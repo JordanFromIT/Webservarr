@@ -1040,15 +1040,18 @@ class EventLogNeverMovesThePage(unittest.TestCase):
         log = page[page.index('<section id="homeEventLog"'):page.index('<section data-arrive="services">')]
         self.assertEqual(log.count("<section"), 1)
         self.assertIn('<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>', log)
-        self.assertIn("<div class=\"ws-wheel\" data-event-wheel>", log)
+        # Focusable and named, to turn back through the history with the keys.
+        self.assertIn('<div class="ws-wheel" data-event-wheel tabindex="0" role="group" '
+                      'aria-label="Event log, use arrow keys to see older events">', log)
+        self.assertIn('<button type="button" class="ws-wheel-latest" data-event-latest hidden>Latest</button>', log)
         self.assertIn('aria-live="polite"', log)
         self.assertNotIn("<a ", log, "there is no feed page to link to")
 
-    def test_the_wheel_holds_four_slots_and_uses_theme_colours(self):
+    def test_the_wheel_holds_five_slots_and_uses_theme_colours(self):
         theme = static_text("css", "theme.css")
         wheel = theme[theme.index("/* ---- Home's event log"):]
         wheel = wheel[:wheel.index("/* ----", 10)] if "/* ----" in wheel[10:] else wheel
-        self.assertIn("--wheel-lines: 4;", wheel)
+        self.assertIn("--wheel-lines: 5;", wheel)
         self.assertIn("height: calc(var(--wheel-radius) * sin(", wheel)
         self.assertIn("overflow: clip;", wheel)
         self.assertNotRegex(wheel, r"#[0-9a-fA-F]{3,8}\b", "colours come from the theme")

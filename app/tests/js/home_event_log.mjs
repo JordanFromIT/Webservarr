@@ -6,13 +6,15 @@
 //
 // Covers: the feed's states (ok, down, unavailable, off, empty, a failed
 // read); events newest at the front (slot 0, last in the document), at most
-// four lines; an outage as its two events; the tick colours by kind; relative
+// five lines; an outage as its two events; the tick colours by kind; relative
 // times; only the front line readable and titled; a new event turning the
 // wheel one notch (several, one notch each, in order) and announced once;
-// never more than four settled lines; reduced motion crossfading at once;
+// never more than five settled lines; reduced motion crossfading at once;
 // text written as text; a section the server rendered hidden coming back;
 // library lines (grey tick, a grab's muted note) and an open outage staying
-// on the wheel under a burst of them.
+// on the wheel under a burst of them; turning back through the history by
+// wheel, keys and drag, with the page scrolling at either end, no yank from
+// new events, "Latest" and the 15 s return.
 //
 // HOME_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/home_event_log.mjs (npm run test:js; CI js-checks).
@@ -260,7 +262,7 @@ await run('the section sits right above Service Health, with Home\'s heading and
   check('the next section is Service Health', t.section.nextElementSibling && t.section.nextElementSibling.getAttribute('data-arrive') === 'services');
   const h = t.section.querySelector('h3');
   check('the heading is "Event log", styled like the other sections, closer to its wheel', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-2');
-  check('a compact section: less room below it than between the other sections', t.section.className === '-mb-3');
+  check('a compact section: less room below it than between the other sections', t.section.classList.contains('-mb-3'));
   const icon = h.previousElementSibling;
   check('its icon follows the section icons setting', icon && icon.classList.contains('ws-section-icon') && icon.getAttribute('aria-hidden') === 'true');
   check('labelled by its heading', t.section.getAttribute('aria-labelledby') === h.id);
@@ -270,19 +272,19 @@ await run('the section sits right above Service Health, with Home\'s heading and
   check('no link (there is no feed page)', !t.section.querySelector('a'));
 });
 
-await run('ok: the newest four events, newest at the front, each with its tick and time', async (make) => {
+await run('ok: the newest five events, newest at the front, each with its tick and time', async (make) => {
   const t = make({ answer: answer('ok', [], QUIET_OK.items.concat([note(9, 'Oldest note', 600)])) });
   await t.open();
   check('it read the feed once', t.WS.reads === 1);
   check('the skeleton is gone and the section shown', !t.wheel.querySelector('.skel') && t.section.hidden === false);
-  check('four lines, never more', t.all().length === 4, t.all().length);
-  check('newest at the front (slot 0), the oldest shown at the back', JSON.stringify(t.texts()) === JSON.stringify(['Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down']), t.texts());
-  check('in the document oldest first, so the newest is last', lineText(t.all()[3]) === 'Requests are slow tonight');
+  check('five lines, never more', t.all().length === 5, t.all().length);
+  check('newest at the front (slot 0), the oldest shown at the back', JSON.stringify(t.texts()) === JSON.stringify(['Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down', 'New shelves on Books']), t.texts());
+  check('in the document oldest first, so the newest is last', lineText(t.all()[4]) === 'Requests are slow tonight');
   const types = t.slots().map((el) => el.getAttribute('data-type'));
-  check('ticks by kind: note, important, back, down', JSON.stringify(types) === JSON.stringify(['note', 'important', 'up', 'down']), types);
+  check('ticks by kind: note, important, back, down, note', JSON.stringify(types) === JSON.stringify(['note', 'important', 'up', 'down', 'note']), types);
   check('every line has its 2px tick, hidden from screen readers', t.all().every((el) => el.firstElementChild.className === 'ws-wheel__mark' && el.firstElementChild.getAttribute('aria-hidden') === 'true'));
   const times = t.slots().map((el) => el.querySelector('time').textContent);
-  check('relative times', JSON.stringify(times) === JSON.stringify(['4 min ago', '35 min ago', '3 h ago', '3 h ago']), times);
+  check('relative times', JSON.stringify(times) === JSON.stringify(['4 min ago', '35 min ago', '3 h ago', '3 h ago', '5 h ago']), times);
   check('a machine-readable time too', t.slots()[0].querySelector('time').getAttribute('datetime') === QUIET_OK.items[3].created_at);
   const front = t.slots()[0];
   check('only the front line is readable', front.getAttribute('aria-hidden') === null && t.slots().slice(1).every((el) => el.getAttribute('aria-hidden') === 'true'));
@@ -352,12 +354,12 @@ await run('a new event turns the wheel one notch and is announced', async (make)
   check('the oldest line turns away over the top', t.all().filter((el) => el.classList.contains('is-leaving')).length === 1);
   check('announced once, as itself', t.announced() === 'Requests is down');
   await t.clock.advance(800);
-  check('after the turn: four settled lines', t.all().length === 4 && t.settled().length === 4, t.all().length);
-  check('in order', JSON.stringify(t.texts()) === JSON.stringify(['Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
+  check('after the turn: five settled lines', t.all().length === 5 && t.settled().length === 5, t.all().length);
+  check('in order', JSON.stringify(t.texts()) === JSON.stringify(['Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down']), t.texts());
   await t.clock.advance(7000);
   check('the announcement clears later (no double reading in browse mode)', t.announced() === '');
   await t.poll();
-  check('the same answer again changes nothing', t.all().length === 4 && t.announced() === '');
+  check('the same answer again changes nothing', t.all().length === 5 && t.announced() === '');
 });
 
 await run('the outage resolves: its return turns in, its start moves back', async (make) => {
@@ -370,10 +372,10 @@ await run('the outage resolves: its return turns in, its start moves back', asyn
   check('back at the front, in the back-up colour', t.texts()[0] === 'Requests is back, down 3 min' && t.slots()[0].getAttribute('data-type') === 'up');
   check('the same "is down" line, one notch back (not rebuilt)', t.slots()[1] === down && lineText(down) === 'Requests is down');
   check('announced', t.announced() === 'Requests is back, down 3 min');
-  check('four lines', t.all().length === 4);
+  check('five lines', t.all().length === 5);
 });
 
-await run('several new events: one notch each, in order, then four lines', async (make) => {
+await run('several new events: one notch each, in order, then five lines', async (make) => {
   const t = make({ answer: QUIET_OK });
   await t.open();
   await t.poll(answer('down', [outage(8, 'Requests', 1), outage(9, 'Books', 0)], QUIET_OK.items.concat([note(10, 'Hello', 2)])));
@@ -386,12 +388,12 @@ await run('several new events: one notch each, in order, then four lines', async
   check('third turn: the newest at the front', t.texts()[0] === 'Books is down', t.texts());
   check('the newest is announced, once', t.announced() === 'Books is down');
   for (let i = 0; i < 3; i++) {
-    check('never more than four settled lines or five in the document', t.settled().length <= 4 && t.all().length <= 5, t.all().length);
+    check('never more than five settled lines or six in the document', t.settled().length <= 5 && t.all().length <= 6, t.all().length);
     await t.clock.advance(300);
   }
   await t.clock.advance(800);
-  check('settled: exactly four', t.all().length === 4 && t.settled().length === 4);
-  check('newest four', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Hello', 'Requests are slow tonight']), t.texts());
+  check('settled: exactly five', t.all().length === 5 && t.settled().length === 5);
+  check('newest five', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Hello', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
 });
 
 await run('a deleted note: the line goes, nothing is announced, nothing turns in', async (make) => {
@@ -399,9 +401,9 @@ await run('a deleted note: the line goes, nothing is announced, nothing turns in
   await t.open();
   await t.poll(answer('ok', [], QUIET_OK.items.slice(0, 3).concat([note(9, 'Oldest note', 600)])));
   await t.clock.advance(800);
-  check('the deleted note is gone and the older one came into view', JSON.stringify(t.texts()) === JSON.stringify(['Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down', 'New shelves on Books']), t.texts());
+  check('the deleted note is gone and the older one came into view', JSON.stringify(t.texts()) === JSON.stringify(['Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down', 'New shelves on Books', 'Oldest note']), t.texts());
   check('not announced', t.announced() === '');
-  check('four lines', t.all().length === 4);
+  check('five lines', t.all().length === 5);
 });
 
 await run('reduced motion: the set crossfades at once, nothing turns', async (make) => {
@@ -410,11 +412,11 @@ await run('reduced motion: the set crossfades at once, nothing turns', async (ma
   const before = t.all();
   await t.poll(answer('down', [outage(8, 'Requests', 1), outage(9, 'Books', 0)], QUIET_OK.items));
   check('every old line fades out where it is', before.every((el) => el.classList.contains('is-leaving') && el.getAttribute('aria-hidden') === 'true'));
-  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
-  check('every old line kept its notch (no move, only a fade)', before.every((el, i) => slot(el) === 3 - i));
+  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
+  check('every old line kept its notch (no move, only a fade)', before.every((el, i) => slot(el) === 4 - i));
   check('the newest announced', t.announced() === 'Books is down');
   await t.clock.advance(800);
-  check('four lines after the fade', t.all().length === 4 && t.settled().length === 4);
+  check('five lines after the fade', t.all().length === 5 && t.settled().length === 5);
 });
 
 await run('text is written as text', async (make) => {
@@ -430,7 +432,7 @@ await run('a kept copy paints at once; what happened since turns in', async (mak
   await t.clock.advance(800);
   check('the new event is at the front', t.texts()[0] === 'Requests is down');
   check('and announced', t.announced() === 'Requests is down');
-  check('four lines', t.all().length === 4);
+  check('five lines', t.all().length === 5);
 });
 
 await run('leaving the page: no turn runs afterwards', async (make) => {
@@ -478,13 +480,13 @@ await run('an open outage stays on the wheel under a burst of 10 library lines',
   let lost = 0;
   for (let k = 0; k < 12; k++) {
     if (!t.texts().includes('Plex is down')) lost += 1;
-    check('never more than four settled lines', t.settled().length <= 4, t.settled().length);
+    check('never more than five settled lines', t.settled().length <= 5, t.settled().length);
     await t.clock.advance(710);
   }
   await t.clock.advance(800);
   check('the outage never left the wheel during the burst', lost === 0, lost);
-  check('settled: the newest three library lines and the outage, four in all', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Plex is down']), t.texts());
-  check('the outage is still in its colour', t.slots()[3].getAttribute('data-type') === 'down');
+  check('settled: the newest four library lines and the outage, five in all', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Episode Added: The Bear S03E06', 'Plex is down']), t.texts());
+  check('the outage is still in its colour', t.slots()[4].getAttribute('data-type') === 'down');
   await t.poll(answer('ok', [], [back(7, 'Plex', 30, 0)].concat(burst)));
   await t.clock.advance(800);
   check('resolved, it is no longer held: its return leads and the start goes', t.texts()[0] === 'Plex is back, down 30 min' && !t.texts().includes('Plex is down'), t.texts());
@@ -495,7 +497,7 @@ await run('a resolved outage is not held: library lines push it off like any lin
   for (let i = 0; i < 5; i++) items.unshift(lib(200 + i, 'Movie Added: Film ' + i, 50 - i));
   const t = make({ answer: answer('ok', [], items) });
   await t.open();
-  check('the newest four only', t.all().length === 4 && t.texts().every((x) => x.indexOf('Movie Added') === 0), t.texts());
+  check('the newest five only', t.all().length === 5 && t.texts().every((x) => x.indexOf('Movie Added') === 0), t.texts());
 });
 
 await run('without Uptime Kuma, library lines alone leave the log hidden', async (make) => {
@@ -504,6 +506,179 @@ await run('without Uptime Kuma, library lines alone leave the log hidden', async
   check('hidden, as the server rendered it', t.section.hidden === true);
   await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2), note(5, 'Maintenance tonight', 10)]));
   check('a note brings it back, library lines with it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Maintenance tonight']), t.texts());
+});
+
+// ---- Turning back through the history ----
+
+const HISTORY = answer('ok', [], QUIET_OK.items.concat([note(11, 'Older 1', 400), note(12, 'Older 2', 500), note(13, 'Older 3', 600)]));
+// Newest first, as the events: QUIET_OK's five, then the three older notes.
+const ORDER = ['Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down', 'New shelves on Books', 'Older 1', 'Older 2', 'Older 3'];
+
+function scroll(t, deltaY, deltaMode = 0) {
+  const e = new t.win.WheelEvent('wheel', { deltaY, deltaMode, bubbles: true, cancelable: true });
+  t.wheel.dispatchEvent(e);
+  return e.defaultPrevented;
+}
+function key(t, name) {
+  const e = new t.win.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true });
+  t.wheel.dispatchEvent(e);
+  return e.defaultPrevented;
+}
+function touch(t, type, y) {
+  const e = new t.win.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(e, 'touches', { value: type === 'touchend' ? [] : [{ clientY: y }] });
+  t.wheel.dispatchEvent(e);
+  return e.defaultPrevented;
+}
+const latestBtn = (t) => t.section.querySelector('[data-event-latest]');
+
+await run('the wheel can be focused and named for the keys', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  check('focusable', t.wheel.getAttribute('tabindex') === '0');
+  check('named, with the keys to use', t.wheel.getAttribute('aria-label') === 'Event log, use arrow keys to see older events' && t.wheel.getAttribute('role') === 'group');
+  check('a visible focus ring from the theme', /\.ws-wheel:focus-visible \{ outline: 2px solid rgb\(var\(--color-accent\)\)/.test(THEME_CSS));
+  check('"Latest" is there but hidden while following the newest', latestBtn(t) && latestBtn(t).hidden === true && latestBtn(t).textContent === 'Latest' && latestBtn(t).type === 'button');
+  check('"Latest" moves nothing when it shows (absolute, in the gap below)', /\.ws-wheel-latest \{\s*position: absolute;/.test(THEME_CSS));
+});
+
+await run('the mouse wheel turns one notch per step, back and forward, and lets the page scroll at either end', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  check('following the newest, scrolling down the page is not taken', scroll(t, 100) === false && t.texts()[0] === ORDER[0]);
+  const oldFront = t.slots()[0];
+  check('scrolling up is taken', scroll(t, -100) === true);
+  check('one notch back: the next older event is at the front', t.texts()[0] === ORDER[1], t.texts());
+  check('the old front goes down under the front edge', oldFront.classList.contains('is-leaving') && oldFront.style.getPropertyValue('--i') === '-1');
+  await t.clock.advance(800);
+  check('five settled lines from there', JSON.stringify(t.texts()) === JSON.stringify(ORDER.slice(1, 6)), t.texts());
+  check('the front line is the readable one, with its full text as its title', t.slots()[0].getAttribute('aria-hidden') === null && t.slots()[0].title === ORDER[1] && t.slots().slice(1).every((el) => el.getAttribute('aria-hidden') === 'true'));
+  check('"Latest" shows', latestBtn(t).hidden === false);
+  check('turning is not announced', t.announced() === '');
+  check('scrolling down turns forward again', scroll(t, 100) === true && t.texts()[0] === ORDER[0]);
+  check('"Latest" hides again at the newest', latestBtn(t).hidden === true);
+  // A trackpad: small deltas add up to one notch.
+  check('a small scroll is taken but turns nothing yet', scroll(t, -10) === true && scroll(t, -10) === true && scroll(t, -10) === true && t.texts()[0] === ORDER[0]);
+  scroll(t, -10);
+  check('enough of them turn one notch', t.texts()[0] === ORDER[1], t.texts());
+  // Lines (deltaMode 1) count as a step each.
+  scroll(t, -1, 1);
+  check('a line-mode step turns a notch', t.texts()[0] === ORDER[2], t.texts());
+  for (let i = 0; i < 10; i++) scroll(t, -100);
+  check('at the oldest the oldest event is at the front', t.texts()[0] === ORDER[7], t.texts());
+  check('and scrolling further up is the page\'s again', scroll(t, -100) === false);
+  check('a pinch (ctrl + wheel) is never taken', (() => { const e = new t.win.WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }); Object.defineProperty(e, 'ctrlKey', { value: true }); t.wheel.dispatchEvent(e); return !e.defaultPrevented; })());
+});
+
+await run('the keys turn it: arrows one notch, Home the newest, End the oldest', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  check('Down at the newest does nothing and leaves the key to the page', key(t, 'ArrowDown') === false && t.texts()[0] === ORDER[0]);
+  check('Up turns back one notch', key(t, 'ArrowUp') === true && t.texts()[0] === ORDER[1]);
+  check('Up again', key(t, 'ArrowUp') === true && t.texts()[0] === ORDER[2]);
+  check('Down turns forward', key(t, 'ArrowDown') === true && t.texts()[0] === ORDER[1]);
+  check('End: the oldest at the front', key(t, 'End') === true && t.texts()[0] === ORDER[7], t.texts());
+  await t.clock.advance(800);
+  check('only what is left behind it (nothing older)', JSON.stringify(t.texts()) === JSON.stringify(['Older 3']), t.texts());
+  check('Up at the oldest leaves the key to the page', key(t, 'ArrowUp') === false);
+  check('Home: the newest again', key(t, 'Home') === true && t.texts()[0] === ORDER[0]);
+  await t.clock.advance(800);
+  check('five lines again', t.settled().length === 5 && JSON.stringify(t.texts()) === JSON.stringify(ORDER.slice(0, 5)), t.texts());
+  check('other keys are left alone', key(t, 'PageUp') === false && key(t, 'a') === false);
+});
+
+await run('a drag turns it, and passes to the page at either end', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  touch(t, 'touchstart', 100);
+  check('dragging up at the newest is the page\'s scroll', touch(t, 'touchmove', 80) === false && t.texts()[0] === ORDER[0]);
+  touch(t, 'touchend');
+  touch(t, 'touchstart', 100);
+  check('dragging down is taken from the first move', touch(t, 'touchmove', 110) === true && t.texts()[0] === ORDER[0]);
+  touch(t, 'touchmove', 126);
+  check('far enough turns one notch back', t.texts()[0] === ORDER[1], t.texts());
+  touch(t, 'touchmove', 152);
+  check('and another', t.texts()[0] === ORDER[2], t.texts());
+  touch(t, 'touchmove', 120);
+  check('dragging back up turns forward', t.texts()[0] === ORDER[1], t.texts());
+  touch(t, 'touchend');
+  check('a move with no touch begun does nothing', touch(t, 'touchmove', 400) === false && t.texts()[0] === ORDER[1]);
+});
+
+await run('turned back, a new event never moves the view; "Latest" brings it back', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  key(t, 'ArrowUp');
+  key(t, 'ArrowUp');
+  await t.clock.advance(800);
+  const view = JSON.stringify(t.texts());
+  await t.poll(answer('down', [outage(30, 'Plex', 0)], HISTORY.items.concat([note(31, 'Hello', 1)])));
+  await t.clock.advance(800);
+  check('the same lines stay in view', JSON.stringify(t.texts()) === view, t.texts());
+  check('the new events are announced once all the same', t.announced() === 'Plex is down');
+  check('"Latest" still shows', latestBtn(t).hidden === false);
+  await t.clock.advance(7000);
+  await t.poll();
+  check('the same answer again announces nothing', t.announced() === '' && JSON.stringify(t.texts()) === view);
+  latestBtn(t).click();
+  await t.clock.advance(800);
+  check('"Latest": the newest at the front, the outage first', JSON.stringify(t.texts()) === JSON.stringify(['Plex is down', 'Hello'].concat(ORDER.slice(0, 3))), t.texts());
+  check('and it hides', latestBtn(t).hidden === true);
+  check('nothing announced twice', t.announced() === '');
+});
+
+await run('turned back, it goes back to the newest after 15 s untouched', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  scroll(t, -100);
+  await t.clock.advance(10000);
+  scroll(t, -100);
+  await t.clock.advance(10000);
+  check('a turn starts the 15 s again', t.texts()[0] === ORDER[2], t.texts());
+  await t.clock.advance(5500);
+  check('then it is back at the newest', t.texts()[0] === ORDER[0] && latestBtn(t).hidden === true, t.texts());
+  await t.clock.advance(800);
+  check('five settled lines', t.settled().length === 5);
+});
+
+await run('fast turning never shows more than five settled lines', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  let worst = 0;
+  let docWorst = 0;
+  for (let i = 0; i < 6; i++) {
+    scroll(t, -100);
+    worst = Math.max(worst, t.settled().length);
+    docWorst = Math.max(docWorst, t.all().length);
+    await t.clock.advance(120);
+  }
+  for (let i = 0; i < 6; i++) { scroll(t, 100); worst = Math.max(worst, t.settled().length); docWorst = Math.max(docWorst, t.all().length); }
+  check('at most five settled lines', worst <= 5, worst);
+  check('at most six in the document (one fading)', docWorst <= 6, docWorst);
+  await t.clock.advance(800);
+  check('back at the newest, five lines', t.all().length === 5 && t.texts()[0] === ORDER[0]);
+});
+
+await run('reduced motion: each notch crossfades', async (make) => {
+  const t = make({ answer: HISTORY, reduced: true });
+  await t.open();
+  const before = t.all();
+  scroll(t, -100);
+  check('the old set fades out in place', before.every((el) => el.classList.contains('is-leaving')) && before.every((el, i) => slot(el) === 4 - i));
+  check('the new set is there at once', JSON.stringify(t.texts()) === JSON.stringify(ORDER.slice(1, 6)), t.texts());
+});
+
+await run('nothing to turn: the quiet line, and leaving the page', async (make) => {
+  const t = make({ answer: answer('ok', [], []) });
+  await t.open();
+  check('the quiet line takes no scroll and no key', scroll(t, -100) === false && key(t, 'ArrowUp') === false);
+  const u = make({ answer: HISTORY });
+  await u.open();
+  scroll(u, -100);
+  u.ctl.abort();
+  check('after leaving the page the wheel takes nothing', scroll(u, -100) === false && key(u, 'ArrowUp') === false);
+  await u.clock.advance(20000);
+  check('and no return runs', u.texts()[0] === ORDER[1]);
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));

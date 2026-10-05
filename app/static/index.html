@@ -111,13 +111,16 @@
      wheel's height is fixed, so its answer never moves anything below it.
      With no Uptime Kuma and nothing in the feed the server renders the
      section hidden (pages.py, feed_off), so a person who never sees it never
-     has its room. Until the first answer the front line is a skeleton. -->
-<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" class="-mb-3">
+     has its room. Until the first answer the front line is a skeleton.
+     The wheel turns back through the history (wheel, drag, arrow keys);
+     "Latest", placed in the gap below so it moves nothing, turns it back. -->
+<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" class="relative -mb-3">
 <div class="flex items-center gap-3 mb-2">
 <span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
 <h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
 </div>
-<div class="ws-wheel" data-event-wheel><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
+<div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
+<button type="button" class="ws-wheel-latest" data-event-latest hidden>Latest</button>
 <p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
 </section>
 <!-- Service Health: one strip across the page. From xl the server's gauges

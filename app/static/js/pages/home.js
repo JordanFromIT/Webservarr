@@ -675,9 +675,19 @@ function releasesError(container) {
 // Library lines (Sonarr, Radarr and Chaptarr: "Movie Added: Dune (2021)")
 // carry a grey tick, and a grab its muted " · not guaranteed". However many
 // of them arrive, an open outage stays on the wheel until it resolves.
+//
+// People can turn the wheel back through the feed's history (30 days): the
+// mouse wheel or trackpad over it, a vertical drag, or the arrow keys with
+// it focused (Home and End for the newest and the oldest). It only takes the
+// scroll while there is more history that way, so the page still scrolls at
+// either end. Turned back, new events don't move it: "Latest" (and
+// WHEEL_IDLE_MS without a turn) brings it back to the newest.
 
-const WHEEL_LINES = 4;
+const WHEEL_LINES = 5;
 const WHEEL_MS = 650;   // theme.css --wheel-duration
+const WHEEL_IDLE_MS = 15000;    // turned back, it goes back to the newest after this long untouched
+const WHEEL_STEP_PX = 40;       // scroll (or less, added up) that turns one notch
+const WHEEL_DRAG_PX = 24;       // a drag this far turns one notch
 const WHEEL_QUIET = {
     empty: 'No outages or notes this month',
     unavailable: 'Status unavailable right now'
@@ -761,16 +771,30 @@ function wheelTime(at) {
     return d === 1 ? 'yesterday' : d + ' days ago';
 }
 
-// One wheel per visit. env: { setTimeout, clearTimeout } (the visit's own,
-// so nothing outlives the page) and reducedMotion().
+// One wheel per visit. env: { setTimeout, clearTimeout, signal } (the
+// visit's own, so nothing outlives the page) and reducedMotion().
 function createEventLog(section, env) {
     var wheel = section.querySelector('[data-event-wheel]');
     var announcer = section.querySelector('[data-event-announce]');
+    var latest = section.querySelector('[data-event-latest]');
     var lines = [];      // on the wheel, newest first: { key, ev, el }
     var leaving = [];
     var seen = null;     // keys shown so far; null until the first answer
     var steps = [];
     var announceTimer = null;
+    var all = [];        // every event of the last answer, newest first
+    var offset = 0;      // notches turned back from the newest; 0 follows the newest
+    var anchor = null;   // turned back: the front event's key, which keeps it in place
+    var newestAt = null; // the newest event's time in the last answer
+    var idleTimer = null;
+    var scrolled = 0;    // scroll added up towards one notch
+    var dragY = null;
+
+    // What the wheel shows of `list`: following the newest, onWheel (an open
+    // outage held); turned back, the WHEEL_LINES events from the front one.
+    function pick(list) {
+        return offset === 0 ? onWheel(list) : list.slice(offset, offset + WHEEL_LINES);
+    }
 
     function fill(el, ev) {
         el.setAttribute('data-type', ev.type);
@@ -867,13 +891,22 @@ function createEventLog(section, env) {
     // it they are simply there. crossfade: every line fades out where it is
     // and the new set fades in.
     function place(list, animate, crossfade) {
-        var target = onWheel(list);
+        var target = pick(list);
         var keep = {};
         target.forEach(function (ev) { keep[ev.key] = true; });
+        var rank = {};
+        list.forEach(function (ev, i) { rank[ev.key] = i; });
+        var front = target.length ? rank[target[0].key] : 0;
         var old = {};
         lines.forEach(function (ln) {
-            if (crossfade || !keep[ln.key]) leave(ln.el);
-            else old[ln.key] = ln;
+            if (crossfade || !keep[ln.key]) {
+                // Turned back, a line newer than the new front goes down
+                // under the front edge; any other fades out on its notch.
+                if (!crossfade && rank[ln.key] < front) ln.el.style.setProperty('--i', '-1');
+                leave(ln.el);
+            } else {
+                old[ln.key] = ln;
+            }
         });
         var next = [];
         target.forEach(function (ev, i) {
@@ -909,6 +942,100 @@ function createEventLog(section, env) {
         steps = [];
     }
 
+    // ---- Turning back through the history ----
+
+    function deepest() {
+        return all.length && all[0].type !== 'quiet' ? all.length - 1 : 0;
+    }
+
+    function canTurn(dir) {
+        return dir > 0 ? offset < deepest() : offset > 0;
+    }
+
+    function showLatest() {
+        if (latest) latest.hidden = offset === 0;
+    }
+
+    function armIdle() {
+        if (idleTimer !== null) env.clearTimeout(idleTimer);
+        idleTimer = null;
+        if (offset > 0) idleTimer = env.setTimeout(function () { idleTimer = null; turnTo(0); }, WHEEL_IDLE_MS);
+    }
+
+    // Turn to `n` notches back (0: the newest). False when it is there already.
+    function turnTo(n) {
+        n = Math.max(0, Math.min(deepest(), n));
+        if (n === offset || seen === null || section.hidden) return false;
+        cancelSteps();
+        offset = n;
+        anchor = n ? all[n].key : null;
+        place(all, true, env.reducedMotion());
+        showLatest();
+        armIdle();
+        return true;
+    }
+
+    function onScroll(e) {
+        if (e.ctrlKey) return;                  // a pinch: the page zooms
+        var dy = e.deltaY * (e.deltaMode === 1 ? WHEEL_STEP_PX : e.deltaMode === 2 ? WHEEL_STEP_PX * 10 : 1);
+        if (!dy) return;
+        var dir = dy < 0 ? 1 : -1;              // up the page is back in time
+        if (!canTurn(dir)) { scrolled = 0; return; }    // the end: the page scrolls
+        e.preventDefault();
+        if (scrolled && (scrolled < 0) !== (dy < 0)) scrolled = 0;
+        scrolled += dy;
+        if (Math.abs(scrolled) >= WHEEL_STEP_PX) {
+            scrolled = 0;
+            turnTo(offset + dir);
+        }
+    }
+
+    function onDragStart(e) {
+        dragY = e.touches && e.touches.length === 1 ? e.touches[0].clientY : null;
+    }
+
+    function onDrag(e) {
+        if (dragY === null || !e.touches || e.touches.length !== 1) return;
+        var y = e.touches[0].clientY;
+        var dy = y - dragY;
+        if (!dy) return;
+        var dir = dy > 0 ? 1 : -1;              // pulling down brings older lines down
+        if (!canTurn(dir)) { dragY = null; return; }    // the end: the page scrolls
+        if (e.cancelable) e.preventDefault();
+        if (Math.abs(dy) >= WHEEL_DRAG_PX) {
+            dragY = y;
+            turnTo(offset + dir);
+        }
+    }
+
+    function onDragEnd() { dragY = null; }
+
+    function onKey(e) {
+        var to = null;
+        if (e.key === 'ArrowUp') to = offset + 1;
+        else if (e.key === 'ArrowDown') to = offset - 1;
+        else if (e.key === 'Home') to = 0;
+        else if (e.key === 'End') to = deepest();
+        if (to !== null && turnTo(to)) e.preventDefault();
+    }
+
+    if (wheel && env.signal) {
+        var opts = { signal: env.signal, passive: false };
+        wheel.addEventListener('wheel', onScroll, opts);
+        wheel.addEventListener('touchstart', onDragStart, { signal: env.signal, passive: true });
+        wheel.addEventListener('touchmove', onDrag, opts);
+        wheel.addEventListener('touchend', onDragEnd, { signal: env.signal });
+        wheel.addEventListener('touchcancel', onDragEnd, { signal: env.signal });
+        wheel.addEventListener('keydown', onKey, { signal: env.signal });
+        if (latest) {
+            latest.addEventListener('click', function () {
+                var hadFocus = document.activeElement === latest;
+                turnTo(0);
+                if (hadFocus) wheel.focus();
+            }, { signal: env.signal });
+        }
+    }
+
     // data: the feed's answer, or null when it could not be read.
     // quiet: true for a copy kept from an earlier visit, painted at once.
     function render(data, quiet) {
@@ -919,20 +1046,52 @@ function createEventLog(section, env) {
         if (state === 'off' && !events.some(function (ev) { return ev.type !== 'library'; })) {
             cancelSteps();
             section.hidden = true;
+            offset = 0;
+            anchor = null;
+            armIdle();
+            showLatest();
             return;
         }
         var list = events.length ? events
             : [{ key: 'quiet:' + (state === 'unavailable' ? 'unavailable' : 'empty'), type: 'quiet',
                  text: WHEEL_QUIET[state === 'unavailable' ? 'unavailable' : 'empty'], at: null }];
         cancelSteps();
+        var before = newestAt;
+        all = list;
+        newestAt = list[0].at;
         if (seen === null || section.hidden) {
             // The first answer (or the section coming back): the lines are
             // simply there, nothing turns and nothing is announced.
             section.hidden = false;
             if (seen === null) wheel.textContent = '';   // the skeleton
             seen = {};
+            offset = 0;
+            anchor = null;
+            armIdle();
+            showLatest();
             place(list, false, false);
             return;
+        }
+        if (offset > 0) {
+            // Turned back: the same front event stays at the front (a new
+            // event never moves the view), and new events are only announced.
+            var at = -1;
+            for (var i = 0; i < list.length; i++) if (list[i].key === anchor) { at = i; break; }
+            offset = at >= 0 ? at : Math.min(offset, deepest());
+            anchor = offset ? list[offset].key : null;
+            showLatest();
+            if (offset > 0) {
+                var arrived = list.filter(function (ev) {
+                    return ev.type !== 'quiet' && !seen[ev.key] && (before === null || ev.at > before);
+                });
+                place(list, !quiet, false);
+                if (arrived.length && !quiet) {
+                    arrived.forEach(function (ev) { seen[ev.key] = true; });
+                    announce(arrived[0]);
+                }
+                return;
+            }
+            armIdle();
         }
         // New: not shown before, and newer than every event on the wheel now.
         var front = -Infinity;
@@ -1087,6 +1246,7 @@ export async function mount(ctx) {
     var eventLog = eventLogHost ? createEventLog(eventLogHost, {
         setTimeout: ctx.setTimeout,
         clearTimeout: ctx.clearTimeout,
+        signal: signal,
         reducedMotion: function () {
             return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
         }
