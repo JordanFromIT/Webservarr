@@ -481,12 +481,6 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   #systemStatus[data-state="err"] .ws-status-dot::after { animation: none; }
 }
 
-/* The dashboard's compact gauge row is static markup so it reserves its space
-   from the first paint; the server marks <html data-netdata> when Netdata is
-   configured, and without that mark the row is simply not there (and Home
-   puts no copy in the header either, pages/home.js). */
-html:not([data-netdata]) #netdataGauges { display: none; }
-
 /* ---- The soft navigation's view transition ----
  *
  * router.js swaps #wsPage inside document.startViewTransition. The sidebar,

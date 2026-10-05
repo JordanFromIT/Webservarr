@@ -584,13 +584,14 @@ class HomePage(unittest.TestCase):
                                          "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
                                          "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
-        # Every lookup stays inside the page, but one: the header's status
-        # pill, which the gauges' header copy goes beside (taken out again by
-        # the cleanup mount returns).
+        # Every lookup stays inside the page, but two: the header's status
+        # pill and the top bar's title, which the gauges' copies go beside
+        # (taken out again by the cleanup mount returns).
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bdocument\.getElementById\(", code)), 1)
+        self.assertEqual(len(re.findall(r"\bdocument\.getElementById\(", code)), 2)
         self.assertIn("var pill = document.getElementById('systemStatus');", src)
-        self.assertIn("return function () { removeHeaderGauges(null); };", code)
+        self.assertIn("var barTitle = document.getElementById('wsBarTitle');", src)
+        self.assertIn("return function () { removeHeaderGauges(); };", code)
 
     def test_continue_is_the_books_row_in_its_compact_form(self):
         h = read("index")

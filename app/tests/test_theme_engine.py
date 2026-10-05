@@ -684,9 +684,9 @@ class GaugeColours(unittest.TestCase):
 
     def test_the_rings_use_them(self):
         for g in ("cpu", "ram", "net"):
-            # Two copies: the compact row and the header's (its template).
+            # One copy: the headers' template (Home clones it into each).
             rings = re.findall(rf'<circle data-gauge-ring="{g}" class="([^"]*)"', INDEX)
-            self.assertEqual(len(rings), 2, g)
+            self.assertEqual(len(rings), 1, g)
             for ring in rings:
                 self.assertEqual(ring.split()[0], f"text-gauge-{g}", g)
                 self.assertNotIn("steel-blue", ring, g)

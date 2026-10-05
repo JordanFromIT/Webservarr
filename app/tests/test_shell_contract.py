@@ -669,59 +669,70 @@ class PhoneShellContract(unittest.TestCase):
         self.assertIn("WS.install.wireCard(install, signal);", mount)
 
     def test_home_gauges_fit_a_small_phone(self):
-        # Below xl the gauges are a compact row of three equal cells at the
-        # top of Service Health: a ring with its reading under it on a phone
-        # (so three fit across 320px) and beside it from sm. From xl that row
-        # goes and the header carries the copy Home adds from its template.
+        # The gauges live in the headers, one copy each from one template:
+        # beside the status pill from lg and between the title and the bell
+        # in the phone's top bar. Service Health has no row of its own.
         page = read("index")
-        m = re.search(r'<div id="netdataGauges" class="([^"]*)">\s*<div class="([^"]*)">', page)
-        self.assertIsNotNone(m)
-        self.assertIn("xl:hidden", m.group(1).split())
-        inner = m.group(2).split()
-        for c in ("grid", "grid-cols-[1fr_1fr_1.25fr]"):
-            self.assertIn(c, inner)
-        cell = '<div class="flex flex-col items-center gap-1.5 text-center min-w-0 sm:flex-row sm:justify-center sm:gap-3 sm:text-left">'
-        self.assertEqual(page.count(cell), 3)
+        self.assertNotIn("netdataGauges", page)
+        self.assertNotIn("netdataGauges", self.theme)
         tpl = re.search(r'<template id="homeHeaderGauges">\s*<div data-home-gauges class="([^"]*)">', page)
         self.assertIsNotNone(tpl)
-        for c in ("hidden", "xl:flex"):
-            self.assertIn(c, tpl.group(1).split())
-        # Both copies carry every reading.
+        outer = tpl.group(1).split()
+        # Shown wherever its header is (each header hides itself), with no
+        # height of its own, so neither header grows. In the top bar it takes
+        # the room up to the bell's padding; in the header it is its own size.
+        for c in ("flex", "h-0", "flex-1", "-mr-3", "lg:flex-none", "lg:mx-0"):
+            self.assertIn(c, outer)
+        self.assertFalse([c for c in outer if c in ("hidden", "xl:flex", "lg:flex")], outer)
         body = page[page.index('<template id="homeHeaderGauges">'):page.index("</template>")]
-        row = page[m.start():page.index('<template id="homeHeaderGauges">')]
-        for part in (body, row):
-            for hook in ('data-gauge-ring="cpu"', 'data-gauge-ring="ram"', 'data-gauge-ring="net"',
-                         'data-gauge-text="cpu"', 'data-gauge-text="ram"',
-                         'data-gauge-net="up"', 'data-gauge-net="down"'):
-                self.assertEqual(part.count(hook), 1, hook)
-            # No sub-line under any gauge (no thread count, memory size or link speed).
-            self.assertNotIn("data-gauge-detail", part)
-            # Upload and download share one line and one visible unit, each
-            # arrow right against its figure (no gap, no fixed-width figure
-            # box), the line holding a minimum width for typical readings, and
-            # screen readers hear the unit in full after each.
-            net = re.search(r'<p class="([^"]*)">(<span[^>]*>arrow_upward</span>.*?)</p>', part)
-            self.assertIsNotNone(net)
-            line_classes, line = net.group(1).split(), net.group(2)
-            self.assertFalse([c for c in line_classes if c.startswith("gap-")], line_classes)
-            self.assertTrue([c for c in line_classes if c.startswith("min-w-[")], line_classes)
-            self.assertIn("arrow_downward", line)
-            self.assertEqual(line.count("data-gauge-unit "), 1)
-            self.assertIn('data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps<', line)
-            self.assertEqual(line.count('data-gauge-unit-long class="sr-only">megabits per second<'), 2)
-            self.assertEqual(line.count('class="tabular-nums">0<'), 2)
-            self.assertNotIn("min-w-[4ch]", line)
-            self.assertRegex(line, r'>arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up"')
-            self.assertRegex(line, r'>arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down"')
-            self.assertLess(line.index('>Upload<'), line.index('data-gauge-net="up"'))
-            self.assertLess(line.index('>Download<'), line.index('data-gauge-net="down"'))
-        # The header is the shell's: Home adds its copy and takes it out on leave.
+        # Below xl a small ring with its reading under it, from xl a larger
+        # ring with the reading beside it.
+        cell = '<div class="flex flex-col items-center gap-1 xl:flex-row xl:gap-2.5">'
+        self.assertEqual(body.count(cell), 3)
+        self.assertEqual(body.count('<svg class="size-6 shrink-0 xl:size-9"'), 3)
+        # CPU and RAM keep their visible names; the network's is for screen readers below xl.
+        self.assertIn('>CPU</p>', body)
+        self.assertIn('>RAM</p>', body)
+        self.assertRegex(body, r'<p class="sr-only [^"]*xl:not-sr-only">Network</p>')
+        for hook in ('data-gauge-ring="cpu"', 'data-gauge-ring="ram"', 'data-gauge-ring="net"',
+                     'data-gauge-text="cpu"', 'data-gauge-text="ram"',
+                     'data-gauge-net="up"', 'data-gauge-net="down"'):
+            self.assertEqual(body.count(hook), 1, hook)
+        # No sub-line under any gauge (no thread count, memory size or link speed).
+        self.assertNotIn("data-gauge-detail", body)
+        # The percentages hold four characters.
+        self.assertEqual(len(re.findall(r'data-gauge-text="(?:cpu|ram)" class="min-w-\[4ch\] ', body)), 2)
+        # Upload and download share one line and one visible unit, each
+        # arrow right against its figure (no gap, no fixed-width figure
+        # box), the line holding a minimum width for typical readings, and
+        # screen readers hear the unit in full after each.
+        net = re.search(r'<p class="([^"]*)">(<span[^>]*>arrow_upward</span>.*?)</p>', body)
+        self.assertIsNotNone(net)
+        line_classes, line = net.group(1).split(), net.group(2)
+        self.assertFalse([c for c in line_classes if c.startswith("gap-")], line_classes)
+        self.assertTrue([c for c in line_classes if c.startswith("min-w-[")], line_classes)
+        self.assertIn("arrow_downward", line)
+        self.assertEqual(line.count("data-gauge-unit "), 1)
+        self.assertIn('data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps<', line)
+        self.assertEqual(line.count('data-gauge-unit-long class="sr-only">megabits per second<'), 2)
+        self.assertEqual(line.count('class="tabular-nums">0<'), 2)
+        self.assertNotIn("min-w-[4ch]", line)
+        self.assertRegex(line, r'>arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up"')
+        self.assertRegex(line, r'>arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down"')
+        self.assertLess(line.index('>Upload<'), line.index('data-gauge-net="up"'))
+        self.assertLess(line.index('>Download<'), line.index('data-gauge-net="down"'))
+        # Both headers are the shell's: Home adds one copy to each, after the
+        # pill and after the top bar's title, and takes them out on leave.
         home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
         add = home[home.index("function addHeaderGauges() {"):home.index("function eachGauge(")]
         self.assertIn("hasAttribute('data-netdata')", add)
-        self.assertIn("removeHeaderGauges(pill.parentNode);", add)
-        self.assertIn("pill.parentNode.insertBefore(headerGauges, pill.nextSibling);", add)
-        self.assertIn("return function () { removeHeaderGauges(null); };", home)
+        self.assertIn("removeHeaderGauges();", add)
+        self.assertLess(add.index("removeHeaderGauges();"), add.index("cloneNode(true)"))
+        self.assertIn("document.getElementById('systemStatus')", add)
+        self.assertIn("document.getElementById('wsBarTitle')", add)
+        self.assertIn("anchor.parentNode.insertBefore(copy, anchor.nextSibling);", add)
+        self.assertIn("document.querySelectorAll('[data-home-gauges]')", add)
+        self.assertIn("return function () { removeHeaderGauges(); };", home)
         # The network figures are whole numbers.
         stats = home[home.index("async function loadSystemStats() {"):home.index("// One delegated listener")]
         self.assertIn("""setGaugeText('[data-gauge-net="down"]', String(Math.round(dl)));""", stats)

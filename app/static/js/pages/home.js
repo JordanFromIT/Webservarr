@@ -2,7 +2,7 @@
  * WebServarr — Home (page module)
  *
  * The dashboard: the event log (the status feed on a wheel), service health
- * (with the server's gauges, which sit in the header from xl), recent
+ * (the server's gauges sit in the header, or the phone's top bar), recent
  * requests beside news, active streams and upcoming releases. Sections the admin switched
  * off (Settings > Pages > Home) are hidden by the server (html[data-home-hide],
  * which the router brings in step on every swap) and never loaded.
@@ -1568,37 +1568,43 @@ export async function mount(ctx) {
 
     // ---- The server's gauges (Netdata) ----
     //
-    // Two copies of the same readings, both marked data-gauge-*, and every
-    // reading is written to both: the compact row in Service Health (below
-    // xl) and, from xl, the header's beside the status pill. The header is
-    // the shell's, so Home adds its copy (from #homeHeaderGauges) once the
-    // first reading is in, so it arrives whole, and the cleanup mount returns
-    // takes it out when the visit ends (the router runs it on leave). The
-    // status pill is the page's one lookup outside #wsPage. Without Netdata
-    // (no html[data-netdata]) neither copy is shown.
+    // They live in the headers, which are the shell's: from lg beside the
+    // status pill, below lg in the top bar between the page title and the
+    // bell. Only one header shows at any width, so Home puts a copy of
+    // #homeHeaderGauges in each, both marked data-gauge-*, and every reading
+    // is written to both. The copies go in once the first reading is in, so
+    // they arrive whole, and the cleanup mount returns takes them out when
+    // the visit ends (the router runs it on leave). The pill and the top
+    // bar's title are the page's two lookups outside #wsPage. Without
+    // Netdata (no html[data-netdata]) there are no copies.
 
-    var headerGauges = null;
+    var headerGauges = [];
 
     function addHeaderGauges() {
-        if (headerGauges || signal.aborted) return;
+        if (headerGauges.length || signal.aborted) return;
         if (!document.documentElement.hasAttribute('data-netdata')) return;
         var tpl = byId('homeHeaderGauges');
+        if (!tpl || !tpl.content || !tpl.content.firstElementChild) return;
+        removeHeaderGauges();   // one copy per header, whatever an earlier visit left
         var pill = document.getElementById('systemStatus');
-        if (!tpl || !tpl.content || !tpl.content.firstElementChild || !pill || !pill.parentNode) return;
-        removeHeaderGauges(pill.parentNode);   // one copy only, whatever an earlier visit left
-        headerGauges = tpl.content.firstElementChild.cloneNode(true);
-        pill.parentNode.insertBefore(headerGauges, pill.nextSibling);
+        var barTitle = document.getElementById('wsBarTitle');
+        [pill, barTitle].forEach(function (anchor) {
+            if (!anchor || !anchor.parentNode) return;
+            var copy = tpl.content.firstElementChild.cloneNode(true);
+            anchor.parentNode.insertBefore(copy, anchor.nextSibling);
+            headerGauges.push(copy);
+        });
     }
 
-    function removeHeaderGauges(scope) {
-        var old = (scope || document.documentElement).querySelectorAll('[data-home-gauges]');
+    function removeHeaderGauges() {
+        var old = document.querySelectorAll('[data-home-gauges]');
         for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
-        headerGauges = null;
+        headerGauges = [];
     }
 
     function eachGauge(selector, fn) {
-        [root, headerGauges].forEach(function (scope) {
-            if (scope) Array.prototype.forEach.call(scope.querySelectorAll(selector), fn);
+        headerGauges.forEach(function (scope) {
+            Array.prototype.forEach.call(scope.querySelectorAll(selector), fn);
         });
     }
     function setGaugeText(selector, text) {
@@ -1649,7 +1655,7 @@ export async function mount(ctx) {
 
         } catch (error) {
             if (signal.aborted || isAbort(error)) return;   // left the page: not an error
-            addHeaderGauges();   // as the compact row, it shows its empty readings
+            addHeaderGauges();   // with its empty readings, as without a reading
             console.log('System stats not available');
         }
     }
@@ -1718,6 +1724,6 @@ export async function mount(ctx) {
         new Promise(function (resolve) { ctx.setTimeout(resolve, 1500); })
     ]);
 
-    // Leaving Home takes the header's gauges with it.
-    return function () { removeHeaderGauges(null); };
+    // Leaving Home takes the headers' gauges with it.
+    return function () { removeHeaderGauges(); };
 }
