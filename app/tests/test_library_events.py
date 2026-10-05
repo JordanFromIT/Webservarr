@@ -5,7 +5,8 @@ translation table (app/services/library_lines.py, one case per row of the
 spec's section 3), Sonarr's grouping and the 10-minute leftovers
 (status_feed.record_library_event, notification_poller.tidy_library_lines),
 POST /api/webhooks/{app} (app/routers/chaptarr_webhook.py) and library lines
-staying out of the pins, pushes, state and Home's "off" hint.
+staying out of the pins, pushes and state while still showing Home's event
+log without Uptime Kuma.
 
 Payloads are shaped like the apps' own (the spike's field tables:
 .superpowers/sdd/2026-10-05-event-log-sources/spike.md), with the fields a
@@ -527,7 +528,7 @@ class OnceAcrossWorkers(unittest.TestCase):
         self.assertEqual(self.rows(), [("Episodes Added: The Bear S03 (2)", False)])
 
 
-# --- 3. Library lines stay out of pins, pushes, state and "off" --------------------------
+# --- 3. Library lines stay out of pins, pushes and state, but show the log -------------
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class NeverAnOutage(unittest.TestCase):
@@ -566,14 +567,25 @@ class NeverAnOutage(unittest.TestCase):
             self.assertEqual(asyncio.run(poller.push_status_updates(r)), 0)
         sent.assert_not_awaited()
 
-    def test_library_lines_alone_leave_home_off(self):
+    def test_without_uptime_kuma_library_lines_alone_show_the_log_and_are_never_down(self):
         db = self.Session()
         try:
-            self.assertTrue(status_feed.home_off(db, T0 + timedelta(hours=1)))
-            db.add(StatusUpdate(source="admin", title="Hello", message="Hello", update_type="note",
-                                severity="info", author_id="", author_name="", active=True, created_at=T0))
-            db.commit()
             self.assertFalse(status_feed.home_off(db, T0 + timedelta(hours=1)))
+            open_items = status_feed.feed(db, 30, T0 + timedelta(hours=1))["open"]
+        finally:
+            db.close()
+        self.assertEqual(status_feed.state(False, False, open_items), "off")
+        self.assertEqual(status_feed.state(True, True, open_items), "ok")
+
+    def test_without_uptime_kuma_nothing_to_show_leaves_it_hidden(self):
+        db = helpers.make_sessionmaker()()
+        try:
+            self.assertTrue(status_feed.home_off(db, T0))
+        finally:
+            db.close()
+        db = self.Session()
+        try:
+            self.assertTrue(status_feed.home_off(db, T0 + timedelta(days=31)), "past the feed's window")
         finally:
             db.close()
 
@@ -607,6 +619,58 @@ class NeverAnOutage(unittest.TestCase):
                         mock.AsyncMock(return_value=[{"id": 1, "name": "Plex", "status": "up"}])):
             summary = client.get("/api/integrations/status-summary").json()
         self.assertEqual(summary, {"status": "online", "down_service": None})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class HomeHintMatchesThePage(unittest.TestCase):
+    """Without Uptime Kuma, the hidden attribute Home is served with
+    (main._event_log_off) and home.js's rule on the feed it then reads (hide
+    only an "off" answer with no events) agree, so the section never appears
+    or vanishes after the first paint. home_event_log.mjs runs the page's
+    side on the same answers."""
+
+    NOW = T0 + timedelta(hours=1)
+
+    def served_and_read(self, rows):
+        from app import main
+        from app.tests.test_pages import render, static_text
+        Session = helpers.make_sessionmaker()
+        db = Session()
+        for row in rows:
+            db.add(row)
+        db.commit()
+        db.close()
+        for p in (mock.patch.object(main, "SessionLocal", Session),
+                  mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                  mock.patch.object(status_feed, "now_utc", lambda: self.NOW),
+                  mock.patch("app.auth.session_manager.get_redis", mock.AsyncMock(return_value=FakeRedis()))):
+            p.start()
+            self.addCleanup(p.stop)
+        page = render(name="index", page=static_text("index.html"), flags={"feed_off": main._event_log_off()})
+        client = helpers.api_client(Session, helpers.MEMBER)
+        self.addCleanup(helpers.reset_overrides)
+        answer = client.get("/api/status/feed").json()
+        served_hidden = '<section id="homeEventLog" hidden' in page
+        page_hides = answer["state"] == "off" and not answer["open"] and not answer["items"]
+        return served_hidden, page_hides, answer["state"]
+
+    def library(self, at):
+        return StatusUpdate(source="library", app="radarr", event_key=f"radarr:test:{at}", title="Movie Added: Dune",
+                            message="Movie Added: Dune", update_type="import", severity="info", author_id="",
+                            author_name="", active=False, important=False, pending=False, created_at=at)
+
+    def test_the_two_agree(self):
+        note = StatusUpdate(source="admin", title="Hello", message="Hello", update_type="note", severity="info",
+                            author_id="", author_name="", active=True, created_at=T0)
+        for what, rows, hidden in (("nothing", [], True),
+                                   ("library lines only", [self.library(T0)], False),
+                                   ("a note only", [note], False),
+                                   ("library lines past the window", [self.library(T0 - timedelta(days=31))], True)):
+            with self.subTest(what):
+                served_hidden, page_hides, state = self.served_and_read(rows)
+                self.assertEqual(state, "off")
+                self.assertEqual(served_hidden, hidden)
+                self.assertEqual(page_hides, served_hidden)
 
 
 # --- 4. POST /api/webhooks/{app} ---------------------------------------------------------

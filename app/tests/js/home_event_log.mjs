@@ -500,12 +500,42 @@ await run('a resolved outage is not held: library lines push it off like any lin
   check('the newest five only', t.all().length === 5 && t.texts().every((x) => x.indexOf('Movie Added') === 0), t.texts());
 });
 
-await run('without Uptime Kuma, library lines alone leave the log hidden', async (make) => {
-  const t = make({ serverHidden: true, answer: answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]) });
+// Every real change to the section's hidden attribute after the first paint
+// (writing the value it already has is not one). home.js writes it only
+// through the `hidden` property; happy-dom's MutationObserver loses the old
+// value of an empty attribute, so the property is watched instead.
+function hiddenFlips(t) {
+  let d = null;
+  for (let p = Object.getPrototypeOf(t.section); p && !d; p = Object.getPrototypeOf(p)) d = Object.getOwnPropertyDescriptor(p, 'hidden');
+  const flips = [];
+  Object.defineProperty(t.section, 'hidden', {
+    configurable: true,
+    get() { return d.get.call(this); },
+    set(v) { if (!!v !== d.get.call(this)) flips.push(!!v); d.set.call(this, v); }
+  });
+  return () => flips;
+}
+
+await run('without Uptime Kuma, library lines alone show the log, never as an outage', async (make) => {
+  // As the server renders it (status_feed.home_off): shown, so nothing moves.
+  const t = make({ serverHidden: false, answer: answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]) });
+  const flips = hiddenFlips(t);
   await t.open();
-  check('hidden, as the server rendered it', t.section.hidden === true);
+  check('shown', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)']), t.texts());
+  check('a library line, not an outage', t.slots()[0].getAttribute('data-type') === 'library');
   await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2), note(5, 'Maintenance tonight', 10)]));
-  check('a note brings it back, library lines with it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Maintenance tonight']), t.texts());
+  check('a note joins it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Maintenance tonight']), t.texts());
+  check('the hidden attribute never changed (CLS 0)', flips().length === 0, flips().length);
+});
+
+await run('without Uptime Kuma and nothing to show, the server\'s hidden section stays put', async (make) => {
+  const t = make({ serverHidden: true, answer: answer('off', [], []) });
+  const flips = hiddenFlips(t);
+  await t.open();
+  check('hidden', t.section.hidden === true);
+  check('the hidden attribute never changed (CLS 0)', flips().length === 0, flips().length);
+  await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]));
+  check('a library line arriving later brings it back', t.section.hidden === false && t.texts()[0] === 'Movie Added: Dune (2021)', t.texts());
 });
 
 // ---- Turning back through the history ----

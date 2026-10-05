@@ -1041,9 +1041,10 @@ function createEventLog(section, env) {
     function render(data, quiet) {
         var state = data && typeof data === 'object' ? data.state : 'unavailable';
         var events = state === 'unavailable' ? [] : feedEvents(data);
-        // Without Uptime Kuma the log shows only for a note or an outage;
-        // library lines alone keep it hidden (status_feed.home_off, the same rule).
-        if (state === 'off' && !events.some(function (ev) { return ev.type !== 'library'; })) {
+        // Without Uptime Kuma the log shows only when it has something to
+        // show: a note, an outage or a library line (status_feed.home_off,
+        // the same rule).
+        if (state === 'off' && !events.length) {
             cancelSteps();
             section.hidden = true;
             offset = 0;

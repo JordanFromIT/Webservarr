@@ -137,8 +137,10 @@ Every write is idempotent across 2 workers, using a unique key per app, event an
 - **Storage:**
   - Rows are `StatusUpdate` with a new `source` value, `library`, plus the fields grouping needs (app,
     event key, pending flag).
-  - Library rows are never pinned, never pushed, and never count as outages in `state()`, `home_off()`
-    or `status-summary`.
+  - Library rows are never pinned and never pushed. Library rows never count as outages; they do
+    count as feed content for showing the log. So they never move `state()` or `status-summary`,
+    but without Uptime Kuma `home_off()` (and the same rule in home.js) shows the event log when it
+    has a note, an outage or a library line from the last 30 days.
   - They are kept for 30 days, like the rest of the feed.
 - **Event log:**
   - Library lines use a neutral grey tick (`--color-text-secondary`).
@@ -177,7 +179,8 @@ an agent) is open.
   - auth per app;
   - the rate limit;
   - the Chaptarr endpoint's existing catalog behaviour is unchanged;
-  - library rows are excluded from state, pins, push and status-summary;
+  - library rows are excluded from state, pins, push and status-summary, but alone keep the event
+    log shown without Uptime Kuma (the server's hidden hint and home.js agree);
   - privacy (no requester, path or release name in the output).
 - **Node runtime:** grey tick, the muted "not guaranteed" span, a pinned outage staying visible under a
   burst of 10 library lines.

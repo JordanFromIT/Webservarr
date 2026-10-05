@@ -247,14 +247,15 @@ def feed(db: Session, days: int, now: datetime) -> dict:
 
 def home_off(db: Session, now: datetime) -> bool:
     """Whether Home's event log is hidden: the feed would answer "off" with
-    nothing but library lines in it (no Uptime Kuma, and no note or outage in
-    the last FEED_DAYS_DEFAULT days). The page renders the section hidden
-    then, so a person who never sees it never has its room; home.js hides it
-    on the same rule."""
+    nothing in it (no Uptime Kuma, and no note, outage or library line in the
+    last FEED_DAYS_DEFAULT days). Library lines never count as outages, but
+    they are feed content, so they alone keep the log shown. The page renders
+    the section hidden then, so a person who never sees it never has its
+    room; home.js hides it on the same rule."""
     if kuma_configured(db):
         return False
     body = feed(db, FEED_DAYS_DEFAULT, now)
-    return not body["open"] and all(i["source"] == LIBRARY for i in body["items"])
+    return not body["open"] and not body["items"]
 
 
 def state(configured: bool, answering: bool, open_items: List[dict]) -> str:
