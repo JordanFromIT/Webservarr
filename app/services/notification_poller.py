@@ -618,10 +618,12 @@ async def _poll_monitors(r: aioredis.Redis,
 
     An outage opens on the second poll in a row that finds a monitor down, so
     one that flaps (down, up, down) opens nothing, and closes on the first
-    poll that finds it up. A monitor switched off in Settings opens nothing.
-    When Uptime Kuma doesn't answer nothing opens or closes, and the feed is
-    told so (status_feed.KUMA_OK_KEY, kept for `kuma_ok_ttl` seconds after
-    each answer). The pushes are push_status_updates' job.
+    poll that finds it up, or on the second in a row that doesn't find it at
+    all (removed, or taken off the status page). A monitor switched off in
+    Settings opens nothing. When Uptime Kuma doesn't answer nothing opens or
+    closes, and the feed is told so (status_feed.KUMA_OK_KEY, kept for
+    `kuma_ok_ttl` seconds after each answer). The pushes are
+    push_status_updates' job.
     """
     from app.integrations.uptime_kuma import read_monitors
 
@@ -641,6 +643,10 @@ async def _poll_monitors(r: aioredis.Redis,
     try:
         for mon in monitors:
             await _track_monitor(r, db, mon, now)
+        listed = {mon.get("id", 0) for mon in monitors}
+        for monitor_id in status_feed.open_outage_monitors(db):
+            if monitor_id not in listed:
+                await _track_missing_monitor(r, db, monitor_id, now)
     finally:
         db.close()
 
@@ -667,6 +673,23 @@ async def _track_monitor(r: aioredis.Redis, db: Session, mon: dict, now: datetim
             status_feed.open_outage(db, monitor_id, name, status_feed.parse_time(since, now), now)
     elif status_label == "up":
         status_feed.close_outage(db, monitor_id, now)
+
+
+# A monitor's snapshot while it has an open outage but the status page
+# doesn't list it.
+MONITOR_MISSING = "missing"
+
+
+async def _track_missing_monitor(r: aioredis.Redis, db: Session, monitor_id: int, now: datetime) -> None:
+    """One poll of a monitor with an open outage that Uptime Kuma's answer
+    left out: the outage closes as "no longer monitored" on the second answer
+    in a row without it, the same debounce as going down."""
+    redis_key = f"poller:monitor:{monitor_id}"
+    seen, _ = _parse_monitor_snapshot(await r.get(redis_key))
+    if seen != MONITOR_MISSING:
+        await r.set(redis_key, f"{MONITOR_MISSING}|{now.isoformat(timespec='seconds')}")
+        return
+    status_feed.close_unmonitored(db, monitor_id, now)
 
 
 async def push_status_updates(r: aioredis.Redis) -> int:

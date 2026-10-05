@@ -211,6 +211,99 @@ class Outages(FeedCase):
         self.assertEqual(self.rows()[0].message, "Audiobooks is down")
 
 
+OTHER = [{"id": 8, "name": "Books", "status": "up", "status_since": None}]
+
+
+class GoneFromUptimeKuma(FeedCase):
+    """An open outage whose monitor is removed, or taken off the status page,
+    closes as "no longer monitored" on the second answer in a row that
+    misses it: never on one, never on no answer, never with a push."""
+
+    def test_it_closes_on_the_second_poll_that_misses_it(self):
+        self.subscribe(OWNER)
+        self.go_down()                                   # began 12:02, now 12:03
+        self.poll(monitors=OTHER)
+        self.assertTrue(self.rows()[0].active, "missed once: still open")
+        self.poll(monitors=OTHER)                        # 12:05
+        [row] = self.rows()
+        self.assertFalse(row.active)
+        self.assertEqual(row.message, "Media is no longer monitored")
+        self.assertEqual(row.title, "Media is no longer monitored")
+        self.assertEqual((row.update_type, row.ended_at, row.resolved_at),
+                         ("resolved", T0 + timedelta(minutes=5), T0 + timedelta(minutes=5)))
+        self.poll(monitors=OTHER, minutes=30)
+        self.assertEqual(self.pushed, [], "closing it never pushes")
+        self.assertEqual(self.notifications(), [])
+
+    def test_an_empty_status_page_counts_as_missing(self):
+        self.go_down()
+        self.poll(monitors=[])
+        self.poll(monitors=[])
+        self.assertEqual(self.rows()[0].message, "Media is no longer monitored")
+
+    def test_back_on_the_page_after_one_miss_keeps_the_outage(self):
+        self.go_down()
+        self.poll(monitors=OTHER)
+        self.poll("down")
+        self.poll(monitors=OTHER)
+        self.assertTrue(self.rows()[0].active, "the misses were not in a row")
+        self.poll("up")
+        self.assertEqual([r.message for r in self.rows()], ["Media is back, down 5 min"])
+
+    def test_back_after_it_closed_is_a_new_outage(self):
+        self.go_down()
+        self.poll(monitors=OTHER)
+        self.poll(monitors=OTHER)
+        self.poll("down")
+        self.poll("down")
+        self.assertEqual([(r.message, r.active) for r in self.rows()],
+                         [("Media is no longer monitored", False), ("Media is down", True)])
+
+    def test_a_pushed_outage_closes_without_another_push(self):
+        self.subscribe(OWNER)
+        self.go_down()
+        self.poll("down", minutes=10)                    # 12:13: pushed
+        self.assertEqual(len(self.pushed), 1)
+        self.poll(monitors=OTHER)
+        self.poll(monitors=OTHER)
+        self.assertFalse(self.rows()[0].active)
+        self.assertEqual(len(self.pushed), 1)
+        self.assertEqual(len(self.notifications()), 1)
+
+    def test_uptime_kuma_not_answering_closes_nothing(self):
+        self.go_down()
+        for _ in range(5):
+            self.poll(answered=False, minutes=10)
+        self.assertTrue(self.rows()[0].active, "no answer is not 'gone'")
+        # One miss, then silence: the next answer that misses it is the second.
+        self.poll(monitors=OTHER)
+        for _ in range(3):
+            self.poll(answered=False)
+        self.assertTrue(self.rows()[0].active)
+        self.poll(monitors=OTHER)
+        self.assertEqual(self.rows()[0].message, "Media is no longer monitored")
+
+    def test_uptime_kuma_failing_to_read_closes_nothing(self):
+        self.go_down()
+        with mock.patch("app.integrations.uptime_kuma.read_monitors",
+                        mock.AsyncMock(side_effect=OSError("refused"))), \
+                self.assertLogs(poller.logger, level="WARNING"):
+            for _ in range(3):
+                run(poller._poll_monitors(self.r))
+        self.assertTrue(self.rows()[0].active)
+
+    def test_two_workers_close_it_once(self):
+        # Every poll runs twice, as two pollers would during a lease handover.
+        self.subscribe(OWNER)
+        self.go_down()
+        for minutes in (1, 1, 1):
+            self.poll(monitors=OTHER, minutes=minutes)
+            self.poll(monitors=OTHER, minutes=0)
+        self.assertEqual([(r.message, r.active) for r in self.rows()],
+                         [("Media is no longer monitored", False)])
+        self.assertEqual(self.pushed, [])
+
+
 class Pushes(FeedCase):
     def test_an_outage_is_pushed_once_when_it_has_lasted_ten_minutes(self):
         self.subscribe(OWNER)
@@ -367,6 +460,20 @@ class OnceAcrossWorkers(unittest.TestCase):
             self.assertEqual(len(raced), 1)
             row = db.query(StatusUpdate).one()
             self.assertEqual(row.message, "Media is back, down 3 min")
+        finally:
+            db.close()
+
+    def test_back_and_gone_at_once_close_it_once(self):
+        # One worker finds the monitor up while the other misses it a second time.
+        db = sessionmaker(bind=self.mine)()
+        try:
+            status_feed.open_outage(db, 7, "Media", T0, T0)
+            raced = self.race("UPDATE status_updates SET",
+                              lambda db2: status_feed.close_outage(db2, 7, T0 + timedelta(minutes=3)))
+            self.assertIsNone(status_feed.close_unmonitored(db, 7, T0 + timedelta(minutes=4)))
+            self.assertEqual(len(raced), 1)
+            row = db.query(StatusUpdate).one()
+            self.assertEqual((row.message, row.active), ("Media is back, down 3 min", False))
         finally:
             db.close()
 

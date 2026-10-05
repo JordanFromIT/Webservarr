@@ -23,7 +23,7 @@ show in the history, and are kept LIBRARY_DAYS.
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from sqlalchemy import and_, func, not_, or_
 from sqlalchemy.exc import IntegrityError
@@ -154,14 +154,38 @@ def open_outage(db: Session, monitor_id: int, name: str, started_at: datetime,
     return row
 
 
+def open_outage_monitors(db: Session) -> List[int]:
+    """The monitors that have an open outage."""
+    return [m for (m,) in db.query(StatusUpdate.monitor_id)
+            .filter(StatusUpdate.source == AUTO, StatusUpdate.active.is_(True)).all()]
+
+
 def close_outage(db: Session, monitor_id: int, now: datetime) -> Optional[StatusUpdate]:
     """Close the monitor's open outage as "<name> is back, down <duration>".
     None when there is none, or the other worker closed it first."""
+    def back(row: StatusUpdate) -> str:
+        began = row.started_at or row.created_at or now
+        return f"{_service(row)} is back, down {duration_text((now - began).total_seconds())}"
+    return _close_outage(db, monitor_id, now, back)
+
+
+def close_unmonitored(db: Session, monitor_id: int, now: datetime) -> Optional[StatusUpdate]:
+    """Close the monitor's open outage as "<name> is no longer monitored": it
+    left Uptime Kuma's status page, so nobody can say whether it came back.
+    None when there is none, or the other worker closed it first."""
+    return _close_outage(db, monitor_id, now, lambda row: f"{_service(row)} is no longer monitored")
+
+
+def _service(row: StatusUpdate) -> str:
+    return row.service_name or f"Monitor {row.monitor_id}"
+
+
+def _close_outage(db: Session, monitor_id: int, now: datetime,
+                  line_for: Callable[[StatusUpdate], str]) -> Optional[StatusUpdate]:
     row = _open_outage(db, monitor_id)
     if row is None:
         return None
-    began = row.started_at or row.created_at or now
-    line = f"{row.service_name or f'Monitor {monitor_id}'} is back, down {duration_text((now - began).total_seconds())}"
+    line = line_for(row)
     closed = (db.query(StatusUpdate)
               .filter(StatusUpdate.id == row.id, StatusUpdate.active.is_(True))
               .update({StatusUpdate.active: False, StatusUpdate.ended_at: now, StatusUpdate.resolved_at: now,
