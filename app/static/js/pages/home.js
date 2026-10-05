@@ -671,6 +671,10 @@ function releasesError(container) {
 // Only the front line is in the accessibility tree; a new event is announced
 // once through the section's polite live region. Text is written with
 // textContent only.
+//
+// Library lines (Sonarr, Radarr and Chaptarr: "Movie Added: Dune (2021)")
+// carry a grey tick, and a grab its muted " · not guaranteed". However many
+// of them arrive, an open outage stays on the wheel until it resolves.
 
 const WHEEL_LINES = 4;
 const WHEEL_MS = 650;   // theme.css --wheel-duration
@@ -686,8 +690,9 @@ function feedTime(iso) {
 }
 
 // The feed's items as events, newest first. An outage is two events: it went
-// down (when it began) and, once resolved, it came back (when it ended, the
-// item's own text). A note is one event, when it was posted.
+// down (when it began; pinned while it is open) and, once resolved, it came
+// back (when it ended, the item's own text). A note is one event, when it was
+// posted, and so is a library line, with its note ("not guaranteed") if any.
 function feedEvents(data) {
     var rows = [].concat(Array.isArray(data.open) ? data.open : [], Array.isArray(data.items) ? data.items : []);
     var out = [];
@@ -707,7 +712,14 @@ function feedEvents(data) {
                 }
                 if (ended !== null && text) out.push({ key: 'a' + it.id + ':up', type: 'up', text: text, at: ended });
             } else if (began !== null && text) {
-                out.push({ key: 'a' + it.id + ':down', type: 'down', text: text, at: began });
+                out.push({ key: 'a' + it.id + ':down', type: 'down', text: text, at: began, pinned: true });
+            }
+        } else if (it.source === 'library') {
+            var when = feedTime(it.created_at);
+            if (when === null) when = feedTime(it.at);
+            if (when !== null && text) {
+                out.push({ key: 'l' + it.id, type: 'library', text: text,
+                           note: typeof it.note === 'string' ? it.note : '', at: when });
             }
         } else {
             var at = feedTime(it.created_at);
@@ -718,6 +730,24 @@ function feedEvents(data) {
     // Newest first; at the same moment an outage's return comes after its start.
     out.sort(function (a, b) { return (b.at - a.at) || (a.key < b.key ? 1 : a.key > b.key ? -1 : 0); });
     return out;
+}
+
+// What the wheel shows of `list` (newest first): the newest WHEEL_LINES
+// events, except that every open outage stays on (up to WHEEL_LINES of them)
+// and the newest others fill the rest. Still newest first.
+function onWheel(list) {
+    var pinned = list.filter(function (ev) { return ev.pinned; }).slice(0, WHEEL_LINES);
+    var room = WHEEL_LINES - pinned.length;
+    return list.filter(function (ev) {
+        if (ev.pinned) return pinned.indexOf(ev) !== -1;
+        room -= 1;
+        return room >= 0;
+    });
+}
+
+// A line as one string: for its title and for the live region.
+function eventWords(ev) {
+    return (WHEEL_SR_PREFIX[ev.type] || '') + ev.text + (ev.note ? ' · ' + ev.note : '');
 }
 
 function wheelTime(at) {
@@ -744,7 +774,7 @@ function createEventLog(section, env) {
 
     function fill(el, ev) {
         el.setAttribute('data-type', ev.type);
-        el.title = ev.text;
+        el.title = ev.text + (ev.note ? ' · ' + ev.note : '');
         var text = el.querySelector('.ws-wheel__text');
         var prefix = WHEEL_SR_PREFIX[ev.type] || '';
         text.textContent = '';
@@ -754,7 +784,22 @@ function createEventLog(section, env) {
             sr.textContent = prefix;
             text.appendChild(sr);
         }
-        text.appendChild(document.createTextNode(ev.text));
+        if (ev.note) {
+            // The title gives way (ellipsis) and the note stays readable,
+            // even on a phone.
+            text.setAttribute('data-noted', '');
+            var title = document.createElement('span');
+            title.className = 'ws-wheel__title';
+            title.textContent = ev.text;
+            text.appendChild(title);
+            var note = document.createElement('span');
+            note.className = 'ws-wheel__note';
+            note.textContent = ' · ' + ev.note;
+            text.appendChild(note);
+        } else {
+            text.removeAttribute('data-noted');
+            text.appendChild(document.createTextNode(ev.text));
+        }
         var time = el.querySelector('time');
         if (ev.at !== null) {
             if (!time) {
@@ -817,12 +862,12 @@ function createEventLog(section, env) {
         }
     }
 
-    // Put the newest WHEEL_LINES of `list` on their notches. animate: lines
+    // Put what the wheel shows of `list` (onWheel) on their notches. animate: lines
     // that join turn up from the front edge (or fade, crossfading); without
     // it they are simply there. crossfade: every line fades out where it is
     // and the new set fades in.
     function place(list, animate, crossfade) {
-        var target = list.slice(0, WHEEL_LINES);
+        var target = onWheel(list);
         var keep = {};
         target.forEach(function (ev) { keep[ev.key] = true; });
         var old = {};
@@ -834,7 +879,8 @@ function createEventLog(section, env) {
         target.forEach(function (ev, i) {
             var ln = old[ev.key];
             if (ln) {
-                if (ln.ev.text !== ev.text || ln.ev.type !== ev.type || ln.ev.at !== ev.at) fill(ln.el, ev);
+                if (ln.ev.text !== ev.text || ln.ev.type !== ev.type || ln.ev.at !== ev.at ||
+                    ln.ev.note !== ev.note) fill(ln.el, ev);
                 ln.ev = ev;
                 ln.el.style.setProperty('--i', String(i));
             } else {
@@ -853,7 +899,7 @@ function createEventLog(section, env) {
     function announce(ev) {
         if (!announcer) return;
         if (announceTimer !== null) env.clearTimeout(announceTimer);
-        announcer.textContent = (WHEEL_SR_PREFIX[ev.type] || '') + ev.text;
+        announcer.textContent = eventWords(ev);
         // Cleared later, so browse mode does not read the newest event twice.
         announceTimer = env.setTimeout(function () { announcer.textContent = ''; announceTimer = null; }, 7000);
     }
@@ -868,7 +914,9 @@ function createEventLog(section, env) {
     function render(data, quiet) {
         var state = data && typeof data === 'object' ? data.state : 'unavailable';
         var events = state === 'unavailable' ? [] : feedEvents(data);
-        if (state === 'off' && !events.length) {
+        // Without Uptime Kuma the log shows only for a note or an outage;
+        // library lines alone keep it hidden (status_feed.home_off, the same rule).
+        if (state === 'off' && !events.some(function (ev) { return ev.type !== 'library'; })) {
             cancelSteps();
             section.hidden = true;
             return;
@@ -889,7 +937,7 @@ function createEventLog(section, env) {
         // New: not shown before, and newer than every event on the wheel now.
         var front = -Infinity;
         lines.forEach(function (ln) { if (ln.ev.at !== null && ln.ev.at > front) front = ln.ev.at; });
-        var shown = list.slice(0, WHEEL_LINES);
+        var shown = onWheel(list);
         var fresh = shown.filter(function (ev) { return ev.type !== 'quiet' && !seen[ev.key] && ev.at >= front; });
         if (!fresh.length || quiet) {
             place(list, !quiet, false);

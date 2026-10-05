@@ -1028,7 +1028,14 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 .ws-wheel__line[data-type="up"] .ws-wheel__mark { background: rgb(var(--ws-status-ok)); }
 .ws-wheel__line[data-type="note"] .ws-wheel__mark { background: rgb(var(--color-accent)); }
 .ws-wheel__line[data-type="important"] .ws-wheel__mark { background: rgb(var(--ws-status-warn)); }
+/* A library line (Sonarr, Radarr, Chaptarr): a neutral grey tick. */
+.ws-wheel__line[data-type="library"] .ws-wheel__mark { background: rgb(var(--color-text-secondary) / 0.55); }
 .ws-wheel__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.005em; }
+/* A grab's " · not guaranteed", muted after the title. The title gives way
+   to it (ellipsis), so the note is still read on a phone. */
+.ws-wheel__text[data-noted] { display: flex; }
+.ws-wheel__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws-wheel__note { flex: none; white-space: pre; color: rgb(var(--color-text) / 0.7); }
 .ws-wheel__line[data-type="quiet"] .ws-wheel__text { color: rgb(var(--color-text) / 0.7); }
 .ws-wheel__time {
   flex: none;

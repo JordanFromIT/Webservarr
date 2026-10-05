@@ -10,7 +10,9 @@
 // times; only the front line readable and titled; a new event turning the
 // wheel one notch (several, one notch each, in order) and announced once;
 // never more than four settled lines; reduced motion crossfading at once;
-// text written as text; a section the server rendered hidden coming back.
+// text written as text; a section the server rendered hidden coming back;
+// library lines (grey tick, a grab's muted note) and an open outage staying
+// on the wheel under a burst of them.
 //
 // HOME_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/home_event_log.mjs (npm run test:js; CI js-checks).
@@ -438,6 +440,69 @@ await run('leaving the page: no turn runs afterwards', async (make) => {
   t.ctl.abort();
   await t.clock.advance(5000);
   check('the second never does once the page is left', t.texts()[0] === 'Requests is down' && t.announced() === '');
+});
+
+// ---- Library lines (Sonarr, Radarr, Chaptarr webhooks) ----
+
+const lib = (id, text, minsAgo, note = '') => ({ id, source: 'library', text, note, service: null, important: false, resolved: true, started_at: null, ended_at: null, created_at: iso(minsAgo), at: iso(minsAgo) });
+const THEME_CSS = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
+
+await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in its own span', async (make) => {
+  const t = make({ answer: answer('ok', [], [lib(20, 'Movie Downloading: Dune (2021)', 2, 'not guaranteed'), lib(21, 'Episode Added: Severance S02E03', 5), note(3, 'A note', 30)]) });
+  await t.open();
+  const [grab, added] = t.slots();
+  check('library lines are typed for their tick', grab.getAttribute('data-type') === 'library' && added.getAttribute('data-type') === 'library');
+  const rule = THEME_CSS.match(/\.ws-wheel__line\[data-type="library"\] \.ws-wheel__mark \{ background: ([^;]+); \}/);
+  check('the tick is the theme\'s secondary text colour, greyed', rule && /^rgb\(var\(--color-text-secondary\) \/ 0\.\d+\)$/.test(rule[1]), rule && rule[1]);
+  const muted = grab.querySelector('.ws-wheel__text .ws-wheel__note');
+  const title = muted && muted.previousElementSibling;
+  check('the note is a span of its own after the title', muted && muted.textContent === ' · not guaranteed' && title && title.className === 'ws-wheel__title' && title.textContent === 'Movie Downloading: Dune (2021)' && !muted.nextSibling);
+  const noteRule = THEME_CSS.match(/\.ws-wheel__note \{ flex: none; white-space: pre; color: ([^;]+); \}/);
+  check('muted with a theme colour, and never cut: the title gives way to it', noteRule && /^rgb\(var\(--color-text\) \/ 0\.\d+\)$/.test(noteRule[1]) && /\.ws-wheel__text\[data-noted\] \{ display: flex; \}/.test(THEME_CSS) && /\.ws-wheel__title \{ min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(THEME_CSS), noteRule && noteRule[1]);
+  check('the whole line reads as one in its title', grab.title === 'Movie Downloading: Dune (2021) · not guaranteed', grab.title);
+  check('a line without a note is plain text', !added.querySelector('.ws-wheel__note') && !added.querySelector('.ws-wheel__title') && !added.querySelector('[data-noted]') && lineText(added) === 'Episode Added: Severance S02E03');
+  check('no screen-reader prefix on library lines', !grab.querySelector('.sr-only'));
+  await t.poll(answer('ok', [], [lib(22, 'Movie Downloading: <b>x</b>', 0, '<i>not</i> guaranteed')].concat(t.feed.answer.items)));
+  await t.clock.advance(800);
+  check('the note and the text are written as text', !t.wheel.querySelector('b') && !t.wheel.querySelector('i') && lineText(t.slots()[0]) === 'Movie Downloading: <b>x</b> · <i>not</i> guaranteed', lineText(t.slots()[0]));
+  check('announced with its note', t.announced() === 'Movie Downloading: <b>x</b> · <i>not</i> guaranteed', t.announced());
+});
+
+await run('an open outage stays on the wheel under a burst of 10 library lines', async (make) => {
+  const t = make({ answer: answer('down', [outage(7, 'Plex', 30)], [note(3, 'A note', 60)]) });
+  await t.open();
+  const burst = [];
+  for (let i = 0; i < 10; i++) burst.push(lib(100 + i, 'Episode Added: The Bear S03E0' + i, 10 - i));
+  await t.poll(answer('down', [outage(7, 'Plex', 30)], burst.concat([note(3, 'A note', 60)])));
+  let lost = 0;
+  for (let k = 0; k < 12; k++) {
+    if (!t.texts().includes('Plex is down')) lost += 1;
+    check('never more than four settled lines', t.settled().length <= 4, t.settled().length);
+    await t.clock.advance(710);
+  }
+  await t.clock.advance(800);
+  check('the outage never left the wheel during the burst', lost === 0, lost);
+  check('settled: the newest three library lines and the outage, four in all', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Plex is down']), t.texts());
+  check('the outage is still in its colour', t.slots()[3].getAttribute('data-type') === 'down');
+  await t.poll(answer('ok', [], [back(7, 'Plex', 30, 0)].concat(burst)));
+  await t.clock.advance(800);
+  check('resolved, it is no longer held: its return leads and the start goes', t.texts()[0] === 'Plex is back, down 30 min' && !t.texts().includes('Plex is down'), t.texts());
+});
+
+await run('a resolved outage is not held: library lines push it off like any line', async (make) => {
+  const items = [back(7, 'Plex', 90, 80)];
+  for (let i = 0; i < 5; i++) items.unshift(lib(200 + i, 'Movie Added: Film ' + i, 50 - i));
+  const t = make({ answer: answer('ok', [], items) });
+  await t.open();
+  check('the newest four only', t.all().length === 4 && t.texts().every((x) => x.indexOf('Movie Added') === 0), t.texts());
+});
+
+await run('without Uptime Kuma, library lines alone leave the log hidden', async (make) => {
+  const t = make({ serverHidden: true, answer: answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]) });
+  await t.open();
+  check('hidden, as the server rendered it', t.section.hidden === true);
+  await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2), note(5, 'Maintenance tonight', 10)]));
+  check('a note brings it back, library lines with it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Maintenance tonight']), t.texts());
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));
