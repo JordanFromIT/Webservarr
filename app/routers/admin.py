@@ -19,7 +19,7 @@ from app.config import settings
 from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
-from app.dependencies import require_admin
+from app.dependencies import require_admin, require_same_origin
 from app.integrations.config import same_address
 from app.routers.admin_settings import effective_values
 from app.services.integration_health import credential_key, probe_one
@@ -57,7 +57,7 @@ class AccountUpdateRequest(BaseModel):
 
 # --- Account Management ---
 
-@router.put("/account")
+@router.put("/account", dependencies=[Depends(require_same_origin)])
 @limiter.limit("5/minute")
 async def update_account(
     request: Request,
@@ -130,7 +130,7 @@ async def update_account(
     return {"success": True, "message": "Account updated successfully", "updated": changes}
 
 
-@router.post("/test-connection")
+@router.post("/test-connection", dependencies=[Depends(require_same_origin)])
 @limiter.limit("20/minute")
 async def test_connection(
     request: Request,
@@ -184,7 +184,7 @@ ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
 
 
-@router.post("/upload-logo")
+@router.post("/upload-logo", dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def upload_logo(
     request: Request,
@@ -254,7 +254,7 @@ def _broadcast_recipients(db: Session) -> Set[str]:
     return (push_emails | notif_emails) - {""}
 
 
-@router.post("/notifications/send")
+@router.post("/notifications/send", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def send_notification(
     request: Request,
@@ -289,7 +289,7 @@ async def send_notification(
     return {"success": True, "sent_to": len(all_emails)}
 
 
-@router.post("/notifications/test-push")
+@router.post("/notifications/test-push", dependencies=[Depends(require_same_origin)])
 @limiter.limit("5/minute")
 async def send_test_push(
     request: Request,

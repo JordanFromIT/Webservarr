@@ -30,7 +30,7 @@ class WikiHooks(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -99,7 +99,7 @@ class WikiHooks(unittest.TestCase):
         self.assertIsNone(data["help_holders"]["issues"])
         self.assertEqual(self.client.get(f"/api/wiki/pages/{a}").json()["help_on"], ["tickets"])
         helpers.reset_overrides()
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertNotIn("help_on", member.get(f"/api/wiki/pages/{a}").json())
 
     # ---- beyond the brief ----
@@ -108,7 +108,7 @@ class WikiHooks(unittest.TestCase):
         self.page("A", ["tickets"])
         b = self.page("B")
         helpers.reset_overrides()
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         for slug in ("a", b):
             data = member.get(f"/api/wiki/pages/{slug}").json()
             self.assertNotIn("help_on", data)
@@ -278,7 +278,7 @@ class ConcurrentHookWrites(unittest.TestCase):
         self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -673,7 +673,7 @@ class HelpCardsFollowTheWikiSwitch(unittest.TestCase):
         from unittest import mock as _mock
         helpers.put(self.db, "sidebar.enabled_wiki", "false")
         with _mock.patch("app.routers.setup.is_setup_completed", return_value=True):
-            client = helpers.api_client(self.Session, helpers.MEMBER)
+            client = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
             try:
                 r = client.get("/api/branding")
             finally:

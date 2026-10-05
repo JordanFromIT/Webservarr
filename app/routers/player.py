@@ -28,7 +28,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, Cookie, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -37,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_same_origin
 from app.integrations import plex_player as pp
 from app.limiter import _get_client_ip, limiter
 from app.routers.tickets import account_identity
@@ -154,7 +153,7 @@ NO_ACCESS = "Your account doesn't have access to the audiobook library"
 NEEDS_PLEX = "The audiobook player needs a Plex account"
 
 
-# --- Rate-limit key and same-origin check ------------------------------------------
+# --- Rate-limit key -----------------------------------------------------------------
 
 def session_rate_key(request: Request) -> str:
     """The rate-limit key: this session (a hash of its cookie, so the cookie
@@ -163,43 +162,6 @@ def session_rate_key(request: Request) -> str:
     if sid:
         return "player-session:" + hashlib.sha256(sid.encode("utf-8", "replace")).hexdigest()[:32]
     return _get_client_ip(request)
-
-
-_DEFAULT_PORTS = {"http": 80, "https": 443}
-
-
-def _origin(value: Optional[str]) -> str:
-    """scheme://host[:port] of a URL or origin, lower-cased with the default
-    port dropped, or "" when it is not an http(s) URL."""
-    try:
-        parts = urlsplit((value or "").strip())
-        port = parts.port
-    except ValueError:
-        return ""
-    scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
-    if scheme not in _DEFAULT_PORTS or not host:
-        return ""
-    if ":" in host:
-        host = f"[{host}]"
-    return f"{scheme}://{host}" if port in (None, _DEFAULT_PORTS[scheme]) else f"{scheme}://{host}:{port}"
-
-
-def require_same_origin(request: Request) -> None:
-    """403 unless the request comes from this site: its Origin (or, when the
-    browser sends none, its Referer) is the configured app URL or this
-    request's own host. Browsers send Origin on every POST and PUT, including
-    sendBeacon; an opaque origin ("null") is refused."""
-    sent = request.headers.get("origin")
-    if sent is None:
-        sent = request.headers.get("referer")
-    got = _origin(sent)
-    allowed = {_origin(settings.app_url)}
-    host = request.headers.get("host")
-    if host:
-        allowed.add(_origin(f"{settings.app_scheme}://{host}"))
-    allowed.discard("")
-    if not got or got not in allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-origin request refused")
 
 
 # --- The listener -------------------------------------------------------------------

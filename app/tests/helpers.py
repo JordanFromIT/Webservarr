@@ -47,8 +47,14 @@ MEMBER = {"username": "sam", "display_name": "Sam", "is_admin": "false",
 _limiter_was: Optional[bool] = None
 
 
-def api_client(Session, user=ADMIN):
+# What a browser on the site sends with every write; state-changing routes
+# refuse a request without it (require_same_origin).
+SAME_ORIGIN = {"Origin": "https://testserver"}
+
+
+def api_client(Session, user=ADMIN, headers=None):
     """A TestClient whose DB is the in-memory one and whose session is `user`.
+    `headers` go with every request (SAME_ORIGIN for a client that writes).
 
     No `with` block on purpose: the lifespan (poller, warmers) must not start.
     Pair every call with reset_overrides() in tearDown."""
@@ -73,7 +79,7 @@ def api_client(Session, user=ADMIN):
     if _limiter_was is None:          # a second call before reset keeps the first saved state
         _limiter_was = limiter.enabled
     set_rate_limits(False)
-    return TestClient(app)
+    return TestClient(app, headers=headers)
 
 
 def set_rate_limits(enabled: bool) -> None:

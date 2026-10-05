@@ -319,14 +319,14 @@ class Endpoint(unittest.TestCase):
         from app.routers import admin_integrations
         payload = {"checked_at": "t", "integrations": {i: {"state": "unconfigured", "reason": "Not set up yet",
                                                           "checked_at": "t"} for i in health.IDS}}
-        admin = helpers.api_client(self.Session)
+        admin = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
         with mock.patch.object(admin_integrations, "get_health", mock.AsyncMock(return_value=payload)):
             r = admin.get("/api/admin/integrations/health")
             self.assertEqual(r.status_code, 200)
             self.assertEqual(set(r.json()["integrations"]), set(health.IDS))
             self.assertEqual(admin.get("/api/admin/integrations/health?service=nope").status_code, 400)
         helpers.reset_overrides()
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertEqual(member.get("/api/admin/integrations/health").status_code, 403)
 
     def test_rate_limited_to_twenty_a_minute(self):
@@ -341,7 +341,7 @@ class Endpoint(unittest.TestCase):
         limiter._storage, limiter._limiter = storage, FixedWindowRateLimiter(storage)
         try:
             limiter.reset()
-            admin = helpers.api_client(self.Session)
+            admin = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
             helpers.set_rate_limits(True)
             payload = {"checked_at": "t", "integrations": {}}
             with mock.patch.object(admin_integrations, "get_health", mock.AsyncMock(return_value=payload)):
@@ -483,7 +483,7 @@ class TestConnection(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -642,7 +642,7 @@ class TestConnection(unittest.TestCase):
 
     def test_admin_only(self):
         helpers.reset_overrides()
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         r = member.post("/api/admin/test-connection", json={"service": "sonarr", "url": "http://192.168.1.5:8989"})
         self.assertEqual(r.status_code, 403)
 
@@ -682,7 +682,7 @@ class KavitaKeyTest(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -759,7 +759,7 @@ class ChaptarrOptions(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -816,7 +816,7 @@ class ChaptarrOptions(unittest.TestCase):
     def test_admin_only(self):
         self.configure()
         helpers.reset_overrides()
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertEqual(member.get("/api/admin/chaptarr/options").status_code, 403)
 
     def test_a_slow_answer_is_503_within_the_deadline(self):

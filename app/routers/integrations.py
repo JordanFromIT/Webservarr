@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, require_admin, require_same_origin
 from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary, nyt
 from app.limiter import limiter
 
@@ -242,7 +242,7 @@ async def get_seerr_url(
     return {"url": row.value if row else ""}
 
 
-@router.post("/seerr-auth")
+@router.post("/seerr-auth", dependencies=[Depends(require_same_origin)])
 async def seerr_auth(
     response: Response,
     current_user: dict = Depends(get_current_user),
@@ -612,7 +612,7 @@ async def _enforce_daily_book_cap(current_user: dict) -> None:
         )
 
 
-@router.post("/chaptarr-request")
+@router.post("/chaptarr-request", dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def create_chaptarr_request(
     request: Request,
@@ -676,7 +676,7 @@ class RequestCreate(BaseModel):
     is4k: bool = False
 
 
-@router.post("/seerr-request")
+@router.post("/seerr-request", dependencies=[Depends(require_same_origin)])
 async def create_seerr_request(
     body: RequestCreate,
     current_user: dict = Depends(get_current_user),
@@ -751,7 +751,7 @@ async def get_issue_detail(
     return issue
 
 
-@router.post("/issues")
+@router.post("/issues", dependencies=[Depends(require_same_origin)])
 async def create_issue(
     body: IssueCreate,
     current_user: dict = Depends(get_current_user),
@@ -776,7 +776,7 @@ async def create_issue(
     return result
 
 
-@router.post("/issues/{issue_id}/comment")
+@router.post("/issues/{issue_id}/comment", dependencies=[Depends(require_same_origin)])
 async def create_issue_comment(
     issue_id: int,
     body: IssueCommentCreate,

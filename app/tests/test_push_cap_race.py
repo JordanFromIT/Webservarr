@@ -20,6 +20,7 @@ from unittest import mock
 try:
     from fastapi import Request
     from fastapi.testclient import TestClient
+    from app.tests.helpers import SAME_ORIGIN
     from sqlalchemy.orm import Session as SASession, sessionmaker
 
     from app import database
@@ -106,7 +107,7 @@ class TwoWorkersAtTheCap(unittest.TestCase):
         results = {}
 
         def worker(n):
-            client = TestClient(app, headers={"x-test-worker": str(n)})
+            client = TestClient(app, headers={**SAME_ORIGIN, "x-test-worker": str(n)})
             results[n] = client.post("/api/notifications/push-subscribe",
                                      json={"endpoint": f"https://push.example.com/send/new-{n}", "keys": KEYS})
 
@@ -135,7 +136,7 @@ class TwoWorkersAtTheCap(unittest.TestCase):
             db.add(PushSubscription(user_email=EMAIL, endpoint=f"https://push.example.com/send/extra-{i}", **KEYS))
         db.commit()
         db.close()
-        r = TestClient(app).post("/api/notifications/push-subscribe",
+        r = TestClient(app, headers=SAME_ORIGIN).post("/api/notifications/push-subscribe",
                                  json={"endpoint": "https://push.example.com/send/newest", "keys": KEYS})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mine(), notifications.MAX_PUSH_DEVICES)

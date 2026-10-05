@@ -860,7 +860,7 @@ class Preference(unittest.TestCase):
     def setUp(self):
         self.Session = helpers.make_sessionmaker()
         with mock.patch("app.routers.setup.is_setup_completed", return_value=True):
-            self.client = helpers.api_client(self.Session, helpers.MEMBER)
+            self.client = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.addCleanup(helpers.reset_overrides)
 
     def test_books_can_be_turned_off_and_is_on_by_default(self):

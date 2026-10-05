@@ -11,6 +11,7 @@ from unittest import mock
 
 try:
     from fastapi.testclient import TestClient
+    from app.tests.helpers import SAME_ORIGIN
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -114,7 +115,7 @@ class StampingTests(unittest.TestCase):
         setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         setup_patch.start()
         self.addCleanup(setup_patch.stop)
-        self.client = TestClient(app)
+        self.client = TestClient(app, headers=SAME_ORIGIN)
 
     def tearDown(self):
         app.dependency_overrides.clear()

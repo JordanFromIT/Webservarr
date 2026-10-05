@@ -75,7 +75,7 @@ class LostWriteLock(unittest.TestCase):
         setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         setup_patch.start()
         self.addCleanup(setup_patch.stop)
-        client = helpers.api_client(self.Session)
+        client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
         self.addCleanup(helpers.reset_overrides)
         with self.write_lock(), self.assertLogs("app.routers.admin_settings", level="WARNING") as logs:
             r = client.put("/api/admin/settings/bulk",
@@ -105,7 +105,7 @@ class LostWriteLock(unittest.TestCase):
                   mock.patch("app.routers.setup.SessionLocal", self.Session)):
             p.start()
             self.addCleanup(p.stop)
-        client = helpers.api_client(self.Session)
+        client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
         self.addCleanup(helpers.reset_overrides)
         with self.write_lock(), self.assertLogs("app.routers.setup", level="ERROR") as logs:
             r = client.post("/api/setup/complete", json={

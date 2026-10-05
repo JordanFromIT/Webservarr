@@ -28,7 +28,7 @@ class SettingsApiBase(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session, self.user or helpers.ADMIN)
+        self.client = helpers.api_client(self.Session, self.user or helpers.ADMIN, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -533,8 +533,8 @@ class HelpersRestoreTheLimiter(unittest.TestCase):
         try:
             for before in (True, False):
                 limiter.enabled = before
-                helpers.api_client(helpers.make_sessionmaker())
-                helpers.api_client(helpers.make_sessionmaker())   # a second call must not lose the saved state
+                helpers.api_client(helpers.make_sessionmaker(), headers=helpers.SAME_ORIGIN)
+                helpers.api_client(helpers.make_sessionmaker(), headers=helpers.SAME_ORIGIN)   # a second call must not lose the saved state
                 self.assertFalse(limiter.enabled)
                 helpers.reset_overrides()
                 self.assertEqual(limiter.enabled, before)
@@ -742,7 +742,7 @@ class PushStatusApi(PushStatusBase):
             self.assertNotIn(leak, r.text)
 
     def test_members_are_refused(self):
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertEqual(member.get("/api/admin/notifications/status").status_code, 403)
 
     # --- recording the last push ----------------------------------------

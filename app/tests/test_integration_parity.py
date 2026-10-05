@@ -164,7 +164,7 @@ class TestButtonReadsLikeTheClient(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()

@@ -23,7 +23,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.content import render_markdown
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, require_admin, require_same_origin
 from app.limiter import limiter
 from app.models import Setting, WikiCategory, WikiPage
 from app.settings_registry import REGISTRY, validate_value
@@ -443,7 +443,7 @@ async def get_page(
 # Page writes (admin)
 # ============================================================
 
-@router.post("/pages", status_code=status.HTTP_201_CREATED)
+@router.post("/pages", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def create_page(
     payload: PageWrite,
@@ -490,7 +490,7 @@ async def create_page(
     return _page_brief(page, cat)
 
 
-@router.put("/pages/{slug}")
+@router.put("/pages/{slug}", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def update_page(
     slug: str,
@@ -555,7 +555,7 @@ async def update_page(
     return _page_brief(page, cat)
 
 
-@router.delete("/pages/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/pages/{slug}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def delete_page(
     slug: str,
@@ -579,7 +579,7 @@ async def delete_page(
 # Category writes (admin)
 # ============================================================
 
-@router.post("/categories", status_code=status.HTTP_201_CREATED)
+@router.post("/categories", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def create_category(
     payload: CategoryWrite,
@@ -609,7 +609,7 @@ async def create_category(
     return _category_dict(cat, 0, 0)
 
 
-@router.put("/categories/{slug}")
+@router.put("/categories/{slug}", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def update_category(
     slug: str,
@@ -652,7 +652,7 @@ async def update_category(
     return _category_dict(cat, published, drafts)
 
 
-@router.delete("/categories/{slug}")
+@router.delete("/categories/{slug}", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def delete_category(
     slug: str,
@@ -684,7 +684,7 @@ async def delete_category(
 # Images
 # ============================================================
 
-@router.post("/images", status_code=status.HTTP_201_CREATED)
+@router.post("/images", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def upload_image(
     request: Request,

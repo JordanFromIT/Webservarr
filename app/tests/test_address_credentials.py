@@ -43,7 +43,7 @@ class AddressBase(unittest.TestCase):
         self.db = self.Session()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
         for k, v in (("integration.seerr.url", SEERR_URL), ("integration.seerr.api_key", SEERR_KEY),
                      ("integration.sonarr.url", SONARR_URL), ("integration.sonarr.api_key", SONARR_KEY)):
             helpers.put(self.db, k, v)

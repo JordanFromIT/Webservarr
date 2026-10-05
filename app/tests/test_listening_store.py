@@ -1474,7 +1474,7 @@ class LibrarySettingApi(unittest.TestCase):
         return client.put("/api/admin/settings/bulk", json={"settings": [{"key": LIB_KEY, "value": value}]})
 
     def test_admin_saves_and_reads_it(self):
-        client = helpers.api_client(self.Session, helpers.ADMIN)
+        client = helpers.api_client(self.Session, helpers.ADMIN, headers=helpers.SAME_ORIGIN)
         self.assertEqual(self.save(client, "7").status_code, 200)
         self.assertEqual(helpers.get(self.db, LIB_KEY), "7")
         body = client.get("/api/admin/settings?view=registry").json()
@@ -1488,7 +1488,7 @@ class LibrarySettingApi(unittest.TestCase):
 
     def test_members_cannot_read_or_write_it(self):
         helpers.put(self.db, LIB_KEY, "7")
-        client = helpers.api_client(self.Session, helpers.MEMBER)
+        client = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertEqual(self.save(client, "9").status_code, 403)
         self.assertEqual(client.get("/api/admin/settings?view=registry").status_code, 403)
         self.assertEqual(helpers.get(self.db, LIB_KEY), "7")

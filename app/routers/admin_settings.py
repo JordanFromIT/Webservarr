@@ -23,7 +23,7 @@ from app.auth import session_manager
 from app.config import settings as app_settings
 from app.database import get_db
 from app.integrations import config as integration_config
-from app.dependencies import require_admin
+from app.dependencies import require_admin, require_same_origin
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
@@ -251,7 +251,7 @@ async def list_settings(
             "address_credentials": dict(integration_config.ADDRESS_CREDENTIALS)}
 
 
-@router.put("/settings/bulk")
+@router.put("/settings/bulk", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def bulk_update_settings(
     request: Request,
@@ -421,7 +421,7 @@ async def settings_shell(
     return shell_fragment(branding, True, "settings", "WebServarr - Settings")
 
 
-@router.post("/settings/import")
+@router.post("/settings/import", dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def import_settings(
     request: Request,

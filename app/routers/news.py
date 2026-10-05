@@ -11,7 +11,7 @@ from sqlalchemy import or_
 
 from app.content import sanitize_html
 from app.database import get_db
-from app.dependencies import get_current_user, get_current_user_optional, require_admin
+from app.dependencies import get_current_user, get_current_user_optional, require_admin, require_same_origin
 from app.limiter import limiter
 from app.models import NewsPost
 from app.utils import utc_iso
@@ -174,7 +174,7 @@ async def get_news_post(
     return _serialize_news_post(post, include_content=is_admin)
 
 
-@router.post("/", response_model=NewsPostResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=NewsPostResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def create_news_post(
     request: Request,
@@ -210,7 +210,7 @@ async def create_news_post(
     return new_post
 
 
-@router.put("/{post_id}", response_model=NewsPostResponse)
+@router.put("/{post_id}", response_model=NewsPostResponse, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def update_news_post(
     request: Request,
@@ -255,7 +255,7 @@ async def update_news_post(
     return post
 
 
-@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def delete_news_post(
     request: Request,

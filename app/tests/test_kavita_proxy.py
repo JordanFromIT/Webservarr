@@ -215,7 +215,7 @@ class ConnectFailureLandsOnBooks(unittest.TestCase):
         self.helpers.set_rate_limits(True)
 
     def connect(self, fake):
-        client = self.helpers.api_client(self.Session, self.helpers.MEMBER)
+        client = self.helpers.api_client(self.Session, self.helpers.MEMBER, headers=self.helpers.SAME_ORIGIN)
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", fake):
             return client.get("/kavita/connect", follow_redirects=False)
@@ -233,7 +233,7 @@ class ConnectFailureLandsOnBooks(unittest.TestCase):
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/books?kavita=error"))
 
     def test_not_configured_is_still_a_503(self):
-        client = self.helpers.api_client(self.Session, self.helpers.MEMBER)
+        client = self.helpers.api_client(self.Session, self.helpers.MEMBER, headers=self.helpers.SAME_ORIGIN)
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=None):
             r = client.get("/kavita/connect", follow_redirects=False)
         self.assertEqual(r.status_code, 503)
@@ -304,7 +304,7 @@ class HandOffReturns(unittest.TestCase):
         self.helpers.set_rate_limits(True)
 
     def start(self, fake, query):
-        client = self.helpers.api_client(self.Session, self.helpers.MEMBER)
+        client = self.helpers.api_client(self.Session, self.helpers.MEMBER, headers=self.helpers.SAME_ORIGIN)
         client.cookies.set(self.cookie, "sid-1")
         self.update = mock.AsyncMock()
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
@@ -406,7 +406,7 @@ class ChapterVisibility(unittest.TestCase):
         helpers.set_rate_limits(False)
         _RecordingProxyClient.asked = []
         user = dict(helpers.MEMBER, kavita_token="jwt-sam", kavita_base=KAVITA)
-        self.client = helpers.api_client(self.Session, user)
+        self.client = helpers.api_client(self.Session, user, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         self.helpers.reset_overrides()
@@ -571,7 +571,7 @@ class ScopedPaths(unittest.TestCase):
         helpers.set_rate_limits(False)
         _RecordingProxyClient.asked = []
         user = dict(helpers.MEMBER, kavita_token="jwt-sam", kavita_base=KAVITA)
-        self.client = helpers.api_client(self.Session, user)
+        self.client = helpers.api_client(self.Session, user, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         self.helpers.reset_overrides()
@@ -657,8 +657,10 @@ def _literal_path_client(app):
     """A TestClient whose request path reaches the app exactly as the
     X-Literal-Path header spells it. httpx collapses a literal `..` before
     sending, while a real client, and the tunnel in front of the site, forward
-    it as is."""
+    it as is. It sends the site's own Origin, as a browser on the site would."""
     from fastapi.testclient import TestClient
+
+    from app.tests.helpers import SAME_ORIGIN
 
     async def literal(scope, receive, send):
         if scope["type"] == "http":
@@ -667,7 +669,7 @@ def _literal_path_client(app):
                     scope = dict(scope, path=value.decode(), raw_path=value)
         await app(scope, receive, send)
 
-    return TestClient(literal)
+    return TestClient(literal, headers=SAME_ORIGIN)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -726,7 +728,7 @@ class DotSegments(unittest.TestCase):
 
     def client_for(self, token):
         user = dict(self.helpers.MEMBER, kavita_token=token, kavita_base=KAVITA) if token else self.helpers.MEMBER
-        return self.helpers.api_client(self.Session, user)
+        return self.helpers.api_client(self.Session, user, headers=self.helpers.SAME_ORIGIN)
 
     def test_every_spelling_of_a_dot_segment_is_404_and_nothing_is_forwarded(self):
         from app.main import app
@@ -815,7 +817,7 @@ class ChapterShortcut(unittest.TestCase):
 
     def fetch(self, session="sid-1", token="jwt-sam", chapter=136, redis="fake", raises=None):
         user = dict(self.helpers.MEMBER, kavita_token=token, kavita_base=KAVITA)
-        client = self.helpers.api_client(self.Session, user)
+        client = self.helpers.api_client(self.Session, user, headers=self.helpers.SAME_ORIGIN)
         client.cookies.set(self.cookie, session)
         sm = kavita_proxy.session_manager
         if redis == "fake":
@@ -902,7 +904,7 @@ class ChapterShortcut(unittest.TestCase):
 
     def test_no_session_cookie_no_shortcut(self):
         user = dict(self.helpers.MEMBER, kavita_token="jwt", kavita_base=KAVITA)
-        client = self.helpers.api_client(self.Session, user)
+        client = self.helpers.api_client(self.Session, user, headers=self.helpers.SAME_ORIGIN)
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
              mock.patch.object(kavita_proxy.session_manager, "get_redis", mock.AsyncMock(return_value=self.redis)), \
              mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", self.check), \

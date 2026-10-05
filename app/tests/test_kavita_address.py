@@ -70,7 +70,7 @@ class KavitaAddressBase(unittest.TestCase):
                         mock.patch.object(kavita_proxy, "SessionLocal", self.Session)]
         for p in self.patches:
             p.start()
-        self.client = helpers.api_client(self.Session)
+        self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
         tag = uuid.uuid4().hex[:8]
         self.sam = f"test-kavita-{tag}-sam"
         self.kim = f"test-kavita-{tag}-kim"

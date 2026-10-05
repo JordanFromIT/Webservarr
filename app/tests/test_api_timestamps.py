@@ -43,7 +43,7 @@ class Timestamps(unittest.TestCase):
         db.close()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session, helpers.ADMIN)
+        self.client = helpers.api_client(self.Session, helpers.ADMIN, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -116,7 +116,7 @@ class TicketAndNotificationTimestamps(unittest.TestCase):
         db.close()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session, helpers.ADMIN)
+        self.client = helpers.api_client(self.Session, helpers.ADMIN, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()

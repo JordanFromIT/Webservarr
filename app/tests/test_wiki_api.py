@@ -33,7 +33,7 @@ class CategoryWrites(unittest.TestCase):
         db.close()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
-        self.client = helpers.api_client(self.Session, helpers.ADMIN)
+        self.client = helpers.api_client(self.Session, helpers.ADMIN, headers=helpers.SAME_ORIGIN)
 
     def tearDown(self):
         helpers.reset_overrides()
@@ -106,7 +106,7 @@ class CategoryWrites(unittest.TestCase):
             db.close()
 
     def test_members_cannot_write(self):
-        member = helpers.api_client(self.Session, helpers.MEMBER)
+        member = helpers.api_client(self.Session, helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.assertEqual(member.post("/api/wiki/categories", json={"name": "Nope"}).status_code, 403)
         self.assertEqual(member.put("/api/wiki/categories/getting-started",
                                     json={"name": "Nope", "slug": "getting-started"}).status_code, 403)

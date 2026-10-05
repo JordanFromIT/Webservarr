@@ -20,7 +20,7 @@ from sqlalchemy import false, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, require_admin, require_same_origin
 from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment, User
 from app.seed import LOCAL_USERNAMES_SNAPSHOT_KEY
@@ -439,7 +439,7 @@ async def list_tickets(
     }
 
 
-@router.post("/tickets", status_code=status.HTTP_201_CREATED)
+@router.post("/tickets", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def create_ticket(
     request: Request,
@@ -568,7 +568,7 @@ async def get_ticket(
     return _ticket_to_dict(ticket, is_admin, identity, comments=comments)
 
 
-@router.post("/tickets/{ticket_id}/comments", status_code=status.HTTP_201_CREATED)
+@router.post("/tickets/{ticket_id}/comments", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def add_comment(
     request: Request,
@@ -677,7 +677,7 @@ async def admin_list_tickets(
     }
 
 
-@router.put("/admin/tickets/{ticket_id}")
+@router.put("/admin/tickets/{ticket_id}", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def admin_update_ticket(
     request: Request,
@@ -723,7 +723,7 @@ async def admin_update_ticket(
     return _ticket_to_dict(ticket, True, account_identity(current_user))
 
 
-@router.delete("/admin/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/admin/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def admin_delete_ticket(
     request: Request,

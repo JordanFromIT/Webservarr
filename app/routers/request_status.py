@@ -9,7 +9,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Request
 
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, require_admin, require_same_origin
 from app.limiter import limiter
 from app.services import request_status
 
@@ -60,7 +60,7 @@ async def get_request_status(
     return snapshot
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(require_same_origin)])
 @limiter.limit("5/minute")
 async def force_refresh(
     request: Request,

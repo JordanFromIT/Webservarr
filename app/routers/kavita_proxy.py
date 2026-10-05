@@ -30,7 +30,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from app.auth import session_manager
 from app.config import settings
 from app.database import SessionLocal
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_same_origin
 from app.integrations.config import same_address
 from app.limiter import limiter
 from app.integrations import kavita as kavita_api
@@ -833,8 +833,11 @@ async def kavita_proxy(
     Forward /kavita/<path> to Kavita, attaching this user's Kavita JWT.
 
     Authentication is mandatory. Without it this route would be an open relay
-    into the home LAN.
+    into the home LAN. Writes (reading progress, bookmarks) must come from
+    this site; reads stay open to <img> and CSS, which send no Origin.
     """
+    if request.method != "GET":
+        require_same_origin(request)
     base = kavita_url_for(current_user)
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
