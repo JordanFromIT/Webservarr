@@ -134,9 +134,11 @@ class TypeFloorAndSentenceCase(unittest.TestCase):
         self.assertEqual(hits, [], "\n".join(hits))
 
     def test_no_uppercase_labels(self):
-        # The login's Plex wordmark is the login card's own finding (M7, a
-        # design decision); the settings hex field is a colour code.
-        allowed = {("login.html", 2), ("js/settings/kit.js", 1)}
+        # The login's typed Plex wordmark on the direct Plex button is the
+        # login card's own finding (M7, a design decision; the Authentik
+        # button now draws Plex's real logo); the settings hex field is a
+        # colour code.
+        allowed = {("login.html", 1), ("js/settings/kit.js", 1)}
         counts = {}
         for rel, src in static_files(DEFERRED):
             n = len(re.findall(r"(?<![-\w:])uppercase(?![-\w])", src)) + \
