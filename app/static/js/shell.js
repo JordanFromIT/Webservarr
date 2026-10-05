@@ -177,6 +177,11 @@
   function arriveInit() {
     var run = arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
     run.order = arriveOrder();
+    // A section the server wrote in full (data-arrived, Home's news) was there
+    // at the first paint: it has arrived, and nothing below waits for it.
+    Array.prototype.forEach.call(document.querySelectorAll('[data-arrive][data-arrived]'), function (el) {
+      run.done[el.getAttribute('data-arrive')] = true;
+    });
     // Ordering is only worth a short wait. Answers that land within this
     // window reveal top-down; anything slower reveals as it comes, so one
     // slow integration never holds the page.

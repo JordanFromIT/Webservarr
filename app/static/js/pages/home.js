@@ -44,6 +44,11 @@ function isAbort(e) { return !!e && e.name === 'AbortError'; }
 // rules, because a pin is the admin saying "this stays up".
 const NEWS_FRESH_MS = 72 * 60 * 60 * 1000; // under 3 days reads as "new"
 
+// With no posts. The server writes the same (app/home_news.py).
+const NEWS_EMPTY_HTML = '<div class="text-center text-steel-blue py-8">' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>' +
+    '<p>No news posts yet.</p></div>';
+
 function newsSettings(branding) {
     var cfg = (branding || {}).news || {};
     return {
@@ -71,7 +76,9 @@ function newsDateLabel(date) {
 }
 
 // The same card shape as the /news archive (pages/news.js) so a post looks the
-// same in both. `expanded` decides whether the body is open on arrival; a
+// same in both. The server writes Home's first cards with a copy of this
+// (app/home_news.py render_news_card); app/tests/news_card_vectors.json holds
+// both to the same output, so change one, change both and the cases. `expanded` decides whether the body is open on arrival; a
 // collapsed card keeps its full content in the DOM behind a toggle rather than
 // re-fetching.
 function renderNewsCard(post, expanded) {
@@ -1312,12 +1319,7 @@ export async function mount(ctx) {
 
         WS.arrive('news', function () {
             if (!Array.isArray(posts) || posts.length === 0) {
-                WS.setHTML(newsContainer, `
-                    <div class="text-center text-steel-blue py-8">
-                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-                        <p>No news posts yet.</p>
-                    </div>
-                `);
+                WS.setHTML(newsContainer, NEWS_EMPTY_HTML);
             } else {
                 var shown = posts.slice(0, cfg.count);
                 WS.setHTML(newsContainer, shown.map(function (post) { return renderNewsCard(post, false); }).join(''));

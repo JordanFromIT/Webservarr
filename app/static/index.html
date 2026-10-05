@@ -146,14 +146,18 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
 </div>
 </div>
-<!-- Skeleton cards are renderNewsCard's collapsed card with nothing in it
-     (the title, two lines on a phone and one from sm, a two-line excerpt
-     and Read more), so an older post lands on its
-     skeleton exactly. A pinned or new post opens in full and is as tall as
-     it is written, which no skeleton can know. -->
+<!-- The server writes the real cards between the markers (app/home_news.py:
+     renderNewsCard's markup for the posts the script will read, or its empty
+     state) and marks the section data-arrived, so on a phone, where News sits
+     above Service Health, nothing under it moves when the script takes over.
+     The skeleton is what is left when the server cannot read the news:
+     renderNewsCard's collapsed card with nothing in it (the title, two lines
+     on a phone and one from sm, a two-line excerpt and Read more). -->
 <div id="newsContainer" class="grid gap-3">
+<!-- ws:home-news -->
 <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+<!-- /ws:home-news -->
 </div>
 </section>
 <!-- Service Health: from lg one strip across the page. The server's gauges

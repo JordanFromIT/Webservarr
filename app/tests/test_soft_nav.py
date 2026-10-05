@@ -579,7 +579,7 @@ class HomePage(unittest.TestCase):
         # so nothing there can keep a node (or a visit's state) alive.
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
-        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
+        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_EMPTY_HTML", "NEWS_FRESH_MS",
                                          "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
                                          "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
                                          "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])

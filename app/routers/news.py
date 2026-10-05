@@ -89,6 +89,28 @@ def _serialize_news_post(post: NewsPost, include_content: bool) -> dict:
     return data
 
 
+def news_query(db: Session, published_only: bool, max_age_days: Optional[int]):
+    """The posts a news read lists, in order: pinned first, then newest first.
+    Shared with the page render of Home's news (app/home_news.py), so the
+    cards written into the page are the ones the page script reads here."""
+    query = db.query(NewsPost)
+
+    if published_only:
+        query = query.filter(NewsPost.published == True)
+
+    if max_age_days:
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        query = query.filter(
+            or_(NewsPost.pinned == True, NewsPost.created_at >= cutoff)
+        )
+
+    # Order by pinned first, then by created_at descending
+    return query.order_by(
+        NewsPost.pinned.desc(),
+        NewsPost.created_at.desc()
+    )
+
+
 @router.get("/", response_model=List[NewsPostResponse], response_model_exclude_unset=True)
 async def get_news_posts(
     published_only: bool = True,
@@ -116,24 +138,7 @@ async def get_news_posts(
     if not published_only and not is_admin:
         published_only = True
 
-    query = db.query(NewsPost)
-
-    if published_only:
-        query = query.filter(NewsPost.published == True)
-
-    if max_age_days:
-        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
-        query = query.filter(
-            or_(NewsPost.pinned == True, NewsPost.created_at >= cutoff)
-        )
-
-    # Order by pinned first, then by created_at descending
-    query = query.order_by(
-        NewsPost.pinned.desc(),
-        NewsPost.created_at.desc()
-    )
-
-    posts = query.offset(offset).limit(limit).all()
+    posts = news_query(db, published_only, max_age_days).offset(offset).limit(limit).all()
     return [_serialize_news_post(post, include_content=is_admin) for post in posts]
 
 

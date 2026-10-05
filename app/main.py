@@ -24,6 +24,7 @@ from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
+from app import home_news
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
@@ -449,7 +450,16 @@ async def root(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("index", request, user, extra_flags={"feed_off": _event_log_off()})
+    return render_page("index", request, user, extra_flags={"feed_off": _event_log_off(), "home_news": _home_news})
+
+
+def _home_news(branding: dict):
+    """Home's news cards for the page render (app/home_news.py), with the time
+    they were judged new or old at; None leaves the section to the script."""
+    news = home_news.load_home_news(branding)
+    if news is not None:
+        news["now_ms"] = home_news.now_ms()
+    return news
 
 
 def _event_log_off() -> bool:

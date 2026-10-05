@@ -25,16 +25,18 @@ function check(name, ok, info) {
 }
 
 // One section: its key and its box, or null when it is not displayed.
-function section(key, box) {
+function section(key, box, arrived) {
   return {
+    arrived: !!arrived,
     getAttribute: (name) => (name === 'data-arrive' ? key : null),
     getClientRects: () => (box ? [box] : []),
     getBoundingClientRect: () => box || { top: 0, left: 0 }
   };
 }
 
-// The order the writes run in when every section answers at once, last first.
-function arrivalOrder(sections) {
+// The order the writes run in when the sections answer in `calls` order
+// (default: all at once, last first).
+function arrivalOrder(sections, calls) {
   const ctx = {
     console, setTimeout, clearTimeout, Promise, JSON, WeakMap, Math, Date,
     performance: { now: () => 0 },
@@ -43,7 +45,8 @@ function arrivalOrder(sections) {
     document: {
       readyState: 'complete', prerendering: false,
       getElementById: () => null, querySelector: () => null,
-      querySelectorAll: (sel) => (sel === '[data-arrive]' ? sections : []),
+      querySelectorAll: (sel) => (sel === '[data-arrive]' ? sections
+        : sel === '[data-arrive][data-arrived]' ? sections.filter((s) => s.arrived) : []),
       addEventListener() {}, dispatchEvent() {}
     }
   };
@@ -52,8 +55,8 @@ function arrivalOrder(sections) {
   vm.runInContext(SRC, ctx);
   ctx.WS.arriveReset();
   const ran = [];
-  const keys = sections.map((s) => s.getAttribute('data-arrive'));
-  keys.slice().reverse().forEach((k) => ctx.WS.arrive(k, () => ran.push(k)));
+  const keys = calls || sections.map((s) => s.getAttribute('data-arrive')).reverse();
+  keys.forEach((k) => ctx.WS.arrive(k, () => ran.push(k)));
   return ran;
 }
 
@@ -105,6 +108,17 @@ function arrivalOrder(sections) {
     section('requests', { top: 260, left: 288 })
   ]);
   check('an undisplayed section keeps its place', ran.join() === 'feed,requests,services,news', ran);
+}
+
+// A section the server wrote in full (data-arrived) was there at the first
+// paint: nothing below waits for it, and its own write runs when it comes.
+{
+  const ran = arrivalOrder([
+    section('feed', { top: 73, left: 16 }),
+    section('news', { top: 237, left: 16 }, true),
+    section('services', { top: 477, left: 16 })
+  ], ['services', 'feed', 'news']);
+  check('Service Health does not wait for News the server wrote', ran.join() === 'feed,services,news', ran);
 }
 
 // With no layout at all (a document not yet laid out), document order.

@@ -565,6 +565,12 @@ HEADER_MARKER = "<!-- ws:header -->"
 APP_NAME_MARKER = "<!-- ws:app-name -->"
 # Home's event log section; flags["feed_off"] renders it hidden (render_html).
 EVENT_LOG_OPEN = '<section id="homeEventLog"'
+# Home's news cards: flags["home_news"] replaces the skeleton between these
+# with the real cards (app/home_news.py) and marks the section arrived.
+HOME_NEWS_OPEN = "<!-- ws:home-news -->"
+HOME_NEWS_CLOSE = "<!-- /ws:home-news -->"
+HOME_NEWS_SECTION = '<section data-arrive="news" class="lg:order-3"'
+HOME_NEWS_VIEW_ALL = 'id="newsViewAll" class="invisible '
 # An <img data-ws-app-icon src="..."> shows the home-screen icon (render_html).
 _APP_ICON_IMG_RE = re.compile(r'(<img data-ws-app-icon src=")[^"]*(")')
 
@@ -1002,6 +1008,20 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         # is hidden from the first paint and never holds room (index.html).
         out = out.replace(EVENT_LOG_OPEN, EVENT_LOG_OPEN + " hidden", 1)
 
+    news = flags.get("home_news") if name == "index" else None
+    if news is not None and HOME_NEWS_OPEN in out and HOME_NEWS_CLOSE in out:
+        # Home's news, written as the page script would write it, so the
+        # section is its real height from the first paint (on a phone it sits
+        # above Service Health). data-arrived tells WS.arrive it is in place:
+        # the script's first write is not played as an arrival.
+        from app.home_news import render_home_news
+        start = out.index(HOME_NEWS_OPEN)
+        end = out.index(HOME_NEWS_CLOSE, start) + len(HOME_NEWS_CLOSE)
+        cards = render_home_news(news.get("posts") or [], int(news.get("count") or 3), int(news["now_ms"]))
+        out = out[:start] + cards + out[end:]
+        out = out.replace(HOME_NEWS_SECTION, HOME_NEWS_SECTION + " data-arrived", 1)
+        out = out.replace(HOME_NEWS_VIEW_ALL, 'id="newsViewAll" class="', 1)
+
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):
         attrs += " data-admin"
@@ -1120,7 +1140,9 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict],
     extra_flags: route-specific render flags (render_html), e.g. rs_empty."""
     branding, flags = load_context(user is not None)
     if extra_flags:
-        flags = dict(flags, **extra_flags)
+        # A route's flag may depend on the branding (Home's news reads the
+        # homepage count and whether the section is on): pass a function of it.
+        flags = dict(flags, **{k: (v(branding) if callable(v) else v) for k, v in extra_flags.items()})
     if gate and page_is_off(gate, branding):
         if not (user and user.get("is_admin") == "true"):
             return RedirectResponse(url="/", status_code=302)
