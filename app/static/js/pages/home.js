@@ -1,8 +1,9 @@
 /**
  * WebServarr — Home (page module)
  *
- * The dashboard: service health and the server's gauges, news, active
- * streams, upcoming releases and recent requests. Sections the admin switched
+ * The dashboard: service health (with the server's gauges, which sit in the
+ * header from xl), recent requests beside news, active streams and upcoming
+ * releases. Sections the admin switched
  * off (Settings > Pages > Home) are hidden by the server (html[data-home-hide],
  * which the router brings in step on every swap) and never loaded.
  *
@@ -270,26 +271,29 @@ function renderStreamCard(stream, preview) {
 
 // ---- Recent requests ----
 
-// The empty and error states take exactly the space of the three skeleton
-// rows they replace, so the card neither shrinks nor grows when they land.
+// The empty and error states take exactly the space of the ten skeleton
+// rows they replace, so the card neither shrinks nor grows when they land
+// (it sits above Active Streams, which would move).
 //
 // By composition rather than a fixed height: the message sits in the same grid
-// cell as an invisible stack of three row shapes built from the real row's
-// markup (padding, 32px thumbnail, title line, the phone-only type pill, 1px
+// cell as an invisible stack of ten row shapes built from the real row's
+// markup (padding, 32px thumbnail, title line, the narrow card's type pill, 1px
 // dividers). The rows mix rem with the pill's px text, so no single length
 // matches them at every browser font size; the same markup does. `label` is
 // always a fixed string from this file, never data.
 function requestsStateRow(label) {
     const shape = (divider) =>
-        `<div class="flex items-center gap-3 px-4 lg:px-6 py-3.5${divider ? ' border-t border-transparent' : ''}">` +
+        `<div class="flex items-center gap-3 px-3 py-2.5${divider ? ' border-t border-transparent' : ''}">` +
             '<div class="size-8 shrink-0"></div>' +
             '<div class="min-w-0 flex-1"><p class="truncate">&nbsp;</p>' +
-                '<div class="sm:hidden mt-1"><span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold leading-none">' +
+                '<div class="@md:hidden mt-1"><span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold leading-none">' +
                     '<span class="material-symbols-outlined text-[13px] leading-none">movie</span><span>Movie</span></span></div>' +
             '</div>' +
         '</div>';
+    let rows = shape(false);
+    for (let i = 1; i < 10; i++) rows += shape(true);
     return '<tr><td colspan="3" class="p-0"><div class="grid">' +
-            '<div class="col-start-1 row-start-1 invisible" aria-hidden="true">' + shape(false) + shape(true) + shape(true) + '</div>' +
+            '<div class="col-start-1 row-start-1 invisible" aria-hidden="true">' + rows + '</div>' +
             '<div class="col-start-1 row-start-1 flex flex-col items-center justify-center px-6 text-center text-steel-blue">' +
                 '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>' +
                 '<p>' + label + '</p>' +
@@ -342,20 +346,23 @@ function renderRequestRow(req) {
         `<span class="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">${type.icon}</span>${type.label}</span>`;
 
     // The skeleton rows in #requestsBody copy this row's geometry so
-    // nothing moves when data lands. Change one, change both.
+    // nothing moves when data lands. Change one, change both. The card is a
+    // container: under 28rem of card the type folds into a pill under the
+    // title and its own column closes to no width (it stays a column, so the
+    // table keeps the three the skeleton rows span); from 28rem it shows.
     return `
         <tr>
-            <td class="px-4 lg:px-6 py-3.5">
+            <td class="px-3 py-2.5">
                 <div class="flex items-center gap-3 min-w-0">
                     <div class="size-8 rounded bg-frosted-blue/[0.04] shrink-0 flex items-center justify-center" style="${posterStyle}">${thumbInner}</div>
                     <div class="min-w-0 flex-1">
                         <p class="font-medium text-frosted-blue truncate">${title}</p>
-                        <div class="sm:hidden mt-1">${typePill}</div>
+                        <div class="@md:hidden mt-1">${typePill}</div>
                     </div>
                 </div>
             </td>
-            <td class="hidden sm:table-cell px-4 lg:px-6 py-3.5">${typePill}</td>
-            <td class="px-4 lg:px-6 py-3.5">
+            <td class="p-0 @md:px-3 @md:py-2.5"><div class="hidden @md:block">${typePill}</div></td>
+            <td class="px-3 py-2.5">
                 <span class="inline-block px-2 py-0.5 rounded ${statusCls} text-[10px] font-bold uppercase leading-tight">${status.label}</span>
             </td>
         </tr>
@@ -421,20 +428,21 @@ function renderServiceTile(service) {
 
     var iconUrl = getServiceIconUrl(service.display_name);
     var iconHtml = iconUrl
-        ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
-        : '<span class="material-symbols-outlined text-3xl leading-8 text-steel-blue">' + escapeHtml(service.icon) + '</span>';
+        ? '<img src="' + iconUrl + '" alt="" width="24" height="24" class="service-icon w-6 h-6 shrink-0 object-contain">'
+        : '<span class="material-symbols-outlined text-2xl leading-6 text-steel-blue">' + escapeHtml(service.icon) + '</span>';
 
-    // Every tile is the same height whatever its name: the top holds
-    // p-3, the 32px icon (the font icon's line box is 32px too), the
-    // gap and two lines of 11px leading-tight label (27.5px), and the
-    // label is clamped to two lines, so nothing can make it taller.
-    // The skeleton tiles in #servicesContainer are this tile, empty.
-    return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
-        '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[calc(4rem_+_27.5px)]">' +
+    // Compact: the 24px icon and the name on one line over the status bar.
+    // Every tile is the same height whatever its name: the top row is a
+    // fixed h-11 and the name keeps to one line (a narrow tile cuts it
+    // short and carries the whole name as its title), so nothing can make
+    // it taller. The skeleton tiles in #servicesContainer are this tile, empty.
+    var name = escapeHtml(service.display_name);
+    return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col min-w-0 hover:border-primary/40 transition-all">' +
+        '<div class="h-11 px-3 flex items-center gap-2.5 min-w-0">' +
             iconHtml +
-            '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
+            '<span class="min-w-0 truncate text-[13px] font-medium text-frosted-blue" title="' + name + '">' + name + '</span>' +
         '</div>' +
-        '<div class="' + barBg + ' py-1 flex items-center justify-center gap-1.5">' +
+        '<div class="' + barBg + ' py-0.5 flex items-center justify-center gap-1.5">' +
             '<span class="ws-light ' + dotCls + '" aria-hidden="true"></span>' +
             '<span class="text-[10px] font-bold ' + textCls + ' uppercase tracking-wider">' + statusLabel + '</span>' +
         '</div>' +
@@ -1048,6 +1056,48 @@ export async function mount(ctx) {
     }
 
     // ---- The server's gauges (Netdata) ----
+    //
+    // Two copies of the same readings, both marked data-gauge-*, and every
+    // reading is written to both: the compact row in Service Health (below
+    // xl) and, from xl, the header's beside the status pill. The header is
+    // the shell's, so Home adds its copy (from #homeHeaderGauges) once the
+    // first reading is in, so it arrives whole, and the cleanup mount returns
+    // takes it out when the visit ends (the router runs it on leave). The
+    // status pill is the page's one lookup outside #wsPage. Without Netdata
+    // (no html[data-netdata]) neither copy is shown.
+
+    var headerGauges = null;
+
+    function addHeaderGauges() {
+        if (headerGauges || signal.aborted) return;
+        if (!document.documentElement.hasAttribute('data-netdata')) return;
+        var tpl = byId('homeHeaderGauges');
+        var pill = document.getElementById('systemStatus');
+        if (!tpl || !tpl.content || !tpl.content.firstElementChild || !pill || !pill.parentNode) return;
+        removeHeaderGauges(pill.parentNode);   // one copy only, whatever an earlier visit left
+        headerGauges = tpl.content.firstElementChild.cloneNode(true);
+        pill.parentNode.insertBefore(headerGauges, pill.nextSibling);
+    }
+
+    function removeHeaderGauges(scope) {
+        var old = (scope || document.documentElement).querySelectorAll('[data-home-gauges]');
+        for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+        headerGauges = null;
+    }
+
+    function eachGauge(selector, fn) {
+        [root, headerGauges].forEach(function (scope) {
+            if (scope) Array.prototype.forEach.call(scope.querySelectorAll(selector), fn);
+        });
+    }
+    function setGaugeText(selector, text) {
+        eachGauge(selector, function (el) { el.textContent = text; });
+    }
+    function setGaugeRing(name, pct) {
+        eachGauge('[data-gauge-ring="' + name + '"]', function (el) {
+            el.style.strokeDashoffset = 251 - (251 * pct / 100);
+        });
+    }
 
     async function loadSystemStats() {
         try {
@@ -1055,62 +1105,54 @@ export async function mount(ctx) {
             if (!response.ok) throw new Error('API error');
             var stats = await response.json();
 
-            if (signal.aborted || !stats.configured || stats.error) return;
+            if (signal.aborted) return;
+            addHeaderGauges();
+            if (!stats.configured || stats.error) return;
 
             // Update CPU gauge
             if (stats.cpu_percent !== null) {
                 var cpuPct = stats.cpu_percent;
-                byId('cpuGaugeText').textContent = Math.round(cpuPct) + '%';
-                byId('cpuGaugeCircle').style.strokeDashoffset = 251 - (251 * cpuPct / 100);
+                setGaugeText('[data-gauge-text="cpu"]', Math.round(cpuPct) + '%');
+                setGaugeRing('cpu', cpuPct);
             }
             // Show CPU label (configurable in settings, falls back to thread count)
-            var cpuDetail = byId('cpuGaugeDetail');
-            if (cpuDetail) {
-                if (stats.cpu_label) {
-                    cpuDetail.textContent = stats.cpu_label;
-                } else if (stats.cpu_cores) {
-                    cpuDetail.textContent = stats.cpu_cores + 'T';
-                }
+            if (stats.cpu_label) {
+                setGaugeText('[data-gauge-detail="cpu"]', stats.cpu_label);
+            } else if (stats.cpu_cores) {
+                setGaugeText('[data-gauge-detail="cpu"]', stats.cpu_cores + 'T');
             }
 
             // Update RAM gauge
             if (stats.ram_percent !== null) {
                 var ramPct = stats.ram_percent;
-                byId('ramGaugeText').textContent = Math.round(ramPct) + '%';
-                byId('ramGaugeCircle').style.strokeDashoffset = 251 - (251 * ramPct / 100);
+                setGaugeText('[data-gauge-text="ram"]', Math.round(ramPct) + '%');
+                setGaugeRing('ram', ramPct);
             }
             // Show RAM label (configurable, falls back to used/total GB)
-            var ramDetail = byId('ramGaugeDetail');
-            if (ramDetail) {
-                if (stats.ram_label) {
-                    ramDetail.textContent = stats.ram_label;
-                } else if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
-                    var usedGB = (stats.ram_used_mb / 1024).toFixed(1);
-                    var totalGB = (stats.ram_total_mb / 1024).toFixed(0);
-                    ramDetail.textContent = usedGB + '/' + totalGB + ' GB';
-                }
+            if (stats.ram_label) {
+                setGaugeText('[data-gauge-detail="ram"]', stats.ram_label);
+            } else if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
+                var usedGB = (stats.ram_used_mb / 1024).toFixed(1);
+                var totalGB = (stats.ram_total_mb / 1024).toFixed(0);
+                setGaugeText('[data-gauge-detail="ram"]', usedGB + '/' + totalGB + ' GB');
             }
 
             // Update Network gauge
             var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
             var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
             var netUnitLabel = stats.net_unit === 'MBps' ? 'MB/s' : 'Mbps';
-            byId('netDownText').textContent = dl.toFixed(1);
-            byId('netUpText').textContent = ul.toFixed(1);
-            byId('netUpUnit').textContent = netUnitLabel;
-            byId('netDownUnit').textContent = netUnitLabel;
+            setGaugeText('[data-gauge-net="down"]', dl.toFixed(1));
+            setGaugeText('[data-gauge-net="up"]', ul.toFixed(1));
+            setGaugeText('[data-gauge-unit]', netUnitLabel);
             // Show network label (configurable)
-            if (stats.net_label) {
-                var netDetail = byId('netGaugeDetail');
-                if (netDetail) netDetail.textContent = stats.net_label;
-            }
+            if (stats.net_label) setGaugeText('[data-gauge-detail="net"]', stats.net_label);
             // Scale network gauge: percentage of configured max throughput
             var netMax = stats.net_max || 1000;
-            var netPct = Math.min((dl + ul) / netMax * 100, 100);
-            byId('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
+            setGaugeRing('net', Math.min((dl + ul) / netMax * 100, 100));
 
         } catch (error) {
             if (signal.aborted || isAbort(error)) return;   // left the page: not an error
+            addHeaderGauges();   // as the compact row, it shows its empty readings
             console.log('System stats not available');
         }
     }
@@ -1172,4 +1214,7 @@ export async function mount(ctx) {
         Promise.all(first),
         new Promise(function (resolve) { ctx.setTimeout(resolve, 1500); })
     ]);
+
+    // Leaving Home takes the header's gauges with it.
+    return function () { removeHeaderGauges(null); };
 }

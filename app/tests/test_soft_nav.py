@@ -581,8 +581,13 @@ class HomePage(unittest.TestCase):
         self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
                                          "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
-        # Every lookup stays inside the page.
-        self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(")
+        # Every lookup stays inside the page, but one: the header's status
+        # pill, which the gauges' header copy goes beside (taken out again by
+        # the cleanup mount returns).
+        code = self.code()
+        self.assertEqual(len(re.findall(r"\bdocument\.getElementById\(", code)), 1)
+        self.assertIn("var pill = document.getElementById('systemStatus');", src)
+        self.assertIn("return function () { removeHeaderGauges(null); };", code)
 
     def test_continue_is_the_books_row_in_its_compact_form(self):
         h = read("index")

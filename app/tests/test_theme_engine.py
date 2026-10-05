@@ -684,10 +684,12 @@ class GaugeColours(unittest.TestCase):
 
     def test_the_rings_use_them(self):
         for g in ("cpu", "ram", "net"):
-            ring = re.search(rf'<circle id="{g}GaugeCircle" class="([^"]*)"', INDEX)
-            self.assertIsNotNone(ring, g)
-            self.assertEqual(ring.group(1).split()[0], f"text-gauge-{g}", g)
-            self.assertNotIn("steel-blue", ring.group(1), g)
+            # Two copies: the compact row and the header's (its template).
+            rings = re.findall(rf'<circle data-gauge-ring="{g}" class="([^"]*)"', INDEX)
+            self.assertEqual(len(rings), 2, g)
+            for ring in rings:
+                self.assertEqual(ring.split()[0], f"text-gauge-{g}", g)
+                self.assertNotIn("steel-blue", ring, g)
             # The compiled utility exists (Tailwind emits only literal classes).
             self.assertIn(f".text-gauge-{g}{{", (STATIC / "css" / "app.css").read_text(encoding="utf-8"))
 

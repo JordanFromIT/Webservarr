@@ -511,10 +511,10 @@ class ShellRendering(unittest.TestCase):
         for sid in ("services", "news", "streams", "releases", "requests"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-arrive="{sid}"]', {}).get("display"),
                              "none", sid)
-        for sid in ("services", "news"):
+        for sid in ("requests", "news"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
                              .get("grid-template-columns"), "minmax(0, 1fr)", sid)
-        self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair]', {})
+        self.assertEqual(rules.get('html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]', {})
                          .get("display"), "none")
         stack = rules.get("html[data-home-hide] [data-home-stack]", {})
         self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
@@ -534,8 +534,11 @@ class ShellRendering(unittest.TestCase):
         self.assertIsNotNone(stack)
         self.assertIn("space-y-8", stack.group(1).split())
         pair = page.index("data-home-pair>")
-        services, news, streams = (page.index(f'data-arrive="{sid}"') for sid in ("services", "news", "streams"))
-        self.assertTrue(stack.end() < pair < services < news < streams)
+        services, requests, news, streams = (page.index(f'data-arrive="{sid}"')
+                                             for sid in ("services", "requests", "news", "streams"))
+        # Service Health is a strip across the top, then Recent Requests and
+        # News share the row under it.
+        self.assertTrue(stack.end() < services < pair < requests < news < streams)
         # The pair closes before Active Streams: both sections sit inside it.
         between = page[pair:streams]
         self.assertEqual(between.count("<div") + 1, between.count("</div>"))

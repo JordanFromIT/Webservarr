@@ -669,18 +669,40 @@ class PhoneShellContract(unittest.TestCase):
         self.assertIn("WS.install.wireCard(install, signal);", mount)
 
     def test_home_gauges_fit_a_small_phone(self):
-        # Three 112px rings do not fit 320px: below 21rem of box they go two
-        # and one, from the first paint (a container query, no script).
+        # Below xl the gauges are a compact row of three equal cells at the
+        # top of Service Health: a ring with its reading under it on a phone
+        # (so three fit across 320px) and beside it from sm. From xl that row
+        # goes and the header carries the copy Home adds from its template.
         page = read("index")
         m = re.search(r'<div id="netdataGauges" class="([^"]*)">\s*<div class="([^"]*)">', page)
         self.assertIsNotNone(m)
-        self.assertIn("@container", m.group(1).split())
+        self.assertIn("xl:hidden", m.group(1).split())
         inner = m.group(2).split()
-        for c in ("grid", "grid-cols-2", "@[21rem]:grid-cols-3"):
+        for c in ("grid", "grid-cols-[1fr_1fr_1.25fr]"):
             self.assertIn(c, inner)
-        self.assertNotIn("justify-between", inner)
-        self.assertIn('<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">', page)
-
+        cell = '<div class="flex flex-col items-center gap-1.5 text-center min-w-0 sm:flex-row sm:justify-center sm:gap-3 sm:text-left">'
+        self.assertEqual(page.count(cell), 3)
+        tpl = re.search(r'<template id="homeHeaderGauges">\s*<div data-home-gauges class="([^"]*)">', page)
+        self.assertIsNotNone(tpl)
+        for c in ("hidden", "xl:flex"):
+            self.assertIn(c, tpl.group(1).split())
+        # Both copies carry every reading.
+        body = page[page.index('<template id="homeHeaderGauges">'):page.index("</template>")]
+        row = page[m.start():page.index('<template id="homeHeaderGauges">')]
+        for part in (body, row):
+            for hook in ('data-gauge-ring="cpu"', 'data-gauge-ring="ram"', 'data-gauge-ring="net"',
+                         'data-gauge-text="cpu"', 'data-gauge-text="ram"',
+                         'data-gauge-detail="cpu"', 'data-gauge-detail="ram"', 'data-gauge-detail="net"',
+                         'data-gauge-net="up"', 'data-gauge-net="down"'):
+                self.assertEqual(part.count(hook), 1, hook)
+            self.assertEqual(part.count("data-gauge-unit"), 2)
+        # The header is the shell's: Home adds its copy and takes it out on leave.
+        home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
+        add = home[home.index("function addHeaderGauges() {"):home.index("function eachGauge(")]
+        self.assertIn("hasAttribute('data-netdata')", add)
+        self.assertIn("removeHeaderGauges(pill.parentNode);", add)
+        self.assertIn("pill.parentNode.insertBefore(headerGauges, pill.nextSibling);", add)
+        self.assertIn("return function () { removeHeaderGauges(null); };", home)
 
 if __name__ == "__main__":
     unittest.main()

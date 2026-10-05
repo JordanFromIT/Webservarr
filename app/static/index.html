@@ -104,86 +104,168 @@
 <div data-note-slot hidden class="mt-3 h-6"></div>
 </div>
 </div>
-<!-- Service Health + News Side by Side -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
-<!-- Service Health -->
+<!-- Service Health: one strip across the page. From xl the server's gauges
+     sit in the header beside the status pill: pages/home.js puts a copy of
+     #homeHeaderGauges there and takes it out again when Home is left (the
+     header is the shell's). Below xl the header has no room for them, so the
+     strip opens with the same gauges in a compact row. -->
 <section data-arrive="services">
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
-<span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
+<span id="serviceLastChecked" class="flex-1 min-w-0 text-right text-[10px] text-steel-blue"></span>
 </div>
-<!-- Netdata Gauges. Each gauge's detail line holds its one line of height
-     before loadSystemStats fills it, so the centred readings don't hop up
-     when it lands. (With no network label set, that line stays empty.)
-     Three 112px rings need 21rem: in a narrower box (a small phone) they
-     go two over one, from the first paint (a container query, no script),
-     so nothing scrolls sideways. -->
-<div id="netdataGauges" class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
-<div class="grid grid-cols-2 @[21rem]:grid-cols-3 gap-y-4 items-center">
-<!-- CPU Gauge -->
-<div class="flex flex-col items-center">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="cpuGaugeCircle" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<!-- The compact gauges (below xl). Three equal cells, each a ring with the
+     reading beside it from sm and under it on a phone, so they fit three
+     across at 320px. Every line of every reading holds its height from the
+     first paint, the detail lines included (empty until loadSystemStats
+     fills them, and with no network label set the network one stays empty),
+     so nothing below moves when the numbers land. -->
+<div id="netdataGauges" class="xl:hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl px-2 py-3 sm:p-3 mb-3">
+<div class="grid grid-cols-[1fr_1fr_1.25fr] gap-2 items-center">
+<!-- CPU -->
+<div class="flex flex-col items-center gap-1.5 text-center min-w-0 sm:flex-row sm:justify-center sm:gap-3 sm:text-left">
+<svg class="size-10 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="cpu" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
 </svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-xs text-steel-blue font-medium">CPU</span>
-<span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="cpuGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
+<div class="w-full min-w-0 leading-none sm:w-28">
+<p class="text-[11px] font-medium text-steel-blue">CPU</p>
+<p data-gauge-text="cpu" class="mt-1 text-base leading-none font-bold text-frosted-blue tabular-nums">--%</p>
+<p data-gauge-detail="cpu" class="mt-1 min-h-[1em] truncate text-[10px] text-frosted-blue/70"></p>
 </div>
 </div>
-</div>
-<!-- RAM Gauge -->
-<div class="flex flex-col items-center">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="ramGaugeCircle" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<!-- RAM -->
+<div class="flex flex-col items-center gap-1.5 text-center min-w-0 sm:flex-row sm:justify-center sm:gap-3 sm:text-left">
+<svg class="size-10 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="ram" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
 </svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-xs text-steel-blue font-medium">RAM</span>
-<span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="ramGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
+<div class="w-full min-w-0 leading-none sm:w-28">
+<p class="text-[11px] font-medium text-steel-blue">RAM</p>
+<p data-gauge-text="ram" class="mt-1 text-base leading-none font-bold text-frosted-blue tabular-nums">--%</p>
+<p data-gauge-detail="ram" class="mt-1 min-h-[1em] truncate text-[10px] text-frosted-blue/70 tabular-nums"></p>
 </div>
 </div>
-</div>
-<!-- Network Gauge -->
-<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="netGaugeCircle" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<!-- Network -->
+<div class="flex flex-col items-center gap-1.5 text-center min-w-0 sm:flex-row sm:justify-center sm:gap-3 sm:text-left">
+<svg class="size-10 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="net" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
 </svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
-<span class="text-xs text-steel-blue font-medium uppercase">Network</span>
-<div class="flex flex-col items-center leading-none mt-1">
-<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
-<span class="material-symbols-outlined text-[11px]">arrow_upward</span>
-<span id="netUpText">0.0</span>
-<span id="netUpUnit" class="text-frosted-blue/70">Mbps</span>
-</div>
-<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
-<span class="material-symbols-outlined text-[11px]">arrow_downward</span>
-<span id="netDownText">0.0</span>
-<span id="netDownUnit" class="text-frosted-blue/70">Mbps</span>
-</div>
-</div>
-<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-frosted-blue/70 mt-0.5"></span>
+<div class="w-full min-w-0 leading-none sm:w-28">
+<p class="text-[11px] font-medium text-steel-blue uppercase">Network</p>
+<p class="mt-1 flex items-center justify-center gap-0.5 whitespace-nowrap text-[11px] text-frosted-blue sm:justify-start"><span class="material-symbols-outlined text-[11px]" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="inline-block min-w-[5ch] text-right tabular-nums">0.0</span><span data-gauge-unit class="text-frosted-blue/70">Mbps</span></p>
+<p class="mt-0.5 flex items-center justify-center gap-0.5 whitespace-nowrap text-[11px] text-frosted-blue sm:justify-start"><span class="material-symbols-outlined text-[11px]" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="inline-block min-w-[5ch] text-right tabular-nums">0.0</span><span data-gauge-unit class="text-frosted-blue/70">Mbps</span></p>
+<p data-gauge-detail="net" class="mt-1 min-h-[1em] truncate text-[9px] text-frosted-blue/70"></p>
 </div>
 </div>
 </div>
 </div>
+<!-- The header's gauges (xl and up): the same readings on one line each,
+     filled by the same code (data-gauge-*). pages/home.js adds the copy once
+     the first reading is in, so it arrives whole and nothing beside it moves;
+     the percentages hold four characters and the upload figure five, so a
+     changing reading never pushes the gauge after it along. -->
+<template id="homeHeaderGauges">
+<div data-home-gauges class="hidden xl:flex items-center gap-5 h-0">
+<div class="flex items-center gap-2.5">
+<svg class="size-9 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="cpu" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="leading-none">
+<p class="text-[10px] font-medium text-steel-blue">CPU</p>
+<p data-gauge-text="cpu" class="mt-0.5 min-w-[4ch] text-sm leading-none font-bold text-frosted-blue tabular-nums">--%</p>
+<p data-gauge-detail="cpu" class="mt-0.5 min-h-[1em] text-[10px] text-frosted-blue/70"></p>
 </div>
-<!-- Service Tiles -->
-<!-- Skeleton tiles are built like the real tile in renderServices: the same
-     border, the same fixed-height top (a 32px icon and a two-line label slot)
+</div>
+<div class="flex items-center gap-2.5">
+<svg class="size-9 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="ram" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="leading-none">
+<p class="text-[10px] font-medium text-steel-blue">RAM</p>
+<p data-gauge-text="ram" class="mt-0.5 min-w-[4ch] text-sm leading-none font-bold text-frosted-blue tabular-nums">--%</p>
+<p data-gauge-detail="ram" class="mt-0.5 min-h-[1em] text-[10px] text-frosted-blue/70 tabular-nums"></p>
+</div>
+</div>
+<div class="flex items-center gap-2.5">
+<svg class="size-9 shrink-0" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
+<circle data-gauge-ring="net" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="leading-none">
+<p class="text-[10px] font-medium text-steel-blue uppercase">Network</p>
+<p class="mt-0.5 flex items-center gap-0.5 whitespace-nowrap text-xs leading-none text-frosted-blue"><span class="material-symbols-outlined text-xs" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="inline-block min-w-[5ch] text-right tabular-nums">0.0</span><span data-gauge-unit class="text-frosted-blue/70">Mbps</span><span class="material-symbols-outlined text-xs ml-2" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="tabular-nums">0.0</span><span data-gauge-unit class="text-frosted-blue/70">Mbps</span></p>
+<p data-gauge-detail="net" class="mt-0.5 min-h-[1em] text-[10px] text-frosted-blue/70"></p>
+</div>
+</div>
+</div>
+</template>
+<!-- Service Tiles: compact, an icon and the name on one line over the status
+     bar, as many across as fit. Skeleton tiles are built like the real tile in
+     renderServiceTile: the same border, the same fixed-height top row (h-11)
      and the same status bar, with nothing in them. Change one, change both. -->
-<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
+<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr))">
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+</div>
+</section>
+<!-- Recent Requests + News side by side -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
+<!-- Recent Requests, compact -->
+<section data-arrive="requests">
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-3">
+<span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
+<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
+</div>
+<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
+View Requests
+<span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<!-- A container: the card is half the page from lg and the whole page below
+     it, so its own width (not the screen's) decides the Type column. Under
+     28rem the type folds into a pill under the title (see renderRequestRow)
+     and its column closes to no width rather than going away, so the table
+     always has three columns: the skeleton and empty rows span three, and a
+     two-column table would move Status when the real rows land.
+     table-fixed so the title column takes what is left and truncates: with
+     auto layout a long title sets the table's min-content width and the
+     table overflows the card. -->
+<div class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
+<table class="w-full table-fixed text-left text-sm">
+<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
+<tr>
+<th class="px-3 py-2">Content</th>
+<th class="w-0 p-0 @md:w-28 @md:px-3 @md:py-2"><span class="hidden @md:inline">Type</span></th>
+<th class="w-36 px-3 py-2">Status</th>
+</tr>
+</thead>
+<!-- Ten skeleton rows, the most the API returns (and what an active server
+     has): the card sits above Active Streams, so it holds that room from the
+     first paint and the sections under it never move when the rows land.
+     Each is built like the real row in renderRequestRow (same padding, 32px
+     thumbnail, one text line, and in a narrow card the type pill, made from
+     the real pill's markup with its content hidden) so it is the height of
+     the row that replaces it. -->
+<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/4 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+</tbody>
+</table>
 </div>
 </section>
 <!-- News & Updates -->
@@ -252,43 +334,6 @@ View Calendar
 </div>
 <div id="releasesContainer">
 <div class="skel rounded-lg h-40" aria-hidden="true"></div>
-</div>
-</section>
-<!-- Recent Requests -->
-<section data-arrive="requests">
-<div class="flex items-center justify-between mb-6">
-<div class="flex items-center gap-3">
-<span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
-<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
-</div>
-<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Requests
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
-</div>
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
-<!-- table-fixed so the title column takes what is left and truncates: with
-     auto layout a long title sets the table's min-content width and the table
-     overflows the card on a phone. Below sm the Type column folds into a pill
-     under the title (see renderRecentRequests). -->
-<table class="w-full table-fixed text-left text-sm">
-<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
-<tr>
-<th class="px-4 lg:px-6 py-3">Content</th>
-<th class="hidden sm:table-cell w-36 px-4 lg:px-6 py-3">Type</th>
-<th class="w-36 lg:w-40 px-4 lg:px-6 py-3">Status</th>
-</tr>
-</thead>
-<!-- Skeleton rows are built like the real rows in renderRecentRequests (same
-     padding, 32px thumbnail, one text line, and below sm the type pill, made
-     from the real pill's markup with its content hidden) so each row is the
-     height of the row that replaces it: 60px wide, 72px on a phone. -->
-<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-</tbody>
-</table>
 </div>
 </section>
 </div>
