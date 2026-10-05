@@ -697,16 +697,22 @@ class PhoneShellContract(unittest.TestCase):
             # No sub-line under any gauge (no thread count, memory size or link speed).
             self.assertNotIn("data-gauge-detail", part)
             # Upload and download share one line and one visible unit, each
-            # figure a fixed four characters wide, and screen readers hear the
-            # unit in full after each.
-            net = re.search(r'<p class="[^"]*">(<span[^>]*>arrow_upward</span>.*?)</p>', part)
+            # arrow right against its figure (no gap, no fixed-width figure
+            # box), the line holding a minimum width for typical readings, and
+            # screen readers hear the unit in full after each.
+            net = re.search(r'<p class="([^"]*)">(<span[^>]*>arrow_upward</span>.*?)</p>', part)
             self.assertIsNotNone(net)
-            line = net.group(1)
+            line_classes, line = net.group(1).split(), net.group(2)
+            self.assertFalse([c for c in line_classes if c.startswith("gap-")], line_classes)
+            self.assertTrue([c for c in line_classes if c.startswith("min-w-[")], line_classes)
             self.assertIn("arrow_downward", line)
             self.assertEqual(line.count("data-gauge-unit "), 1)
-            self.assertIn('data-gauge-unit class="ml-0.5 text-frosted-blue/70" aria-hidden="true">Mbps<', line)
+            self.assertIn('data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps<', line)
             self.assertEqual(line.count('data-gauge-unit-long class="sr-only">megabits per second<'), 2)
-            self.assertEqual(line.count('class="inline-block min-w-[4ch] text-right tabular-nums">0<'), 2)
+            self.assertEqual(line.count('class="tabular-nums">0<'), 2)
+            self.assertNotIn("min-w-[4ch]", line)
+            self.assertRegex(line, r'>arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up"')
+            self.assertRegex(line, r'>arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down"')
             self.assertLess(line.index('>Upload<'), line.index('data-gauge-net="up"'))
             self.assertLess(line.index('>Download<'), line.index('data-gauge-net="down"'))
         # The header is the shell's: Home adds its copy and takes it out on leave.

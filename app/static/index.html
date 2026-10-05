@@ -117,10 +117,11 @@
 </div>
 <!-- The compact gauges (below xl). Three equal cells, each a ring with the
      reading beside it from sm and under it on a phone, so they fit three
-     across at 320px. Every reading holds its height and width from the first
-     paint (the network's upload and download share one line and one unit,
-     each figure four characters wide), so nothing moves when the numbers
-     land. -->
+     across at 320px. Every reading holds its height from the first paint.
+     The network's upload and download share one line and one unit, each
+     arrow right against its figure; the line keeps a minimum width that fits
+     typical readings, its figures left-aligned in it, so a reading changing
+     from 9 to 87 does not shift the line. -->
 <div id="netdataGauges" class="xl:hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl px-2 py-3 sm:p-3 mb-3">
 <div class="grid grid-cols-[1fr_1fr_1.25fr] gap-2 items-center">
 <!-- CPU -->
@@ -153,7 +154,7 @@
 </svg>
 <div class="w-full min-w-0 leading-none sm:w-auto">
 <p class="text-[11px] font-medium text-steel-blue uppercase">Network</p>
-<p class="mt-1 flex items-center justify-center gap-0.5 whitespace-nowrap text-[11px] text-frosted-blue sm:justify-start"><span class="material-symbols-outlined text-[11px]" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="inline-block min-w-[4ch] text-right tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span class="material-symbols-outlined text-[11px] ml-1" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="inline-block min-w-[4ch] text-right tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span data-gauge-unit class="ml-0.5 text-frosted-blue/70" aria-hidden="true">Mbps</span></p>
+<p class="mt-1 mx-auto flex items-center min-w-[min(100%,12ch)] w-fit whitespace-nowrap text-[11px] text-frosted-blue sm:mx-0"><span class="material-symbols-outlined text-[11px] -mr-px" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span class="material-symbols-outlined text-[11px] -mr-px ml-1.5" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps</span></p>
 </div>
 </div>
 </div>
@@ -161,8 +162,10 @@
 <!-- The header's gauges (xl and up): the same readings on one line each,
      filled by the same code (data-gauge-*). pages/home.js adds the copy once
      the first reading is in, so it arrives whole and nothing beside it moves;
-     the percentages and both network figures hold four characters, so a
-     changing reading never pushes the gauge after it along. -->
+     the percentages hold four characters, so a changing reading never
+     pushes the gauge after it along, and the network line (the last) keeps
+     a minimum width for typical readings, its arrows right against their
+     figures. -->
 <template id="homeHeaderGauges">
 <div data-home-gauges class="hidden xl:flex items-center gap-5 h-0">
 <div class="flex items-center gap-2.5">
@@ -192,7 +195,7 @@
 </svg>
 <div class="leading-none">
 <p class="text-[10px] font-medium text-steel-blue uppercase">Network</p>
-<p class="mt-0.5 flex items-center gap-0.5 whitespace-nowrap text-xs leading-none text-frosted-blue"><span class="material-symbols-outlined text-xs" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="inline-block min-w-[4ch] text-right tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span class="material-symbols-outlined text-xs ml-1" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="inline-block min-w-[4ch] text-right tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span data-gauge-unit class="ml-0.5 text-frosted-blue/70" aria-hidden="true">Mbps</span></p>
+<p class="mt-0.5 flex items-center min-w-[12ch] whitespace-nowrap text-xs leading-none text-frosted-blue"><span class="material-symbols-outlined text-xs -mr-px" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span class="material-symbols-outlined text-xs -mr-px ml-1.5" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps</span></p>
 </div>
 </div>
 </div>
