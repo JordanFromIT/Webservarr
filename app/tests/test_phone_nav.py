@@ -124,7 +124,7 @@ class TabBar(unittest.TestCase):
 
     def test_tabs_and_rows_escape_operator_text(self):
         b = branding(**{"sidebar.label_requests": "<b>Ask</b>", "sidebar.sublabel_tickets": "<i>x</i>",
-                        "icon.nav_issues": "bug_report"})
+                        "icon.nav_issues": "construction"})
         out = render(b=b)
         self.assertIn("&lt;b&gt;Ask&lt;/b&gt;", tab_bar(out))
         self.assertNotIn("<b>Ask</b>", out)

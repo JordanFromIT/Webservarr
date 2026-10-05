@@ -486,11 +486,11 @@ class ShellPatch(SettingsApiBase):
         # badge is kept and the links carry no id (they fill two navs).
         from app.pages import render_nav_links
         from app.routers.branding import load_branding
-        r = self.save(("icon.nav_issues", "bug_report"), ("sidebar.label_wiki", "Help & <Guides>"))
+        r = self.save(("icon.nav_issues", "construction"), ("sidebar.label_wiki", "Help & <Guides>"))
         self.assertEqual(r.status_code, 200, r.text)
         nav = self.client.get("/api/admin/settings/shell").json()["nav_html"]
         self.assertEqual(nav, render_nav_links(load_branding(self.db, True), True, "settings"))
-        self.assertIn(">bug_report<", nav)
+        self.assertIn(">construction<", nav)
         self.assertIn("Help &amp; &lt;Guides&gt;", nav)
         self.assertNotIn("<Guides>", nav)
         self.assertRegex(nav, r'href="/requests"[^\n]*data-badge="requestsBadge"')

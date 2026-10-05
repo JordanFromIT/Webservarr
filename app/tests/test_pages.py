@@ -283,11 +283,11 @@ class ShellRendering(unittest.TestCase):
                 self.assertEqual(dupes, [])
 
     def test_labels_icons_sublabels_and_new_flag_apply(self):
-        b = branding(**{"sidebar.label_issues": "Problems", "icon.nav_issues": "bug_report",
+        b = branding(**{"sidebar.label_issues": "Problems", "icon.nav_issues": "construction",
                         "sidebar.sublabel_issues": "", "sidebar.new_issues": "true"})
         out = render(b=b)
         self.assertIn("Problems", out)
-        self.assertIn(">bug_report<", out)
+        self.assertIn(">construction<", out)
         self.assertIn('class="nav-new-badge"', out)
         # Empty sublabel means "no second line" for that item.
         self.assertRegex(out, r'href="/issues"[^\n]*<span>Problems<span class="nav-new-badge">New!</span></span>')
