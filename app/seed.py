@@ -190,25 +190,42 @@ def migrate_books_catalog_v2(db: Session) -> None:
     those in place; `book_pair_overrides` is remade only if it is still keyed
     on a series. The catalog is rebuilt from Kavita and Plex at the next
     rebuild, and nothing wrote overrides before this. Guarded by PRAGMA
-    table_info, so it does nothing on a fresh database or a second run; with
-    two workers starting at once, a worker that sees the new columns leaves the
-    tables alone, and the drops are IF EXISTS.
+    table_info, so it does nothing on a fresh database or a second run.
+
+    Two workers start at once, and both can read the old shape. The remake is
+    one transaction that holds SQLite's write lock from its start (BEGIN
+    IMMEDIATE) and reads the shape again inside it: the second worker waits,
+    then finds the new tables and leaves them alone. Dropping on its first,
+    stale read could drop a table the first worker had just made, before its
+    indexes ("no such table: main.books", which stops a worker for good).
     """
     from sqlalchemy import text
+    from app.database import Base
 
-    columns = {row[1] for row in db.execute(text("PRAGMA table_info(books)"))}
-    if not columns or ("kavita_chapter_id" in columns and "ebook_work_key" in columns
-                       and "narrator" not in columns):
+    def old_shape() -> bool:
+        columns = {row[1] for row in db.execute(text("PRAGMA table_info(books)"))}
+        return bool(columns) and not ("kavita_chapter_id" in columns and "ebook_work_key" in columns
+                                      and "narrator" not in columns)
+
+    if not old_shape():
         return
-    drop = ["book_audio_editions", "books"]
-    override_columns = {row[1] for row in db.execute(text("PRAGMA table_info(book_pair_overrides)"))}
-    if "kavita_chapter_id" not in override_columns:
-        drop.append("book_pair_overrides")
-    for table in drop:
-        db.execute(text(f"DROP TABLE IF EXISTS {table}"))
-    db.commit()
-    from app.database import create_tables
-    create_tables(db.get_bind())
+    db.commit()     # nothing open, so the BEGIN below starts the transaction
+    db.execute(text("BEGIN IMMEDIATE"))
+    try:
+        if not old_shape():
+            db.rollback()   # the other worker remade them while this one waited
+            return
+        drop = ["book_audio_editions", "books"]
+        override_columns = {row[1] for row in db.execute(text("PRAGMA table_info(book_pair_overrides)"))}
+        if "kavita_chapter_id" not in override_columns:
+            drop.append("book_pair_overrides")
+        for table in drop:
+            db.execute(text(f"DROP TABLE IF EXISTS {table}"))
+        Base.metadata.create_all(bind=db.connection(), checkfirst=True)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     logger.info("Remade the Books catalog tables: %s", ", ".join(drop))
 
 

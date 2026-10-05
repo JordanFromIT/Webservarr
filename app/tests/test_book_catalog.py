@@ -627,6 +627,61 @@ class Migration(unittest.TestCase):
                 # An override already keyed on the chapter survives; one keyed on a series can't mean anything.
                 self.assertEqual(overrides, 0 if shape == "series" else 1)
 
+    def test_a_worker_that_read_the_old_shape_leaves_the_other_workers_tables_alone(self):
+        # Both workers read the old shape; the other one remakes the tables
+        # (and the catalog fills) before this one acts on its stale read.
+        # Dropping then would take the other's new tables away, mid-build in
+        # the worst case ("no such table: main.books" on its indexes).
+        from sqlalchemy import event, text
+        from sqlalchemy.orm import sessionmaker
+
+        from app import models  # noqa: F401 - registers the tables
+        from app.database import Base, make_engine
+        from app.seed import migrate_books_catalog_v2
+
+        with tempfile.TemporaryDirectory() as tmp:
+            url = f"sqlite:///{tmp}/old.db"
+            mine, other = make_engine(url), make_engine(url)
+            self.addCleanup(mine.dispose)
+            self.addCleanup(other.dispose)
+            Base.metadata.create_all(bind=mine, tables=[t for t in Base.metadata.sorted_tables if t.name not in (
+                "books", "book_pair_overrides", "book_audio_editions")])
+            with mine.begin() as conn:
+                conn.execute(text("CREATE TABLE books (id INTEGER PRIMARY KEY, title VARCHAR(300) NOT NULL, "
+                                  "kavita_series_id INTEGER, narrator VARCHAR(200))"))
+                conn.execute(text("CREATE TABLE book_pair_overrides (id INTEGER PRIMARY KEY, "
+                                  "kavita_series_id INTEGER NOT NULL, plex_book_key VARCHAR(64) NOT NULL, "
+                                  "action VARCHAR(8) NOT NULL, created_by VARCHAR(255) NOT NULL, "
+                                  "created_at DATETIME NOT NULL)"))
+
+            raced = []
+
+            def other_worker(conn, cursor, statement, parameters, context, executemany):
+                if raced or not statement.lstrip().upper().startswith(("BEGIN IMMEDIATE", "DROP TABLE")):
+                    return
+                raced.append(statement)
+                db2 = sessionmaker(bind=other)()
+                try:
+                    migrate_books_catalog_v2(db2)
+                    db2.execute(text("INSERT INTO books (title, sort_title, author, series, description, "
+                                     "cover_source, updated_at, kavita_chapter_id) "
+                                     "VALUES ('Theirs', '', '', '', '', 'kavita', '2026-01-01 00:00:00', 7)"))
+                    db2.commit()
+                finally:
+                    db2.close()
+
+            event.listen(mine, "before_cursor_execute", other_worker)
+            db = sessionmaker(bind=mine)()
+            try:
+                migrate_books_catalog_v2(db)
+            finally:
+                db.close()
+                event.remove(mine, "before_cursor_execute", other_worker)
+            self.assertEqual(len(raced), 1)
+            with mine.connect() as conn:
+                titles = conn.execute(text("SELECT title FROM books")).scalars().all()
+            self.assertEqual(titles, ["Theirs"])
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Webhook(unittest.TestCase):
