@@ -20,7 +20,7 @@ import json
 import logging
 import re
 from typing import Dict, Optional
-from urllib.parse import parse_qsl, urlencode, urlparse
+from urllib.parse import parse_qsl, unquote, urlencode, urlparse
 
 import bleach
 import httpx
@@ -307,6 +307,28 @@ def _location_allowed(location: str, kavita_base: str) -> bool:
         if allowed and _origin(allowed) == target:
             return True
     return False
+
+
+_DECODE_ROUNDS = 4    # more layers of percent-encoding than any client sends
+
+
+def _path_is_canonical(path: str) -> bool:
+    """False for a path that the next hop could read as a different one than
+    the checks below read (F1): a `.` or `..` segment in any percent-encoded
+    spelling, an encoded `/`, or a backslash, which some servers treat as `/`.
+    httpx and Kavita collapse dot segments, so `api/book/../account/login`
+    would pass the allowlist as `book` and reach `account/login`."""
+    decoded = path
+    for _ in range(_DECODE_ROUNDS):
+        once = unquote(decoded)
+        if once == decoded:
+            break
+        decoded = once
+    else:
+        return False
+    if "\\" in decoded:
+        return False
+    return not any(segment in (".", "..") for segment in decoded.split("/"))
 
 
 def _kavita_path_allowed(path: str) -> bool:
@@ -820,7 +842,12 @@ async def kavita_proxy(
     # Only the reader/library's own resources may be reached (L6). Everything
     # else — anonymous login, admin, plugin auth — is refused so this
     # authenticated proxy cannot be turned into a general relay into the LAN.
-    if not _kavita_path_allowed(path):
+    # The checks read the path as received, so it must be one no later hop
+    # rewrites (F1), and the URL sent is held to exactly that path.
+    if not _path_is_canonical(path) or not _kavita_path_allowed(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    target = httpx.URL(f"{base}/{path}")
+    if target.path != httpx.URL(base).path.rstrip("/") + "/" + path:
         raise HTTPException(status_code=404, detail="Not found")
 
     token = current_user.get("kavita_token") or None
@@ -858,7 +885,7 @@ async def kavita_proxy(
     try:
         upstream_request = client.build_request(
             request.method,
-            f"{base}/{path}",
+            target,
             headers=headers,
             content=body,
             params=params,

@@ -653,6 +653,127 @@ class ScopedPaths(unittest.TestCase):
         self.check.assert_not_awaited()
 
 
+def _literal_path_client(app):
+    """A TestClient whose request path reaches the app exactly as the
+    X-Literal-Path header spells it. httpx collapses a literal `..` before
+    sending, while a real client, and the tunnel in front of the site, forward
+    it as is."""
+    from fastapi.testclient import TestClient
+
+    async def literal(scope, receive, send):
+        if scope["type"] == "http":
+            for name, value in scope["headers"]:
+                if name == b"x-literal-path":
+                    scope = dict(scope, path=value.decode(), raw_path=value)
+        await app(scope, receive, send)
+
+    return TestClient(literal)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class DotSegments(unittest.TestCase):
+    """F1: the allowlist and the visibility check read the path as received,
+    while httpx (and Kavita) collapse `.` and `..` segments. `api/book/..` in
+    front of any path would pass the checks as `book` and reach that path. A
+    path with a dot segment in any spelling is refused before anything is
+    asked of Kavita, and what is sent is exactly the path that was checked."""
+
+    # Each is the path as the route receives it: uvicorn decodes the wire form
+    # once, so a literal `..` and `%2e%2e` on the wire both arrive as `..`, and
+    # a double-encoded `%252e%252e` arrives as `%2e%2e`, which Kavita decodes.
+    TRAVERSALS = [
+        "api/book/../Server/settings",               # the audit's hops
+        "api/book/../account/login",
+        "api/Book/136/../../account/login",
+        "api/book/./136/book-info",                  # a single dot is refused too
+        "api/book/136/..",
+        "api/book/%2e%2e/account/login",
+        "api/Book/%2E%2E/account/login",
+        "api/book/.%2e/account/login",
+        "api/book/%2e./account/login",
+        "api/book/%252e%252e/account/login",
+        "api/book/%2e/136/book-info",
+        "api/book/..%2faccount/login",               # an encoded separator after the dots
+        "api/book/..\\account/login",                # a backslash, read as / by some servers
+        "api/book\\..\\account\\login",
+        "api/book/%5c..%5caccount/login",
+    ]
+
+    def setUp(self):
+        from app.tests import helpers
+        self.helpers = helpers
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+        _RecordingProxyClient.asked = []
+        self.check = mock.AsyncMock(return_value=True)
+        self.patches = [
+            mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA),
+            mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", self.check),
+            mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=104),
+            mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient),
+        ]
+        for patch in self.patches:
+            patch.start()
+
+    def tearDown(self):
+        for patch in self.patches:
+            patch.stop()
+        self.helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def client_for(self, token):
+        user = dict(self.helpers.MEMBER, kavita_token=token, kavita_base=KAVITA) if token else self.helpers.MEMBER
+        return self.helpers.api_client(self.Session, user)
+
+    def test_every_spelling_of_a_dot_segment_is_404_and_nothing_is_forwarded(self):
+        from app.main import app
+        for token in ("jwt-sam", None):
+            self.client_for(token)
+            client = _literal_path_client(app)
+            for path in self.TRAVERSALS:
+                for method in ("get", "post"):
+                    with self.subTest(path=path, method=method, token=bool(token)):
+                        _RecordingProxyClient.asked = []
+                        r = client.request(method, "/kavita/placeholder",
+                                           headers={"X-Literal-Path": "/kavita/" + path})
+                        self.assertEqual(r.status_code, 404)
+                        self.assertEqual(_RecordingProxyClient.asked, [])
+                        self.check.assert_not_awaited()
+
+    def test_an_encoded_dot_segment_from_a_browser_is_404(self):
+        # The form the tunnel's edge would otherwise normalise: sent encoded.
+        client = self.client_for("jwt-sam")
+        for path in ("api/book/%2e%2e/Server/settings", "api/book/%2E%2E/account/login",
+                     "api/book/..%2Faccount/login"):
+            with self.subTest(path=path):
+                _RecordingProxyClient.asked = []
+                self.assertEqual(client.get("/kavita/" + path).status_code, 404)
+                self.assertEqual(_RecordingProxyClient.asked, [])
+                self.check.assert_not_awaited()
+
+    def test_a_path_httpx_would_send_differently_is_404(self):
+        # "%41" (from %2541 on the wire) would go out as an escape that Kavita
+        # reads as "A": not the path that was checked.
+        from app.main import app
+        self.client_for("jwt-sam")
+        r = _literal_path_client(app).get("/kavita/placeholder",
+                                          headers={"X-Literal-Path": "/kavita/api/Series/%41ll-v2"})
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(_RecordingProxyClient.asked, [])
+
+    def test_the_path_sent_is_exactly_the_path_checked(self):
+        client = self.client_for("jwt-sam")
+        for path in ("api/Series/all-v2", "api/Book/136/book-info", "api/image/series-cover"):
+            with self.subTest(path=path):
+                _RecordingProxyClient.asked = []
+                r = client.get("/kavita/" + path)
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual([str(url) for url in _RecordingProxyClient.asked], [KAVITA + "/" + path])
+
+
 class _FakeRedis:
     """Just the two calls the shortcut makes, with a clock the test moves."""
     def __init__(self):
