@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from app.database import SessionLocal
 from app.models import PushSubscription, Setting
-from app.utils import identity_email, is_safe_push_endpoint, same_origin_path
+from app.utils import identity_email, is_known_push_service, is_safe_push_endpoint, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -330,11 +330,19 @@ async def _dispatch_push(
         # Re-validate at send time (M12): the endpoint passed the SSRF check when
         # it was subscribed, but DNS can rebind a once-public host to a
         # loopback/LAN/metadata address in the meantime. Re-resolve and refuse.
+        # One stored before push services were allowlisted, to another host,
+        # is skipped and kept: it is not stale, only never sent to (F2).
         if not is_safe_push_endpoint(sub["endpoint"]):
-            logger.warning(
-                "Skipping push to %s: endpoint no longer resolves to a public host",
-                sub["user_email"],
-            )
+            if is_known_push_service(sub["endpoint"]):
+                logger.warning(
+                    "Skipping push to %s: endpoint no longer resolves to a public host",
+                    sub["user_email"],
+                )
+            else:
+                logger.info(
+                    "Skipping push to %s: endpoint is not a known push service",
+                    sub["user_email"],
+                )
             return
 
         subscription_info = {

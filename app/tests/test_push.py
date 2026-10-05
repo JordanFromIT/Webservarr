@@ -252,6 +252,108 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertFalse(push.vapid_subject_ok(push.vapid_subject("x@bad!.com")))
 
 
+PUBLIC_IP = "142.250.0.1"
+PRIVATE_IP = "10.0.0.5"
+
+
+def _resolving_to(*addresses):
+    """Stand in for DNS: every host resolves to these addresses."""
+    import ipaddress
+    return mock.patch("app.utils._resolve_ips",
+                      return_value={ipaddress.ip_address(a) for a in addresses})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class PushServiceAllowlist(unittest.TestCase):
+    """F2: a subscription's endpoint must be a browser push service, so the
+    server never sends to (and parses the reply of) a host the subscriber
+    chose. The SSRF checks still apply to the services themselves."""
+
+    KNOWN = [
+        "https://fcm.googleapis.com/fcm/send/abc",
+        "https://fcm.googleapis.com/wp/abc",
+        "https://updates.push.services.mozilla.com/wpush/v2/abc",
+        "https://web.push.apple.com/QGx",
+        "https://wns2-par02p.notify.windows.com/w/?token=abc",
+        "https://db5p.notify.windows.com/w/?token=abc",
+    ]
+    UNKNOWN = [
+        "https://push.example.com/send/abc",
+        "https://fcm.googleapis.com.evil.example/send/abc",
+        "https://evil.example/fcm.googleapis.com/send",
+        "https://evilpush.apple.com/x",
+        "https://push.apple.com.evil.example/x",
+        "https://notify.windows.com.evil.example/x",
+        "https://googleapis.com/fcm/send/abc",
+        "http://fcm.googleapis.com/fcm/send/abc",
+        "",
+    ]
+
+    def test_the_browser_push_services_are_accepted(self):
+        from app.utils import is_safe_push_endpoint
+        with _resolving_to(PUBLIC_IP):
+            for url in self.KNOWN:
+                with self.subTest(url=url):
+                    self.assertTrue(is_safe_push_endpoint(url))
+
+    def test_any_other_host_is_refused_even_when_public(self):
+        from app.utils import is_safe_push_endpoint
+        with _resolving_to(PUBLIC_IP):
+            for url in self.UNKNOWN:
+                with self.subTest(url=url):
+                    self.assertFalse(is_safe_push_endpoint(url))
+
+    def test_a_push_service_resolving_inside_the_network_is_still_refused(self):
+        from app.utils import is_safe_push_endpoint
+        for addresses in ((PRIVATE_IP,), ("127.0.0.1",), (PUBLIC_IP, PRIVATE_IP), ()):
+            with self.subTest(addresses=addresses), _resolving_to(*addresses):
+                self.assertFalse(is_safe_push_endpoint("https://fcm.googleapis.com/fcm/send/abc"))
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class UnknownPushServiceAtSend(unittest.TestCase):
+    """A subscription stored before the allowlist, to a host outside it, is
+    skipped at send time and kept (logged at info): it is not stale, and the
+    person's other devices still get the push."""
+
+    setUp = SeededKeySignsPushes.setUp
+    _subscribe = SeededKeySignsPushes._subscribe
+
+    def _dispatch(self, emails):
+        posts = []
+
+        def fake_post(session, url, **kwargs):
+            posts.append(url)
+            return _Response()
+
+        with mock.patch.object(push, "SessionLocal", self.Session), \
+             mock.patch.object(push, "_record_last_push", mock.AsyncMock()), \
+             mock.patch.object(requests.Session, "post", fake_post), \
+             _resolving_to(PUBLIC_IP):
+            result = asyncio.run(push.dispatch_push(emails, "Title", "Body", "news", "/"))
+        return result, posts
+
+    def test_an_unknown_host_is_skipped_and_kept(self):
+        known = "https://fcm.googleapis.com/fcm/send/abc"
+        unknown = "https://push.example.com/send/abc"
+        self._subscribe("someone@example.com", known)
+        self._subscribe("someone@example.com", unknown)
+
+        with self.assertLogs(push.logger, level="INFO") as logs:
+            result, posts = self._dispatch(["someone@example.com"])
+
+        self.assertEqual(posts, [known])
+        self.assertEqual(result["succeeded"], 1)
+        skipped = [r for r in logs.records if "not a known push service" in r.getMessage()]
+        self.assertEqual([r.levelname for r in skipped], ["INFO"])
+        db = self.Session()
+        try:
+            kept = {row.endpoint for row in db.query(PushSubscription).all()}
+        finally:
+            db.close()
+        self.assertEqual(kept, {known, unknown})
+
+
 BADGE_RE = re.compile(r"""['"]?badge['"]?\s*[:=]""", re.I)
 
 

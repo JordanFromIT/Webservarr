@@ -202,21 +202,35 @@ def is_safe_integration_url(url: str) -> bool:
     return True
 
 
+# The Web Push services browsers subscribe with: FCM (Chrome, Android, Opera,
+# Samsung Internet, Brave), Mozilla's (Firefox), Apple's (Safari) and WNS
+# (Edge, which hands out per-region wns2-*.notify.windows.com hosts).
+_PUSH_SERVICE_HOSTS = frozenset({"fcm.googleapis.com", "updates.push.services.mozilla.com"})
+_PUSH_SERVICE_SUFFIXES = (".push.apple.com", ".notify.windows.com")
+
+
+def is_known_push_service(url: str) -> bool:
+    """True when the endpoint is an https URL on a browser push service's host."""
+    parsed = urlparse((url or "").strip())
+    host = parsed.hostname or ""
+    return parsed.scheme.lower() == "https" and (
+        host in _PUSH_SERVICE_HOSTS or host.endswith(_PUSH_SERVICE_SUFFIXES)
+    )
+
+
 def is_safe_push_endpoint(url: str) -> bool:
     """Validate a user-supplied Web Push endpoint URL (anti-SSRF).
 
-    Must be a public https URL. Any private/RFC-1918, loopback, link-local,
-    multicast, reserved or CGNAT (100.64.0.0/10) address — anything not globally
-    routable — or an unresolvable host, is rejected, since legitimate browser
-    push services are always public HTTPS hosts. Every resolved address must
-    pass, so a host that resolves to a mix of public and internal IPs is
-    rejected outright (a DNS-rebind defence)."""
-    parsed = urlparse((url or "").strip())
-    if parsed.scheme.lower() != "https":
+    Must be an https URL on a known browser push service (is_known_push_service),
+    so the server never sends to, or parses the reply of, a host the subscriber
+    chose. It must also resolve publicly: any private/RFC-1918, loopback,
+    link-local, multicast, reserved or CGNAT (100.64.0.0/10) address — anything
+    not globally routable — or an unresolvable host, is rejected. Every resolved
+    address must pass, so a host that resolves to a mix of public and internal
+    IPs is rejected outright (a DNS-rebind defence)."""
+    if not is_known_push_service(url):
         return False
-    host = parsed.hostname
-    if not host:
-        return False
+    host = urlparse((url or "").strip()).hostname
     ips = _resolve_ips(host)
     if not ips:
         return False
