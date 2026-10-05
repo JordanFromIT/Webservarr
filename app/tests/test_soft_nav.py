@@ -581,7 +581,8 @@ class HomePage(unittest.TestCase):
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
         self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
                                          "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
-                                         "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET", "WHEEL_SR_PREFIX"])
+                                         "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
+                                         "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
         # Every lookup stays inside the page, but one: the header's status
         # pill, which the gauges' header copy goes beside (taken out again by
@@ -621,11 +622,17 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("scrollStreams(", h)
         src = module_source("index")
         self.assertEqual(src.count('data-action="stream-info"'), 1)
-        for action in ("streams-prev", "streams-next", "stream-info"):
+        self.assertEqual(h.count('data-action="event-latest"'), 1)
+        for action in ("streams-prev", "streams-next", "stream-info", "event-latest"):
             self.assertIn(f"case '{action}':", src, action)
-        # One listener, on the page, for them and the news cards' Read more.
+        # One click listener, on the page, for them and the news cards' Read
+        # more. The event log's wheel has its own input listeners (scroll,
+        # drag, keys): those are not buttons.
         code = self.code()
-        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["root"])
+        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["wheel"] * 6 + ["root"])
+        self.assertEqual(re.findall(r"\bwheel\.addEventListener\('(\w+)'", src),
+                         ["wheel", "touchstart", "touchmove", "touchend", "touchcancel", "keydown"])
+        self.assertIn("root.addEventListener('click', function (e) {", src)
         self.assertIn("var toggle = t.closest('[data-news-toggle]');", src)
 
     def test_sections_follow_the_pages_own_payload(self):

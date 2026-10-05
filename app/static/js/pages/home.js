@@ -1019,21 +1019,21 @@ function createEventLog(section, env) {
         if (to !== null && turnTo(to)) e.preventDefault();
     }
 
+    // "Latest" (a data-action of the page's one click listener, in mount).
+    function toLatest() {
+        var hadFocus = latest && document.activeElement === latest;
+        turnTo(0);
+        if (hadFocus) wheel.focus();
+    }
+
+    // The wheel's own input: scroll, drag and keys, for this visit only.
     if (wheel && env.signal) {
-        var opts = { signal: env.signal, passive: false };
-        wheel.addEventListener('wheel', onScroll, opts);
+        wheel.addEventListener('wheel', onScroll, { signal: env.signal, passive: false });
         wheel.addEventListener('touchstart', onDragStart, { signal: env.signal, passive: true });
-        wheel.addEventListener('touchmove', onDrag, opts);
+        wheel.addEventListener('touchmove', onDrag, { signal: env.signal, passive: false });
         wheel.addEventListener('touchend', onDragEnd, { signal: env.signal });
         wheel.addEventListener('touchcancel', onDragEnd, { signal: env.signal });
         wheel.addEventListener('keydown', onKey, { signal: env.signal });
-        if (latest) {
-            latest.addEventListener('click', function () {
-                var hadFocus = document.activeElement === latest;
-                turnTo(0);
-                if (hadFocus) wheel.focus();
-            }, { signal: env.signal });
-        }
     }
 
     // data: the feed's answer, or null when it could not be read.
@@ -1138,7 +1138,7 @@ function createEventLog(section, env) {
         });
     }
 
-    return { render: render, refreshTimes: refreshTimes };
+    return { render: render, refreshTimes: refreshTimes, toLatest: toLatest };
 }
 
 export async function mount(ctx) {
@@ -1668,6 +1668,9 @@ export async function mount(ctx) {
             // The transcode details sit right after their "More info".
             case 'stream-info':
                 if (btn.nextElementSibling) btn.nextElementSibling.classList.toggle('hidden');
+                break;
+            case 'event-latest':
+                if (eventLog) eventLog.toLatest();
                 break;
         }
     }, { signal: signal });

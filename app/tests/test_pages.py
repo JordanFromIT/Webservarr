@@ -1049,7 +1049,7 @@ class EventLogNeverMovesThePage(unittest.TestCase):
         # Focusable and named, to turn back through the history with the keys.
         self.assertIn('<div class="ws-wheel" data-event-wheel tabindex="0" role="group" '
                       'aria-label="Event log, use arrow keys to see older events">', log)
-        self.assertIn('<button type="button" class="ws-wheel-latest" data-event-latest hidden>Latest</button>', log)
+        self.assertIn('<button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>', log)
         self.assertIn('aria-live="polite"', log)
         self.assertNotIn("<a ", log, "there is no feed page to link to")
 
