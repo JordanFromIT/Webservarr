@@ -435,9 +435,12 @@ function renderServiceTile(service) {
     // Every tile is the same height whatever its name: the top row is a
     // fixed h-11 and the name keeps to one line (a narrow tile cuts it
     // short and carries the whole name as its title), so nothing can make
-    // it taller. The skeleton tiles in #servicesContainer are this tile, empty.
+    // it taller. From sm a tile is as wide as its name and no narrower than
+    // 9rem, and never wider than the row (max-w-full, so a long name
+    // truncates there instead of overflowing). The skeleton tiles in
+    // #servicesContainer are this tile, empty.
     var name = escapeHtml(service.display_name);
-    return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col min-w-0 hover:border-primary/40 transition-all">' +
+    return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col min-w-0 sm:min-w-36 max-w-full hover:border-primary/40 transition-all">' +
         '<div class="h-11 px-3 flex items-center gap-2.5 min-w-0">' +
             iconHtml +
             '<span class="min-w-0 truncate text-[13px] font-medium text-frosted-blue" title="' + name + '">' + name + '</span>' +
@@ -1007,7 +1010,7 @@ export async function mount(ctx) {
 
         WS.arrive('services', function () {
             if (services.length === 0) {
-                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>');
+                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full w-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>');
                 return;
             }
 

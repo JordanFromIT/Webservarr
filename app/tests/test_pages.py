@@ -977,6 +977,44 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                 self.assertNotIn("<br", page[page.index(want["skel"]):page.index(want["skel"]) + 600])
 
 
+class ServiceTilesFitTheirNames(unittest.TestCase):
+    """Home follow-up 2026-10-05: a Service Health tile is as wide as its icon
+    and name (no stretching to share the row), left-aligned and wrapping from
+    sm; two equal columns on a phone so the skeleton's rows match."""
+
+    def setUp(self):
+        page = static_text("index.html")
+        start = page.index('<div id="servicesContainer"')
+        self.container = page[start:page.index("</div>\n</section>", start)]
+        self.tile = function_text(static_text("js", "pages", "home.js"), "function renderServiceTile(service)")
+
+    def test_the_row_wraps_instead_of_stretching(self):
+        head = self.container[:self.container.index(">")]
+        classes = re.search(r'class="([^"]*)"', head).group(1).split()
+        for cls in ("grid", "grid-cols-2", "sm:flex", "sm:flex-wrap"):
+            self.assertIn(cls, classes)
+        self.assertNotIn("style=", head)
+        self.assertNotIn("1fr", head)
+        self.assertNotIn("justify-", head)
+
+    def test_tile_and_skeleton_share_the_minimum_width(self):
+        self.assertEqual(self.container.count('<div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true">'), 3)
+        self.assertIn("min-w-0 sm:min-w-36 max-w-full", self.tile)
+        # The name still keeps to one line and carries the whole name as its title.
+        self.assertIn("'<span class=\"min-w-0 truncate text-[13px] font-medium text-frosted-blue\" title=\"' + name + '\">'", self.tile)
+
+    def test_requests_link_reads_make_a_request(self):
+        page = static_text("index.html")
+        link = re.search(r'<a id="viewRequestsLink" href="/requests" class="([^"]*)">([^<]*)</a>', page)
+        self.assertIsNotNone(link)
+        self.assertEqual(link.group(2), "Make a request")
+        classes = link.group(1).split()
+        for cls in ("text-[15px]", "font-semibold", "text-steel-blue", "whitespace-nowrap"):
+            self.assertIn(cls, classes)
+        for cls in ("uppercase", "tracking-wider", "text-xs", "font-bold"):
+            self.assertNotIn(cls, classes)
+
+
 class FunctionText(unittest.TestCase):
     """function_text (StreamsPreview.body_of) returns the whole function, even
     when comments come before the text a test looks for (Task 10 fix TH1)."""

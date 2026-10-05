@@ -198,28 +198,33 @@
 </div>
 </template>
 <!-- Service Tiles: compact, an icon and the name on one line over the status
-     bar, as many across as fit. Skeleton tiles are built like the real tile in
-     renderServiceTile: the same border, the same fixed-height top row (h-11)
-     and the same status bar, with nothing in them. Change one, change both. -->
-<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr))">
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+     bar. From sm each tile is only as wide as its name (never under 9rem, so
+     the status bar reads), left-aligned in a row that wraps. On a phone they
+     are two equal columns, so the number of rows depends only on how many
+     services there are and the skeleton's rows match the real ones (8px
+     apart across, so "Plex Media Server" still fits whole at 375px).
+     Skeleton tiles are built like the real tile in renderServiceTile: the
+     same border, the same fixed-height top row (h-11), the same minimum
+     width and the same status bar, with nothing in them. Change one, change
+     both. -->
+<div id="servicesContainer" class="grid grid-cols-2 gap-x-2 gap-y-3 sm:flex sm:flex-wrap sm:gap-3">
+<div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
 </div>
 </section>
 <!-- Recent Requests + News side by side -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
 <!-- Recent Requests, compact -->
 <section data-arrive="requests">
-<div class="flex items-center justify-between mb-4">
+<!-- Wraps only on the narrowest phones (320px), where the heading and the
+     link cannot share a line: the link then sits under the heading. -->
+<div class="flex flex-wrap items-center justify-between gap-x-4 mb-4">
 <div class="flex items-center gap-3">
 <span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
 <h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
 </div>
-<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Requests
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
+<a id="viewRequestsLink" href="/requests" class="flex items-center min-h-6 whitespace-nowrap text-[15px] font-semibold text-steel-blue hover:text-frosted-blue transition-colors">Make a request</a>
 </div>
 <!-- A container: the card is half the page from lg and the whole page below
      it, so its own width (not the screen's) decides the Type column. Under
