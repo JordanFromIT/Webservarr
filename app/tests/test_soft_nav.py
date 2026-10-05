@@ -525,15 +525,16 @@ class HomePage(unittest.TestCase):
 
     def test_every_read_is_on_the_pages_signal(self):
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 5, "continue, news, streams, requests, releases")
-        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 5)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 6,
+                         "continue, the event log, news, streams, requests, releases")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 6)
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
         for at in fetches:
             self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 6,
-                         "five onError handlers and the gauges' catch")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 7,
+                         "six onError handlers and the gauges' catch")
         self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
         for name in ("renderContinue", "renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
                      "renderUpcomingReleases"):
@@ -579,7 +580,8 @@ class HomePage(unittest.TestCase):
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
         self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
-                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
+                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
+                                         "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET", "WHEEL_SR_PREFIX"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
         # Every lookup stays inside the page, but one: the header's status
         # pill, which the gauges' header copy goes beside (taken out again by

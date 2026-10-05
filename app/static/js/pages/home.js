@@ -1,9 +1,9 @@
 /**
  * WebServarr — Home (page module)
  *
- * The dashboard: service health (with the server's gauges, which sit in the
- * header from xl), recent requests beside news, active streams and upcoming
- * releases. Sections the admin switched
+ * The dashboard: the event log (the status feed on a wheel), service health
+ * (with the server's gauges, which sit in the header from xl), recent
+ * requests beside news, active streams and upcoming releases. Sections the admin switched
  * off (Settings > Pages > Home) are hidden by the server (html[data-home-hide],
  * which the router brings in step on every swap) and never loaded.
  *
@@ -662,6 +662,278 @@ function releasesError(container) {
     container.appendChild(errDiv);
 }
 
+// ---- Event log ----
+//
+// The status feed's newest events on a wheel (theme.css .ws-wheel): the
+// newest line flat at the bottom, older ones curled up over the top and
+// dimmed. A new event turns the wheel one notch; several turn it one notch
+// each, in order. Under reduced motion the lines crossfade in place instead.
+// Only the front line is in the accessibility tree; a new event is announced
+// once through the section's polite live region. Text is written with
+// textContent only.
+
+const WHEEL_LINES = 4;
+const WHEEL_MS = 650;   // theme.css --wheel-duration
+const WHEEL_QUIET = {
+    empty: 'No outages or notes this month',
+    unavailable: 'Status unavailable right now'
+};
+const WHEEL_SR_PREFIX = { note: 'Note: ', important: 'Important: ' };
+
+function feedTime(iso) {
+    var t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+    return isNaN(t) ? null : t;
+}
+
+// The feed's items as events, newest first. An outage is two events: it went
+// down (when it began) and, once resolved, it came back (when it ended, the
+// item's own text). A note is one event, when it was posted.
+function feedEvents(data) {
+    var rows = [].concat(Array.isArray(data.open) ? data.open : [], Array.isArray(data.items) ? data.items : []);
+    var out = [];
+    var seen = {};
+    rows.forEach(function (it) {
+        if (!it || typeof it !== 'object' || seen[it.id]) return;
+        seen[it.id] = true;
+        var text = typeof it.text === 'string' ? it.text : '';
+        if (it.source === 'auto') {
+            var began = feedTime(it.started_at);
+            if (began === null) began = feedTime(it.created_at);
+            if (it.resolved) {
+                var ended = feedTime(it.ended_at);
+                if (ended === null) ended = feedTime(it.at);
+                if (began !== null && typeof it.service === 'string' && it.service) {
+                    out.push({ key: 'a' + it.id + ':down', type: 'down', text: it.service + ' is down', at: began });
+                }
+                if (ended !== null && text) out.push({ key: 'a' + it.id + ':up', type: 'up', text: text, at: ended });
+            } else if (began !== null && text) {
+                out.push({ key: 'a' + it.id + ':down', type: 'down', text: text, at: began });
+            }
+        } else {
+            var at = feedTime(it.created_at);
+            if (at === null) at = feedTime(it.at);
+            if (at !== null && text) out.push({ key: 'n' + it.id, type: it.important ? 'important' : 'note', text: text, at: at });
+        }
+    });
+    // Newest first; at the same moment an outage's return comes after its start.
+    out.sort(function (a, b) { return (b.at - a.at) || (a.key < b.key ? 1 : a.key > b.key ? -1 : 0); });
+    return out;
+}
+
+function wheelTime(at) {
+    var s = Math.max(0, Math.round((Date.now() - at) / 1000));
+    if (s < 45) return 'just now';
+    var m = Math.round(s / 60);
+    if (m < 60) return m + ' min ago';
+    var h = Math.round(m / 60);
+    if (h < 24) return h + ' h ago';
+    var d = Math.round(h / 24);
+    return d === 1 ? 'yesterday' : d + ' days ago';
+}
+
+// One wheel per visit. env: { setTimeout, clearTimeout } (the visit's own,
+// so nothing outlives the page) and reducedMotion().
+function createEventLog(section, env) {
+    var wheel = section.querySelector('[data-event-wheel]');
+    var announcer = section.querySelector('[data-event-announce]');
+    var lines = [];      // on the wheel, newest first: { key, ev, el }
+    var leaving = [];
+    var seen = null;     // keys shown so far; null until the first answer
+    var steps = [];
+    var announceTimer = null;
+
+    function fill(el, ev) {
+        el.setAttribute('data-type', ev.type);
+        el.title = ev.text;
+        var text = el.querySelector('.ws-wheel__text');
+        var prefix = WHEEL_SR_PREFIX[ev.type] || '';
+        text.textContent = '';
+        if (prefix) {
+            var sr = document.createElement('span');
+            sr.className = 'sr-only';
+            sr.textContent = prefix;
+            text.appendChild(sr);
+        }
+        text.appendChild(document.createTextNode(ev.text));
+        var time = el.querySelector('time');
+        if (ev.at !== null) {
+            if (!time) {
+                time = document.createElement('time');
+                time.className = 'ws-wheel__time';
+                el.appendChild(time);
+            }
+            time.dateTime = new Date(ev.at).toISOString();
+            time.textContent = wheelTime(ev.at);
+        } else if (time) {
+            el.removeChild(time);
+        }
+    }
+
+    function build(ev) {
+        var el = document.createElement('div');
+        el.className = 'ws-wheel__line';
+        var mark = document.createElement('span');
+        mark.className = 'ws-wheel__mark';
+        mark.setAttribute('aria-hidden', 'true');
+        el.appendChild(mark);
+        var text = document.createElement('span');
+        text.className = 'ws-wheel__text';
+        el.appendChild(text);
+        fill(el, ev);
+        return el;
+    }
+
+    // A line joining at the front turns up from under the front edge; one
+    // joining further back (a newer one was deleted) fades in on its notch.
+    function enter(el, slot, before, animate) {
+        var from = slot === 0 ? 'is-entering' : 'is-appearing';
+        el.style.setProperty('--i', String(slot));
+        if (animate) el.classList.add(from);
+        if (before && before.parentNode === wheel) wheel.insertBefore(el, before);
+        else wheel.appendChild(el);
+        if (animate) {
+            void el.offsetHeight;   // commit the start, so the turn animates
+            el.classList.remove(from);
+        }
+    }
+
+    function leave(el) {
+        if (!el || el.classList.contains('is-leaving')) return;
+        el.classList.add('is-leaving');
+        el.setAttribute('aria-hidden', 'true');
+        el.removeAttribute('title');
+        leaving.push(el);
+        env.setTimeout(function () {
+            if (el.parentNode) el.parentNode.removeChild(el);
+            var k = leaving.indexOf(el);
+            if (k !== -1) leaving.splice(k, 1);
+        }, WHEEL_MS + 80);
+        // In a burst only one line fades out at a time (a whole set when
+        // crossfading), so the wheel never shows a stack of ghosts.
+        var cap = env.reducedMotion() ? WHEEL_LINES + 1 : 1;
+        while (leaving.length > cap) {
+            var old = leaving.shift();
+            if (old.parentNode) old.parentNode.removeChild(old);
+        }
+    }
+
+    // Put the newest WHEEL_LINES of `list` on their notches. animate: lines
+    // that join turn up from the front edge (or fade, crossfading); without
+    // it they are simply there. crossfade: every line fades out where it is
+    // and the new set fades in.
+    function place(list, animate, crossfade) {
+        var target = list.slice(0, WHEEL_LINES);
+        var keep = {};
+        target.forEach(function (ev) { keep[ev.key] = true; });
+        var old = {};
+        lines.forEach(function (ln) {
+            if (crossfade || !keep[ln.key]) leave(ln.el);
+            else old[ln.key] = ln;
+        });
+        var next = [];
+        target.forEach(function (ev, i) {
+            var ln = old[ev.key];
+            if (ln) {
+                if (ln.ev.text !== ev.text || ln.ev.type !== ev.type || ln.ev.at !== ev.at) fill(ln.el, ev);
+                ln.ev = ev;
+                ln.el.style.setProperty('--i', String(i));
+            } else {
+                ln = { key: ev.key, ev: ev, el: build(ev) };
+                // In the document oldest first, as on screen top to bottom.
+                enter(ln.el, i, i > 0 ? next[i - 1].el : null, animate);
+            }
+            if (i === 0) ln.el.removeAttribute('aria-hidden');
+            else ln.el.setAttribute('aria-hidden', 'true');
+            next.push(ln);
+        });
+        lines = next;
+        if (seen) target.forEach(function (ev) { seen[ev.key] = true; });
+    }
+
+    function announce(ev) {
+        if (!announcer) return;
+        if (announceTimer !== null) env.clearTimeout(announceTimer);
+        announcer.textContent = (WHEEL_SR_PREFIX[ev.type] || '') + ev.text;
+        // Cleared later, so browse mode does not read the newest event twice.
+        announceTimer = env.setTimeout(function () { announcer.textContent = ''; announceTimer = null; }, 7000);
+    }
+
+    function cancelSteps() {
+        steps.forEach(function (id) { env.clearTimeout(id); });
+        steps = [];
+    }
+
+    // data: the feed's answer, or null when it could not be read.
+    // quiet: true for a copy kept from an earlier visit, painted at once.
+    function render(data, quiet) {
+        var state = data && typeof data === 'object' ? data.state : 'unavailable';
+        var events = state === 'unavailable' ? [] : feedEvents(data);
+        if (state === 'off' && !events.length) {
+            cancelSteps();
+            section.hidden = true;
+            return;
+        }
+        var list = events.length ? events
+            : [{ key: 'quiet:' + (state === 'unavailable' ? 'unavailable' : 'empty'), type: 'quiet',
+                 text: WHEEL_QUIET[state === 'unavailable' ? 'unavailable' : 'empty'], at: null }];
+        cancelSteps();
+        if (seen === null || section.hidden) {
+            // The first answer (or the section coming back): the lines are
+            // simply there, nothing turns and nothing is announced.
+            section.hidden = false;
+            if (seen === null) wheel.textContent = '';   // the skeleton
+            seen = {};
+            place(list, false, false);
+            return;
+        }
+        // New: not shown before, and newer than every event on the wheel now.
+        var front = -Infinity;
+        lines.forEach(function (ln) { if (ln.ev.at !== null && ln.ev.at > front) front = ln.ev.at; });
+        var shown = list.slice(0, WHEEL_LINES);
+        var fresh = shown.filter(function (ev) { return ev.type !== 'quiet' && !seen[ev.key] && ev.at >= front; });
+        if (!fresh.length || quiet) {
+            place(list, !quiet, false);
+            return;
+        }
+        var isFresh = {};
+        fresh.forEach(function (ev) { isFresh[ev.key] = true; });
+        var base = list.filter(function (ev) { return !isFresh[ev.key]; });
+        var newest = fresh[0];
+        if (env.reducedMotion()) {
+            place(list, true, true);
+            announce(newest);
+            return;
+        }
+        // One notch per new event, oldest first, each after the last turn.
+        var order = fresh.slice().reverse();
+        function upTo(n) {
+            var add = {};
+            for (var k = 0; k < n; k++) add[order[k].key] = true;
+            return list.filter(function (ev) { return !isFresh[ev.key] || add[ev.key]; });
+        }
+        place(base, true, false);
+        order.forEach(function (ev, k) {
+            var turn = function () {
+                place(upTo(k + 1), true, false);
+                if (k === order.length - 1) announce(newest);
+            };
+            if (k === 0) turn();
+            else steps.push(env.setTimeout(turn, k * (WHEEL_MS + 60)));
+        });
+    }
+
+    function refreshTimes() {
+        lines.forEach(function (ln) {
+            var t = ln.el.querySelector('time');
+            if (!t || ln.ev.at === null) return;
+            var next = wheelTime(ln.ev.at);
+            if (t.textContent !== next) t.textContent = next;
+        });
+    }
+
+    return { render: render, refreshTimes: refreshTimes };
+}
+
 export async function mount(ctx) {
     var root = ctx.root;
     var signal = ctx.signal;
@@ -756,6 +1028,33 @@ export async function mount(ctx) {
         } else {
             WS.arrive('continue');
         }
+    }
+
+    // ---- Event log (the status feed, on its wheel) ----
+    //
+    // Everyone signed in reads it (the feed's own rules decide what is in it).
+    // Polled with the other live sections; a copy kept from the last visit
+    // paints at once, and what happened since then turns in.
+    var eventLogHost = byId('homeEventLog');
+    var eventLog = eventLogHost ? createEventLog(eventLogHost, {
+        setTimeout: ctx.setTimeout,
+        clearTimeout: ctx.clearTimeout,
+        reducedMotion: function () {
+            return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        }
+    }) : null;
+
+    function loadEventLog() {
+        if (!eventLog) return Promise.resolve(null);
+        return WS.swr('status:feed', function () { return WS.getJSON('/api/status/feed', { signal: signal }); }, function (data, fromCache) {
+            if (signal.aborted) return;
+            WS.arrive('feed', function () { eventLog.render(data, fromCache); });
+        }, {
+            onError: function (error) {
+                if (signal.aborted || isAbort(error)) return;   // left the page: not an error
+                WS.arrive('feed', function () { eventLog.render(null, false); });
+            }
+        });
     }
 
     // This visit's state.
@@ -1172,6 +1471,7 @@ export async function mount(ctx) {
 
     var first = [];
     if (continueHost && booksOn) first.push(loadContinue());
+    first.push(loadEventLog());
     if (sectionOn('news')) first.push(loadNews());
     if (sectionOn('services')) { first.push(loadServices()); first.push(loadSystemStats()); }
     if (sectionOn('streams')) first.push(loadActiveStreams());
@@ -1181,6 +1481,8 @@ export async function mount(ctx) {
 
     // Auto-refresh dynamic sections every 30 seconds (paused in background tabs)
     ctx.poll(function() {
+        loadEventLog();
+        if (eventLog) eventLog.refreshTimes();
         if (sectionOn('services')) loadServices();
         if (sectionOn('streams')) loadActiveStreams();
         if (sectionOn('requests')) loadRecentRequests();

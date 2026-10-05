@@ -957,6 +957,98 @@ html:not([data-section-icons]) .ws-section-icon { display: none; }
 html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }
 html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 
+/* ---- Home's event log: the status wheel ----
+ *
+ * Every line sits on the surface of one drum that turns around a horizontal
+ * axis. The axis runs through the bottom slot, pushed back by the radius, so
+ * slot 0 (the newest, --i: 0) faces the viewer flat and sharp; older slots are
+ * turned further over the top, which lifts them, compresses them and dims
+ * them. pages/home.js (createEventLog) sets each line's --i and turns the
+ * wheel one notch per new event. The values are take B of the approved
+ * playground. --wheel-duration is also WHEEL_MS in home.js: change both.
+ * The height holds four slots from the first paint, whatever the answer.
+ */
+.ws-wheel {
+  --wheel-lines: 4;
+  --wheel-radius: 170px;
+  --wheel-notch: 15deg;
+  --wheel-perspective: 6000px;
+  --wheel-dim: 0.24;
+  --wheel-line-h: 44px;
+  --wheel-duration: 650ms;
+  --wheel-ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  position: relative;
+  height: calc(var(--wheel-lines) * var(--wheel-line-h));
+  height: calc(var(--wheel-radius) * sin(min(90deg, (var(--wheel-lines) - 1) * var(--wheel-notch))) + var(--wheel-line-h));
+  overflow: hidden;
+  overflow: clip;
+  font-size: 15px;
+  color: rgb(var(--color-text));
+}
+.ws-wheel__line {
+  --i: 0;
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  height: var(--wheel-line-h);
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  white-space: nowrap;
+  backface-visibility: hidden;
+  transform:
+    perspective(var(--wheel-perspective)) translateZ(calc(var(--wheel-radius) * -1))
+    rotateX(calc(var(--i) * var(--wheel-notch)))
+    translateZ(var(--wheel-radius));
+  opacity: max(0, calc(1 - var(--i) * var(--wheel-dim)));
+  transition:
+    transform var(--wheel-duration) var(--wheel-ease),
+    opacity var(--wheel-duration) var(--wheel-ease);
+}
+/* A new line turns up from under the front edge. */
+.ws-wheel__line.is-entering {
+  opacity: 0;
+  transform:
+    perspective(var(--wheel-perspective)) translateZ(calc(var(--wheel-radius) * -1))
+    rotateX(calc(var(--wheel-notch) * -1))
+    translateZ(var(--wheel-radius));
+}
+.ws-wheel__line.is-leaving,
+.ws-wheel__line.is-appearing { opacity: 0; }
+/* The status tick: 2px of the event's colour; transparent on a plain line, so
+   every line's text starts at the same place. */
+.ws-wheel__mark {
+  flex: none;
+  width: 2px;
+  height: 0.95em;
+  border-radius: 1px;
+  background: transparent;
+}
+.ws-wheel__line[data-type="down"] .ws-wheel__mark { background: rgb(var(--ws-status-err)); }
+.ws-wheel__line[data-type="up"] .ws-wheel__mark { background: rgb(var(--ws-status-ok)); }
+.ws-wheel__line[data-type="note"] .ws-wheel__mark { background: rgb(var(--color-accent)); }
+.ws-wheel__line[data-type="important"] .ws-wheel__mark { background: rgb(var(--ws-status-warn)); }
+.ws-wheel__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.005em; }
+.ws-wheel__line[data-type="quiet"] .ws-wheel__text { color: rgb(var(--color-text) / 0.7); }
+.ws-wheel__time {
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline-start: 1em;
+  color: rgb(var(--color-text) / 0.7);
+  font-size: 0.8125em;
+  font-variant-numeric: tabular-nums;
+}
+/* Reduced motion: lines crossfade in place, nothing turns. */
+@media (prefers-reduced-motion: reduce) {
+  .ws-wheel__line { transition: opacity var(--wheel-duration) linear; }
+  .ws-wheel__line.is-entering {
+    transform:
+      perspective(var(--wheel-perspective)) translateZ(calc(var(--wheel-radius) * -1))
+      rotateX(calc(var(--i) * var(--wheel-notch)))
+      translateZ(var(--wheel-radius));
+  }
+}
+
 /* ---- Settings ----
  *
  * The --ws-status-* tokens are for NON-TEXT marks (lights, rings, invalid-field

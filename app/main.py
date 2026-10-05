@@ -27,6 +27,7 @@ from app.integrations import plex_player
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
+from app.services import status_feed as status_feed_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
 from app.services.request_status_warmer import (
     start_warmer as start_request_status_warmer,
@@ -448,7 +449,22 @@ async def root(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("index", request, user)
+    return render_page("index", request, user, extra_flags={"feed_off": _event_log_off()})
+
+
+def _event_log_off() -> bool:
+    """Home's event log starts hidden when the status feed is off and empty
+    (status_feed.home_off). Not knowing (no database) leaves it to the page."""
+    db = None
+    try:
+        db = SessionLocal()
+        return status_feed_service.home_off(db, status_feed_service.now_utc())
+    except Exception:  # noqa: BLE001 - a hint only; the page script decides again
+        logger.warning("Could not read whether the event log is off", exc_info=True)
+        return False
+    finally:
+        if db is not None:
+            db.close()
 
 
 # Login page

@@ -1015,6 +1015,51 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
             self.assertNotIn(cls, classes)
 
 
+class EventLogNeverMovesThePage(unittest.TestCase):
+    """Home's event log (the status feed on a wheel, above Service Health).
+    When the feed is off and empty the server renders the section hidden, so
+    a person who never sees it never has its room; otherwise it is there from
+    the first paint, its wheel a fixed height (theme.css .ws-wheel)."""
+
+    def page(self, flags):
+        return render(name="index", page=static_text("index.html"), flags=flags)
+
+    def test_hidden_from_the_first_paint_when_the_feed_is_off(self):
+        self.assertIn('<section id="homeEventLog" hidden data-arrive="feed"', self.page({"feed_off": True}))
+        shown = self.page({"feed_off": False})
+        self.assertIn('<section id="homeEventLog" data-arrive="feed"', shown)
+        self.assertNotIn('<section id="homeEventLog" hidden', shown)
+        self.assertNotIn('<section id="homeEventLog" hidden', self.page({}))
+        # Only Home has the section.
+        self.assertNotIn("homeEventLog", render(name="index", flags={"feed_off": True}))
+
+    def test_it_sits_right_above_service_health(self):
+        page = static_text("index.html")
+        order = re.findall(r'data-arrive="(\w+)"', page)
+        self.assertEqual(order[order.index("feed") + 1], "services")
+        log = page[page.index('<section id="homeEventLog"'):page.index('<section data-arrive="services">')]
+        self.assertEqual(log.count("<section"), 1)
+        self.assertIn('<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>', log)
+        self.assertIn("<div class=\"ws-wheel\" data-event-wheel>", log)
+        self.assertIn('aria-live="polite"', log)
+        self.assertNotIn("<a ", log, "there is no feed page to link to")
+
+    def test_the_wheel_holds_four_slots_and_uses_theme_colours(self):
+        theme = static_text("css", "theme.css")
+        wheel = theme[theme.index("/* ---- Home's event log"):]
+        wheel = wheel[:wheel.index("/* ----", 10)] if "/* ----" in wheel[10:] else wheel
+        self.assertIn("--wheel-lines: 4;", wheel)
+        self.assertIn("height: calc(var(--wheel-radius) * sin(", wheel)
+        self.assertIn("overflow: clip;", wheel)
+        self.assertNotRegex(wheel, r"#[0-9a-fA-F]{3,8}\b", "colours come from the theme")
+        for token in ("--ws-status-err", "--ws-status-ok", "--ws-status-warn", "--color-accent", "--color-text"):
+            self.assertIn(token, wheel)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", wheel)
+        home = static_text("js", "pages", "home.js")
+        self.assertIn("const WHEEL_MS = 650;", home)
+        self.assertIn("--wheel-duration: 650ms;", wheel)
+
+
 class FunctionText(unittest.TestCase):
     """function_text (StreamsPreview.body_of) returns the whole function, even
     when comments come before the text a test looks for (Task 10 fix TH1)."""

@@ -563,6 +563,8 @@ SIDEBAR_MARKER = "<!-- ws:sidebar -->"
 HEADER_MARKER = "<!-- ws:header -->"
 # In page copy: the site's name, HTML-escaped (render_html).
 APP_NAME_MARKER = "<!-- ws:app-name -->"
+# Home's event log section; flags["feed_off"] renders it hidden (render_html).
+EVENT_LOG_OPEN = '<section id="homeEventLog"'
 # An <img data-ws-app-icon src="..."> shows the home-screen icon (render_html).
 _APP_ICON_IMG_RE = re.compile(r'(<img data-ws-app-icon src=")[^"]*(")')
 
@@ -994,6 +996,11 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
 
     if name == "login":
         out = _fill_login_name(out, branding)
+
+    if name == "index" and flags.get("feed_off"):
+        # Home's event log: the status feed is off and empty, so the section
+        # is hidden from the first paint and never holds room (index.html).
+        out = out.replace(EVENT_LOG_OPEN, EVENT_LOG_OPEN + " hidden", 1)
 
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):

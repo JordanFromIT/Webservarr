@@ -539,6 +539,37 @@ class FeedApi(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class HomeEventLogHint(unittest.TestCase):
+    """Home renders its event log hidden (pages.py feed_off) only when the feed
+    would answer "off" with nothing in it."""
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.now = T0 + timedelta(days=60)
+
+    def off(self):
+        db = self.Session()
+        try:
+            return status_feed.home_off(db, self.now)
+        finally:
+            db.close()
+
+    def test_off_only_without_uptime_kuma_and_with_nothing_to_show(self):
+        self.assertTrue(self.off())
+        add_row(self.Session, message="Long ago", active=False, created_at=self.now - timedelta(days=45),
+                resolved_at=self.now - timedelta(days=45))
+        self.assertTrue(self.off(), "older than the feed's window")
+        add_row(self.Session, message="Heads up", created_at=self.now - timedelta(hours=1))
+        self.assertFalse(self.off(), "a note shows without Uptime Kuma")
+
+    def test_never_off_with_uptime_kuma(self):
+        db = self.Session()
+        helpers.put(db, "integration.uptime_kuma.url", KUMA_URL)
+        db.close()
+        self.assertFalse(self.off())
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class StatusSummary(unittest.TestCase):
     """Review Focus 3: GET /api/integrations/status-summary, public, says the
     one-line current state and nothing more."""

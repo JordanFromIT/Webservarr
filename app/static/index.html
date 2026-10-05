@@ -104,6 +104,22 @@
 <div data-note-slot hidden class="mt-3 h-6"></div>
 </div>
 </div>
+<!-- Event log: the status feed's newest events (GET /api/status/feed) on a
+     wheel that turns on a horizontal axis. The newest line sits flat at the
+     bottom; older ones curl up over the top and dim. pages/home.js builds the
+     lines (createEventLog) and theme.css draws the wheel (.ws-wheel). The
+     wheel's height is fixed, so its answer never moves anything below it.
+     With no Uptime Kuma and nothing in the feed the server renders the
+     section hidden (pages.py, feed_off), so a person who never sees it never
+     has its room. Until the first answer the front line is a skeleton. -->
+<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle">
+<div class="flex items-center gap-3 mb-4">
+<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
+<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
+</div>
+<div class="ws-wheel" data-event-wheel><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
+<p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
+</section>
 <!-- Service Health: one strip across the page. From xl the server's gauges
      sit in the header beside the status pill: pages/home.js puts a copy of
      #homeHeaderGauges there and takes it out again when Home is left (the
