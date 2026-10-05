@@ -1115,12 +1115,6 @@ export async function mount(ctx) {
                 setGaugeText('[data-gauge-text="cpu"]', Math.round(cpuPct) + '%');
                 setGaugeRing('cpu', cpuPct);
             }
-            // Show CPU label (configurable in settings, falls back to thread count)
-            if (stats.cpu_label) {
-                setGaugeText('[data-gauge-detail="cpu"]', stats.cpu_label);
-            } else if (stats.cpu_cores) {
-                setGaugeText('[data-gauge-detail="cpu"]', stats.cpu_cores + 'T');
-            }
 
             // Update RAM gauge
             if (stats.ram_percent !== null) {
@@ -1128,24 +1122,16 @@ export async function mount(ctx) {
                 setGaugeText('[data-gauge-text="ram"]', Math.round(ramPct) + '%');
                 setGaugeRing('ram', ramPct);
             }
-            // Show RAM label (configurable, falls back to used/total GB)
-            if (stats.ram_label) {
-                setGaugeText('[data-gauge-detail="ram"]', stats.ram_label);
-            } else if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
-                var usedGB = (stats.ram_used_mb / 1024).toFixed(1);
-                var totalGB = (stats.ram_total_mb / 1024).toFixed(0);
-                setGaugeText('[data-gauge-detail="ram"]', usedGB + '/' + totalGB + ' GB');
-            }
 
-            // Update Network gauge
+            // Update Network gauge: whole numbers on one line under one unit;
+            // screen readers get the unit in full after each figure.
             var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
             var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
-            var netUnitLabel = stats.net_unit === 'MBps' ? 'MB/s' : 'Mbps';
-            setGaugeText('[data-gauge-net="down"]', dl.toFixed(1));
-            setGaugeText('[data-gauge-net="up"]', ul.toFixed(1));
-            setGaugeText('[data-gauge-unit]', netUnitLabel);
-            // Show network label (configurable)
-            if (stats.net_label) setGaugeText('[data-gauge-detail="net"]', stats.net_label);
+            var bytes = stats.net_unit === 'MBps';
+            setGaugeText('[data-gauge-net="down"]', String(Math.round(dl)));
+            setGaugeText('[data-gauge-net="up"]', String(Math.round(ul)));
+            setGaugeText('[data-gauge-unit]', bytes ? 'MB/s' : 'Mbps');
+            setGaugeText('[data-gauge-unit-long]', bytes ? 'megabytes per second' : 'megabits per second');
             // Scale network gauge: percentage of configured max throughput
             var netMax = stats.net_max || 1000;
             setGaugeRing('net', Math.min((dl + ul) / netMax * 100, 100));

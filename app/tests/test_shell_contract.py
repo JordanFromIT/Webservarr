@@ -692,10 +692,23 @@ class PhoneShellContract(unittest.TestCase):
         for part in (body, row):
             for hook in ('data-gauge-ring="cpu"', 'data-gauge-ring="ram"', 'data-gauge-ring="net"',
                          'data-gauge-text="cpu"', 'data-gauge-text="ram"',
-                         'data-gauge-detail="cpu"', 'data-gauge-detail="ram"', 'data-gauge-detail="net"',
                          'data-gauge-net="up"', 'data-gauge-net="down"'):
                 self.assertEqual(part.count(hook), 1, hook)
-            self.assertEqual(part.count("data-gauge-unit"), 2)
+            # No sub-line under any gauge (no thread count, memory size or link speed).
+            self.assertNotIn("data-gauge-detail", part)
+            # Upload and download share one line and one visible unit, each
+            # figure a fixed four characters wide, and screen readers hear the
+            # unit in full after each.
+            net = re.search(r'<p class="[^"]*">(<span[^>]*>arrow_upward</span>.*?)</p>', part)
+            self.assertIsNotNone(net)
+            line = net.group(1)
+            self.assertIn("arrow_downward", line)
+            self.assertEqual(line.count("data-gauge-unit "), 1)
+            self.assertIn('data-gauge-unit class="ml-0.5 text-frosted-blue/70" aria-hidden="true">Mbps<', line)
+            self.assertEqual(line.count('data-gauge-unit-long class="sr-only">megabits per second<'), 2)
+            self.assertEqual(line.count('class="inline-block min-w-[4ch] text-right tabular-nums">0<'), 2)
+            self.assertLess(line.index('>Upload<'), line.index('data-gauge-net="up"'))
+            self.assertLess(line.index('>Download<'), line.index('data-gauge-net="down"'))
         # The header is the shell's: Home adds its copy and takes it out on leave.
         home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
         add = home[home.index("function addHeaderGauges() {"):home.index("function eachGauge(")]
@@ -703,6 +716,12 @@ class PhoneShellContract(unittest.TestCase):
         self.assertIn("removeHeaderGauges(pill.parentNode);", add)
         self.assertIn("pill.parentNode.insertBefore(headerGauges, pill.nextSibling);", add)
         self.assertIn("return function () { removeHeaderGauges(null); };", home)
+        # The network figures are whole numbers.
+        stats = home[home.index("async function loadSystemStats() {"):home.index("// One delegated listener")]
+        self.assertIn("""setGaugeText('[data-gauge-net="down"]', String(Math.round(dl)));""", stats)
+        self.assertIn("""setGaugeText('[data-gauge-net="up"]', String(Math.round(ul)));""", stats)
+        self.assertNotIn("toFixed", stats)
+        self.assertNotIn("data-gauge-detail", stats)
 
 if __name__ == "__main__":
     unittest.main()
