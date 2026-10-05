@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.config import settings
 from app.database import SessionLocal
+from app.home_event_log import PINNED_EMPTY as EVENT_PINNED_EMPTY, render_pinned
 from app.settings_registry import (
     COLOR_KEYS, GAUGE_IDS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color,
     safe_font,
@@ -565,6 +566,8 @@ HEADER_MARKER = "<!-- ws:header -->"
 APP_NAME_MARKER = "<!-- ws:app-name -->"
 # Home's event log section; flags["feed_off"] renders it hidden (render_html).
 EVENT_LOG_OPEN = '<section id="homeEventLog"'
+# Home's pinned problems: flags["event_pinned"] ({"items", "now_ms"}) writes
+# the rows into the empty list, home_event_log.PINNED_EMPTY.
 # Home's news cards: flags["home_news"] replaces the skeleton between these
 # with the real cards (app/home_news.py) and marks the section arrived.
 HOME_NEWS_OPEN = "<!-- ws:home-news -->"
@@ -1007,6 +1010,14 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         # Home's event log: the status feed is off and empty, so the section
         # is hidden from the first paint and never holds room (index.html).
         out = out.replace(EVENT_LOG_OPEN, EVENT_LOG_OPEN + " hidden", 1)
+
+    pinned = flags.get("event_pinned") if name == "index" else None
+    if pinned is not None and not flags.get("feed_off") and EVENT_PINNED_EMPTY in out:
+        # Open outages and important notes, above the wheel: written as the
+        # page script would write them, so the section is its real height
+        # from the first paint and the script takes the rows over as they are.
+        out = out.replace(EVENT_PINNED_EMPTY,
+                          render_pinned(pinned.get("items") or [], int(pinned["now_ms"])), 1)
 
     news = flags.get("home_news") if name == "index" else None
     if news is not None and HOME_NEWS_OPEN in out and HOME_NEWS_CLOSE in out:

@@ -1,0 +1,245 @@
+{
+ "about": "Home's pinned problems: app/home_event_log.py render_pinned (test_home_event_log.py) and the rows pages/home.js writes (app/tests/js/home_event_log.mjs) must both be exactly html for each case's open items at now_ms. Regenerate from home_event_log.py only after changing both.",
+ "now_ms": 1791201600000,
+ "cases": [
+  {
+   "why": "an outage, minutes: the red mark",
+   "open": [
+    {
+     "id": 7,
+     "source": "auto",
+     "text": "Demo service is down",
+     "service": "Demo service",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:54:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:54:00.000Z",
+     "at": "2026-10-05T11:54:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a7:down\" data-type=\"down\" title=\"Demo service is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Demo service is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:54:00.000Z\">6 min ago</time></li></ul>"
+  },
+  {
+   "why": "an important note: the amber mark",
+   "open": [
+    {
+     "id": 3,
+     "source": "admin",
+     "text": "Downloads paused until 9pm",
+     "service": null,
+     "important": true,
+     "resolved": false,
+     "started_at": null,
+     "ended_at": null,
+     "created_at": "2026-10-05T11:25:00.000Z",
+     "at": "2026-10-05T11:25:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"n3\" data-type=\"important\" title=\"Downloads paused until 9pm\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">warning</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Important: </span>Downloads paused until 9pm</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:25:00.000Z\">35 min ago</time></li></ul>"
+  },
+  {
+   "why": "just now",
+   "open": [
+    {
+     "id": 8,
+     "source": "auto",
+     "text": "Plex is down",
+     "service": "Plex",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:59:40.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:59:40.000Z",
+     "at": "2026-10-05T11:59:40.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a8:down\" data-type=\"down\" title=\"Plex is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Plex is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:59:40.000Z\">just now</time></li></ul>"
+  },
+  {
+   "why": "hours",
+   "open": [
+    {
+     "id": 9,
+     "source": "auto",
+     "text": "Books is down",
+     "service": "Books",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T09:30:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T09:30:00.000Z",
+     "at": "2026-10-05T09:30:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a9:down\" data-type=\"down\" title=\"Books is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Books is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T09:30:00.000Z\">3 h ago</time></li></ul>"
+  },
+  {
+   "why": "yesterday",
+   "open": [
+    {
+     "id": 10,
+     "source": "admin",
+     "text": "Maintenance window",
+     "service": null,
+     "important": true,
+     "resolved": false,
+     "started_at": null,
+     "ended_at": null,
+     "created_at": "2026-10-04T06:00:00.000Z",
+     "at": "2026-10-04T06:00:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"n10\" data-type=\"important\" title=\"Maintenance window\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">warning</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Important: </span>Maintenance window</span><time class=\"ws-pinned__time\" datetime=\"2026-10-04T06:00:00.000Z\">yesterday</time></li></ul>"
+  },
+  {
+   "why": "days",
+   "open": [
+    {
+     "id": 11,
+     "source": "auto",
+     "text": "Requests is down",
+     "service": "Requests",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-02T11:50:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-02T11:50:00.000Z",
+     "at": "2026-10-02T11:50:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a11:down\" data-type=\"down\" title=\"Requests is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Requests is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-02T11:50:00.000Z\">3 days ago</time></li></ul>"
+  },
+  {
+   "why": "escaping",
+   "open": [
+    {
+     "id": 12,
+     "source": "admin",
+     "text": "<b>Bold</b> & \"quoted\" 'single'",
+     "service": null,
+     "important": true,
+     "resolved": false,
+     "started_at": null,
+     "ended_at": null,
+     "created_at": "2026-10-05T11:55:00.000Z",
+     "at": "2026-10-05T11:55:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"n12\" data-type=\"important\" title=\"&lt;b&gt;Bold&lt;/b&gt; &amp; &quot;quoted&quot; &#x27;single&#x27;\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">warning</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Important: </span>&lt;b&gt;Bold&lt;/b&gt; &amp; \"quoted\" 'single'</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:55:00.000Z\">5 min ago</time></li></ul>"
+  },
+  {
+   "why": "no start time: the outage's created time",
+   "open": [
+    {
+     "id": 13,
+     "source": "auto",
+     "text": "Kavita is down",
+     "service": "Kavita",
+     "important": false,
+     "resolved": false,
+     "started_at": null,
+     "ended_at": null,
+     "created_at": "2026-10-05T11:48:00.000Z",
+     "at": "2026-10-05T11:48:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a13:down\" data-type=\"down\" title=\"Kavita is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Kavita is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:48:00.000Z\">12 min ago</time></li></ul>"
+  },
+  {
+   "why": "newest first, an outage and a note mixed",
+   "open": [
+    {
+     "id": 14,
+     "source": "auto",
+     "text": "Plex is down",
+     "service": "Plex",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:20:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:20:00.000Z",
+     "at": "2026-10-05T11:20:00.000Z"
+    },
+    {
+     "id": 15,
+     "source": "admin",
+     "text": "Heads up",
+     "service": null,
+     "important": true,
+     "resolved": false,
+     "started_at": null,
+     "ended_at": null,
+     "created_at": "2026-10-05T11:50:00.000Z",
+     "at": "2026-10-05T11:50:00.000Z"
+    },
+    {
+     "id": 16,
+     "source": "auto",
+     "text": "Books is down",
+     "service": "Books",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:40:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:40:00.000Z",
+     "at": "2026-10-05T11:40:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"n15\" data-type=\"important\" title=\"Heads up\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">warning</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Important: </span>Heads up</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:50:00.000Z\">10 min ago</time></li><li class=\"ws-pinned__row\" data-key=\"a16:down\" data-type=\"down\" title=\"Books is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Books is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:40:00.000Z\">20 min ago</time></li><li class=\"ws-pinned__row\" data-key=\"a14:down\" data-type=\"down\" title=\"Plex is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Plex is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:20:00.000Z\">40 min ago</time></li></ul>"
+  },
+  {
+   "why": "same moment: the higher id first",
+   "open": [
+    {
+     "id": 17,
+     "source": "auto",
+     "text": "Plex is down",
+     "service": "Plex",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:55:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:55:00.000Z",
+     "at": "2026-10-05T11:55:00.000Z"
+    },
+    {
+     "id": 18,
+     "source": "auto",
+     "text": "Books is down",
+     "service": "Books",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T11:55:00.000Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:55:00.000Z",
+     "at": "2026-10-05T11:55:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a18:down\" data-type=\"down\" title=\"Books is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Books is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:55:00.000Z\">5 min ago</time></li><li class=\"ws-pinned__row\" data-key=\"a17:down\" data-type=\"down\" title=\"Plex is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Plex is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T11:55:00.000Z\">5 min ago</time></li></ul>"
+  },
+  {
+   "why": "milliseconds kept",
+   "open": [
+    {
+     "id": 19,
+     "source": "auto",
+     "text": "Sonarr is down",
+     "service": "Sonarr",
+     "important": false,
+     "resolved": false,
+     "started_at": "2026-10-05T03:57:00.123456Z",
+     "ended_at": null,
+     "created_at": "2026-10-05T11:57:00.000Z",
+     "at": "2026-10-05T11:57:00.000Z"
+    }
+   ],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\"><li class=\"ws-pinned__row\" data-key=\"a19:down\" data-type=\"down\" title=\"Sonarr is down\"><span class=\"ws-pinned__icon material-symbols-outlined\" aria-hidden=\"true\">error</span><span class=\"ws-pinned__text\"><span class=\"sr-only\">Problem: </span>Sonarr is down</span><time class=\"ws-pinned__time\" datetime=\"2026-10-05T03:57:00.123Z\">8 h ago</time></li></ul>"
+  },
+  {
+   "why": "nothing pinned: the empty list",
+   "open": [],
+   "html": "<ul class=\"ws-pinned\" data-event-pinned role=\"list\" aria-label=\"Current problems\" hidden></ul>"
+  }
+ ]
+}

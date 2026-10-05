@@ -1053,7 +1053,8 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 .ws-wheel__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ws-wheel__note { flex: none; white-space: pre; color: rgb(var(--color-text) / 0.7); }
 .ws-wheel__line[data-type="quiet"] .ws-wheel__text { color: rgb(var(--color-text) / 0.7); }
-.ws-wheel__time {
+.ws-wheel__time,
+.ws-pinned__time {
   flex: none;
   margin-inline-start: auto;
   padding-inline-start: 1em;
@@ -1061,6 +1062,39 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
   font-size: 0.8125em;
   font-variant-numeric: tabular-nums;
 }
+/* What the feed pins (an open outage, an open important note): a row of its
+   own between the heading and the wheel until it is resolved, so the wheel
+   rolls on under it. The wheel's front line in size and height (15px on
+   28px), its time in the same column; the icon is a status mark (red for an
+   outage, amber for an important note), not a section icon, so the section
+   icons setting leaves it on. Its box is fixed, so the icon font arriving
+   moves nothing. pages/home.js and app/home_event_log.py write the rows. */
+.ws-pinned {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 15px;
+  color: rgb(var(--color-text));
+}
+.ws-pinned[hidden] { display: none; }
+.ws-pinned__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  height: 28px;
+  white-space: nowrap;
+}
+.ws-pinned__icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  font-size: 18px;
+  line-height: 1;
+}
+.ws-pinned__row[data-type="down"] .ws-pinned__icon { color: rgb(var(--ws-status-err)); }
+.ws-pinned__row[data-type="important"] .ws-pinned__icon { color: rgb(var(--ws-status-warn)); }
+.ws-pinned__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; letter-spacing: -0.005em; }
 /* Reduced motion: lines crossfade in place, nothing turns. */
 @media (prefers-reduced-motion: reduce) {
   .ws-wheel__line { transition: opacity var(--wheel-duration) linear; }

@@ -119,6 +119,10 @@
 <span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
 <h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
 </div>
+<!-- Open outages and important notes, held above the wheel until they are
+     resolved (theme.css .ws-pinned). The server writes the rows in
+     (app/home_event_log.py) and pages/home.js takes them over. -->
+<ul class="ws-pinned" data-event-pinned role="list" aria-label="Current problems" hidden></ul>
 <div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
 <button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>
 <p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>

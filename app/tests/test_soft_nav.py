@@ -580,9 +580,10 @@ class HomePage(unittest.TestCase):
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
         self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_EMPTY_HTML", "NEWS_FRESH_MS",
+                                         "PINNED_ICON", "PINNED_PREFIX",
                                          "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
                                          "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
-                                         "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])
+                                         "WHEEL_QUIET_PINNED", "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
         # Every lookup stays inside the page, but two: the header's status
         # pill and the top bar's title, which the gauges' copies go beside

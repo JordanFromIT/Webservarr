@@ -145,8 +145,19 @@ Every write is idempotent across 2 workers, using a unique key per app, event an
 - **Event log:**
   - Library lines use a neutral grey tick (`--color-text-secondary`).
   - " · not guaranteed" is a muted span after the title.
-  - An open outage stays pinned in the log until it resolves, so library lines can't push it out of
-    view. The wheel shows the pinned outage plus the newest lines, 4 in all.
+  - What the feed pins (an open outage, an open important note) is a row of its own between the
+    "Event log" heading and the wheel, not a line on the wheel, so library lines can't push it out of
+    view and the wheel keeps rolling the rest (5 lines, scroll-back as before). Each row: an icon
+    (`error` in `--ws-status-err` for an outage, `warning` in `--ws-status-warn` for a note), the
+    text, and the time in the wheel's time column. The rows are a list named "Current problems",
+    the icon hidden from screen readers behind a visually hidden "Problem:" or "Important:"; a new
+    row is announced through the log's polite live region.
+  - The server writes the rows into Home's HTML (app/home_event_log.py, the same markup as
+    home.js, kept in step by app/tests/event_pinned_vectors.json), so nothing moves when the script
+    takes over. A row that appears or goes after load is a real status change and may move the page.
+  - Resolved, an outage's row goes and its "is down" and "is back, down N min" lines join the
+    wheel's history (the return turns in and is announced); a resolved or unpinned note joins the
+    history at its own time, unannounced.
 - **The feed API** returns library items in the same `items` list, with `source: "library"`.
 
 ## 7. Errors and privacy

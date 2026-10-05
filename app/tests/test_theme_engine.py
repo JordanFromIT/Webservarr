@@ -244,7 +244,13 @@ class DerivedStatusText(unittest.TestCase):
         self.assertGreater(THEME.index("@supports (color: color-mix("), THEME.index("[data-ws-theme-preview] {"))
 
     def test_no_css_paints_words_in_a_pure_status_colour(self):
-        self.assertNotRegex(THEME, r"(?<![-\w])color:\s*rgb\(var\(--(?:color|ws)-status-")
+        # One exception, and it is not words: the icon on Home's pinned rows
+        # (.ws-pinned__icon), a glyph hidden from screen readers that marks
+        # the row's status the way the wheel's tick does. The words beside it
+        # are the plain text colour.
+        icon = re.compile(r"\.ws-pinned__row\[data-type=\"(?:down|important)\"\] \.ws-pinned__icon \{[^{}]*\}")
+        self.assertEqual(len(icon.findall(THEME)), 2)
+        self.assertNotRegex(icon.sub("", THEME), r"(?<![-\w])color:\s*rgb\(var\(--(?:color|ws)-status-")
 
 
 

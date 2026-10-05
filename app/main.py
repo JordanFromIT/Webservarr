@@ -24,7 +24,7 @@ from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
-from app import home_news
+from app import home_event_log, home_news
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
@@ -450,7 +450,8 @@ async def root(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("index", request, user, extra_flags={"feed_off": _event_log_off(), "home_news": _home_news})
+    return render_page("index", request, user, extra_flags={
+        "feed_off": _event_log_off(), "event_pinned": await _event_log_pinned(), "home_news": _home_news})
 
 
 def _home_news(branding: dict):
@@ -460,6 +461,27 @@ def _home_news(branding: dict):
     if news is not None:
         news["now_ms"] = home_news.now_ms()
     return news
+
+
+async def _event_log_pinned() -> Optional[dict]:
+    """Home's pinned problems for the page render (app/home_event_log.py): the
+    feed's open outages and important notes, none when the feed would answer
+    "unavailable" (home.js shows none then either). None leaves them to the
+    page script."""
+    db = None
+    try:
+        db = SessionLocal()
+        items = status_feed_service.pinned_items(db)
+        configured = status_feed_service.kuma_configured(db)
+    except Exception:  # noqa: BLE001 - the page script writes them instead
+        logger.warning("Could not read Home's pinned problems", exc_info=True)
+        return None
+    finally:
+        if db is not None:
+            db.close()
+    if items and configured and not await status_feed_service.kuma_answering():
+        items = []
+    return {"items": items, "now_ms": home_event_log.now_ms()}
 
 
 def _event_log_off() -> bool:

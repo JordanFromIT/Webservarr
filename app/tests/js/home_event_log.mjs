@@ -11,10 +11,13 @@
 // wheel one notch (several, one notch each, in order) and announced once;
 // never more than five settled lines; reduced motion crossfading at once;
 // text written as text; a section the server rendered hidden coming back;
-// library lines (grey tick, a grab's muted note) and an open outage staying
-// on the wheel under a burst of them; turning back through the history by
-// wheel, keys and drag, with the page scrolling at either end, no yank from
-// new events, "Latest" and the 15 s return.
+// library lines (grey tick, a grab's muted note); what the feed pins (an
+// open outage, an important note) as rows above the wheel and never on it,
+// announced when new, joining the history when resolved, held under a burst
+// of library lines, and the server's rows (event_pinned_vectors.json) taken
+// over without a change; turning back through the history by wheel, keys and
+// drag, with the page scrolling at either end, no yank from new events,
+// "Latest" and the 15 s return.
 //
 // HOME_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/home_event_log.mjs (npm run test:js; CI js-checks).
@@ -27,6 +30,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(here, '../../static');
 const HOME_PATH = process.env.HOME_JS || join(STATIC, 'js/pages/home.js');
 const HOME_HTML = readFileSync(join(STATIC, 'index.html'), 'utf8');
+const THEME_CSS = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
+const PINNED = JSON.parse(readFileSync(join(here, '../event_pinned_vectors.json'), 'utf8'));
 const BOOKS_SRC = readFileSync(join(STATIC, 'js/pages/books.js'), 'utf8');
 
 const report = console.error.bind(console);
@@ -141,6 +146,12 @@ function visit(o = {}) {
   const doc = win.document;
   doc.body.innerHTML = HOME_HTML.match(NAV)[0].replace(/<\/main>$/, '');
   if (o.serverHidden) doc.getElementById('homeEventLog').hidden = true;
+  if (o.pinnedHTML !== undefined) {
+    // As the server writes them (app/home_event_log.py).
+    const tpl = doc.createElement('template');
+    tpl.innerHTML = o.pinnedHTML;
+    doc.querySelector('[data-event-pinned]').replaceWith(tpl.content.firstElementChild);
+  }
   const clock = fakeClock();
   const feed = { answer: o.answer };
   const ctl = new win.AbortController();
@@ -185,6 +196,9 @@ function visit(o = {}) {
   const wheel = section.querySelector('[data-event-wheel]');
   const t = {
     win, doc, clock, ctl, WS, feed, reduced, section, wheel,
+    pinnedList: () => section.querySelector('[data-event-pinned]'),
+    pinned: () => Array.from(section.querySelector('[data-event-pinned]').children),
+    pinnedTexts: () => t.pinned().map((el) => { const x = el.querySelector('.ws-pinned__text'); return x.textContent.slice(x.querySelector('.sr-only').textContent.length); }),
     // Lines on the wheel in the document's order (oldest first).
     all: () => Array.from(wheel.children),
     settled: () => Array.from(wheel.children).filter((el) => !el.classList.contains('is-leaving')),
@@ -243,6 +257,7 @@ const iso = (minsAgo) => new Date(Date.now() - minsAgo * MIN).toISOString();
 const note = (id, text, minsAgo, important = false) => ({ id, source: 'admin', text, service: null, important, resolved: false, started_at: null, ended_at: null, created_at: iso(minsAgo), at: iso(minsAgo) });
 const outage = (id, service, minsAgo) => ({ id, source: 'auto', text: service + ' is down', service, important: false, resolved: false, started_at: iso(minsAgo), ended_at: null, created_at: iso(minsAgo), at: iso(minsAgo) });
 const back = (id, service, beganAgo, endedAgo) => ({ id, source: 'auto', text: `${service} is back, down ${beganAgo - endedAgo} min`, service, important: false, resolved: true, started_at: iso(beganAgo), ended_at: iso(endedAgo), created_at: iso(beganAgo), at: iso(endedAgo) });
+const lib = (id, text, minsAgo, note = '') => ({ id, source: 'library', text, note, service: null, important: false, resolved: true, started_at: null, ended_at: null, created_at: iso(minsAgo), at: iso(minsAgo) });
 const answer = (state, open, items) => ({ state, open, items });
 
 const QUIET_OK = answer('ok', [], [
@@ -296,13 +311,45 @@ await run('ok: the newest five events, newest at the front, each with its tick a
   check('two polls: the live sections (30 s) carry the feed', !!t.WS && t.WS.reads === 1);
 });
 
-await run('down: an open outage leads, in the outage colour', async (make) => {
-  const t = make({ answer: answer('down', [outage(7, 'Plex', 2)], [note(3, 'Movie night Friday', 90)]) });
+await run('down: an open outage is pinned above the wheel, never on it', async (make) => {
+  const t = make({ answer: answer('down', [outage(7, 'Plex', 6)], [note(3, 'Movie night Friday', 90)]) });
+  check('before the answer the list is empty and hidden', t.pinned().length === 0 && t.pinnedList().hidden === true);
   await t.open();
-  const front = t.slots()[0];
-  check('the outage is at the front', lineText(front) === 'Plex is down' && front.getAttribute('data-type') === 'down');
-  check('just now / minutes', front.querySelector('time').textContent === '2 min ago');
-  check('the note behind it', lineText(t.slots()[1]) === 'Movie night Friday');
+  const list = t.pinnedList();
+  check('the list sits under the heading, above the wheel', list.previousElementSibling.querySelector('h3') && list.nextElementSibling === t.wheel);
+  check('a list named for what it holds', list.tagName === 'UL' && list.getAttribute('role') === 'list' && list.getAttribute('aria-label') === 'Current problems' && list.hidden === false);
+  const [row] = t.pinned();
+  check('one row: the outage', t.pinned().length === 1 && row.tagName === 'LI' && row.getAttribute('data-type') === 'down' && row.getAttribute('data-key') === 'a7:down');
+  const icon = row.firstElementChild;
+  check('an exclamation icon first, hidden from screen readers', icon.classList.contains('ws-pinned__icon') && icon.classList.contains('material-symbols-outlined') && icon.textContent === 'error' && icon.getAttribute('aria-hidden') === 'true');
+  check('a status icon, not a section icon (the section icons setting leaves it on)', !icon.classList.contains('ws-section-icon'));
+  const words = row.querySelector('.ws-pinned__text');
+  check('"Problem: " for screen readers, then the problem', words.querySelector('.sr-only').textContent === 'Problem: ' && JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Plex is down']));
+  check('its time last, as the wheel says times', row.lastElementChild.tagName === 'TIME' && row.lastElementChild.textContent === '6 min ago' && row.lastElementChild.getAttribute('datetime') === t.feed.answer.open[0].started_at);
+  check('the full text in its title (ellipsis on a phone)', row.title === 'Plex is down');
+  check('not on the wheel: the note is at the front', JSON.stringify(t.texts()) === JSON.stringify(['Movie night Friday']), t.texts());
+  check('nothing announced on the first answer', t.announced() === '');
+});
+
+await run('only pinned: the wheel says there is nothing else', async (make) => {
+  const t = make({ answer: answer('down', [outage(7, 'Plex', 6)], []) });
+  await t.open();
+  check('the outage is pinned', JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Plex is down']));
+  check('the wheel\'s quiet line does not say the month was clear', JSON.stringify(t.texts()) === JSON.stringify(['No other events this month']) && t.all()[0].getAttribute('data-type') === 'quiet', t.texts());
+  check('nothing to turn back to', t.wheel.getAttribute('tabindex') === '0');
+});
+
+await run('an important note is pinned in amber; a plain note is not pinned', async (make) => {
+  const t = make({ answer: answer('ok', [note(3, 'Downloads paused until 9pm', 35, true)], [note(4, 'Requests are slow tonight', 4)]) });
+  await t.open();
+  const [row] = t.pinned();
+  check('one row: the note', t.pinned().length === 1 && row.getAttribute('data-type') === 'important' && row.getAttribute('data-key') === 'n3');
+  check('its own icon, "Important: " for screen readers', row.querySelector('.ws-pinned__icon').textContent === 'warning' && row.querySelector('.sr-only').textContent === 'Important: ');
+  check('the time it was posted', row.querySelector('time').textContent === '35 min ago');
+  check('the plain note stays on the wheel, alone', JSON.stringify(t.texts()) === JSON.stringify(['Requests are slow tonight']), t.texts());
+  const err = THEME_CSS.match(/\.ws-pinned__row\[data-type="down"\] \.ws-pinned__icon \{ color: ([^;]+); \}/);
+  const warn = THEME_CSS.match(/\.ws-pinned__row\[data-type="important"\] \.ws-pinned__icon \{ color: ([^;]+); \}/);
+  check('red for an outage, amber for a note, from the theme\'s status colours', err && err[1] === 'rgb(var(--ws-status-err))' && warn && warn[1] === 'rgb(var(--ws-status-warn))', [err && err[1], warn && warn[1]]);
 });
 
 await run('unavailable: one line, never a claim that everything is running', async (make) => {
@@ -347,54 +394,111 @@ await run('a new event turns the wheel one notch and is announced', async (make)
   const t = make({ answer: QUIET_OK });
   await t.open();
   const oldFront = t.slots()[0];
-  await t.poll(answer('down', [outage(8, 'Requests', 0)], QUIET_OK.items));
+  await t.poll(answer('ok', [], [note(8, 'Movie night moved to Saturday', 0)].concat(QUIET_OK.items)));
   const entering = t.all()[t.all().length - 1];
-  check('the new line is last in the document, on the front notch', lineText(entering) === 'Requests is down' && slot(entering) === 0);
+  check('the new line is last in the document, on the front notch', lineText(entering) === 'Movie night moved to Saturday' && slot(entering) === 0);
   check('the old front moved back one notch', slot(oldFront) === 1 && oldFront.getAttribute('aria-hidden') === 'true');
-  check('the new front is readable and titled', entering.getAttribute('aria-hidden') === null && entering.title === 'Requests is down');
+  check('the new front is readable and titled', entering.getAttribute('aria-hidden') === null && entering.title === 'Movie night moved to Saturday');
   check('the oldest line turns away over the top', t.all().filter((el) => el.classList.contains('is-leaving')).length === 1);
-  check('announced once, as itself', t.announced() === 'Requests is down');
+  check('announced once, as itself', t.announced() === 'Note: Movie night moved to Saturday');
   await t.clock.advance(800);
   check('after the turn: five settled lines', t.all().length === 5 && t.settled().length === 5, t.all().length);
-  check('in order', JSON.stringify(t.texts()) === JSON.stringify(['Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down']), t.texts());
+  check('in order', JSON.stringify(t.texts()) === JSON.stringify(['Movie night moved to Saturday', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min', 'Books is down']), t.texts());
   await t.clock.advance(7000);
   check('the announcement clears later (no double reading in browse mode)', t.announced() === '');
   await t.poll();
   check('the same answer again changes nothing', t.all().length === 5 && t.announced() === '');
 });
 
-await run('the outage resolves: its return turns in, its start moves back', async (make) => {
+await run('a new outage is pinned above the wheel and announced; the wheel does not turn', async (make) => {
+  const t = make({ answer: QUIET_OK });
+  await t.open();
+  const before = t.all();
+  check('nothing pinned yet: the list is hidden', t.pinnedList().hidden === true);
+  await t.poll(answer('down', [outage(8, 'Requests', 0)], QUIET_OK.items));
+  check('a row for it', JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Requests is down']) && t.pinnedList().hidden === false);
+  check('announced once, as a problem', t.announced() === 'Problem: Requests is down', t.announced());
+  check('the wheel kept its lines, nothing turned', t.all().length === 5 && t.all().every((el, i) => el === before[i]) && !t.wheel.querySelector('.is-entering, .is-leaving'));
+  await t.clock.advance(7000);
+  await t.poll();
+  check('the same answer again announces nothing', t.announced() === '' && t.pinned().length === 1);
+});
+
+await run('the outage resolves: its row goes, and its start and return join the wheel', async (make) => {
   const t = make({ answer: answer('down', [outage(8, 'Requests', 3)], QUIET_OK.items) });
   await t.open();
-  const down = t.slots()[0];
-  check('the outage is at the front', t.slots()[0] === down && lineText(down) === 'Requests is down');
+  const row = t.pinned()[0];
+  check('pinned, and not on the wheel', row && !t.texts().includes('Requests is down'));
   await t.poll(answer('ok', [], [back(8, 'Requests', 3, 0)].concat(QUIET_OK.items)));
+  check('the row is gone and the list hidden', !row.parentNode && t.pinned().length === 0 && t.pinnedList().hidden === true);
   await t.clock.advance(800);
   check('back at the front, in the back-up colour', t.texts()[0] === 'Requests is back, down 3 min' && t.slots()[0].getAttribute('data-type') === 'up');
-  check('the same "is down" line, one notch back (not rebuilt)', t.slots()[1] === down && lineText(down) === 'Requests is down');
-  check('announced', t.announced() === 'Requests is back, down 3 min');
+  check('its start one notch behind, in the outage colour', t.texts()[1] === 'Requests is down' && t.slots()[1].getAttribute('data-type') === 'down', t.texts());
+  check('the return announced, once', t.announced() === 'Requests is back, down 3 min');
   check('five lines', t.all().length === 5);
+});
+
+await run('an important note resolved moves into the history, unannounced', async (make) => {
+  const t = make({ answer: answer('ok', [note(30, 'Server move tonight', 2, true)], QUIET_OK.items) });
+  await t.open();
+  check('pinned', JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Server move tonight']));
+  check('the wheel without it', !t.texts().includes('Server move tonight'));
+  const resolved = Object.assign(note(30, 'Server move tonight', 2, true), { resolved: true, at: iso(0) });
+  await t.poll(answer('ok', [], [resolved].concat(QUIET_OK.items)));
+  await t.clock.advance(800);
+  check('the row is gone', t.pinned().length === 0 && t.pinnedList().hidden === true);
+  check('on the wheel at its own time, the front', t.texts()[0] === 'Server move tonight' && t.slots()[0].getAttribute('data-type') === 'important', t.texts());
+  check('not announced again', t.announced() === '');
+});
+
+await run('unavailable: nothing is pinned', async (make) => {
+  const t = make({ answer: answer('down', [outage(7, 'Plex', 2)], QUIET_OK.items) });
+  await t.open();
+  check('pinned at first', t.pinned().length === 1);
+  await t.poll(answer('unavailable', [outage(7, 'Plex', 2)], QUIET_OK.items));
+  check('the row goes with the rest', t.pinned().length === 0 && t.pinnedList().hidden === true && t.texts()[0] === 'Status unavailable right now');
+});
+
+await run('a new outage and a new line in one answer: one message says both', async (make) => {
+  const t = make({ answer: QUIET_OK });
+  await t.open();
+  await t.poll(answer('down', [outage(8, 'Plex', 1)], [note(9, 'Hello', 0)].concat(QUIET_OK.items)));
+  check('the problem first, then the line', t.announced() === 'Problem: Plex is down. Note: Hello', t.announced());
+  const r = make({ answer: QUIET_OK, reduced: true });
+  await r.open();
+  await r.poll(answer('down', [outage(8, 'Plex', 1)], [note(9, 'Hello', 0)].concat(QUIET_OK.items)));
+  check('the same under reduced motion', r.announced() === 'Problem: Plex is down. Note: Hello', r.announced());
+});
+
+await run('reduced motion: a pinned row is simply there, nothing about it moves', async (make) => {
+  const t = make({ answer: QUIET_OK, reduced: true });
+  await t.open();
+  await t.poll(answer('down', [outage(8, 'Requests', 0)], QUIET_OK.items));
+  const row = t.pinned()[0];
+  check('there at once, no entering state', row && row.className === 'ws-pinned__row');
+  const block = THEME_CSS.slice(THEME_CSS.indexOf('.ws-pinned {'), THEME_CSS.indexOf('/* Reduced motion: lines crossfade'));
+  check('the rows have no transition or animation at all', block.length > 0 && !/transition|animation/.test(block));
 });
 
 await run('several new events: one notch each, in order, then five lines', async (make) => {
   const t = make({ answer: QUIET_OK });
   await t.open();
-  await t.poll(answer('down', [outage(8, 'Requests', 1), outage(9, 'Books', 0)], QUIET_OK.items.concat([note(10, 'Hello', 2)])));
+  await t.poll(answer('ok', [], [lib(9, 'Movie Added: Dune (2021)', 0), lib(8, 'Episode Added: Severance S02E03', 1)].concat(QUIET_OK.items, [note(10, 'Hello', 2)])));
   check('first turn at once: the oldest new event at the front', t.texts()[0] === 'Hello', t.texts());
   check('never more than one line fading out', t.all().filter((el) => el.classList.contains('is-leaving')).length <= 1);
   check('no announcement mid-burst', t.announced() === '');
   await t.clock.advance(710);
-  check('second turn', t.texts()[0] === 'Requests is down', t.texts());
+  check('second turn', t.texts()[0] === 'Episode Added: Severance S02E03', t.texts());
   await t.clock.advance(710);
-  check('third turn: the newest at the front', t.texts()[0] === 'Books is down', t.texts());
-  check('the newest is announced, once', t.announced() === 'Books is down');
+  check('third turn: the newest at the front', t.texts()[0] === 'Movie Added: Dune (2021)', t.texts());
+  check('the newest is announced, once', t.announced() === 'Movie Added: Dune (2021)');
   for (let i = 0; i < 3; i++) {
     check('never more than five settled lines or six in the document', t.settled().length <= 5 && t.all().length <= 6, t.all().length);
     await t.clock.advance(300);
   }
   await t.clock.advance(800);
   check('settled: exactly five', t.all().length === 5 && t.settled().length === 5);
-  check('newest five', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Hello', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
+  check('newest five', JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Episode Added: Severance S02E03', 'Hello', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
 });
 
 await run('a deleted note: the line goes, nothing is announced, nothing turns in', async (make) => {
@@ -411,11 +515,11 @@ await run('reduced motion: the set crossfades at once, nothing turns', async (ma
   const t = make({ answer: QUIET_OK, reduced: true });
   await t.open();
   const before = t.all();
-  await t.poll(answer('down', [outage(8, 'Requests', 1), outage(9, 'Books', 0)], QUIET_OK.items));
+  await t.poll(answer('ok', [], [lib(9, 'Movie Added: Dune (2021)', 0), lib(8, 'Episode Added: Severance S02E03', 1)].concat(QUIET_OK.items)));
   check('every old line fades out where it is', before.every((el) => el.classList.contains('is-leaving') && el.getAttribute('aria-hidden') === 'true'));
-  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Books is down', 'Requests is down', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
+  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Episode Added: Severance S02E03', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
   check('every old line kept its notch (no move, only a fade)', before.every((el, i) => slot(el) === 4 - i));
-  check('the newest announced', t.announced() === 'Books is down');
+  check('the newest announced', t.announced() === 'Movie Added: Dune (2021)');
   await t.clock.advance(800);
   check('five lines after the fade', t.all().length === 5 && t.settled().length === 5);
 });
@@ -428,28 +532,27 @@ await run('text is written as text', async (make) => {
 });
 
 await run('a kept copy paints at once; what happened since turns in', async (make) => {
-  const t = make({ cached: QUIET_OK, answer: answer('down', [outage(8, 'Requests', 0)], QUIET_OK.items) });
+  const t = make({ cached: QUIET_OK, answer: answer('down', [outage(8, 'Requests', 1)], [note(9, 'Hello', 0)].concat(QUIET_OK.items)) });
   await t.open();
   await t.clock.advance(800);
-  check('the new event is at the front', t.texts()[0] === 'Requests is down');
-  check('and announced', t.announced() === 'Requests is down');
+  check('the new event is at the front', t.texts()[0] === 'Hello');
+  check('the outage pinned', JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Requests is down']));
+  check('and both announced', t.announced() === 'Problem: Requests is down. Note: Hello', t.announced());
   check('five lines', t.all().length === 5);
 });
 
 await run('leaving the page: no turn runs afterwards', async (make) => {
   const t = make({ answer: QUIET_OK });
   await t.open();
-  await t.poll(answer('down', [outage(8, 'Requests', 1), outage(9, 'Books', 0)], QUIET_OK.items));
-  check('the first turn ran', t.texts()[0] === 'Requests is down');
+  await t.poll(answer('ok', [], [note(9, 'Books is slow', 0), note(8, 'Requests is slow', 1)].concat(QUIET_OK.items)));
+  check('the first turn ran', t.texts()[0] === 'Requests is slow');
   t.ctl.abort();
   await t.clock.advance(5000);
-  check('the second never does once the page is left', t.texts()[0] === 'Requests is down' && t.announced() === '');
+  check('the second never does once the page is left', t.texts()[0] === 'Requests is slow' && t.announced() === '');
 });
 
 // ---- Library lines (Sonarr, Radarr, Chaptarr webhooks) ----
 
-const lib = (id, text, minsAgo, note = '') => ({ id, source: 'library', text, note, service: null, important: false, resolved: true, started_at: null, ended_at: null, created_at: iso(minsAgo), at: iso(minsAgo) });
-const THEME_CSS = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
 
 await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in its own span', async (make) => {
   const t = make({ answer: answer('ok', [], [lib(20, 'Movie Downloading: Dune (2021)', 2, 'not guaranteed'), lib(21, 'Episode Added: Severance S02E03', 5), note(3, 'A note', 30)]) });
@@ -472,25 +575,66 @@ await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in 
   check('announced with its note', t.announced() === 'Movie Downloading: <b>x</b> · <i>not</i> guaranteed', t.announced());
 });
 
-await run('an open outage stays on the wheel under a burst of 10 library lines', async (make) => {
+await run('an open outage stays pinned under a burst of 10 library lines', async (make) => {
   const t = make({ answer: answer('down', [outage(7, 'Plex', 30)], [note(3, 'A note', 60)]) });
   await t.open();
+  const row = t.pinned()[0];
   const burst = [];
   for (let i = 0; i < 10; i++) burst.push(lib(100 + i, 'Episode Added: The Bear S03E0' + i, 10 - i));
   await t.poll(answer('down', [outage(7, 'Plex', 30)], burst.concat([note(3, 'A note', 60)])));
   let lost = 0;
   for (let k = 0; k < 12; k++) {
-    if (!t.texts().includes('Plex is down')) lost += 1;
+    if (t.pinned()[0] !== row || t.texts().includes('Plex is down')) lost += 1;
     check('never more than five settled lines', t.settled().length <= 5, t.settled().length);
     await t.clock.advance(710);
   }
   await t.clock.advance(800);
-  check('the outage never left the wheel during the burst', lost === 0, lost);
-  check('settled: the newest four library lines and the outage, five in all', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Episode Added: The Bear S03E06', 'Plex is down']), t.texts());
-  check('the outage is still in its colour', t.slots()[4].getAttribute('data-type') === 'down');
+  check('the same row stayed pinned, off the wheel, all through the burst', lost === 0, lost);
+  check('settled: the newest five library lines on the wheel', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Episode Added: The Bear S03E06', 'Episode Added: The Bear S03E05']), t.texts());
   await t.poll(answer('ok', [], [back(7, 'Plex', 30, 0)].concat(burst)));
   await t.clock.advance(800);
-  check('resolved, it is no longer held: its return leads and the start goes', t.texts()[0] === 'Plex is back, down 30 min' && !t.texts().includes('Plex is down'), t.texts());
+  check('resolved: the row goes and its return leads the wheel', t.pinned().length === 0 && t.texts()[0] === 'Plex is back, down 30 min' && !t.texts().includes('Plex is down'), t.texts());
+});
+
+// ---- The server's rows (app/home_event_log.py), taken over ----
+
+await run('the script writes exactly the rows the server writes (event_pinned_vectors.json)', async (make) => {
+  const realNow = Date.now;
+  Date.now = () => PINNED.now_ms;
+  try {
+    for (const c of PINNED.cases) {
+      const t = make({ answer: answer('down', c.open, []) });
+      await t.open();
+      const tpl = t.doc.createElement('template');
+      tpl.innerHTML = c.html;
+      const want = tpl.content.firstElementChild;
+      check(c.why + ': the same list', t.pinnedList().isEqualNode(want), [t.pinnedList().outerHTML, c.html]);
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  check('the cases cover what can drift', PINNED.cases.length >= 10);
+});
+
+await run('taking the server\'s rows over changes nothing (no height change)', async (make) => {
+  const realNow = Date.now;
+  Date.now = () => PINNED.now_ms;
+  try {
+    for (const c of PINNED.cases) {
+      const t = make({ answer: answer('down', c.open, [note(99, 'A note', 1)]), pinnedHTML: c.html });
+      const list = t.pinnedList();
+      const rows = t.pinned();
+      const html = list.outerHTML;
+      const flips = [];
+      new t.win.MutationObserver((m) => flips.push(...m)).observe(list, { subtree: true, childList: true, attributes: true, characterData: true });
+      await t.open();
+      check(c.why + ': the same list element', t.pinnedList() === list);
+      check(c.why + ': the same rows, not rebuilt', t.pinned().length === rows.length && t.pinned().every((el, i) => el === rows[i]));
+      check(c.why + ': not one change to them', flips.length === 0 && list.outerHTML === html, flips.length);
+    }
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 await run('a resolved outage is not held: library lines push it off like any line', async (make) => {
@@ -646,14 +790,15 @@ await run('turned back, a new event never moves the view; "Latest" brings it bac
   await t.poll(answer('down', [outage(30, 'Plex', 0)], HISTORY.items.concat([note(31, 'Hello', 1)])));
   await t.clock.advance(800);
   check('the same lines stay in view', JSON.stringify(t.texts()) === view, t.texts());
-  check('the new events are announced once all the same', t.announced() === 'Plex is down');
+  check('the outage is pinned above all the same', JSON.stringify(t.pinnedTexts()) === JSON.stringify(['Plex is down']));
+  check('the new events are announced once all the same', t.announced() === 'Problem: Plex is down. Note: Hello', t.announced());
   check('"Latest" still shows', latestBtn(t).hidden === false);
   await t.clock.advance(7000);
   await t.poll();
   check('the same answer again announces nothing', t.announced() === '' && JSON.stringify(t.texts()) === view);
   latestBtn(t).click();
   await t.clock.advance(800);
-  check('"Latest": the newest at the front, the outage first', JSON.stringify(t.texts()) === JSON.stringify(['Plex is down', 'Hello'].concat(ORDER.slice(0, 3))), t.texts());
+  check('"Latest": the newest at the front, the outage still pinned and not on the wheel', JSON.stringify(t.texts()) === JSON.stringify(['Hello'].concat(ORDER.slice(0, 4))) && t.pinned().length === 1, t.texts());
   check('and it hides', latestBtn(t).hidden === true);
   check('nothing announced twice', t.announced() === '');
 });

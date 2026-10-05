@@ -680,8 +680,14 @@ function releasesError(container) {
 // textContent only.
 //
 // Library lines (Sonarr, Radarr and Chaptarr: "Movie Added: Dune (2021)")
-// carry a grey tick, and a grab its muted " · not guaranteed". However many
-// of them arrive, an open outage stays on the wheel until it resolves.
+// carry a grey tick, and a grab its muted " · not guaranteed".
+//
+// What the feed pins (an open outage, an open important note) is not on the
+// wheel: it is a row of its own above it (theme.css .ws-pinned), with its
+// icon, until it is resolved, so the wheel rolls on under it. The server
+// writes the rows into the page (app/home_event_log.py, the same markup) and
+// the rows are taken over by their data-key. Resolved, an outage's two
+// events and a note join the wheel's history; a new pinned row is announced.
 //
 // People can turn the wheel back through the feed's history (30 days): the
 // mouse wheel or trackpad over it, a vertical drag, or the arrow keys with
@@ -700,6 +706,11 @@ const WHEEL_QUIET = {
     unavailable: 'Status unavailable right now'
 };
 const WHEEL_SR_PREFIX = { note: 'Note: ', important: 'Important: ' };
+// Nothing on the wheel but something pinned above it.
+const WHEEL_QUIET_PINNED = 'No other events this month';
+// A pinned row's icon and its words for screen readers (app/home_event_log.py).
+const PINNED_ICON = { down: 'error', important: 'warning' };
+const PINNED_PREFIX = { down: 'Problem: ', important: 'Important: ' };
 
 function feedTime(iso) {
     var t = typeof iso === 'string' ? Date.parse(iso) : NaN;
@@ -710,14 +721,26 @@ function feedTime(iso) {
 // down (when it began; pinned while it is open) and, once resolved, it came
 // back (when it ended, the item's own text). A note is one event, when it was
 // posted, and so is a library line, with its note ("not guaranteed") if any.
+// What the feed sends as "open" is pinned: an open outage, an important note.
 function feedEvents(data) {
-    var rows = [].concat(Array.isArray(data.open) ? data.open : [], Array.isArray(data.items) ? data.items : []);
+    var open = Array.isArray(data.open) ? data.open : [];
+    var rows = [].concat(open, Array.isArray(data.items) ? data.items : []);
     var out = [];
     var seen = {};
-    rows.forEach(function (it) {
+    rows.forEach(function (it, n) {
         if (!it || typeof it !== 'object' || seen[it.id]) return;
         seen[it.id] = true;
         var text = typeof it.text === 'string' ? it.text : '';
+        if (n < open.length) {
+            if (!text || it.resolved || it.source === 'library') return;
+            var since = feedTime(it.source === 'auto' ? it.started_at : it.created_at);
+            if (since === null) since = feedTime(it.source === 'auto' ? it.created_at : it.at);
+            if (since === null) return;
+            out.push(it.source === 'auto'
+                ? { key: 'a' + it.id + ':down', id: it.id, type: 'down', text: text, at: since, pinned: true }
+                : { key: 'n' + it.id, id: it.id, type: 'important', text: text, at: since, pinned: true });
+            return;
+        }
         if (it.source === 'auto') {
             var began = feedTime(it.started_at);
             if (began === null) began = feedTime(it.created_at);
@@ -728,8 +751,6 @@ function feedEvents(data) {
                     out.push({ key: 'a' + it.id + ':down', type: 'down', text: it.service + ' is down', at: began });
                 }
                 if (ended !== null && text) out.push({ key: 'a' + it.id + ':up', type: 'up', text: text, at: ended });
-            } else if (began !== null && text) {
-                out.push({ key: 'a' + it.id + ':down', type: 'down', text: text, at: began, pinned: true });
             }
         } else if (it.source === 'library') {
             var when = feedTime(it.created_at);
@@ -749,17 +770,15 @@ function feedEvents(data) {
     return out;
 }
 
-// What the wheel shows of `list` (newest first): the newest WHEEL_LINES
-// events, except that every open outage stays on (up to WHEEL_LINES of them)
-// and the newest others fill the rest. Still newest first.
+// What the wheel shows of `list` (newest first, nothing pinned): the newest
+// WHEEL_LINES events.
 function onWheel(list) {
-    var pinned = list.filter(function (ev) { return ev.pinned; }).slice(0, WHEEL_LINES);
-    var room = WHEEL_LINES - pinned.length;
-    return list.filter(function (ev) {
-        if (ev.pinned) return pinned.indexOf(ev) !== -1;
-        room -= 1;
-        return room >= 0;
-    });
+    return list.slice(0, WHEEL_LINES);
+}
+
+// The pinned rows' order, the feed's own: the newest first, then the higher id.
+function pinnedOrder(a, b) {
+    return (b.at - a.at) || ((Number(b.id) || 0) - (Number(a.id) || 0));
 }
 
 // A line as one string: for its title and for the live region.
@@ -782,6 +801,7 @@ function wheelTime(at) {
 // visit's own, so nothing outlives the page) and reducedMotion().
 function createEventLog(section, env) {
     var wheel = section.querySelector('[data-event-wheel]');
+    var pinnedList = section.querySelector('[data-event-pinned]');
     var announcer = section.querySelector('[data-event-announce]');
     var latest = section.querySelector('[data-event-latest]');
     var lines = [];      // on the wheel, newest first: { key, ev, el }
@@ -936,12 +956,100 @@ function createEventLog(section, env) {
         if (seen) target.forEach(function (ev) { seen[ev.key] = true; });
     }
 
-    function announce(ev) {
+    function announce(ev, words) {
         if (!announcer) return;
         if (announceTimer !== null) env.clearTimeout(announceTimer);
-        announcer.textContent = eventWords(ev);
+        announcer.textContent = words || eventWords(ev);
         // Cleared later, so browse mode does not read the newest event twice.
         announceTimer = env.setTimeout(function () { announcer.textContent = ''; announceTimer = null; }, 7000);
+    }
+
+    // ---- Pinned rows, above the wheel ----
+    //
+    // Each row: <li data-key data-type title> with its icon (hidden from
+    // screen readers), its words after a hidden "Problem: " or "Important: ",
+    // and its time, as app/home_event_log.py writes them.
+
+    function fillPinned(el, ev) {
+        el.setAttribute('data-type', ev.type);
+        el.title = ev.text;
+        el.querySelector('.ws-pinned__icon').textContent = PINNED_ICON[ev.type];
+        var text = el.querySelector('.ws-pinned__text');
+        text.textContent = '';
+        var sr = document.createElement('span');
+        sr.className = 'sr-only';
+        sr.textContent = PINNED_PREFIX[ev.type];
+        text.appendChild(sr);
+        text.appendChild(document.createTextNode(ev.text));
+        var time = el.querySelector('time');
+        time.setAttribute('datetime', new Date(ev.at).toISOString());
+        time.textContent = wheelTime(ev.at);
+    }
+
+    function buildPinned(ev) {
+        var el = document.createElement('li');
+        el.className = 'ws-pinned__row';
+        el.setAttribute('data-key', ev.key);
+        var icon = document.createElement('span');
+        icon.className = 'ws-pinned__icon material-symbols-outlined';
+        icon.setAttribute('aria-hidden', 'true');
+        el.appendChild(icon);
+        var text = document.createElement('span');
+        text.className = 'ws-pinned__text';
+        el.appendChild(text);
+        var time = document.createElement('time');
+        time.className = 'ws-pinned__time';
+        el.appendChild(time);
+        fillPinned(el, ev);
+        return el;
+    }
+
+    // The words a row reads as, for the live region.
+    function pinnedWords(ev) {
+        return PINNED_PREFIX[ev.type] + ev.text;
+    }
+
+    // Bring the rows in step with `pinned` (newest first). A row already
+    // there (the server's, or the last answer's) is kept as it is unless
+    // what it says changed, so taking the server's rows over moves nothing.
+    // Returns the events that were not pinned before.
+    function placePinned(pinned) {
+        if (!pinnedList) return [];
+        var had = {};
+        Array.prototype.forEach.call(pinnedList.children, function (el) {
+            var k = el.getAttribute('data-key');
+            if (k) had[k] = el;
+        });
+        var added = [];
+        pinned.forEach(function (ev, i) {
+            var el = had[ev.key];
+            if (el) {
+                delete had[ev.key];
+                var time = el.querySelector('time');
+                var words = el.querySelector('.ws-pinned__text');
+                if (!time || !words || !el.querySelector('.ws-pinned__icon')) {
+                    var fresh = buildPinned(ev);
+                    pinnedList.replaceChild(fresh, el);
+                    el = fresh;
+                } else if (el.getAttribute('data-type') !== ev.type || el.title !== ev.text ||
+                           time.getAttribute('datetime') !== new Date(ev.at).toISOString() ||
+                           words.textContent !== PINNED_PREFIX[ev.type] + ev.text) {
+                    fillPinned(el, ev);
+                } else if (time.textContent !== wheelTime(ev.at)) {
+                    time.textContent = wheelTime(ev.at);
+                }
+            } else {
+                el = buildPinned(ev);
+                added.push(ev);
+            }
+            if (pinnedList.children[i] !== el) pinnedList.insertBefore(el, pinnedList.children[i] || null);
+        });
+        Object.keys(had).forEach(function (k) { pinnedList.removeChild(had[k]); });
+        // Anything else in the list (not a row of ours) goes too.
+        while (pinnedList.children.length > pinned.length) pinnedList.removeChild(pinnedList.lastChild);
+        var none = pinned.length === 0;
+        if (pinnedList.hidden !== none) pinnedList.hidden = none;
+        return added;
     }
 
     function cancelSteps() {
@@ -1047,32 +1155,41 @@ function createEventLog(section, env) {
     // quiet: true for a copy kept from an earlier visit, painted at once.
     function render(data, quiet) {
         var state = data && typeof data === 'object' ? data.state : 'unavailable';
-        var events = state === 'unavailable' ? [] : feedEvents(data);
+        var feedAll = state === 'unavailable' ? [] : feedEvents(data);
+        var pinned = feedAll.filter(function (ev) { return ev.pinned; }).sort(pinnedOrder);
+        var events = feedAll.filter(function (ev) { return !ev.pinned; });
         // Without Uptime Kuma the log shows only when it has something to
         // show: a note, an outage or a library line (status_feed.home_off,
         // the same rule).
-        if (state === 'off' && !events.length) {
+        if (state === 'off' && !events.length && !pinned.length) {
             cancelSteps();
             section.hidden = true;
+            placePinned([]);
             offset = 0;
             anchor = null;
             armIdle();
             showLatest();
             return;
         }
+        var quietKey = state === 'unavailable' ? 'unavailable' : pinned.length ? 'pinned' : 'empty';
         var list = events.length ? events
-            : [{ key: 'quiet:' + (state === 'unavailable' ? 'unavailable' : 'empty'), type: 'quiet',
-                 text: WHEEL_QUIET[state === 'unavailable' ? 'unavailable' : 'empty'], at: null }];
+            : [{ key: 'quiet:' + quietKey, type: 'quiet',
+                 text: quietKey === 'pinned' ? WHEEL_QUIET_PINNED : WHEEL_QUIET[quietKey], at: null }];
         cancelSteps();
         var before = newestAt;
         all = list;
         newestAt = list[0].at;
-        if (seen === null || section.hidden) {
+        var first = seen === null || section.hidden;
+        var added = placePinned(pinned);
+        if (first) seen = {};
+        // A pinned event was shown: when it is resolved and joins the wheel
+        // it is not new (an outage's return is, and is announced).
+        pinned.forEach(function (ev) { seen[ev.key] = true; });
+        if (first) {
             // The first answer (or the section coming back): the lines are
             // simply there, nothing turns and nothing is announced.
             section.hidden = false;
-            if (seen === null) wheel.textContent = '';   // the skeleton
-            seen = {};
+            if (wheel.querySelector('.skel')) wheel.textContent = '';   // the skeleton
             offset = 0;
             anchor = null;
             armIdle();
@@ -1080,6 +1197,11 @@ function createEventLog(section, env) {
             place(list, false, false);
             return;
         }
+        // A new problem is announced as it is pinned; what turns in on the
+        // wheel in the same answer is said after it, in the same message.
+        var lead = added.length && !quiet ? pinnedWords(added[0]) : '';
+        if (lead) announce(added[0], lead);
+        function say(ev) { announce(ev, lead ? lead + '. ' + eventWords(ev) : null); }
         if (offset > 0) {
             // Turned back: the same front event stays at the front (a new
             // event never moves the view), and new events are only announced.
@@ -1095,7 +1217,7 @@ function createEventLog(section, env) {
                 place(list, !quiet, false);
                 if (arrived.length && !quiet) {
                     arrived.forEach(function (ev) { seen[ev.key] = true; });
-                    announce(arrived[0]);
+                    say(arrived[0]);
                 }
                 return;
             }
@@ -1116,7 +1238,7 @@ function createEventLog(section, env) {
         var newest = fresh[0];
         if (env.reducedMotion()) {
             place(list, true, true);
-            announce(newest);
+            say(newest);
             return;
         }
         // One notch per new event, oldest first, each after the last turn.
@@ -1130,7 +1252,7 @@ function createEventLog(section, env) {
         order.forEach(function (ev, k) {
             var turn = function () {
                 place(upTo(k + 1), true, false);
-                if (k === order.length - 1) announce(newest);
+                if (k === order.length - 1) say(newest);
             };
             if (k === 0) turn();
             else steps.push(env.setTimeout(turn, k * (WHEEL_MS + 60)));
@@ -1144,6 +1266,13 @@ function createEventLog(section, env) {
             var next = wheelTime(ln.ev.at);
             if (t.textContent !== next) t.textContent = next;
         });
+        if (pinnedList) {
+            Array.prototype.forEach.call(pinnedList.querySelectorAll('time'), function (t) {
+                var at = feedTime(t.getAttribute('datetime'));
+                var next = at === null ? '' : wheelTime(at);
+                if (next && t.textContent !== next) t.textContent = next;
+            });
+        }
     }
 
     return { render: render, refreshTimes: refreshTimes, toLatest: toLatest };

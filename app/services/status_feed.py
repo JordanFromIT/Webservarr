@@ -231,18 +231,25 @@ def item(row: StatusUpdate) -> dict:
     return body
 
 
+def pinned_items(db: Session) -> List[dict]:
+    """The pinned updates (open outages, open important notes) as feed
+    items, the newest first. Home writes them above its wheel
+    (app/home_event_log.py)."""
+    began = func.coalesce(StatusUpdate.started_at, StatusUpdate.created_at)
+    return [item(r) for r in
+            db.query(StatusUpdate).filter(_pinned()).order_by(began.desc(), StatusUpdate.id.desc()).all()]
+
+
 def feed(db: Session, days: int, now: datetime) -> dict:
     """{"open": [...], "items": [...]}: the pinned updates, newest first, then
     everything else that changed in the last `days` days, newest first."""
-    began = func.coalesce(StatusUpdate.started_at, StatusUpdate.created_at)
-    pinned = db.query(StatusUpdate).filter(_pinned()).order_by(began.desc(), StatusUpdate.id.desc()).all()
     changed = func.coalesce(StatusUpdate.resolved_at, StatusUpdate.created_at)
     history = (db.query(StatusUpdate)
                .filter(not_(_pinned()), StatusUpdate.pending.is_(False), changed >= now - timedelta(days=days))
                .order_by(changed.desc(), StatusUpdate.id.desc())
                .limit(FEED_ITEMS_MAX)
                .all())
-    return {"open": [item(r) for r in pinned], "items": [item(r) for r in history]}
+    return {"open": pinned_items(db), "items": [item(r) for r in history]}
 
 
 def home_off(db: Session, now: datetime) -> bool:
