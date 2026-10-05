@@ -301,13 +301,18 @@ STATUS_FEED_COLUMNS = (
     ("started_at", "DATETIME"),
     ("ended_at", "DATETIME"),
     ("pushed_at", "DATETIME"),
+    ("app", "VARCHAR(10)"),
+    ("event_key", "VARCHAR(160)"),
+    ("pending", "BOOLEAN NOT NULL DEFAULT 0"),
 )
 
 
 def migrate_status_feed_fields(db: Session) -> None:
     """One-time migration: add the status feed's columns to status_updates
-    (source, important, monitor_id, started_at, ended_at, pushed_at) and its
-    one-open-outage-per-monitor index, in existing databases.
+    (source, important, monitor_id, started_at, ended_at, pushed_at, and the
+    library events' app, event_key and pending), its
+    one-open-outage-per-monitor index and its one-row-per-library-event
+    index, in existing databases.
 
     Rows already there were posted by an admin, so they read as admin notes,
     not important. Guarded by PRAGMA table_info and idempotent, like
@@ -334,6 +339,8 @@ def migrate_status_feed_fields(db: Session) -> None:
                 raise
     db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_status_updates_open_monitor "
                     "ON status_updates (monitor_id) WHERE active = 1 AND source = 'auto'"))
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_status_updates_event_key "
+                    "ON status_updates (event_key) WHERE event_key IS NOT NULL"))
     db.commit()
 
 

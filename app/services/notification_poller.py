@@ -72,6 +72,8 @@ DEFAULT_NEWS_INTERVAL = 60
 
 # Internal tick — how often we check whether a poll is due
 TICK_SECONDS = 5
+# How often held Sonarr files are checked (they wait status_feed.LIBRARY_HOLD).
+LIBRARY_TIDY_INTERVAL = 60
 
 # Leader lease: the holder renews it every tick. The TTL covers a couple of
 # missed renewals, and bounds how long polling stops if the leader dies.
@@ -703,6 +705,18 @@ async def push_status_updates(r: aioredis.Redis) -> int:
     return pushed
 
 
+def tidy_library_lines() -> None:
+    """Publish the Sonarr files no Import Complete took in time, and delete
+    library lines past the feed's window (status_feed)."""
+    now = status_feed.now_utc()
+    db = SessionLocal()
+    try:
+        status_feed.publish_held_library_lines(db, now)
+        status_feed.prune_library_lines(db, now)
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Poll: News posts
 # ---------------------------------------------------------------------------
@@ -920,6 +934,7 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
     last_monitors = 0.0
     last_news = 0.0
     last_tickets = 0.0
+    last_library = 0.0
     # The Books catalog is rebuilt in a task of its own: a rebuild reads Kavita
     # and Plex over the network and must not hold up the notification polls.
     # Its own Redis lock keeps two rebuilds (this one, a webhook's, an admin's)
@@ -1015,6 +1030,14 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                     await push_status_updates(r)
                 except Exception as exc:
                     logger.warning("Poller: status push error: %s", exc)
+
+            # --- Library lines: held Sonarr files, and the 30-day window ---
+            if lease.held and now - last_library >= LIBRARY_TIDY_INTERVAL:
+                last_library = now
+                try:
+                    tidy_library_lines()
+                except Exception as exc:
+                    logger.warning("Poller: library lines error: %s", type(exc).__name__)
 
             # --- News ---
             if lease.held and now - last_news >= interval_news:

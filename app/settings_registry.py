@@ -283,8 +283,11 @@ def _build() -> List[SettingDef]:
         _secret("integration.nyt.api_key", "New York Times Books API key"),
         _url("integration.sonarr.url", "", "Sonarr address", ssrf_check=True, seed=False),
         _secret("integration.sonarr.api_key", "Sonarr API key", seed=False),
+        # Sonarr's and Radarr's webhooks send these as the HTTP Basic password (any username).
+        _secret("integration.sonarr.webhook_secret", "Sonarr webhook secret (for the event log)"),
         _url("integration.radarr.url", "", "Radarr address", ssrf_check=True, seed=False),
         _secret("integration.radarr.api_key", "Radarr API key", seed=False),
+        _secret("integration.radarr.webhook_secret", "Radarr webhook secret (for the event log)"),
         _url("integration.uptime_kuma.url", "", "Uptime Kuma address", ssrf_check=True, seed=False),
         # Not empty: Clear on the Integrations card then restores "default", the
         # page the client and the status light fall back to for an empty row.

@@ -626,7 +626,35 @@ await run('the Chaptarr webhook: this page\'s own address, never typed in', asyn
   check('it follows the address the page was opened at (nothing is hard-coded)', other.q('#chaptarrWebhookUrl').value === 'https://books.example.org:8443/api/webhooks/chaptarr', other.q('#chaptarrWebhookUrl').value);
   const src = readFileSync(join(STATIC, 'js/settings/integrations.js'), 'utf8');
   check('no site name in the source', !/https?:\/\/[a-z0-9.-]+\.(tv|com|org|net)\/api\/webhooks/.test(src));
-  check('the setup steps are in plain words', /In Chaptarr: Settings → Connect → \+ → Webhook\. Tick On Release Import and On Upgrade\. Method POST\. Any Username\. Password = the secret\./.test(t.q('#integration-card-chaptarr').textContent));
+  check('the setup steps are in plain words', /In Chaptarr: Settings → Connect → \+ → Webhook\. Tick On Grab, On Release Import, On Upgrade, On Book Delete, On Book File Delete and On Author Delete\. Leave On Book File Delete For Upgrade unticked, or upgrades show as removed\. Method POST\. Any Username\. Password = the secret\./.test(t.q('#integration-card-chaptarr').textContent));
+});
+
+// Sonarr and Radarr call the same address with their own name (the event log).
+await run('the Sonarr and Radarr webhooks: their own address, secret and boxes to tick', async (make) => {
+  const t = await make({ url: 'https://ws.test/settings#integrations',
+    values: { 'integration.sonarr.webhook_secret': '', 'integration.radarr.webhook_secret': MASK } });
+  await t.open();
+  const ticks = {
+    sonarr: 'In Sonarr: Settings → Connect → + → Webhook. Tick On Grab, On File Import, On File Upgrade, On Import Complete, On Rename, On Series Add, On Series Delete and On Episode File Delete. Method POST. Any Username. Password = the secret.',
+    radarr: 'In Radarr: Settings → Connect → + → Webhook. Tick On Grab, On File Import, On File Upgrade, On Movie Added, On Movie Delete and On Movie File Delete. Method POST. Any Username. Password = the secret.'
+  };
+  for (const app of ['sonarr', 'radarr']) {
+    const card = t.q('#integration-card-' + app);
+    const field = t.q('#' + app + 'WebhookUrl');
+    check(app + ': its address is this site\'s own, read-only', field && field.readOnly === true && field.value === 'https://ws.test/api/webhooks/' + app, field && field.value);
+    check(app + ': the heading names it', card.querySelector('h3') && card.querySelector('h3').textContent === 'Tell ' + (app === 'sonarr' ? 'Sonarr' : 'Radarr') + ' to ping this site');
+    check(app + ': which boxes to tick', card.textContent.indexOf(ticks[app]) !== -1);
+    check(app + ': its own secret field', !!card.querySelector('#ws-f-integration-' + app + '-webhook-secret'));
+  }
+  const sonarr = t.q('#integration-card-sonarr');
+  check('an empty secret offers one to make', Array.from(sonarr.querySelectorAll('button')).some((b) => b.textContent === 'Generate secret'));
+  const radarr = t.q('#integration-card-radarr');
+  check('a saved one is never shown, only a new one offered', Array.from(radarr.querySelectorAll('button')).some((b) => b.textContent === 'Generate new secret') && radarr.querySelector('#ws-f-integration-radarr-webhook-secret').value === '');
+  await t.press(Array.from(sonarr.querySelectorAll('button')).find((b) => b.textContent === 'Generate secret'));
+  await t.press('#settingsSaveBar button:last-of-type');
+  const sent = t.calls('PUT', '/api/admin/settings/bulk')[0];
+  const body = sent && JSON.parse(sent.init.body);
+  check('Save sends only Sonarr\'s secret', body && body.settings.length === 1 && body.settings[0].key === 'integration.sonarr.webhook_secret' && /^[A-Za-z0-9]{32}$/.test(body.settings[0].value), body);
 });
 
 await run('the webhook secret is made here, shown once, copied, saved, and then only "Saved"', async (make) => {

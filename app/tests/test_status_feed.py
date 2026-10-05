@@ -647,7 +647,8 @@ OLD_STATUS_TABLE = (
     "service_name VARCHAR(100), author_id VARCHAR(100) NOT NULL, author_name VARCHAR(100) NOT NULL, "
     "created_at DATETIME DEFAULT (CURRENT_TIMESTAMP) NOT NULL, active BOOLEAN NOT NULL, resolved_at DATETIME)"
 )
-NEW_COLUMNS = {"source", "important", "monitor_id", "started_at", "ended_at", "pushed_at"}
+NEW_COLUMNS = {"source", "important", "monitor_id", "started_at", "ended_at", "pushed_at", "app", "event_key",
+               "pending"}
 
 
 def old_database(path):
@@ -698,7 +699,7 @@ class Migration(unittest.TestCase):
             with self.assertNoLogs("app.seed", level=logging.INFO):
                 migrate_status_feed_fields(db)       # idempotent: nothing left to do
             self.assertTrue(NEW_COLUMNS <= self.columns(db))
-            self.assertIn("ux_status_updates_open_monitor", self.indexes(db))
+            self.assertTrue({"ux_status_updates_open_monitor", "ux_status_updates_event_key"} <= self.indexes(db))
             old = db.query(StatusUpdate).one()
             self.assertEqual((old.message, old.source, old.important, old.pushed_at), ("An old post", "admin", False,
                                                                                        None))
@@ -737,7 +738,7 @@ class Migration(unittest.TestCase):
             migrate_status_feed_fields(db)
             self.assertEqual(len(raced), 1)
             self.assertTrue(NEW_COLUMNS <= self.columns(db))
-            self.assertIn("ux_status_updates_open_monitor", self.indexes(db))
+            self.assertTrue({"ux_status_updates_open_monitor", "ux_status_updates_event_key"} <= self.indexes(db))
         finally:
             db.close()
 
@@ -749,7 +750,7 @@ class Migration(unittest.TestCase):
             with self.assertNoLogs("app.seed", level=logging.INFO):
                 migrate_status_feed_fields(db)
                 migrate_status_preferences(db)
-            self.assertIn("ux_status_updates_open_monitor", self.indexes(db))
+            self.assertTrue({"ux_status_updates_open_monitor", "ux_status_updates_event_key"} <= self.indexes(db))
         finally:
             db.close()
         empty = sessionmaker(bind=create_engine("sqlite://"))()
@@ -787,7 +788,7 @@ class Migration(unittest.TestCase):
         db = sessionmaker(bind=self.engine)()
         try:
             self.assertTrue(NEW_COLUMNS <= self.columns(db))
-            self.assertIn("ux_status_updates_open_monitor", self.indexes(db))
+            self.assertTrue({"ux_status_updates_open_monitor", "ux_status_updates_event_key"} <= self.indexes(db))
             self.assertEqual([(r.message, r.source) for r in db.query(StatusUpdate).all()],
                              [("An old post", "admin")])
             self.assertEqual(self.status_pref(db, "off@example.com"), "false")

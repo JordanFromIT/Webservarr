@@ -72,7 +72,8 @@ class Service(Base):
 
 class StatusUpdate(Base):
     """One item of the status feed (app/services/status_feed.py): an outage
-    Uptime Kuma reported (source "auto") or an admin's note ("admin").
+    Uptime Kuma reported (source "auto"), an admin's note ("admin") or a
+    library event from a Sonarr, Radarr or Chaptarr webhook ("library").
 
     `message` holds the line people read; `title` is its first 200
     characters. An outage is one row: opened as "<Service> is down", closed
@@ -83,6 +84,9 @@ class StatusUpdate(Base):
     __table_args__ = (
         Index("ux_status_updates_open_monitor", "monitor_id", unique=True,
               sqlite_where=text("active = 1 AND source = 'auto'")),
+        # Each library event is written once, whichever worker takes it.
+        Index("ux_status_updates_event_key", "event_key", unique=True,
+              sqlite_where=text("event_key IS NOT NULL")),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -105,12 +109,16 @@ class StatusUpdate(Base):
     active = Column(Boolean, default=True, nullable=False)
     resolved_at = Column(DateTime, nullable=True)
 
-    source = Column(String(10), nullable=False, default="admin", server_default="admin")  # auto, admin
+    source = Column(String(10), nullable=False, default="admin", server_default="admin")  # auto, admin, library
     important = Column(Boolean, nullable=False, default=False, server_default=text("0"))
     monitor_id = Column(Integer, nullable=True)  # the Uptime Kuma monitor, for an outage
     started_at = Column(DateTime, nullable=True)  # when the outage began
     ended_at = Column(DateTime, nullable=True)  # when it was seen back up
     pushed_at = Column(DateTime, nullable=True)  # set once, when its push is claimed
+    app = Column(String(10), nullable=True)  # a library event's app: sonarr, radarr, chaptarr
+    event_key = Column(String(160), nullable=True)  # a library event's id (library_lines.LibraryEvent.key)
+    # A Sonarr per-file import held back for its Import Complete: not shown.
+    pending = Column(Boolean, nullable=False, default=False, server_default=text("0"))
 
     def __repr__(self):
         return f"<StatusUpdate(id={self.id}, type='{self.update_type}')>"

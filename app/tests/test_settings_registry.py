@@ -65,6 +65,7 @@ SECRETS = {
     "integration.nyt.api_key", "integration.sonarr.api_key", "integration.radarr.api_key",
     "integration.netdata.api_key", "integration.authentik.client_secret",
     "integration.kavita.api_key", "integration.chaptarr.webhook_secret",
+    "integration.sonarr.webhook_secret", "integration.radarr.webhook_secret",
 }
 
 

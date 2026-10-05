@@ -714,12 +714,12 @@ class Webhook(unittest.TestCase):
 
     def test_an_import_event_triggers_a_rebuild(self):
         r = self.post({"eventType": "Download", "book": {"title": "Dune"}}, user="anything")
-        self.assertEqual(r.status_code, 202)
+        self.assertEqual(r.status_code, 204)
         self.rebuild.assert_awaited_with("chaptarr")
 
     # FR3: Kavita only looks for new files on its own schedule, so an import asks it to scan
     def test_an_import_asks_kavita_to_scan_and_rebuilds_now_and_twice_after(self):
-        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
         self.scan.assert_awaited_once_with()
         self.assertEqual(self.rebuild.await_count, 3)              # at once, then after the scan
         self.assertEqual(self.sleeps, [20, 100])                   # 20 s after the scan, and 120 s after it
@@ -735,7 +735,7 @@ class Webhook(unittest.TestCase):
 
     def test_a_burst_of_imports_is_bounded(self):
         for _ in range(5):
-            self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+            self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
         self.assertEqual(self.scan.await_count, 1)                 # one scan request for the burst
         self.assertEqual(self.sleeps, [20, 100])                   # one follow-up sequence
         self.assertEqual(self.rebuild.await_count, 3 + 4)          # every import still rebuilds at once
@@ -753,7 +753,7 @@ class Webhook(unittest.TestCase):
 
     def test_with_redis_unreachable_only_the_immediate_rebuild_runs(self):
         self.redis_up = False
-        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
         self.rebuild.assert_awaited_once_with("chaptarr")
         self.scan.assert_not_awaited()
         self.assertEqual(self.sleeps, [])
@@ -765,13 +765,13 @@ class Webhook(unittest.TestCase):
             self.claimed.clear()
             self.sleeps.clear()
             self.rebuild.reset_mock()
-            self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+            self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
             self.assertEqual(self.rebuild.await_count, 3)
             self.assertEqual(self.sleeps, [20, 100])
 
     def test_a_rebuild_that_fails_does_not_stop_the_scan_or_the_later_rebuilds(self):
         self.rebuild.side_effect = RuntimeError("database is locked")
-        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
         self.scan.assert_awaited_once_with()
         self.assertEqual(self.rebuild.await_count, 3)
 
@@ -784,7 +784,7 @@ class Webhook(unittest.TestCase):
     def test_the_answer_is_not_held_up_by_any_of_it(self):
         import inspect
         from app.routers import chaptarr_webhook
-        src = inspect.getsource(chaptarr_webhook.chaptarr_import)
+        src = inspect.getsource(chaptarr_webhook.arr_webhook)
         self.assertIn("background.add_task(_after_import)", src)
         for word in ("sleep", "scan", "rebuild(", "_claim"):
             self.assertNotIn(word, src.replace("_after_import", ""))
@@ -813,10 +813,10 @@ class Webhook(unittest.TestCase):
 
     def test_a_failing_rebuild_does_not_fail_the_webhook(self):
         self.rebuild.side_effect = RuntimeError("database is locked")
-        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
 
-    def test_a_body_that_is_not_json_is_400(self):
-        self.assertEqual(self.post(None, raw=b"not json").status_code, 400)
+    def test_a_body_that_is_not_json_is_422(self):
+        self.assertEqual(self.post(None, raw=b"not json").status_code, 422)
         self.rebuild.assert_not_awaited()
 
 

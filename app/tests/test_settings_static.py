@@ -1477,13 +1477,16 @@ class IntegrationsTab(unittest.TestCase):
         # and the path the router answers on; its secret is made in the browser, never typed in.
         src = INTEGRATIONS.read_text(encoding="utf-8")
         self.assertIn("secret: ['integration.kavita.api_key', 'API key',", src)
-        self.assertIn("webhook: ['integration.chaptarr.webhook_secret', 'Webhook secret'] },", src)
-        self.assertIn("field.value = window.location.origin + WEBHOOK_PATH;", src)
+        # Sonarr, Radarr and Chaptarr each carry a webhook (the event log), at the base plus the card's id.
+        for app in ("chaptarr", "sonarr", "radarr"):
+            self.assertIn(f"webhook: ['integration.{app}.webhook_secret', 'Webhook secret'],", src)
+        self.assertIn("field.value = window.location.origin + WEBHOOK_BASE + id;", src)
         main = (STATIC.parent / "main.py").read_text(encoding="utf-8")
         router = (STATIC.parent / "routers" / "chaptarr_webhook.py").read_text(encoding="utf-8")
         prefix = re.search(r"include_router\(chaptarr_webhook\.router, prefix=\"([^\"]+)\"", main).group(1)
         route = re.search(r"@router\.post\(\"([^\"]+)\"", router).group(1)
-        self.assertIn(f"var WEBHOOK_PATH = '{prefix}{route}';", src, "the page and the router disagree on the webhook's address")
+        self.assertEqual(route, "/{app}")
+        self.assertIn(f"var WEBHOOK_BASE = '{prefix}/';", src, "the page and the router disagree on the webhook's address")
         self.assertIn("generate: 32,", src)
         kit = kit_code()
         self.assertIn("window.crypto.getRandomValues(bytes);", kit)
@@ -1491,7 +1494,14 @@ class IntegrationsTab(unittest.TestCase):
         raw = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
         self.assertIn("if (v === S.mask) { hide(); input.value = ''; mode('saved'); }", raw)
         self.assertIn("else if (v === '' && baseline(o.key) === S.mask) { hide(); input.value = ''; mode('cleared'); }", raw)
-        for words in ("In Chaptarr: Settings → Connect → + → Webhook.", "Tick On Release Import and On Upgrade.",
+        # Which boxes to tick: the spec's table (2026-10-05-event-log-library-events-design.md, section 3).
+        for words in ("In Chaptarr: Settings → Connect → + → Webhook.",
+                      "Tick On Grab, On Release Import, On Upgrade, On Book Delete, On Book File Delete and On Author "
+                      "Delete. Leave On Book File Delete For Upgrade unticked",
+                      "In Sonarr: Settings → Connect → + → Webhook. Tick On Grab, On File Import, On File Upgrade, "
+                      "On Import Complete, On Rename, On Series Add, On Series Delete and On Episode File Delete.",
+                      "In Radarr: Settings → Connect → + → Webhook. Tick On Grab, On File Import, On File Upgrade, "
+                      "On Movie Added, On Movie Delete and On Movie File Delete.",
                       "Method POST.", "Any Username.", "Password = the secret."):
             self.assertIn(words, src)
 
