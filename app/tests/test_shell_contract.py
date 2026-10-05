@@ -619,6 +619,18 @@ class PhoneShellContract(unittest.TestCase):
             self.assertIn("'install.js'", m.group(1), name)
         self.assertRegex(leaks, r"const SHELL_IDS = \[[^\]]*'wsTabBar'")
 
+    def test_the_player_modules_load_after_the_stylesheets(self):
+        # They are not needed for the first paint; at the default priority
+        # they took a slow phone's bandwidth from the render-blocking CSS
+        # (first paint about 300 ms later on a throttled cold load).
+        side = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tags = re.findall(r'<script type="module" src="/static/js/player/[a-z]+\.js\?v=1"[^>]*>', side)
+        self.assertEqual(len(tags), 6)
+        for tag in tags:
+            self.assertIn(' fetchpriority="low"', tag)
+        for name in ("install.js", "router.js"):
+            self.assertIn(f'<script type="module" src="/static/js/{name}?v=1"></script>', side)
+
     def test_the_phone_nav_js_tests_run_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
         for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
