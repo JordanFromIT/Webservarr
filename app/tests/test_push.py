@@ -276,6 +276,8 @@ class PushServiceAllowlist(unittest.TestCase):
         "https://web.push.apple.com/QGx",
         "https://wns2-par02p.notify.windows.com/w/?token=abc",
         "https://db5p.notify.windows.com/w/?token=abc",
+        "https://jmt17.google.com/fcm/send/abc",          # Chrome Beta, Dev and Canary
+        "https://fcm.googleapis.com:443/fcm/send/abc",
     ]
     UNKNOWN = [
         "https://push.example.com/send/abc",
@@ -287,6 +289,34 @@ class PushServiceAllowlist(unittest.TestCase):
         "https://googleapis.com/fcm/send/abc",
         "http://fcm.googleapis.com/fcm/send/abc",
         "",
+        "https://jmt17.google.com.evil.example/x",
+        "https://xjmt17.google.com/x",
+        "https://fcm.googleapis.com./x",
+    ]
+    # Spellings two URL parsers read differently, or that hide another host.
+    # pywebpush sends with requests, which parses with urllib3: it reads the
+    # first as 127.0.0.1:8443 while urllib.parse reads fcm.googleapis.com.
+    LOOKALIKES = [
+        "https://127.0.0.1:8443\\@fcm.googleapis.com/x",
+        "https://evil.example\\@fcm.googleapis.com/x",
+        "https://fcm.googleapis.com\\@evil.example/x",
+        "https://evil.example#@fcm.googleapis.com/",
+        "https://evil.example?@fcm.googleapis.com/",
+        "https://x:y@fcm.googleapis.com/x",
+        "https://fcm.googleapis.com@evil.example/x",
+        "https://@fcm.googleapis.com/x",
+        "https://fcm.googleapis.com:8443/x",
+        "https://fcm.googleapis.com:80/x",
+        "https://fcm.googleapis.com/x y",
+        " https://fcm.googleapis.com/x",
+        "https://fcm.googleapis.com/x\n",
+        "https://fcm.googleapis.com\t/x",
+        "https://fcm.googleapis.com\x00.evil.example/x",
+        "https://fcm.googleapis.com/x\x7f",
+        "https://\uff46cm.googleapis.com/x",
+        "https://fcm.googleapis.com/\u00a0x",
+        "https:fcm.googleapis.com/x",
+        "https:///fcm.googleapis.com/x",
     ]
 
     def test_the_browser_push_services_are_accepted(self):
@@ -301,6 +331,14 @@ class PushServiceAllowlist(unittest.TestCase):
         with _resolving_to(PUBLIC_IP):
             for url in self.UNKNOWN:
                 with self.subTest(url=url):
+                    self.assertFalse(is_safe_push_endpoint(url))
+
+    def test_lookalike_spellings_are_refused(self):
+        from app.utils import is_known_push_service, is_safe_push_endpoint
+        with _resolving_to(PUBLIC_IP):
+            for url in self.LOOKALIKES:
+                with self.subTest(url=url):
+                    self.assertFalse(is_known_push_service(url))
                     self.assertFalse(is_safe_push_endpoint(url))
 
     def test_a_push_service_resolving_inside_the_network_is_still_refused(self):

@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse, urlsplit
 
+from urllib3.util import parse_url
+
 
 # --- Timestamps ---
 
@@ -203,18 +205,39 @@ def is_safe_integration_url(url: str) -> bool:
 
 
 # The Web Push services browsers subscribe with: FCM (Chrome, Android, Opera,
-# Samsung Internet, Brave), Mozilla's (Firefox), Apple's (Safari) and WNS
-# (Edge, which hands out per-region wns2-*.notify.windows.com hosts).
-_PUSH_SERVICE_HOSTS = frozenset({"fcm.googleapis.com", "updates.push.services.mozilla.com"})
+# Samsung Internet, Brave; Chrome Beta, Dev and Canary use jmt17.google.com),
+# Mozilla's (Firefox), Apple's (Safari) and WNS (Edge, which hands out
+# per-region wns2-*.notify.windows.com hosts). All of them listen on 443.
+_PUSH_SERVICE_HOSTS = frozenset({"fcm.googleapis.com", "jmt17.google.com",
+                                 "updates.push.services.mozilla.com"})
 _PUSH_SERVICE_SUFFIXES = (".push.apple.com", ".notify.windows.com")
 
 
 def is_known_push_service(url: str) -> bool:
-    """True when the endpoint is an https URL on a browser push service's host."""
-    parsed = urlparse((url or "").strip())
+    """True when the endpoint is an https URL on a browser push service's host,
+    on the default port, with no userinfo.
+
+    Two parsers must agree on the host: urllib.parse here and urllib3, which
+    requests (and so pywebpush) sends with. They part ways on spellings such
+    as https://127.0.0.1:8443\\@fcm.googleapis.com/x, so anything but printable
+    ASCII (no whitespace or control characters), an "@" or a backslash is
+    refused before either one reads it."""
+    url = url or ""
+    if any(not "!" <= ch <= "~" for ch in url) or "@" in url or "\\" in url:
+        return False
+    try:
+        parsed = urlparse(url)
+        sent = parse_url(url)
+        port = parsed.port
+    except ValueError:             # urllib3's LocationParseError is a ValueError
+        return False
     host = parsed.hostname or ""
-    return parsed.scheme.lower() == "https" and (
-        host in _PUSH_SERVICE_HOSTS or host.endswith(_PUSH_SERVICE_SUFFIXES)
+    return (
+        parsed.scheme.lower() == "https"
+        and (sent.scheme or "").lower() == "https"
+        and (sent.host or "").lower() == host
+        and port in (None, 443) and sent.port in (None, 443)
+        and (host in _PUSH_SERVICE_HOSTS or host.endswith(_PUSH_SERVICE_SUFFIXES))
     )
 
 
@@ -230,7 +253,7 @@ def is_safe_push_endpoint(url: str) -> bool:
     IPs is rejected outright (a DNS-rebind defence)."""
     if not is_known_push_service(url):
         return False
-    host = urlparse((url or "").strip()).hostname
+    host = urlparse(url).hostname
     ips = _resolve_ips(host)
     if not ips:
         return False
