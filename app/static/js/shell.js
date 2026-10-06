@@ -306,6 +306,9 @@
        custom_css      the operator's CSS, last in <head> ('' removes it)
        favicon         the tab icon
        title           document.title
+       nav_icons       false hides the sidebar's page icons (<html
+                       data-nav-icons-off>, theme.css); the router copies
+                       <html>'s flags itself, so only Settings sends it
      Markup is the server's own (escaped there), written only when it
      changed; CSS goes in as text. */
   function applyShell(parts) {
@@ -360,6 +363,11 @@
       if (icon && icon.getAttribute('href') !== parts.favicon) icon.setAttribute('href', parts.favicon);
     }
     if (typeof parts.title === 'string' && parts.title && document.title !== parts.title) document.title = parts.title;
+    if (typeof parts.nav_icons === 'boolean') {
+      var root = document.documentElement;
+      if (parts.nav_icons) root.removeAttribute('data-nav-icons-off');
+      else if (!root.hasAttribute('data-nav-icons-off')) root.setAttribute('data-nav-icons-off', '');
+    }
   }
 
   // A page the router prefetched on hover was fetched before whatever made it

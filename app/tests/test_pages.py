@@ -699,7 +699,7 @@ class ShellFragment(unittest.TestCase):
         frag = pages.shell_fragment(b, True, "settings", "WebServarr - Settings")
         self.assertEqual(set(frag), {"nav_html", "brand_html", "tabs_html", "more_html", "bar_title",
                                      "theme_color", "touch_icon", "theme_css", "font_href",
-                                     "custom_css", "favicon", "title", "branding"})
+                                     "custom_css", "favicon", "title", "nav_icons", "branding"})
         # The sidebar and the phone's bars carry exactly these fragments.
         self.assertEqual(out.count(frag["brand_html"]), 1)
         self.assertEqual(len(re.findall(r"<div [^>]*\bdata-ws-brand>", out)), 1)

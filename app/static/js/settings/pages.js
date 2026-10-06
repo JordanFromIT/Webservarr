@@ -266,6 +266,10 @@
       var card = WSSettings.card('Pages',
         'Rename pages and the line under each name, pick their icons, choose the order, and turn pages off. ' +
         'A page that is off disappears from the sidebar and only admins can open it.');
+      // Above the list, as Home's "Icons beside section headings" sits above
+      // its sections: one switch for every page's icon in the sidebar.
+      card.body.appendChild(api.toggle({ key: 'ui.nav_icons', label: 'Icons in the sidebar',
+        help: 'Shows each page’s icon beside its name. The phone’s tab bar always keeps its icons.' }));
       var head = el('div', 'hidden lg:grid grid-cols-[88px_40px_minmax(0,1fr)_minmax(0,1fr)_96px_56px_56px] gap-3 ' +
         'px-[13px] pb-2 text-[13px] font-semibold text-frosted-blue/60');
       ['', 'Icon', 'Label', 'Sublabel', 'Address', 'New!', 'On'].forEach(function (h) { head.appendChild(el('span', '', h)); });

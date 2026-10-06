@@ -829,9 +829,10 @@
   //                         (Books shows only with one of them)
   //                         the nav, the phone's tabs and More: labels, sublabels,
   //                         New! flags, switches, order
+  //   ui.nav_icons          the sidebar's page icons (<html data-nav-icons-off>)
   //   theme.*               colours, gauge rings, font (#ws-theme and <html>),
   //                         the font stylesheet (#ws-font), custom CSS
-  var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|theme\.)/;
+  var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|ui\.nav_icons$|theme\.)/;
   var shellSeq = 0;
 
   // After a save that changes any of it, the shell is fetched as every page
@@ -853,7 +854,7 @@
       if (sig.aborted || seq !== shellSeq || !data || typeof data.nav_html !== 'string') return;
       var parts = {};
       ['nav_html', 'brand_html', 'tabs_html', 'more_html', 'bar_title', 'touch_icon', 'favicon', 'title',
-       'branding'].forEach(function (k) {
+       'nav_icons', 'branding'].forEach(function (k) {
         if (hasOwn(data, k)) parts[k] = data[k];
       });
       if (!SAFE) {

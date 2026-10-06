@@ -249,6 +249,11 @@ def _build() -> List[SettingDef]:
         # data-section-icons> only while this is on, and theme.css hides
         # .ws-section-icon without that mark.
         _bool("ui.section_icons", "false", "Show an icon before each section heading", public=True),
+        # The icon beside each page's name in the desktop sidebar. On by
+        # default: the page renderer marks <html data-nav-icons-off> only
+        # while this is off, and theme.css hides .ws-nav-icon under that mark.
+        # The phone's tab bar and More sheet keep theirs.
+        _bool("ui.nav_icons", "true", "Show page icons in the desktop sidebar", public=True),
         # Home page news window: old posts drop off the home page rather than piling
         # up forever; the /news archive still holds them all.
         _int("news.homepage_count", "3", "News posts shown on the home page", 1, 20, public=True),

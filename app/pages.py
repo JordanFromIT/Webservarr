@@ -394,12 +394,12 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
 _LINK_ACTIVE = (
     '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-bright '
     'font-bold transition-all shadow-baltic-blue/20" href="{href}" aria-current="page">'
-    '<span class="material-symbols-outlined fill-1 shrink-0">{icon}</span>{label}{badge}</a>'
+    '<span class="ws-nav-icon material-symbols-outlined fill-1 shrink-0">{icon}</span>{label}{badge}</a>'
 )
 _LINK = (
     '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue '
     'transition-all group" href="{href}">'
-    '<span class="material-symbols-outlined text-steel-blue group-hover:text-frosted-blue transition-colors shrink-0">{icon}</span>'
+    '<span class="ws-nav-icon material-symbols-outlined text-steel-blue group-hover:text-frosted-blue transition-colors shrink-0">{icon}</span>'
     '{label}{badge}</a>'
 )
 # A sublabel stacks under the label instead of sitting beside it, so the nav
@@ -817,8 +817,8 @@ def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], sta
     router never swaps (only #wsPage, the title and <html> flags change on a
     soft navigation): the nav, the phone's tab bar, More pages and top-bar
     words, the logo and name, the <head> theme, font, custom CSS and browser
-    colour, the favicon and home-screen icon, the page's title, and the
-    payload itself.
+    colour, the favicon and home-screen icon, the page's title, whether the
+    sidebar shows its icons (<html data-nav-icons-off>), and the payload itself.
     GET /api/admin/settings/shell sends it; Settings writes it in after a save.
     Rendered by the same code as every page, so it cannot drift."""
     values = shell_values(branding, {"is_admin": is_admin}, "", "")
@@ -837,6 +837,7 @@ def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], sta
         "custom_css": custom if isinstance(custom, str) and custom.strip() else "",
         "favicon": _safe_url(branding.get("logo_url")) or "/static/webservarr.svg",
         "title": page_title(branding, static_title),
+        "nav_icons": branding.get("nav_icons") is not False,
         "branding": branding,
     }
 
@@ -1085,6 +1086,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         # Every page: without the mark theme.css hides .ws-section-icon from
         # the first paint, and the router copies it on each soft navigation.
         attrs += " data-section-icons"
+    if branding.get("nav_icons") is False:
+        # Every page: under the mark theme.css hides the sidebar's .ws-nav-icon
+        # from the first paint, and the router copies it on each soft navigation.
+        attrs += " data-nav-icons-off"
     if flags.get("netdata"):
         attrs += " data-netdata"
     if safe:

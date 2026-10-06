@@ -478,7 +478,7 @@ class ShellPatch(SettingsApiBase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(set(r.json()), {"nav_html", "brand_html", "tabs_html", "more_html", "bar_title",
                                          "theme_color", "touch_icon", "theme_css", "font_href",
-                                         "custom_css", "favicon", "title", "branding"})
+                                         "custom_css", "favicon", "title", "nav_icons", "branding"})
 
     def test_fragment_is_the_page_renderer_output(self):
         # Same renderer, same branding, same active page as /settings, so

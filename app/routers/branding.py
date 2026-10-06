@@ -194,6 +194,10 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # Icons before section headings: the page renderer marks <html
         # data-section-icons> by it. Off unless exactly "true", like the default.
         "section_icons": get("ui.section_icons") == "true",
+        # Icons beside the desktop sidebar's page names: the page renderer
+        # marks <html data-nav-icons-off> by it. On unless exactly "false",
+        # like the default.
+        "nav_icons": get("ui.nav_icons") != "false",
         "wiki_hooks": wiki_hooks,
         "sidebar_labels": {p: get("sidebar.label_" + p) for p in pages},
         "sidebar_sublabels": {p: get("sidebar.sublabel_" + p) for p in pages},

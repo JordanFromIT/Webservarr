@@ -538,7 +538,7 @@ class KitApi(unittest.TestCase):
         decls = live_matches(src, r"\bvar SHELL_KEYS = (?=/)")
         self.assertEqual(len(decls), 1, "one live SHELL_KEYS declaration")
         literal = src[decls[0].end():src.index(";", decls[0].end())]
-        self.assertEqual(literal, r"/^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|theme\.)/")
+        self.assertEqual(literal, r"/^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|ui\.nav_icons$|theme\.)/")
         self.assertRegex(function_body(kit_code(), "refreshShell"),
                          r"if \(keys\.some\(function \((\w+)\) \{ return SHELL_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
         # Against the registry: every key the shell or <head> renders from
@@ -552,7 +552,8 @@ class KitApi(unittest.TestCase):
         for key in REGISTRY:
             with self.subTest(key):
                 expected = key.startswith(shell) or key in ("pages.order", "integration.kavita.url",
-                                                            "integration.plex.audiobook_library")
+                                                            "integration.plex.audiobook_library",
+                                                            "ui.nav_icons")
                 self.assertEqual(bool(pattern.search(key)), expected, key)
 
     def test_shell_patch_goes_through_apply_shell(self):

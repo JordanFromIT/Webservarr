@@ -1143,6 +1143,17 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
  */
 html:not([data-section-icons]) .ws-section-icon { display: none; }
 
+/* ---- Sidebar page icons (Settings > Pages) ----
+ *
+ * The icon beside each page's name in the desktop sidebar carries
+ * .ws-nav-icon (app/pages.py). The server marks <html data-nav-icons-off> only
+ * while ui.nav_icons is off, so the icons are never painted then. The link is
+ * a flex row whose gap only spaces displayed items, so the name moves to the
+ * link's own padding, and the name's line is as tall as the icon was, so no
+ * row changes height. The phone's tab bar and More sheet keep their icons.
+ */
+html[data-nav-icons-off] .ws-nav-icon { display: none; }
+
 /* ---- Home's push offer on a full load ----
  *
  * theme-loader.js marks <html data-push-offer> in <head> when Home is to offer
