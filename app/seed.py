@@ -998,6 +998,39 @@ def migrate_books_nav_v1(db: Session) -> None:
     logger.info("Books nav migration: %s", ", ".join(changed) if changed else "nothing to change (customised)")
 
 
+def migrate_page_order_books_v1(db: Session) -> None:
+    """
+    One-time migration: Books moves up to third in the shipped page order.
+
+    A phone's tab bar holds the first five pages (app/pages.py TAB_COUNT), and
+    the new default puts Books among them: Home, Requests, Books, Issues,
+    Calendar. Only a stored order that still IS the earlier default (the same
+    pages in the same order, however the JSON is spaced) is rewritten; an
+    order the admin arranged themselves stays as it is. A fresh install gets
+    the new default from seed_default_settings.
+
+    Guarded by migration.page_order_books_v1.
+    """
+    import json
+    from app.settings_registry import DEFAULT_PAGE_ORDER, PAGE_ORDER_BEFORE_BOOKS_V1
+
+    marker = "migration.page_order_books_v1"
+    if _setting_row(db, marker):
+        return
+    row = _setting_row(db, "pages.order")
+    changed = False
+    if row is not None:
+        try:
+            stored = json.loads(row.value or "")
+        except ValueError:
+            stored = None
+        if stored == PAGE_ORDER_BEFORE_BOOKS_V1:
+            row.value = json.dumps(DEFAULT_PAGE_ORDER)
+            changed = True
+    if _finish_migration(db, marker, "One-time move of Books to third in the shipped page order"):
+        logger.info("Page order migration: %s", "Books moved to third" if changed else "nothing to change (customised)")
+
+
 def migrate_home_sublabel_v3(db: Session) -> None:
     """
     One-time migration: Home's sublabel becomes "See what's happening".

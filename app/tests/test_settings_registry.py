@@ -427,7 +427,9 @@ class Helpers(unittest.TestCase):
         # Unknown and duplicate ids dropped; home/settings pinned.
         messy = json.dumps(["settings", "wiki", "news", "wiki", "home"])
         self.assertEqual(reg.normalize_page_order(messy),
-                         ["home", "wiki", "requests", "issues", "calendar", "tickets", "library", "settings"])
+                         ["home", "wiki", "requests", "library", "issues", "calendar", "tickets", "settings"])
+        # The shipped order puts Books third (a phone's tab bar holds the first five).
+        self.assertEqual(default, ["home", "requests", "library", "issues", "calendar", "tickets", "wiki", "settings"])
 
     def test_mask(self):
         self.assertEqual(reg.mask("integration.plex.token", "abc"), reg.MASK)

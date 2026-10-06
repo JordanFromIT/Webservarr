@@ -3,10 +3,10 @@ Phone navigation (docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-d
 Part 1): the bottom tab bar, the More sheet and the phone top bar, rendered by
 app/pages.py for the signed-in user from the operator's nav settings.
 
-Below lg the first four pages the user can see become tabs, in the operator's
+Below lg the first five pages the user can see become tabs, in the operator's
 order, and the last tab is always More: the More sheet holds the remaining
 pages, then "Add to home screen", Account settings (admins) and Sign out. With
-four pages or fewer every page is a tab; More stays, because Sign out and
+five pages or fewer every page is a tab; More stays, because Sign out and
 "Add to home screen" live there (the spec's "no More tab" case would leave a
 phone with no way to sign out).
 """
@@ -57,17 +57,18 @@ ALL_ON = {"integration.kavita.url": "http://192.168.1.50:5000"}
 
 
 class TabBar(unittest.TestCase):
-    def test_first_four_pages_in_order_then_more(self):
+    def test_first_five_pages_in_order_then_more(self):
+        # The shipped order puts Books third, so a phone has it as a tab.
         out = render(user=ADMIN, b=branding(**ALL_ON))
         self.assertEqual(tabs(out), [("/", "Home", "page"), ("/requests", "Requests", None),
-                                     ("/issues", "Issues", None), ("/calendar", "Calendar", None),
-                                     ("more", "More", None)])
-        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/books", "/wiki", "/settings"])
+                                     ("/books", "Books", None), ("/issues", "Issues", None),
+                                     ("/calendar", "Calendar", None), ("more", "More", None)])
+        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/wiki", "/settings"])
 
     def test_members_get_their_own_set(self):
         out = render(user=MEMBER, b=branding(**ALL_ON))
-        self.assertEqual([t[0] for t in tabs(out)], ["/", "/requests", "/issues", "/calendar", "more"])
-        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/books", "/wiki"])
+        self.assertEqual([t[0] for t in tabs(out)], ["/", "/requests", "/books", "/issues", "/calendar", "more"])
+        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/wiki"])
         self.assertNotIn('href="/settings"', tab_bar(out) + sheet(out))
 
     def test_the_operators_order_switches_and_labels_decide(self):
@@ -80,11 +81,11 @@ class TabBar(unittest.TestCase):
         out = render(user=MEMBER, b=b)
         self.assertEqual(tabs(out), [("/", "Home", "page"), ("/wiki", "Guides &amp; help", None),
                                      ("/books", "Books", None), ("/requests", "Requests", None),
-                                     ("more", "More", None)])
+                                     ("/issues", "Issues", None), ("more", "More", None)])
         self.assertIn(">help</span>", tab_bar(out))
-        self.assertEqual([r[0] for r in more_rows(out)], ["/issues", "/calendar"])
+        self.assertEqual([r[0] for r in more_rows(out)], ["/calendar"])
 
-    def test_four_pages_or_fewer_are_all_tabs_and_more_stays(self):
+    def test_five_pages_or_fewer_are_all_tabs_and_more_stays(self):
         b = branding(**{"sidebar.enabled_issues": "false", "sidebar.enabled_calendar": "false",
                         "sidebar.enabled_tickets": "false"})
         out = render(user=MEMBER, b=b)
@@ -95,15 +96,18 @@ class TabBar(unittest.TestCase):
 
     def test_active_tab_and_more_follow_the_page(self):
         out = render(user=ADMIN, name="issues", b=branding(**ALL_ON))
-        self.assertEqual([t[2] for t in tabs(out)], [None, None, "page", None, None])
+        self.assertEqual([t[2] for t in tabs(out)], [None, None, None, "page", None, None])
         # A page that lives in More: More is the active tab, its row is current.
         out = render(user=ADMIN, name="wiki", b=branding(**ALL_ON))
         self.assertEqual(tabs(out)[-1], ("more", "More", "true"))
         self.assertEqual([r for r in more_rows(out) if r[2]], [("/wiki", "Wiki", ' aria-current="page"')])
-        # Sub-pages highlight their section (a book is Books).
+        # Sub-pages highlight their section (a book is Books, now a tab).
         out = render(user=ADMIN, name="book", b=branding(**ALL_ON))
+        self.assertEqual([t[0] for t in tabs(out) if t[2]], ["/books"])
+        self.assertIsNone(tabs(out)[-1][2])
+        # And one that lives in More still lights More (Tickets).
+        out = render(user=ADMIN, name="tickets", b=branding(**ALL_ON))
         self.assertEqual(tabs(out)[-1][2], "true")
-        self.assertEqual([r[0] for r in more_rows(out) if r[2]], ["/books"])
 
     def test_more_is_a_button_that_opens_the_sheet(self):
         out = render(b=branding(**ALL_ON))
@@ -119,11 +123,11 @@ class TabBar(unittest.TestCase):
         self.assertRegex(tab_bar(out), r'href="/requests".*?data-badge="requestsBadge"')
         # In More, when the operator moved it there.
         b = branding(**dict(ALL_ON, **{
-            "pages.order": '["home","wiki","tickets","library","requests","issues","calendar","settings"]'}))
+            "pages.order": '["home","wiki","tickets","library","issues","requests","calendar","settings"]'}))
         self.assertRegex(sheet(render(b=b)), r'href="/requests".*?data-badge="requestsBadge"')
 
     def test_tabs_and_rows_escape_operator_text(self):
-        b = branding(**{"sidebar.label_requests": "<b>Ask</b>", "sidebar.sublabel_tickets": "<i>x</i>",
+        b = branding(**{"sidebar.label_requests": "<b>Ask</b>", "sidebar.sublabel_wiki": "<i>x</i>",
                         "icon.nav_issues": "construction"})
         out = render(b=b)
         self.assertIn("&lt;b&gt;Ask&lt;/b&gt;", tab_bar(out))

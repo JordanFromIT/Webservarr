@@ -118,6 +118,86 @@ class BooksNav(MigrationBase):
         self.assertEqual(helpers.get(self.db, "migration.books_nav_v1"), "done")
 
 
+class PageOrderBooksThird(MigrationBase):
+    """Books moves to third in the shipped page order, so a phone's tab bar
+    (the first five pages) holds it: only an order still equal to the earlier
+    default changes; an admin's own order stays."""
+
+    OLD = ["home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings"]
+    NEW = ["home", "requests", "library", "issues", "calendar", "tickets", "wiki", "settings"]
+
+    def order(self, db=None):
+        import json
+        return json.loads(helpers.get(db or self.db, "pages.order"))
+
+    def test_the_old_default_becomes_the_new_one(self):
+        import json
+        for stored in (json.dumps(self.OLD), json.dumps(self.OLD, separators=(",", ":"))):
+            db = helpers.make_sessionmaker()()
+            try:
+                helpers.put(db, "pages.order", stored)
+                seed.migrate_page_order_books_v1(db)
+                self.assertEqual(self.order(db), self.NEW, stored)
+                self.assertEqual(helpers.get(db, "migration.page_order_books_v1"), "done")
+            finally:
+                db.close()
+
+    def test_the_new_default_is_the_registry_default(self):
+        from app import settings_registry as reg
+        self.assertEqual(reg.DEFAULT_PAGE_ORDER, self.NEW)
+        self.assertEqual(reg.PAGE_ORDER_BEFORE_BOOKS_V1, self.OLD)
+
+    def test_an_admins_own_order_stays(self):
+        import json
+        custom = '["home","wiki","tickets","library","requests","issues","calendar","settings"]'
+        for stored in (custom, "not json", json.dumps(self.OLD[:-2] + ["settings"])):
+            db = helpers.make_sessionmaker()()
+            try:
+                helpers.put(db, "pages.order", stored)
+                seed.migrate_page_order_books_v1(db)
+                self.assertEqual(helpers.get(db, "pages.order"), stored)
+            finally:
+                db.close()
+
+    def test_it_runs_once(self):
+        import json
+        helpers.put(self.db, "pages.order", json.dumps(self.OLD))
+        seed.migrate_page_order_books_v1(self.db)
+        helpers.put(self.db, "pages.order", json.dumps(self.OLD))     # the admin put it back
+        seed.migrate_page_order_books_v1(self.db)
+        self.assertEqual(self.order(), self.OLD)
+
+    def test_a_fresh_install_has_nothing_to_change(self):
+        seed.migrate_page_order_books_v1(self.db)
+        self.assertIsNone(helpers.get(self.db, "pages.order"))
+        self.assertEqual(helpers.get(self.db, "migration.page_order_books_v1"), "done")
+
+    def test_two_workers_at_once(self):
+        # uvicorn runs two workers, and each runs the migrations at start. The
+        # second one read "no marker" before the first committed: its marker
+        # insert loses the race, it rolls back cleanly and the result stands.
+        import json
+        from unittest import mock
+        from app.models import Setting
+        sm = helpers.make_sessionmaker()
+        first, second = sm(), sm()
+        try:
+            helpers.put(first, "pages.order", json.dumps(self.OLD))
+            real = seed._setting_row
+
+            def stale(db, key):
+                return None if key == "migration.page_order_books_v1" else real(db, key)
+
+            seed.migrate_page_order_books_v1(first)
+            with mock.patch.object(seed, "_setting_row", side_effect=stale):
+                seed.migrate_page_order_books_v1(second)   # a moment behind: no error
+            self.assertEqual(self.order(second), self.NEW)
+            self.assertEqual(second.query(Setting).filter(Setting.key == "migration.page_order_books_v1").count(), 1)
+        finally:
+            first.close()
+            second.close()
+
+
 class RequestsSource(MigrationBase):
     """Spec section 7, migration 3 - the four-row table, exactly."""
 

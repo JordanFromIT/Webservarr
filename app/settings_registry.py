@@ -41,7 +41,12 @@ import httpx
 MASK = "***masked***"
 
 SIDEBAR_PAGE_IDS = ("home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings")
-DEFAULT_PAGE_ORDER = list(SIDEBAR_PAGE_IDS)
+# The shipped order. Books comes third so a phone's tab bar (the first five
+# pages, app/pages.py TAB_COUNT) holds it; installs that kept the earlier
+# default are moved to this one by app/seed.py migrate_page_order_books_v1.
+DEFAULT_PAGE_ORDER = ["home", "requests", "library", "issues", "calendar", "tickets", "wiki", "settings"]
+# The shipped order before Books moved up, which that migration looks for.
+PAGE_ORDER_BEFORE_BOOKS_V1 = ["home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings"]
 HOME_SECTION_IDS = ("services", "news", "streams", "releases", "requests")
 TYPES = ("text", "url", "bool", "int", "color", "icon", "enum", "json")
 

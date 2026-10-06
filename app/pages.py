@@ -468,14 +468,15 @@ def visible_nav_items(branding: dict, is_admin: bool) -> list:
 # ---------------------------------------------------------------------------
 #
 # The first TAB_COUNT pages the user can see, in the operator's order, are
-# tabs; the last tab is always More, which holds the rest of the pages and
+# tabs (five, plus More, fit a 320px screen: theme.css .ws-tabbar-list); the
+# last tab is always More, which holds the rest of the pages and
 # then "Add to home screen", Account settings and Sign out (the partial).
 # More stays even when every page fits as a tab, since sign-out lives there.
 # Design: docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-design.md.
 # The active tab is marked by aria-current, which theme.css draws (a filled
 # icon on a primary pill, a bolder label), so it never rests on colour alone.
 
-TAB_COUNT = 4
+TAB_COUNT = 5
 
 _TAB = (
     '<li><a class="ws-navtab" href="{href}"{current}>'
