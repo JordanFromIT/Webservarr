@@ -36,13 +36,15 @@ CATALOGUE = pathlib.Path(__file__).resolve().parent / "material_symbols_names.tx
 # Words the code uses that happen to be Material Symbols names but are never
 # drawn as icons (attribute names, event names, keys, page ids...). A word
 # here that the code later draws as an icon must move to the icon list.
+# Check every place a word appears before adding it: helpers such as
+# methodCard('password', ...) and the editors' toolbar tables pass icon
+# names as plain strings.
 NOT_ICONS = frozenset("""
-album api approval badge block cached cancel class clear colors cookie deselect details dock docs domain
-done downloading feed files filter fullscreen function height host http https iframe input ios light list
-login menu message monitor mouse move news note notes overview pages password pattern pending people percent
-pin place post preview priority queue radio resize resume script sd select sleep sort source stars start stop
-stream style switch tab table target timer title today token toolbar transform upgrade verified web webhook
-width window work
+album api approval badge block cached cancel class clear colors cookie deselect details dock docs domain done
+downloading feed files filter fullscreen function height host http https iframe input ios light list login
+menu message monitor mouse move news note notes overview pages pattern pending people percent pin place post
+preview priority queue radio resize resume script sd select sleep sort source stars start stop stream style
+switch tab table target timer today toolbar transform upgrade verified web webhook width window work
 """.split())
 
 # A lowercase word between quotes or backticks, or alone between > and <.

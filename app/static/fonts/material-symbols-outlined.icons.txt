@@ -85,6 +85,7 @@ notifications
 notifications_active
 notifications_none
 palette
+password
 pause
 person
 play_arrow
@@ -118,7 +119,9 @@ support_agent
 sync
 tag
 text_fields
+title
 toc
+token
 travel_explore
 tune
 tv
