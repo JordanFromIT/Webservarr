@@ -10,11 +10,13 @@
   notifications.js finds the bells here and in the mobile top bar by
   title="Notifications" and opens its dropdown in the tapped bell's parent -
   keep the title. #wsPlayerPill, left of the bell, is the audiobook player's
-  top-bar pill (js/player/ui.js fills it while a book is loaded). The bell is inline-flex so its height is the icon's own,
+  top-bar pill (js/player/ui.js fills it while a book is loaded). Its group
+  takes the free width from the start, so the pill coming and going moves
+  nothing, and the pill narrows into that width (theme.css). The bell is inline-flex so its height is the icon's own,
   not a text line whose height changes when the icon font lands.
 -->
 <header id="appHeader" class="h-16 shrink-0 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-background-dark/40 backdrop-blur-md relative z-50">
-  <div class="relative flex items-center gap-6">
+  <div class="relative shrink-0 flex items-center gap-6">
     <!-- The status pill opens the status panel (status-panel.js): on hover
          after a short pause, or pinned open by a click. -->
     <button type="button" id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-expanded="false" aria-controls="wsStatusPop">
@@ -22,7 +24,7 @@
       <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
     </button>
   </div>
-  <div class="flex items-center gap-4">
+  <div class="flex-1 min-w-0 flex items-center justify-end gap-4">
     <div id="wsPlayerPill" hidden></div>
     <button class="relative inline-flex p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications" aria-label="Notifications">
       <span class="material-symbols-outlined">notifications</span>

@@ -1911,10 +1911,13 @@ html[data-player-full] #scrollDownHint { display: none; }
   html:not([data-shell="hidden"]) .wsp-bar.wsp-bar-pilled { display: none; }
 }
 #wsPlayerPill[hidden], #wsPlayerPill [hidden] { display: none !important; }
+/* The slot narrows into the top bar's free width (300px at most); under
+   200px the pill is its cover and its play button, the title in its label. */
+#wsPlayerPill { flex: 0 1 300px; min-width: 80px; container-type: inline-size; }
 
 .wsp-pill {
   position: relative; display: flex; align-items: center; gap: 4px;
-  width: clamp(232px, 22vw, 300px); height: 48px; padding: 0 4px 0 0; overflow: hidden;
+  width: 100%; height: 48px; padding: 0 4px 0 0; overflow: hidden;
   /* Taller than the bell's row: it takes no more of it, so the top bar's
      items never move when it comes and goes. */
   margin-block: -4px;
@@ -1957,6 +1960,14 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-pill[data-state="playing"] .wsp-eq span:nth-child(3) { animation-delay: -600ms; }
 .wsp-pill:not([data-state="playing"]) .wsp-eq, .wsp-pill[data-warn] .wsp-eq { display: none; }
 @keyframes wsp-eq { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+@container (max-width: 199px) {
+  .wsp-pill { width: max-content; margin-left: auto; gap: 2px; padding-right: 4px; }
+  .wsp-pill-open { flex: none; padding: 0 2px 0 4px; }
+  .wsp-pill-text { display: none; }
+  .wsp-pill-art { width: 32px; height: 32px; }
+  .wsp-pill-play { width: 32px; height: 32px; }
+  .wsp-pill-line { left: 12px; right: 12px; }
+}
 @media (hover: hover) and (pointer: fine) {
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }
 }
