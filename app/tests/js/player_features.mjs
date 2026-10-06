@@ -890,6 +890,35 @@ await run('the skip length menu', async () => {
   t.engine.close();
 });
 
+await run('playback settings is a toggle: pressed again, Chapters come back', async () => {
+  for (const wide of [true, false]) {
+    const t = await setup({ wide });
+    await t.openAt(MULTI.key, '502', 300000);
+    t.ui.open();
+    const btn = t.q('.wsp-slot-menu button');
+    const shown = (name) => !!t.q('[data-panel="' + name + '"]') && !t.q('[data-panel="' + name + '"]').hidden;
+    check(wide + ': closed to start', btn.getAttribute('aria-expanded') === 'false');
+    const over = () => t.q('[data-view]') ? t.q('[data-view]').getAttribute('data-view') : null;
+    check(wide + ': Chapters is the side view, nothing over the player', shown('chapters') && !shown('settings') && over() === null);
+    btn.click();
+    check(wide + ': open', shown('settings') && !shown('chapters') && btn.getAttribute('aria-expanded') === 'true');
+    btn.click();
+    check(wide + ': pressed again, settings go and Chapters are back', !shown('settings') && shown('chapters') && over() === null && btn.getAttribute('aria-expanded') === 'false');
+    btn.click();
+    t.q('[data-panel="settings"] .wsp-panel-back').click();
+    check(wide + ': its back button says closed too', !shown('settings') && btn.getAttribute('aria-expanded') === 'false');
+    btn.click();
+    t.q('.wsp-slot-speed button').click();
+    check(wide + ': another panel in its place says closed', shown('speed') && btn.getAttribute('aria-expanded') === 'false');
+    btn.click();
+    check(wide + ': and it opens again from there', shown('settings') && btn.getAttribute('aria-expanded') === 'true');
+    t.ui.close();
+    await t.clock.advance(1000);
+    check(wide + ': the full player closing says closed', btn.getAttribute('aria-expanded') === 'false');
+    t.engine.close();
+  }
+});
+
 await run('speed: a stepper and presets, 0.75x to 2x in 0.05 steps', async () => {
   const t = await setup();
   await t.openAt(MULTI.key, '502', 300000);

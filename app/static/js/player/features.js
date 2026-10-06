@@ -1661,8 +1661,15 @@ export function createFeatures(env) {
   }
 
   // Settings: the skip length and smart rewind, in the top right.
-  const settingsBtn = h('button', { type: 'button', class: 'wsp-icon-btn', 'aria-label': 'Playback settings' }, [icon('tune')]);
-  const settings = ui.panel('settings', { title: 'Playback settings' });
+  // A toggle: pressed again it puts back what the panel covered (Chapters
+  // beside the player on a wide screen, the player on a phone). aria-expanded
+  // follows every way the panel goes (its back button, Escape or Back, another
+  // panel, the full player closing) through onHide.
+  const settingsBtn = h('button', { type: 'button', class: 'wsp-icon-btn', 'aria-label': 'Playback settings', 'aria-expanded': 'false' }, [icon('tune')]);
+  const settings = ui.panel('settings', {
+    title: 'Playback settings',
+    onHide: function () { setAttr(settingsBtn, 'aria-expanded', 'false'); }
+  });
   const skipChips = h('div', { class: 'wsp-chips', role: 'group', 'aria-labelledby': 'wspSkipHead' });
   const rewindSwitch = h('button', {
     type: 'button', class: 'wsp-switch', role: 'switch', 'aria-checked': 'true',
@@ -1716,7 +1723,11 @@ export function createFeatures(env) {
     if (b) setSkip(Number(b.getAttribute('data-skip')));
   });
   rewindSwitch.addEventListener('click', function () { setRewind(!prefs.smart_rewind); });
-  settingsBtn.addEventListener('click', function () { settings.show(settingsBtn); });
+  settingsBtn.addEventListener('click', function () {
+    if (settings.shown) { settings.hide(); return; }
+    settings.show(settingsBtn);
+    setAttr(settingsBtn, 'aria-expanded', 'true');
+  });
   ui.fill('menu', settingsBtn);
 
   // Speed: a stepper and the usual presets.
