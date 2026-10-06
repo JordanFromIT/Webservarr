@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Start background notification poller
     poller_task = asyncio.create_task(start_poller())
-    logger.info("Notification poller launched")
+    logger.info("Notification poller launched (polls only while this worker holds the lease)")
 
     # Trending book shelves are ~46 external round trips to build, against one
     # for a Seerr row, so they are prepared in the background rather than while

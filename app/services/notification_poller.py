@@ -189,11 +189,14 @@ class LeaderLease:
         except Exception as exc:
             # Unknown state: stand down. If we were leader the lease will
             # lapse and whoever can reach Redis takes over.
-            logger.warning("Poller: leader lease check failed: %s", exc)
+            logger.warning("Lease %s: check failed: %s", self.key, exc)
             self.held = False
         if self.held != was_held:
+            # Name the key: the class also guards other one-at-a-time jobs
+            # (the books catalog rebuild), whose lease is not the poller's.
             logger.info(
-                "Poller: %s the leader lease (%s)",
+                "Lease %s: %s by %s",
+                self.key,
                 "acquired" if self.held else "lost",
                 self.owner,
             )

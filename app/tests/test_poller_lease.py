@@ -64,6 +64,18 @@ class LeaderLeaseTests(unittest.TestCase):
             with self.assertLogs(poller.logger, level="WARNING"):
                 self.assertFalse(run(self.a.refresh()))
 
+    def test_handover_logs_name_the_lease_key(self):
+        # Another job's lease (the books rebuild lock) taken in the leader's
+        # process must not read as a second poller taking the leader lease.
+        other = poller.LeaderLease(self.r, key="books:catalog:rebuild", ttl=15, owner="worker-a")
+        with self.assertLogs(poller.logger, level="INFO") as logs:
+            run(self.a.refresh())
+            run(other.refresh())
+        self.assertEqual(logs.output, [
+            f"INFO:{poller.logger.name}:Lease {poller.LEADER_KEY}: acquired by worker-a",
+            f"INFO:{poller.logger.name}:Lease books:catalog:rebuild: acquired by worker-a",
+        ])
+
 
 
 def _redis_reachable() -> bool:
