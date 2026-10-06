@@ -1044,10 +1044,11 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
         self.assertIsNotNone(link)
         self.assertEqual(link.group(2), "Make a request")
         classes = link.group(1).split()
-        # The site's primary button, as "Turn on" on the push card: the same
+        # The site's primary button, as "Turn on" on the push banner: the same
         # fill, text, radius, size and focus ring; one line high in the row.
+        # (The banner's button is a little narrower, px-3, to leave its words room.)
         turn_on = re.search(r'<button type="button" data-push-prompt-enable class="([^"]*)"', page).group(1).split()
-        shared = [c for c in turn_on if c not in ("flex-1", "sm:flex-none", "py-2", "disabled:opacity-50")]
+        shared = [c for c in turn_on if c not in ("px-3", "py-1.5", "disabled:opacity-50")]
         for cls in shared:
             self.assertIn(cls, classes)
         for cls in ("py-1", "whitespace-nowrap"):
