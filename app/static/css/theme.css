@@ -1913,7 +1913,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 #wsPlayerPill[hidden], #wsPlayerPill [hidden] { display: none !important; }
 /* The slot narrows into the top bar's free width (300px at most); under
    200px the pill is its cover and its play button, the title in its label. */
-#wsPlayerPill { flex: 0 1 300px; min-width: 80px; container-type: inline-size; }
+#wsPlayerPill { flex: 0 1 auto; width: 300px; min-width: 80px; container-type: inline-size; }
 
 .wsp-pill {
   position: relative; display: flex; align-items: center; gap: 4px;
