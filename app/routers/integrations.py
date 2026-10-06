@@ -161,14 +161,32 @@ async def get_service_status(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get enabled service status from Uptime Kuma for homepage display."""
-    monitors = await uptime_kuma.get_monitors()
+    """The enabled monitors for the header's status pill and panel (and Home).
+
+    Each monitor carries its current status, its last 50 checks (beats:
+    status, ping in ms or null, time as ISO UTC, oldest first) and its uptime
+    over each window the panel offers (uptime: {"24h", "30d", "all"}, a
+    percentage or null when Uptime Kuma's badge could not be read).
+
+    [] when Uptime Kuma is not set up. 503 when it is set up but did not
+    answer: the pill then says the status is unavailable, never what it last
+    saw. Monitors switched off in Settings are never sent.
+    """
+    monitors = await uptime_kuma.read_monitors()
+    if monitors is None:
+        if uptime_kuma.configured():
+            raise HTTPException(status_code=503, detail="Uptime Kuma is not answering right now")
+        return []
     result = []
     for m in monitors:
         prefs = _get_monitor_preferences(db, m["id"])
         if prefs["enabled"]:
             m["icon"] = prefs["icon"]
             result.append(m)
+    uptime = await uptime_kuma.read_uptime(result)
+    for m in result:
+        m["uptime"] = uptime.get(m["id"], {})
+        m["uptime_30d"] = m["uptime"].get("30d")
     return result
 
 

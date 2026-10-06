@@ -1,10 +1,19 @@
 """
 Uptime Kuma monitoring integration.
 Fetches service status from Uptime Kuma's public status page API.
+
+Everything here is a GET against public endpoints: the status page, its
+heartbeats (the last 50 checks of each monitor and the past day's uptime) and
+the uptime badges (/api/badge/<id>/uptime/<hours>), which are the only public
+source of uptime over longer windows. Nothing is ever written to Uptime Kuma.
 """
 
+import asyncio
+import json
 import logging
-from typing import Optional
+import re
+from datetime import datetime, timezone
+from typing import Dict, Iterable, Optional
 
 import httpx
 from app.integrations import config as integration_config
@@ -21,6 +30,79 @@ STATUS_MAP = {
     2: "degraded",  # pending
     3: "maintenance",
 }
+
+
+# The uptime windows the status panel offers, in hours. "all" asks for far
+# more hours than any install has kept (100000 h is about 11 years): Uptime
+# Kuma 1.23 then answers over every check it still holds, the same figure a
+# ten times larger window gives.
+UPTIME_WINDOWS = {"24h": 24, "30d": 720, "all": 100000}
+BADGE_TIMEOUT = 4.0
+# A badge figure moves slowly; one read per monitor and window per 10 minutes
+# serves every worker (Redis, never module memory: uvicorn runs several). A
+# badge that could not be read is asked again sooner, but not on every call.
+BADGE_TTL = 600
+BADGE_MISS_TTL = 120
+_CACHE_PREFIX = "webservarr:cache:kuma-uptime:"
+# The figure in a badge's accessible name: aria-label="Uptime (720h): 99.72%".
+_BADGE_LABEL = re.compile(r'aria-label="[^"]*?:\s*(\d{1,3}(?:\.\d+)?)\s*%"')
+_BADGE_TITLE = re.compile(r"<title>[^<]*?:\s*(\d{1,3}(?:\.\d+)?)\s*%</title>")
+
+
+def kuma_iso(value) -> Optional[str]:
+    """A heartbeat time as ISO 8601 UTC with a Z. Uptime Kuma sends its
+    stored UTC time with no zone ("2026-10-06 01:56:33.664"); a browser given
+    that would read it as its own local time. None for anything else."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("T", " ").rstrip("Z")
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return dt.replace(tzinfo=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return None
+
+
+def beat_list(heartbeats) -> list:
+    """The last 50 checks, oldest first: {status, ping, time}. status is one
+    of STATUS_MAP's words, ping whole milliseconds or None (a down check has
+    no reply), time ISO UTC."""
+    out = []
+    for beat in (heartbeats or [])[-50:]:
+        if not isinstance(beat, dict):
+            continue
+        ping = beat.get("ping")
+        out.append({
+            "status": STATUS_MAP.get(beat.get("status", 0), "down"),
+            "ping": int(round(ping)) if isinstance(ping, (int, float)) and not isinstance(ping, bool) and ping >= 0 else None,
+            "time": kuma_iso(beat.get("time")),
+        })
+    return out
+
+
+def parse_badge_percent(svg) -> Optional[float]:
+    """The uptime figure in an Uptime Kuma uptime badge, or None.
+
+    Read from the badge's accessible name (aria-label, then <title>), never
+    from its drawn text or colours. "N/A" (a monitor that is not public, or
+    has no checks in the window), anything not a badge, or a figure outside
+    0-100 is None, so the panel says "Not available" instead of a number."""
+    if not isinstance(svg, str) or "<svg" not in svg[:400]:
+        return None
+    for pattern in (_BADGE_LABEL, _BADGE_TITLE):
+        m = pattern.search(svg)
+        if m:
+            value = float(m.group(1))
+            return round(value, 2) if 0 <= value <= 100 else None
+    return None
+
+
+def configured() -> bool:
+    """Whether an Uptime Kuma address is set: without one there is no status
+    to show, which is not the same as Uptime Kuma not answering."""
+    return bool(_get_config()["url"])
 
 
 def _get_config() -> dict:
@@ -105,22 +187,23 @@ async def read_monitors() -> Optional[list]:
                         break
                     run_start = beat.get("time") or run_start
 
-                # Get uptime percentage
-                uptime_key_24h = f"{monitor_id}_24"
-                uptime_key_720h = f"{monitor_id}_720"
-                uptime_24h = uptime_list.get(uptime_key_24h, 0)
-                uptime_30d = uptime_list.get(uptime_key_720h, 0)
+                # The past day's uptime is the only window the status page
+                # sends (<id>_24, 0..1). Longer windows come from the badges
+                # (read_uptime); there is no <id>_720 key, so uptime_30d is
+                # None here and filled in by the caller that reads them.
+                uptime_24h = uptime_list.get(f"{monitor_id}_24")
 
                 monitors.append({
                     "id": monitor_id,
                     "name": name,
                     "status": status,
                     "response_time": response_time,
-                    "uptime_24h": round(uptime_24h * 100, 2) if uptime_24h <= 1 else round(uptime_24h, 2),
-                    "uptime_30d": round(uptime_30d * 100, 2) if uptime_30d <= 1 else round(uptime_30d, 2),
+                    "uptime_24h": _percent(uptime_24h),
+                    "uptime_30d": None,
                     "last_check": latest.get("time", ""),
                     "status_since": status_since,
                     "status_message": latest.get("msg", ""),
+                    "beats": beat_list(heartbeats),
                 })
 
             return monitors
@@ -134,3 +217,68 @@ async def read_monitors() -> Optional[list]:
     except Exception as e:
         logger.error("Uptime Kuma integration error: %s", str(e))
         return None
+
+
+def _percent(value) -> Optional[float]:
+    """Uptime Kuma's 0..1 ratio as a percentage (a value already over 1 is
+    taken as one), or None when there is no number."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        return None
+    return round(value * 100, 2) if value <= 1 else round(min(value, 100), 2)
+
+
+async def _redis():
+    from app.auth import session_manager
+    return await session_manager.get_redis()
+
+
+async def _badge(client: httpx.AsyncClient, url: str, monitor_id: int, hours: int) -> Optional[float]:
+    """One badge's figure, from Redis when a worker read it in the last 10
+    minutes. A failed read is remembered (as null) for 2 minutes."""
+    key = f"{_CACHE_PREFIX}{monitor_id}:{hours}"
+    redis = None
+    try:
+        redis = await _redis()
+        raw = await redis.get(key)
+        if raw:
+            return json.loads(raw).get("pct")
+    except Exception:  # noqa: BLE001 - a cold or missing cache is not an error
+        redis = None
+    pct = None
+    try:
+        resp = await client.get(f"{url}/api/badge/{monitor_id}/uptime/{hours}")
+        if resp.status_code == 200:
+            pct = parse_badge_percent(resp.text)
+    except Exception as exc:  # noqa: BLE001 - one badge never fails the rest
+        logger.debug("Uptime badge %s/%sh not read: %s", monitor_id, hours, exc)
+    if redis is not None:
+        try:
+            await redis.set(key, json.dumps({"pct": pct}), ex=BADGE_TTL if pct is not None else BADGE_MISS_TTL)
+        except Exception:  # noqa: BLE001
+            pass
+    return pct
+
+
+async def read_uptime(monitors: Iterable[dict]) -> Dict[int, dict]:
+    """Uptime per monitor for every window in UPTIME_WINDOWS:
+    {id: {"24h": pct, "30d": pct, "all": pct}}, each a percentage or None
+    ("Not available"). The past day comes from the heartbeat answer already
+    in hand (uptime_24h); the longer windows from the badges, read together.
+    WebServarr keeps no uptime history of its own to fall back on (the status
+    feed records outages, not checks), so a badge that can't be read is None,
+    never an estimate."""
+    monitors = list(monitors)
+    out = {m["id"]: {"24h": m.get("uptime_24h")} for m in monitors}
+    config = _get_config()
+    long_windows = [(name, hours) for name, hours in UPTIME_WINDOWS.items() if name != "24h"]
+    if not config["url"] or not monitors:
+        for m in monitors:
+            out[m["id"]].update({name: None for name, _ in long_windows})
+        return out
+    async with httpx.AsyncClient(timeout=BADGE_TIMEOUT, verify=False) as client:
+        jobs = [(m["id"], name, _badge(client, config["url"], m["id"], hours))
+                for m in monitors for name, hours in long_windows]
+        values = await asyncio.gather(*(job for _, _, job in jobs))
+    for (monitor_id, name, _), value in zip(jobs, values):
+        out[monitor_id][name] = value
+    return out
