@@ -167,6 +167,11 @@ class SoftOpenClose(unittest.TestCase):
             self.assertTrue(120 <= int(ms) <= 160, closed)
         m = re.search(r"transition-duration: (\d+)ms", opened)
         self.assertTrue(m and 150 <= int(m.group(1)) <= 220, opened)
+        # Every open unfolds from the top edge (not only the bell's first,
+        # whose list arriving made it grow); the clip stays clear of the shadow.
+        self.assertIn("clip-path: inset(-24px -24px 100% -24px)", closed)
+        self.assertIn("clip-path 140ms ease-out", closed)
+        self.assertIn("clip-path: inset(-24px -24px -24px -24px)", opened)
 
     def test_every_open_restarts_from_the_closed_state(self):
         # A panel whose open was left to @starting-style animated only the

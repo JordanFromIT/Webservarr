@@ -609,12 +609,23 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
  * is quicker than open. A closing panel takes no pointer: pointer-events is
  * not in the transition list, so it switches off the moment the close
  * begins, and the drop is small (6px) so the panel never seems to travel.
+ *
+ * It also unfolds from its top edge (clip-path) on every open and folds back
+ * on close. Without it, the bell's first open was the only one that looked
+ * animated: its list came in while the panel faded, so the panel grew, and
+ * every later open (the list already drawn) read as instant. The clip runs
+ * 24px wide of the box so the shadow is never cut.
  */
 .ws-pop {
   opacity: 0; transform: translateY(-6px); pointer-events: none;
-  transition: opacity 140ms ease-out, transform 140ms ease-out, display 140ms allow-discrete;
+  clip-path: inset(-24px -24px 100% -24px);
+  transition: opacity 140ms ease-out, transform 140ms ease-out, clip-path 140ms ease-out, display 140ms allow-discrete;
 }
-.ws-pop.is-open { opacity: 1; transform: none; pointer-events: auto; transition-duration: 180ms; }
+.ws-pop.is-open {
+  opacity: 1; transform: none; pointer-events: auto;
+  clip-path: inset(-24px -24px -24px -24px);
+  transition-duration: 220ms;
+}
 
 /* The WSUI dialog (ui.js): the dim fades in and the box rises 6px with it;
    on close ui.js marks the overlay .is-closing (and inert, so nothing in it
