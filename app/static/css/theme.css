@@ -532,6 +532,26 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   html[data-page="index"][data-netdata] .ws-status-chip { min-width: 24px; padding: 0; margin-inline-end: -12px; }
   html[data-page="index"][data-netdata] .ws-status-chip-face { width: 24px; height: 24px; padding: 0; justify-content: center; }
 }
+/* Below 360px the top bar's gauges are each a ring over two short lines,
+ * so "Home" stays whole at 320px with every reading at its widest (100%,
+ * three-figure speeds): CPU and RAM put the name over the reading (as from
+ * xl), the network puts upload over download with the unit once beside
+ * both. All three are the same height, so the rings stay in line. Nothing
+ * is smaller than the gauges' own text. The header copy (lg) is not here. */
+@media (max-width: 359px) {
+  #mobileTopBar [data-home-gauges] { column-gap: 12px; }
+  #mobileTopBar .ws-gauge-reading { display: block; text-align: center; }
+  #mobileTopBar .ws-gauge-reading > p + p { margin-top: 1px; }
+  #mobileTopBar .ws-gauge-net {
+    display: grid; grid-template-columns: auto auto auto; align-items: center; min-width: 0; row-gap: 1px;
+  }
+  #mobileTopBar .ws-gauge-net > .material-symbols-outlined:first-child { grid-area: 1 / 1; }
+  #mobileTopBar .ws-gauge-net > .material-symbols-outlined:not(:first-child) { grid-area: 2 / 1; margin-inline-start: 0; }
+  #mobileTopBar .ws-gauge-net > [data-gauge-net] { min-width: 3ch; }
+  #mobileTopBar .ws-gauge-net > [data-gauge-net="up"] { grid-area: 1 / 2; }
+  #mobileTopBar .ws-gauge-net > [data-gauge-net="down"] { grid-area: 2 / 2; }
+  #mobileTopBar .ws-gauge-net > [data-gauge-unit] { grid-area: 1 / 3 / 3 / 4; }
+}
 
 /* The popover hangs from the header's left group (positioned), under the pill. */
 .ws-sp-pop {
