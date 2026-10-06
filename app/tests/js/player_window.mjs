@@ -1,7 +1,7 @@
 // The desktop player (app/static/js/player/ui.js and popout.js, and the
 // remote window's app/static/js/player-remote.js) in
 // happy-dom: the top bar's pill and its states, the floating window (open,
-// its X and Escape back to the pill, the pill's Stop while paused with
+// its X and Escape back to the pill, the pill's Stop (right of Play) with
 // Resume, panels opening below and
 // closing again, Playback settings back to Chapters), moving and sizing it
 // by pointer and keyboard inside the viewport, its remembered place per
@@ -491,25 +491,32 @@ await run('prompts and notices show inside the window while it is open', () => {
   pr.remove();
 });
 
-await run('the pill\'s Stop: only while paused; the book closes, the place is saved, Resume', async () => {
+await run('the pill\'s Stop: right of Play, playing or paused; the book closes, the place is saved, Resume', async () => {
   const t = setup({ state: BOOK });
   const stop = t.q('.wsp-pill-stop');
-  check('playing: no Stop', stop.hidden);
+  const live = () => !stop.hidden && !stop.hasAttribute('aria-disabled');
+  check('playing: Stop, named for what it does', live() && stop.getAttribute('aria-label') === 'Stop listening, your place is saved' &&
+    stop.getAttribute('title') === 'Stop listening' && stop.textContent === 'stop');
+  check('right of Play', t.q('.wsp-pill-play').nextElementSibling === stop);
+  check('no narrow-bar marker any more', !t.q('.wsp-pill').hasAttribute('data-stop'));
   t.engine.set({ playing: false }, 'pause');
-  check('paused: Stop, named for what it does', !stop.hidden && stop.getAttribute('aria-label') === 'Stop listening, your place is saved' &&
-    stop.textContent === 'close');
-  check('left of Play, so Play stays put', stop.nextElementSibling === t.q('.wsp-pill-play'));
-  check('the pill is marked for the narrow top bar', t.q('.wsp-pill').hasAttribute('data-stop'));
-  t.engine.set({ playing: true }, 'play');
-  check('playing again: gone', stop.hidden && !t.q('.wsp-pill').hasAttribute('data-stop'));
-  t.engine.set({ loading: true, playing: false }, 'loading');
-  check('opening: none', stop.hidden);
+  check('paused: Stop', live());
+  t.engine.set({ loading: true }, 'loading');
+  check('loading: kept in place but inert', !stop.hidden && stop.getAttribute('aria-disabled') === 'true');
+  stop.click();
+  check('an inert Stop does nothing', !t.engine.calls.some((c) => c[0] === 'close') && !t.q('.wsp-notice'));
   t.engine.set({ loading: false, checking: true }, 'loading');
-  check('reading the saved places: none', stop.hidden);
-  t.engine.set({ checking: false }, 'pause');
+  check('reading the saved places: inert', !stop.hidden && stop.getAttribute('aria-disabled') === 'true');
   stop.focus();
+  t.engine.set({ checking: false }, 'pause');
+  check('then live again, focus where it was', live() && t.doc.activeElement === stop);
   t.engine.set({ playing: true }, 'play');
-  check('focus on it when play starts elsewhere: to Play', stop.hidden && t.doc.activeElement === t.q('.wsp-pill-play'));
+  check('playing: still there, focus kept', live() && t.doc.activeElement === stop);
+
+  const p = setup({ state: Object.assign({}, BOOK, { playing: true }) });
+  p.q('.wsp-pill-stop').click();
+  check('stops a book that is playing', p.engine.calls.some((x) => x[0] === 'close') && p.q('#wsPlayerPill').hidden &&
+    p.q('.wsp-notice').textContent.indexOf('Stopped at 11:40. Your place is saved.') !== -1);
   t.engine.set({ playing: false }, 'pause');
 
   t.ui.open();

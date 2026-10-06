@@ -124,9 +124,9 @@
  * below the player and close again from the same button (Playback settings
  * gives way to Chapters). Escape or its X (Close player window) sends it back
  * to the pill and focus with it; the book plays on. Only the pill stops a
- * book: while paused it shows a ✕ (Stop listening) that closes the book
- * ("Your place is saved", Resume). A full-screen view (the reader) keeps the
- * bar and the sheet.
+ * book: its Stop, right of Play, closes the book playing or paused ("Your
+ * place is saved", Resume). A full-screen view (the reader) keeps the bar
+ * and the sheet.
  *
  * Pop out (popout.js) moves the window into a window of its own: dock()
  * puts this same window in a Document Picture-in-Picture document, and
@@ -569,18 +569,17 @@ export function createUI(env) {
     h('span', { class: 'wsp-pill-text' }, [pillTitle, pillMeta])
   ]);
   const pillPlay = h('button', { type: 'button', class: 'wsp-play wsp-pill-play', 'aria-label': 'Play' }, [icon('play_arrow')]);
-  // Stop: shown only while paused, so a book playing can't be stopped by a
-  // stray click. It sits left of Play, so Play never moves when it comes
-  // (a second click on Pause lands on Play, not here).
-  const pillStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-pill-stop', hidden: true }, [icon('close')]);
+  // Stop, right of Play: always in its place while the pill shows, so Play
+  // never moves under the pointer. Inert (aria-disabled) while it can't act.
+  const pillStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-pill-stop', title: 'Stop listening' }, [icon('stop')]);
   const pillFill = h('span', { class: 'wsp-pill-fill' });
   // The not-saved warning, said here while the window is not open (the
   // window's own says it then), so it is announced once.
   const pillWarn = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const pill = h('div', { class: 'wsp-pill', role: 'group', 'aria-label': 'Audiobook player', 'data-state': 'paused' }, [
     pillOpen,
-    pillStop,
     pillPlay,
+    pillStop,
     h('span', { class: 'wsp-pill-line', 'aria-hidden': 'true' }, [pillFill]),
     pillWarn
   ]);
@@ -1107,17 +1106,12 @@ export function createUI(env) {
     if (pillFill.style.transform !== tf) pillFill.style.transform = tf;
     setArt(pillArt, s.cover || '');
     drawPlay(pillPlay, s);
-    // Stop is offered only for a loaded book at rest (not playing, opening
-    // or reading its saved places).
-    const canStop = !loadingOnly && !playing(s) && !s.loading && !s.checking;
+    // Stop acts on a loaded book, playing or paused, but not while it opens,
+    // loads a part or reads its saved places (a newer place may be coming).
+    const canStop = !loadingOnly && !s.loading && !s.checking;
     const held = !!(s.filesChanged || s.safetyNet);
-    if (!canStop && pillStop === doc.activeElement) pillPlay.focus({ preventScroll: true });
-    setHidden(pillStop, !canStop);
-    // In the narrowest top bar Stop takes the cover's place (theme.css).
-    setAttr(pill, 'data-stop', canStop ? '' : null);
-    if (canStop && pillOpen === doc.activeElement && !isVisible(pillOpen)) pillPlay.focus({ preventScroll: true });
+    setAttr(pillStop, 'aria-disabled', canStop ? null : 'true');
     setAttr(pillStop, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
-    setAttr(pillStop, 'title', 'Stop listening');
     const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
     setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
     setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
@@ -1613,11 +1607,11 @@ export function createUI(env) {
     if (popOutFn) safely(popOutFn)();
   });
 
-  // The pill's Stop: the book closes (its last save goes as it does), with
-  // a way back to the same place.
+  // The pill's Stop: the book closes, playing or paused (its last save goes
+  // as it does), with a way back to the same place.
   pillStop.addEventListener('click', function () {
     const s = player.state();
-    if (!s || !s.book || s.playing) return;
+    if (!s || !s.book || s.loading || s.checking) return;
     const key = s.book;
     const held = !!(s.filesChanged || s.safetyNet);
     const msg = held ? 'Stopped. Your place is as it was.' : 'Stopped at ' + formatClock(s.bookMs) + '. Your place is saved.';
@@ -1856,7 +1850,8 @@ export function createUI(env) {
       lastFocus = null;
       if (lastState) drawPill(lastState);
       if (focusIn) {
-        const back = pillOnScreen() ? pillOpen : fallbackFocus();
+        // The narrowest top bar has no cover to open the window: Play then.
+        const back = pillOnScreen() ? (isVisible(pillOpen) ? pillOpen : pillPlay) : fallbackFocus();
         if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
       }
       emit('close');

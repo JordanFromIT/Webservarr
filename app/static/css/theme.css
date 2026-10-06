@@ -1968,9 +1968,12 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-pill-play { width: 36px; height: 36px; }
 .wsp-pill-play .material-symbols-outlined { font-size: 24px; }
 .wsp-pill-play:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
-/* Stop, while paused: quieter than Play (the icon button's muted text). */
-.wsp-pill-stop { width: 32px; height: 32px; }
-.wsp-pill-stop .material-symbols-outlined { font-size: 20px; }
+/* Stop, right of Play: quieter than Play (the icon button's muted text), a
+   filled square so it reads as a transport control, not a checkbox. Dimmed
+   while it can't act (ui.js sets aria-disabled), with no hover. */
+.wsp-pill-stop { width: 32px; height: 32px; margin-inline-start: 2px; }
+.wsp-pill-stop .material-symbols-outlined { font-size: 20px; font-variation-settings: 'FILL' 1; }
+.wsp-pill-stop[aria-disabled="true"] { opacity: .45; cursor: default; background: none; color: rgb(var(--color-text) / .7); }
 .wsp-pill-line { position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; pointer-events: none; background: rgb(var(--color-text) / .12); }
 .wsp-pill-fill { display: block; height: 100%; background: rgb(var(--color-accent)); transform-origin: 0 50%; transform: scaleX(0); }
 .wsp-pill[data-open] { background: rgb(var(--color-primary) / .3); border-color: rgb(var(--color-accent) / .5); }
@@ -1998,11 +2001,11 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-pill-play { width: 32px; height: 32px; }
   .wsp-pill-line { left: 12px; right: 12px; }
 }
-/* Too narrow for the cover, Stop and Play together (about 1024 to 1050px
-   wide): while Stop shows, it takes the cover's place. */
+/* Too narrow for the cover, Play and Stop together (about 1024 to 1050px
+   wide): the cover gives way, Play and Stop stay. */
 @container (max-width: 111px) {
-  .wsp-pill[data-stop] .wsp-pill-open { display: none; }
-  .wsp-pill[data-stop] .wsp-pill-stop { margin-left: 6px; }
+  .wsp-pill-open { display: none; }
+  .wsp-pill-play { margin-inline-start: 6px; }
 }
 @media (hover: hover) and (pointer: fine) {
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }

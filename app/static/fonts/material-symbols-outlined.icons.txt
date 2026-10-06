@@ -113,6 +113,7 @@ shield
 shopping_cart
 speed
 star
+stop
 stop_circle
 strikethrough_s
 subtitles
