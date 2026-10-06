@@ -704,10 +704,11 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
   font-size: 12px; line-height: 16px; font-weight: 500;
 }
 /* Six tabs (five pages and More) share a narrow phone: about 53px each at
-   320px. The pill gives up its spare width (above) and the labels step down
-   a pixel with less side padding, so every name fits; each tab keeps the
-   bar's full height, and the pill and badge are as before. */
-@media (max-width: 413.98px) {
+   320px. The pill gives up its spare width (above) and, below 375px, the
+   labels step down a pixel with less side padding, so every name fits (at
+   320px "Requests" and "Calendar" clip at 12px); each tab keeps the bar's
+   full height, and the pill and badge are as before. */
+@media (max-width: 374.98px) {
   .ws-tabbar-list:has(> li:nth-child(6)) .ws-navtab { padding: 0 2px; }
   .ws-tabbar-list:has(> li:nth-child(6)) .ws-navtab-label { font-size: 11px; }
 }
