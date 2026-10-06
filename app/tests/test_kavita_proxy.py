@@ -527,6 +527,29 @@ class ScopedItems(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIsNone(self.items(path))
 
+    def test_a_path_id_in_any_other_spelling_of_a_number_refuses_the_request(self):
+        # Kavita's access filter cannot parse these and falls back to a query
+        # chapterId, while ASP.NET binds the route value as 5 (Int32Converter
+        # trims, takes a sign and reads 0x/&H hex). They are never forwarded.
+        for spelling in ("0x5", "0X5", "+5", "-5", " 5", "5 ", "\t5", "5\n", "\u00a05", "&H5", "&h5",
+                         "0xff", "5.0", "1e3", "5abc", "\uff15", "\u0665"):
+            for path in (f"api/Book/{spelling}/book-page", f"api/Series/{spelling}",
+                         f"api/Download/volume/{spelling}", f"api/Reader/{spelling}"):
+                with self.subTest(path=path):
+                    self.assertIsNone(self.items(path, "page=0&chapterId=2"))
+
+    def test_words_after_a_scoped_kind_still_name_nothing(self):
+        for path in ("api/Series/all-v2", "api/Series/series-detail", "api/series/v2", "api/Series/volume",
+                     "api/Series/chapter", "api/Series/recently-added-v2", "api/Series/add", "api/Series/x5"):
+            with self.subTest(path=path):
+                self.assertEqual(self.items(path), set())
+
+    def test_query_and_body_ids_are_plain_ascii_digits_only(self):
+        for value in ("\uff15", "\u0665", "5\n", " 5", "+5", "&H5"):
+            with self.subTest(value=value):
+                self.assertIsNone(kavita_proxy.scoped_items("api/Series/chapter", [("chapterId", value)], b""))
+                self.assertIsNone(self.items("api/Reader/progress", body={"chapterId": value}))
+
     def test_naming_too_much_is_refused(self):
         self.assertIsNotNone(self.items("api/Series/series-by-ids", body={"seriesIds": list(range(1, 201))}))
         self.assertIsNone(self.items("api/Series/series-by-ids", body={"seriesIds": list(range(1, 202))}))
@@ -640,6 +663,18 @@ class ScopedPaths(unittest.TestCase):
                 self.assertEqual(r.status_code, 404)
                 self.assertEqual(_RecordingProxyClient.asked, [])
                 self.check.assert_not_awaited()
+
+    def test_a_path_id_spelled_another_way_is_refused_not_forwarded(self):
+        # A visible chapterId in the query must not carry a hidden chapter
+        # named as 0x5, +5, " 5" or &H5 in the path past the check.
+        for spelling in ("0x5", "%2B5", "%205", "5%20", "%26H5", "%EF%BC%95"):
+            for path in (f"api/Book/{spelling}/book-page", f"api/Book/{spelling}/book-resources"):
+                with self.subTest(path=path):
+                    _RecordingProxyClient.asked = []
+                    r = self.call("get", path, "page=0&file=a.png&chapterId=2")
+                    self.assertEqual(r.status_code, 404)
+                    self.assertEqual(_RecordingProxyClient.asked, [])
+                    self.check.assert_not_awaited()
 
     def test_a_second_hidden_id_among_visible_ones_hides_the_request(self):
         r = self.call("get", "api/Series/metadata", "seriesId=104&seriesId=105", visible=False)

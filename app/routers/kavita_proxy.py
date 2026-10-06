@@ -58,7 +58,18 @@ _SCOPE_PARAMS = {"chapterid": "chapter", "volumeid": "volume", "seriesid": "seri
 _SCOPE_LISTS = {"chapterids": "chapter", "volumeids": "volume", "seriesids": "series"}
 _SCOPE_PATH = {"book": "chapter", "chapter": "chapter", "volume": "volume", "series": "series"}
 _MAX_SCOPED = 200          # a request naming more than this is refused (the work is bounded)
-_ID_TEXT = re.compile(r"^\d{1,10}$")
+_ID_TEXT = re.compile(r"[0-9]{1,10}")      # fullmatch: plain ASCII digits, nothing around them
+
+
+def _looks_like_a_number(segment: str) -> bool:
+    """True for a path segment ASP.NET could still bind as an int although it
+    is not plain digits: its Int32Converter trims whitespace, takes a sign and
+    reads 0x and &H hex, so " 5", "+5", "0x5" and "&H5" all bind as 5 while
+    Kavita's own access filter cannot parse them and falls back to the query's
+    chapterId. Anything starting with a digit (in any script) once whitespace
+    and signs are dropped counts, as does an &H prefix."""
+    text = segment.strip().lstrip("+-").strip()
+    return text[:1].isdigit() or text[:2].lower() == "&h"
 
 
 def _whole_id(value) -> Optional[int]:
@@ -67,7 +78,7 @@ def _whole_id(value) -> Optional[int]:
         return None
     if isinstance(value, int):
         number = value
-    elif isinstance(value, str) and _ID_TEXT.match(value):
+    elif isinstance(value, str) and _ID_TEXT.fullmatch(value):
         number = int(value)
     else:
         return None
@@ -77,11 +88,15 @@ def _whole_id(value) -> Optional[int]:
 def scoped_items(path: str, query_pairs, body: bytes, content_type: str = ""):
     """The set of (kind, id) a request names, or None when it names one that is
     not a plain id (refused: nothing is forwarded on a guess). An empty set is a
-    request about nothing in particular (a list Kavita filters itself)."""
+    request about nothing in particular (a list Kavita filters itself). A path
+    segment that reads as a number in any other spelling (0x5, +5, " 5") is
+    refused too, since Kavita would bind it to an id this check never saw."""
     found = set()
     segments = path.split("/")
     for at, segment in enumerate(segments[2:], start=2):
-        if not segment.isdigit():
+        if not _ID_TEXT.fullmatch(segment):
+            if _looks_like_a_number(segment):
+                return None
             continue
         kind = _SCOPE_PATH.get(segments[at - 1].lower())
         item_id = _whole_id(segment)
