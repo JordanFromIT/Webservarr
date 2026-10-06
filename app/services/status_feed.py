@@ -40,8 +40,10 @@ AUTO = "auto"
 ADMIN = "admin"
 LIBRARY = "library"
 
-# An outage is pushed once it has lasted this long; an important note at once.
-PUSH_AFTER = timedelta(minutes=10)
+# An outage is confirmed once it has lasted this long, and only a confirmed
+# one reaches the bell and is pushed (its "back" follows only then); a
+# shorter one shows in the feed alone. An important note is pushed at once.
+CONFIRMED_AFTER = timedelta(minutes=10)
 
 NOTE_MAX = 280
 SERVICE_MAX = 100
@@ -207,11 +209,11 @@ def _close_outage(db: Session, monitor_id: int, now: datetime,
 
 def due_pushes(db: Session, now: datetime, include_outages: bool = True) -> List[StatusUpdate]:
     """The updates whose push is due and not yet claimed: an open outage that
-    began PUSH_AFTER ago or more (only when `include_outages`), and an open
+    began CONFIRMED_AFTER ago or more (only when `include_outages`), and an open
     important note."""
     due = [and_(StatusUpdate.source == ADMIN, StatusUpdate.important.is_(True))]
     if include_outages:
-        due.append(and_(StatusUpdate.source == AUTO, StatusUpdate.started_at <= now - PUSH_AFTER))
+        due.append(and_(StatusUpdate.source == AUTO, StatusUpdate.started_at <= now - CONFIRMED_AFTER))
     return (db.query(StatusUpdate)
             .filter(StatusUpdate.active.is_(True), StatusUpdate.pushed_at.is_(None), or_(*due))
             .order_by(StatusUpdate.id)
@@ -219,9 +221,11 @@ def due_pushes(db: Session, now: datetime, include_outages: bool = True) -> List
 
 
 def claim_push(db: Session, row_id: int, now: datetime) -> bool:
-    """Take the one push this update gets. False when it was already taken."""
+    """Take the one push this update gets. False when it was already taken,
+    or the update closed in the meantime (nothing to say "down" about)."""
     taken = (db.query(StatusUpdate)
-             .filter(StatusUpdate.id == row_id, StatusUpdate.pushed_at.is_(None))
+             .filter(StatusUpdate.id == row_id, StatusUpdate.pushed_at.is_(None),
+                     StatusUpdate.active.is_(True))
              .update({StatusUpdate.pushed_at: now}, synchronize_session=False))
     db.commit()
     return taken == 1
@@ -233,6 +237,13 @@ def push_text(row: StatusUpdate, now: datetime) -> Tuple[str, str]:
         began = row.started_at or row.created_at or now
         return row.title, f"Down for {duration_text((now - began).total_seconds())}"
     return "Status update", row.message
+
+
+def back_text(row: StatusUpdate) -> Tuple[str, str]:
+    """(title, body) of the "back" a closed outage sends after its push."""
+    began = row.started_at or row.created_at
+    ended = row.ended_at or began
+    return f"{_service(row)} is back", f"Down for {duration_text((ended - began).total_seconds())}"
 
 
 # --- The feed -----------------------------------------------------------------------

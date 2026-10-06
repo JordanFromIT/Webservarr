@@ -622,8 +622,9 @@ async def _poll_monitors(r: aioredis.Redis,
     all (removed, or taken off the status page). A monitor switched off in
     Settings opens nothing. When Uptime Kuma doesn't answer nothing opens or
     closes, and the feed is told so (status_feed.KUMA_OK_KEY, kept for
-    `kuma_ok_ttl` seconds after each answer). The pushes are
-    push_status_updates' job.
+    `kuma_ok_ttl` seconds after each answer). The "down" notifications and
+    pushes are push_status_updates' job; the "back" ones go out as an
+    outage closes, to whoever got its "down" (_notify_back).
     """
     from app.integrations.uptime_kuma import read_monitors
 
@@ -672,7 +673,9 @@ async def _track_monitor(r: aioredis.Redis, db: Session, mon: dict, now: datetim
         if status_feed.monitor_enabled(db, monitor_id):
             status_feed.open_outage(db, monitor_id, name, status_feed.parse_time(since, now), now)
     elif status_label == "up":
-        status_feed.close_outage(db, monitor_id, now)
+        closed = status_feed.close_outage(db, monitor_id, now)
+        if closed is not None:
+            await _notify_back(r, db, closed)
 
 
 # A monitor's snapshot while it has an open outage but the status page
@@ -692,10 +695,48 @@ async def _track_missing_monitor(r: aioredis.Redis, db: Session, monitor_id: int
     status_feed.close_unmonitored(db, monitor_id, now)
 
 
+def _status_ref(row_id: int) -> str:
+    """The reference_id of an update's in-app notification."""
+    return f"status:{row_id}"
+
+
+async def _notify_status(r: aioredis.Redis, db: Session, emails: Set[str],
+                         title: str, body: str, ref_id: str) -> None:
+    """File a "status" notification for each of `emails` who wants them
+    (once per ref_id) and push it to their devices."""
+    notified = []
+    for email in emails:
+        if await _create_notification_once(r, db, email, "status", title, body, ref_id):
+            notified.append(email)
+    if notified:
+        try:
+            await send_push_to_users(notified, title, body, "status", url="/status")
+        except Exception as exc:  # noqa: BLE001 - the notifications are saved; a push is best effort
+            logger.warning("Poller: a status push could not be sent: %s", type(exc).__name__)
+
+
+async def _notify_back(r: aioredis.Redis, db: Session, row) -> None:
+    """Tell the people who were told an outage was down that it is back.
+
+    Only a confirmed outage (status_feed.CONFIRMED_AFTER) reached anyone's
+    bell, so a short one sends nothing here either. Called by whichever
+    poll closed it (status_feed.close_outage closes it once across workers).
+    """
+    down_ref = _status_ref(row.id)
+    told = {email for (email,) in db.query(Notification.user_email)
+            .filter(Notification.category == "status", Notification.reference_id == down_ref)
+            .distinct().all()}
+    if not told:
+        return
+    title, body = status_feed.back_text(row)
+    await _notify_status(r, db, told, title, body, f"{down_ref}:back")
+
+
 async def push_status_updates(r: aioredis.Redis) -> int:
-    """Push every status update that is due (status_feed.due_pushes): an
-    outage down PUSH_AFTER or longer, while Uptime Kuma is still answering
-    (never on a reading that may be stale), and an important note.
+    """Push every status update that is due (status_feed.due_pushes): a
+    confirmed outage (down CONFIRMED_AFTER or longer), while Uptime Kuma is
+    still answering (never on a reading that may be stale), and an important
+    note. A shorter outage never reaches the bell or a device.
 
     Each update is pushed at most once across workers: its push is claimed
     in the database before anything is sent, so a failed send is not
@@ -710,19 +751,11 @@ async def push_status_updates(r: aioredis.Redis) -> int:
     try:
         for row in status_feed.due_pushes(db, now, include_outages):
             if not status_feed.claim_push(db, row.id, now):
-                continue  # another worker has it
+                continue  # another worker has it, or it closed
             pushed += 1
             title, body = status_feed.push_text(row, now)
-            ref_id = f"status:{row.id}"
-            notified = []
-            for email in await _collect_recipient_emails(r, db):
-                if await _create_notification_once(r, db, email, "status", title, body, ref_id):
-                    notified.append(email)
-            if notified:
-                try:
-                    await send_push_to_users(notified, title, body, "status", url="/status")
-                except Exception as exc:  # noqa: BLE001 - the notifications are saved; a push is best effort
-                    logger.warning("Poller: a status push could not be sent: %s", type(exc).__name__)
+            await _notify_status(r, db, await _collect_recipient_emails(r, db), title, body,
+                                 _status_ref(row.id))
     finally:
         db.close()
     return pushed

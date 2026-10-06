@@ -316,9 +316,44 @@ class Pushes(FeedCase):
         self.assertEqual(self.notifications(), [(OWNER, "status", "Media is down", f"status:{row_id}")])
         for _ in range(5):
             self.poll("down", minutes=5)
+        self.assertEqual(len(self.pushed), 1, "still down: no second push")
+        self.poll("up")                                 # 12:38
+        self.assertEqual(self.pushed[1:], [([OWNER], "Media is back", "Down for 36 min", "status", "/status")])
+        self.assertEqual(self.notifications()[1:], [(OWNER, "status", "Media is back", f"status:{row_id}:back")])
+
+    def test_a_blip_under_the_threshold_reaches_no_bell_and_no_device(self):
+        # Down long enough to open an outage (the Home event log shows it),
+        # back before it is confirmed: nothing down, nothing back.
+        self.subscribe(OWNER)
+        self.go_down()                                  # began 12:02, now 12:03
+        self.poll("down", minutes=7)                    # 12:10: 8 minutes
+        self.poll("up", kuma_time(T0 + timedelta(minutes=11)))   # 12:11
+        [row] = self.rows()
+        self.assertEqual((row.message, row.active), ("Media is back, down 9 min", False))
+        self.assertIsNone(row.pushed_at)
+        self.poll("up", minutes=30)
+        self.assertEqual(self.pushed, [])
+        self.assertEqual(self.notifications(), [])
+
+    def test_back_goes_only_to_the_people_told_it_was_down(self):
+        self.subscribe(OWNER)
+        self.go_down()
+        self.poll("down", minutes=10)                   # pushed to the owner only
+        self.r.hashes["session:late"] = {"email": "late@example.com"}
         self.poll("up")
-        self.assertEqual(len(self.pushed), 1)
-        self.assertEqual(len(self.notifications()), 1)
+        self.assertEqual([(p[0], p[1]) for p in self.pushed],
+                         [([OWNER], "Media is down"), ([OWNER], "Media is back")])
+        self.assertEqual({n[0] for n in self.notifications()}, {OWNER})
+
+    def test_only_status_notifications_come_from_a_monitor(self):
+        # The retired per-change "service" alert stays silent through a
+        # whole confirmed outage: the status feed is the one path.
+        self.subscribe(OWNER)
+        self.go_down()
+        self.poll("down", minutes=10)
+        self.poll("up")
+        self.assertEqual({n[1] for n in self.notifications()}, {"status"})
+        self.assertEqual({p[3] for p in self.pushed}, {"status"})
 
     def test_two_workers_post_and_push_it_once(self):
         # Review Focus 1: every poll and every sweep runs twice, as two
@@ -326,13 +361,14 @@ class Pushes(FeedCase):
         # database. (The race inside one statement: OnceAcrossWorkers.)
         self.subscribe(OWNER)
         self.r.hashes["session:x"] = {"email": "friend@example.com"}
-        for status, minutes in (("up", 1), ("down", 1), ("down", 1), ("down", 10), ("down", 1)):
+        for status, minutes in (("up", 1), ("down", 1), ("down", 1), ("down", 10), ("down", 1), ("up", 1)):
             self.poll(status, kuma_time(T0 + timedelta(minutes=2)), minutes=minutes)
             self.poll(status, kuma_time(T0 + timedelta(minutes=2)), minutes=0)
         self.assertEqual(len(self.rows()), 1)
-        self.assertEqual(len(self.pushed), 1)
+        self.assertEqual([p[1] for p in self.pushed], ["Media is down", "Media is back"])
         self.assertEqual(self.pushed[0][0], ["friend@example.com", OWNER])
-        self.assertEqual(len(self.notifications()), 2)
+        self.assertEqual(self.pushed[1][0], ["friend@example.com", OWNER])
+        self.assertEqual(len(self.notifications()), 4)
 
     def test_only_people_who_want_status_notifications_get_them(self):
         self.subscribe(OWNER)
@@ -447,6 +483,15 @@ class OnceAcrossWorkers(unittest.TestCase):
                               lambda db2: self.assertTrue(status_feed.claim_push(db2, row.id, T0)))
             self.assertFalse(status_feed.claim_push(db, row.id, T0))
             self.assertEqual(len(raced), 1)
+        finally:
+            db.close()
+
+    def test_a_closed_outage_is_never_claimed_for_a_push(self):
+        db = sessionmaker(bind=self.mine)()
+        try:
+            row = status_feed.open_outage(db, 7, "Media", T0, T0)
+            status_feed.close_outage(db, 7, T0 + timedelta(minutes=11))
+            self.assertFalse(status_feed.claim_push(db, row.id, T0 + timedelta(minutes=11)))
         finally:
             db.close()
 
