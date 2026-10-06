@@ -12,8 +12,8 @@ raises, whatever JSON it is given. Storing it is status_feed's job
 
 The wording is ACTIONS: one entry per row of the spec's table, so changing
 what a line says is a one-line edit. A line holds only the action, the
-title, the year, the episode code, a count and a resolution: never a
-requester, a user, a path or a release name.
+title, the year, the episode code, a count, a book's format and
+"(author)": never a requester, a user, a path or a release name.
 """
 
 import hashlib
@@ -25,38 +25,39 @@ APPS = ("sonarr", "radarr", "chaptarr")
 
 # (app, eventType, variant) -> the action that leads the line. The variant is
 # what the payload decides: "upgrade" (isUpgrade), "files" (deletedFiles, the
-# files went too), "many" (several episodes). "{format}" is Audiobook, Ebook
-# or Book. An eventType missing here makes no line.
+# files went too), "many" (several episodes). What follows the title (a year,
+# an episode code, "(8 episodes)", a book's format, "(author)") is the
+# handler's. An eventType missing here makes no line.
 ACTIONS = {
-    ("radarr", "Grab", ""): "Movie Downloading",
-    ("radarr", "Download", ""): "Movie Added",
-    ("radarr", "Download", "upgrade"): "Movie Upgraded",
-    ("radarr", "MovieAdded", ""): "Movie Monitored",
-    ("radarr", "MovieDelete", ""): "Movie Unmonitored",
-    ("radarr", "MovieDelete", "files"): "Movie Removed",
-    ("radarr", "MovieFileDelete", ""): "Movie Removed",
+    ("radarr", "Grab", ""): "Downloading",
+    ("radarr", "Download", ""): "Added",
+    ("radarr", "Download", "upgrade"): "Upgraded",
+    ("radarr", "MovieAdded", ""): "Monitored",
+    ("radarr", "MovieDelete", ""): "Unmonitored",
+    ("radarr", "MovieDelete", "files"): "Removed",
+    ("radarr", "MovieFileDelete", ""): "Removed",
 
-    ("sonarr", "Grab", ""): "Episode Downloading",
-    ("sonarr", "Grab", "many"): "Episodes Downloading",
-    ("sonarr", "Download", ""): "Episode Added",
-    ("sonarr", "Download", "many"): "Episodes Added",
-    ("sonarr", "Download", "upgrade"): "Episode Upgraded",
-    ("sonarr", "Download", "upgrade many"): "Episodes Upgraded",
+    ("sonarr", "Grab", ""): "Downloading",
+    ("sonarr", "Grab", "many"): "Downloading",
+    ("sonarr", "Download", ""): "Added",
+    ("sonarr", "Download", "many"): "Added",
+    ("sonarr", "Download", "upgrade"): "Upgraded",
+    ("sonarr", "Download", "upgrade many"): "Upgraded",
     ("sonarr", "Rename", ""): "Files Renamed",
-    ("sonarr", "SeriesAdd", ""): "Series Monitored",
-    ("sonarr", "SeriesDelete", ""): "Series Unmonitored",
-    ("sonarr", "SeriesDelete", "files"): "Series Removed",
-    ("sonarr", "EpisodeFileDelete", ""): "Episode Removed",
-    ("sonarr", "EpisodeFileDelete", "many"): "Episodes Removed",
+    ("sonarr", "SeriesAdd", ""): "Monitored",
+    ("sonarr", "SeriesDelete", ""): "Unmonitored",
+    ("sonarr", "SeriesDelete", "files"): "Removed",
+    ("sonarr", "EpisodeFileDelete", ""): "Removed",
+    ("sonarr", "EpisodeFileDelete", "many"): "Removed",
 
-    ("chaptarr", "Grab", ""): "{format} Downloading",
-    ("chaptarr", "Download", ""): "{format} Added",
-    ("chaptarr", "Download", "upgrade"): "{format} Upgraded",
-    ("chaptarr", "BookDelete", ""): "Book Unmonitored",
-    ("chaptarr", "BookDelete", "files"): "Book Removed",
-    ("chaptarr", "BookFileDelete", ""): "{format} Removed",
-    ("chaptarr", "AuthorDelete", ""): "Author Unmonitored",
-    ("chaptarr", "AuthorDelete", "files"): "Author Removed",
+    ("chaptarr", "Grab", ""): "Downloading",
+    ("chaptarr", "Download", ""): "Added",
+    ("chaptarr", "Download", "upgrade"): "Upgraded",
+    ("chaptarr", "BookDelete", ""): "Unmonitored",
+    ("chaptarr", "BookDelete", "files"): "Removed",
+    ("chaptarr", "BookFileDelete", ""): "Removed",
+    ("chaptarr", "AuthorDelete", ""): "Unmonitored",
+    ("chaptarr", "AuthorDelete", "files"): "Removed",
 }
 
 # The muted note after a grab's title (the event log shows it as " · <note>"):
@@ -66,9 +67,6 @@ GRAB_NOTE = "not guaranteed"
 LINE_MAX = 199          # every line stays under 200 characters
 KEY_MAX = 160
 ELLIPSIS = "…"
-
-# Resolution words for "now X" on an upgrade; any other quality says nothing.
-RESOLUTIONS = {"2160": "4K", "1080": "1080p", "720": "720p"}
 
 # Chaptarr's quality names (Readarr's set) by format.
 AUDIO_QUALITIES = {"M4B", "MP3", "FLAC", "M4A", "UNKNOWN AUDIO"}
@@ -155,23 +153,6 @@ def _line(action: str, title: str, tail: str = "") -> str:
     return f"{head}{title}{tail}"
 
 
-def resolution(quality) -> str:
-    """"4K", "1080p", "720p" from a quality name such as "WEBDL-2160p", or ""."""
-    if not isinstance(quality, str):
-        return ""
-    found = re.search(r"(\d{3,4})p\b", quality, re.IGNORECASE)
-    return RESOLUTIONS.get(found.group(1), "") if found else ""
-
-
-def _now(qualities) -> str:
-    """", now 4K" when every quality given names the same resolution."""
-    words = {resolution(q) for q in qualities}
-    if len(words) == 1:
-        word = words.pop()
-        return f", now {word}" if word else ""
-    return ""
-
-
 def _movie(body: dict) -> Tuple[str, str]:
     movie = _dict(body.get("movie"))
     year = _year(movie.get("year"))
@@ -179,8 +160,9 @@ def _movie(body: dict) -> Tuple[str, str]:
 
 
 def _episodes_tail(episodes: list) -> Tuple[str, bool]:
-    """(tail, many): " S02E03" for one episode, " S03 (8)" for several in
-    one season, " (12)" across seasons, "" when none are listed."""
+    """(tail, many): " S02E03" for one episode, " S03 (8 episodes)" for
+    several in one season, " (12 episodes)" across seasons, "" when none are
+    listed."""
     seen = set()
     for ep in episodes:
         ep = _dict(ep)
@@ -195,27 +177,27 @@ def _episodes_tail(episodes: list) -> Tuple[str, bool]:
         return f" S{season:02d}E{number:02d}", False
     seasons = {s for s, _ in seen}
     if len(seasons) == 1:
-        return f" S{seasons.pop():02d} ({len(seen)})", True
-    return f" ({len(seen)})", True
+        return f" S{seasons.pop():02d} ({len(seen)} episodes)", True
+    return f" ({len(seen)} episodes)", True
 
 
 def _book_format(qualities, paths) -> str:
-    """Audiobook or Ebook from the files' quality names, else from the path's
-    root folder (/audiobooks, /ebooks); Book when neither says."""
+    """" (audiobook)" or " (ebook)" from the files' quality names, else from
+    the path's root folder (/audiobooks, /ebooks); "" when neither says."""
     names = {q.strip().upper() for q in qualities if isinstance(q, str)}
     if names and names <= AUDIO_QUALITIES:
-        return "Audiobook"
+        return " (audiobook)"
     if names and names <= EBOOK_QUALITIES:
-        return "Ebook"
+        return " (ebook)"
     for path in paths:
         if not isinstance(path, str):
             continue
         parts = {p.lower() for p in re.split(r"[\\/]", path) if p}
         if "audiobooks" in parts:
-            return "Audiobook"
+            return " (audiobook)"
         if "ebooks" in parts:
-            return "Ebook"
-    return "Book"
+            return " (ebook)"
+    return ""
 
 
 # --- Per app ---------------------------------------------------------------------------
@@ -231,8 +213,7 @@ def _radarr(event: str, body: dict) -> Optional[LibraryEvent]:
     if event == "Download":
         movie_file = _dict(body.get("movieFile"))
         upgrade = _flag(body.get("isUpgrade"))
-        tail = year + (_now([movie_file.get("quality")]) if upgrade else "")
-        return LibraryEvent("line", _line(ACTIONS["radarr", event, "upgrade" if upgrade else ""], title, tail),
+        return LibraryEvent("line", _line(ACTIONS["radarr", event, "upgrade" if upgrade else ""], title, year),
                             _key("radarr", event, _id(movie_file.get("id"))), "upgrade" if upgrade else "import")
     if event == "MovieAdded":
         return LibraryEvent("line", _line(ACTIONS["radarr", event, ""], title, year),
@@ -266,17 +247,15 @@ def _sonarr(event: str, body: dict) -> Optional[LibraryEvent]:
         ids = sorted({i for i in (_id(f.get("id")) for f in files) if i is not None})
         download = _id(body.get("downloadId"))
         ident = download or ("files-" + "-".join(ids) if ids else None)
-        now = _now([f.get("quality") for f in files])
         return LibraryEvent("complete", _line(ACTIONS["sonarr", event, plural.strip()], title, tail),
                             _key("sonarr", "complete", ident), "import",
-                            upgrade_text=_line(ACTIONS["sonarr", event, ("upgrade" + plural)], title, tail + now),
+                            upgrade_text=_line(ACTIONS["sonarr", event, ("upgrade" + plural)], title, tail),
                             file_keys=tuple(_key("sonarr", "file", i) for i in ids))
     if event == "Download":
         episode_file = _dict(body.get("episodeFile"))
         upgrade = _flag(body.get("isUpgrade"))
         variant = ("upgrade" + plural) if upgrade else plural.strip()
-        now = _now([episode_file.get("quality")]) if upgrade else ""
-        return LibraryEvent("file", _line(ACTIONS["sonarr", event, variant], title, tail + now),
+        return LibraryEvent("file", _line(ACTIONS["sonarr", event, variant], title, tail),
                             _key("sonarr", "file", _id(episode_file.get("id"))), "upgrade" if upgrade else "import")
     if event == "Rename":
         return LibraryEvent("line", _line(ACTIONS["sonarr", event, ""], title), None, "change")
@@ -303,7 +282,7 @@ def _chaptarr(event: str, body: dict) -> Optional[LibraryEvent]:
         if not name:
             return None
         variant = "files" if _flag(body.get("deletedFiles")) else ""
-        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, variant], name),
+        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, variant], name, " (author)"),
                             _key("chaptarr", event, _id(author.get("id"))), "change")
     # A grab lists its books; every other book event carries one.
     books = [_dict(b) for b in _list(body.get("books"))] if event == "Grab" else [_dict(body.get("book"))]
@@ -313,7 +292,7 @@ def _chaptarr(event: str, body: dict) -> Optional[LibraryEvent]:
     title = _words(book.get("title"))
     if event == "Grab":
         fmt = _book_format([_dict(body.get("release")).get("quality")], [author.get("path")])
-        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, ""].format(format=fmt), title),
+        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, ""], title, fmt),
                             _key("chaptarr", event, _id(body.get("downloadId"))), "grab", note=GRAB_NOTE)
     if event == "Download":
         files = [_dict(f) for f in _list(body.get("bookFiles"))]
@@ -321,8 +300,7 @@ def _chaptarr(event: str, body: dict) -> Optional[LibraryEvent]:
         upgrade = _flag(body.get("isUpgrade"))
         ids = sorted({i for i in (_id(f.get("id")) for f in files) if i is not None})
         ident = "-".join(ids) if ids else _id(body.get("downloadId"))
-        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, "upgrade" if upgrade else ""].format(format=fmt),
-                                          title),
+        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, "upgrade" if upgrade else ""], title, fmt),
                             _key("chaptarr", event, ident), "upgrade" if upgrade else "import")
     if event == "BookDelete":
         variant = "files" if _flag(body.get("deletedFiles")) else ""
@@ -331,7 +309,7 @@ def _chaptarr(event: str, body: dict) -> Optional[LibraryEvent]:
     if event == "BookFileDelete":
         book_file = _dict(body.get("bookFile"))
         fmt = _book_format([book_file.get("quality")], [book_file.get("path"), author.get("path")])
-        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, ""].format(format=fmt), title),
+        return LibraryEvent("line", _line(ACTIONS["chaptarr", event, ""], title, fmt),
                             _key("chaptarr", event, _id(book_file.get("id"))), "change")
     return None
 

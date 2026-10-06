@@ -483,22 +483,22 @@ await run('reduced motion: a pinned row is simply there, nothing about it moves'
 await run('several new events: one notch each, in order, then five lines', async (make) => {
   const t = make({ answer: QUIET_OK });
   await t.open();
-  await t.poll(answer('ok', [], [lib(9, 'Movie Added: Dune (2021)', 0), lib(8, 'Episode Added: Severance S02E03', 1)].concat(QUIET_OK.items, [note(10, 'Hello', 2)])));
+  await t.poll(answer('ok', [], [lib(9, 'Added: Dune (2021)', 0), lib(8, 'Added: Severance S02E03', 1)].concat(QUIET_OK.items, [note(10, 'Hello', 2)])));
   check('first turn at once: the oldest new event at the front', t.texts()[0] === 'Hello', t.texts());
   check('never more than one line fading out', t.all().filter((el) => el.classList.contains('is-leaving')).length <= 1);
   check('no announcement mid-burst', t.announced() === '');
   await t.clock.advance(710);
-  check('second turn', t.texts()[0] === 'Episode Added: Severance S02E03', t.texts());
+  check('second turn', t.texts()[0] === 'Added: Severance S02E03', t.texts());
   await t.clock.advance(710);
-  check('third turn: the newest at the front', t.texts()[0] === 'Movie Added: Dune (2021)', t.texts());
-  check('the newest is announced, once', t.announced() === 'Movie Added: Dune (2021)');
+  check('third turn: the newest at the front', t.texts()[0] === 'Added: Dune (2021)', t.texts());
+  check('the newest is announced, once', t.announced() === 'Added: Dune (2021)');
   for (let i = 0; i < 3; i++) {
     check('never more than five settled lines or six in the document', t.settled().length <= 5 && t.all().length <= 6, t.all().length);
     await t.clock.advance(300);
   }
   await t.clock.advance(800);
   check('settled: exactly five', t.all().length === 5 && t.settled().length === 5);
-  check('newest five', JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Episode Added: Severance S02E03', 'Hello', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
+  check('newest five', JSON.stringify(t.texts()) === JSON.stringify(['Added: Dune (2021)', 'Added: Severance S02E03', 'Hello', 'Requests are slow tonight', 'Downloads paused until 9pm']), t.texts());
 });
 
 await run('a deleted note: the line goes, nothing is announced, nothing turns in', async (make) => {
@@ -515,11 +515,11 @@ await run('reduced motion: the set crossfades at once, nothing turns', async (ma
   const t = make({ answer: QUIET_OK, reduced: true });
   await t.open();
   const before = t.all();
-  await t.poll(answer('ok', [], [lib(9, 'Movie Added: Dune (2021)', 0), lib(8, 'Episode Added: Severance S02E03', 1)].concat(QUIET_OK.items)));
+  await t.poll(answer('ok', [], [lib(9, 'Added: Dune (2021)', 0), lib(8, 'Added: Severance S02E03', 1)].concat(QUIET_OK.items)));
   check('every old line fades out where it is', before.every((el) => el.classList.contains('is-leaving') && el.getAttribute('aria-hidden') === 'true'));
-  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Episode Added: Severance S02E03', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
+  check('the final set is there at once, no steps', JSON.stringify(t.texts()) === JSON.stringify(['Added: Dune (2021)', 'Added: Severance S02E03', 'Requests are slow tonight', 'Downloads paused until 9pm', 'Books is back, down 3 min']), t.texts());
   check('every old line kept its notch (no move, only a fade)', before.every((el, i) => slot(el) === 4 - i));
-  check('the newest announced', t.announced() === 'Movie Added: Dune (2021)');
+  check('the newest announced', t.announced() === 'Added: Dune (2021)');
   await t.clock.advance(800);
   check('five lines after the fade', t.all().length === 5 && t.settled().length === 5);
 });
@@ -569,7 +569,7 @@ await run('an outage that ends "no longer monitored": the neutral tick, not the 
 
 
 await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in its own span', async (make) => {
-  const t = make({ answer: answer('ok', [], [lib(20, 'Movie Downloading: Dune (2021)', 2, 'not guaranteed'), lib(21, 'Episode Added: Severance S02E03', 5), note(3, 'A note', 30)]) });
+  const t = make({ answer: answer('ok', [], [lib(20, 'Downloading: Dune (2021)', 2, 'not guaranteed'), lib(21, 'Added: Severance S02E03', 5), note(3, 'A note', 30)]) });
   await t.open();
   const [grab, added] = t.slots();
   check('library lines are typed for their tick', grab.getAttribute('data-type') === 'library' && added.getAttribute('data-type') === 'library');
@@ -577,16 +577,16 @@ await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in 
   check('the tick is the theme\'s secondary text colour, greyed', rule && /^rgb\(var\(--color-text-secondary\) \/ 0\.\d+\)$/.test(rule[1]), rule && rule[1]);
   const muted = grab.querySelector('.ws-wheel__text .ws-wheel__note');
   const title = muted && muted.previousElementSibling;
-  check('the note is a span of its own after the title', muted && muted.textContent === ' · not guaranteed' && title && title.className === 'ws-wheel__title' && title.textContent === 'Movie Downloading: Dune (2021)' && !muted.nextSibling);
+  check('the note is a span of its own after the title', muted && muted.textContent === ' · not guaranteed' && title && title.className === 'ws-wheel__title' && title.textContent === 'Downloading: Dune (2021)' && !muted.nextSibling);
   const noteRule = THEME_CSS.match(/\.ws-wheel__note \{ flex: none; white-space: pre; color: ([^;]+); \}/);
   check('muted with a theme colour, and never cut: the title gives way to it', noteRule && /^rgb\(var\(--color-text\) \/ 0\.\d+\)$/.test(noteRule[1]) && /\.ws-wheel__text\[data-noted\] \{ display: flex; \}/.test(THEME_CSS) && /\.ws-wheel__title \{ min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(THEME_CSS), noteRule && noteRule[1]);
-  check('the whole line reads as one in its title', grab.title === 'Movie Downloading: Dune (2021) · not guaranteed', grab.title);
-  check('a line without a note is plain text', !added.querySelector('.ws-wheel__note') && !added.querySelector('.ws-wheel__title') && !added.querySelector('[data-noted]') && lineText(added) === 'Episode Added: Severance S02E03');
+  check('the whole line reads as one in its title', grab.title === 'Downloading: Dune (2021) · not guaranteed', grab.title);
+  check('a line without a note is plain text', !added.querySelector('.ws-wheel__note') && !added.querySelector('.ws-wheel__title') && !added.querySelector('[data-noted]') && lineText(added) === 'Added: Severance S02E03');
   check('no screen-reader prefix on library lines', !grab.querySelector('.sr-only'));
-  await t.poll(answer('ok', [], [lib(22, 'Movie Downloading: <b>x</b>', 0, '<i>not</i> guaranteed')].concat(t.feed.answer.items)));
+  await t.poll(answer('ok', [], [lib(22, 'Downloading: <b>x</b>', 0, '<i>not</i> guaranteed')].concat(t.feed.answer.items)));
   await t.clock.advance(800);
-  check('the note and the text are written as text', !t.wheel.querySelector('b') && !t.wheel.querySelector('i') && lineText(t.slots()[0]) === 'Movie Downloading: <b>x</b> · <i>not</i> guaranteed', lineText(t.slots()[0]));
-  check('announced with its note', t.announced() === 'Movie Downloading: <b>x</b> · <i>not</i> guaranteed', t.announced());
+  check('the note and the text are written as text', !t.wheel.querySelector('b') && !t.wheel.querySelector('i') && lineText(t.slots()[0]) === 'Downloading: <b>x</b> · <i>not</i> guaranteed', lineText(t.slots()[0]));
+  check('announced with its note', t.announced() === 'Downloading: <b>x</b> · <i>not</i> guaranteed', t.announced());
 });
 
 await run('an open outage stays pinned under a burst of 10 library lines', async (make) => {
@@ -594,7 +594,7 @@ await run('an open outage stays pinned under a burst of 10 library lines', async
   await t.open();
   const row = t.pinned()[0];
   const burst = [];
-  for (let i = 0; i < 10; i++) burst.push(lib(100 + i, 'Episode Added: The Bear S03E0' + i, 10 - i));
+  for (let i = 0; i < 10; i++) burst.push(lib(100 + i, 'Added: The Bear S03E0' + i, 10 - i));
   await t.poll(answer('down', [outage(7, 'Plex', 30)], burst.concat([note(3, 'A note', 60)])));
   let lost = 0;
   for (let k = 0; k < 12; k++) {
@@ -604,7 +604,7 @@ await run('an open outage stays pinned under a burst of 10 library lines', async
   }
   await t.clock.advance(800);
   check('the same row stayed pinned, off the wheel, all through the burst', lost === 0, lost);
-  check('settled: the newest five library lines on the wheel', JSON.stringify(t.texts()) === JSON.stringify(['Episode Added: The Bear S03E09', 'Episode Added: The Bear S03E08', 'Episode Added: The Bear S03E07', 'Episode Added: The Bear S03E06', 'Episode Added: The Bear S03E05']), t.texts());
+  check('settled: the newest five library lines on the wheel', JSON.stringify(t.texts()) === JSON.stringify(['Added: The Bear S03E09', 'Added: The Bear S03E08', 'Added: The Bear S03E07', 'Added: The Bear S03E06', 'Added: The Bear S03E05']), t.texts());
   await t.poll(answer('ok', [], [back(7, 'Plex', 30, 0)].concat(burst)));
   await t.clock.advance(800);
   check('resolved: the row goes and its return leads the wheel', t.pinned().length === 0 && t.texts()[0] === 'Plex is back, down 30 min' && !t.texts().includes('Plex is down'), t.texts());
@@ -653,10 +653,10 @@ await run('taking the server\'s rows over changes nothing (no height change)', a
 
 await run('a resolved outage is not held: library lines push it off like any line', async (make) => {
   const items = [back(7, 'Plex', 90, 80)];
-  for (let i = 0; i < 5; i++) items.unshift(lib(200 + i, 'Movie Added: Film ' + i, 50 - i));
+  for (let i = 0; i < 5; i++) items.unshift(lib(200 + i, 'Added: Film ' + i, 50 - i));
   const t = make({ answer: answer('ok', [], items) });
   await t.open();
-  check('the newest five only', t.all().length === 5 && t.texts().every((x) => x.indexOf('Movie Added') === 0), t.texts());
+  check('the newest five only', t.all().length === 5 && t.texts().every((x) => x.indexOf('Added: Film') === 0), t.texts());
 });
 
 // Every real change to the section's hidden attribute after the first paint
@@ -677,13 +677,13 @@ function hiddenFlips(t) {
 
 await run('without Uptime Kuma, library lines alone show the log, never as an outage', async (make) => {
   // As the server renders it (status_feed.home_off): shown, so nothing moves.
-  const t = make({ serverHidden: false, answer: answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]) });
+  const t = make({ serverHidden: false, answer: answer('off', [], [lib(20, 'Added: Dune (2021)', 2)]) });
   const flips = hiddenFlips(t);
   await t.open();
-  check('shown', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)']), t.texts());
+  check('shown', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Added: Dune (2021)']), t.texts());
   check('a library line, not an outage', t.slots()[0].getAttribute('data-type') === 'library');
-  await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2), note(5, 'Maintenance tonight', 10)]));
-  check('a note joins it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Movie Added: Dune (2021)', 'Maintenance tonight']), t.texts());
+  await t.poll(answer('off', [], [lib(20, 'Added: Dune (2021)', 2), note(5, 'Maintenance tonight', 10)]));
+  check('a note joins it', t.section.hidden === false && JSON.stringify(t.texts()) === JSON.stringify(['Added: Dune (2021)', 'Maintenance tonight']), t.texts());
   check('the hidden attribute never changed (CLS 0)', flips().length === 0, flips().length);
 });
 
@@ -693,8 +693,8 @@ await run('without Uptime Kuma and nothing to show, the server\'s hidden section
   await t.open();
   check('hidden', t.section.hidden === true);
   check('the hidden attribute never changed (CLS 0)', flips().length === 0, flips().length);
-  await t.poll(answer('off', [], [lib(20, 'Movie Added: Dune (2021)', 2)]));
-  check('a library line arriving later brings it back', t.section.hidden === false && t.texts()[0] === 'Movie Added: Dune (2021)', t.texts());
+  await t.poll(answer('off', [], [lib(20, 'Added: Dune (2021)', 2)]));
+  check('a library line arriving later brings it back', t.section.hidden === false && t.texts()[0] === 'Added: Dune (2021)', t.texts());
 });
 
 // ---- Turning back through the history ----

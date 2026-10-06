@@ -664,7 +664,7 @@ function releasesError(container) {
 // once through the section's polite live region. Text is written with
 // textContent only.
 //
-// Library lines (Sonarr, Radarr and Chaptarr: "Movie Added: Dune (2021)")
+// Library lines (Sonarr, Radarr and Chaptarr: "Added: Dune (2021)")
 // carry a grey tick, and a grab its muted " · not guaranteed".
 //
 // What the feed pins (an open outage, an open important note) is not on the

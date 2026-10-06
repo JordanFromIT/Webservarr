@@ -71,7 +71,7 @@ class SharedCases(unittest.TestCase):
         self.assertIn('</span>&lt;img src=x onerror=alert(1)&gt;"</span>', row)
 
     def test_what_is_not_pinned_has_no_row(self):
-        items = [{"id": 1, "source": "library", "text": "Movie Added: Dune", "resolved": True,
+        items = [{"id": 1, "source": "library", "text": "Added: Dune", "resolved": True,
                   "created_at": "2026-10-01T12:00:00.000Z"},
                  {"id": 2, "source": "auto", "text": "Plex is back, down 3 min", "resolved": True,
                   "started_at": "2026-10-01T12:00:00.000Z"},

@@ -16,7 +16,9 @@ being upgraded, being dropped. Each line must read so a family member can't mist
 
 - **Sources:** webhooks from Sonarr, Radarr and Chaptarr. There is no Plex check in WebServarr; Plex
   reachability stays in Uptime Kuma (section 8).
-- **Format:** `<Action>: <Title>`. The plain-English action comes first, in Title Case.
+- **Format:** `<Action>: <Title>`, one short line. The plain-English action comes first, in Title Case.
+  Wording revised with Jordan on 2026-10-06 (section 3): no media-type word in the action, and upgrades
+  name no resolution.
 - **Who sees it:** everyone signed in. It shows titles only, never who requested them.
 - **Push notifications:** none for library lines.
 - **Health events:** health issues and health restored are dropped.
@@ -34,13 +36,13 @@ response. Test pings also produce no line.
 
 | Trigger (UI) | `eventType` | Condition | Event log line |
 |---|---|---|---|
-| On Grab | `Grab` | | `Movie Downloading: Dune (2021) · not guaranteed` |
-| On File Import | `Download` | `isUpgrade` false | `Movie Added: Dune (2021)` |
-| On File Upgrade | `Download` | `isUpgrade` true | `Movie Upgraded: Dune (2021), now 4K` |
-| On Movie Added | `MovieAdded` | | `Movie Monitored: Dune Messiah (2026)` |
-| On Movie Delete | `MovieDelete` | `deletedFiles` false | `Movie Unmonitored: Dune (2021)` |
-| On Movie Delete | `MovieDelete` | `deletedFiles` true | `Movie Removed: Dune (2021)` |
-| On Movie File Delete | `MovieFileDelete` | `deleteReason` is not `upgrade` | `Movie Removed: Dune (2021)` |
+| On Grab | `Grab` | | `Downloading: Dune (2021) · not guaranteed` |
+| On File Import | `Download` | `isUpgrade` false | `Added: Dune (2021)` |
+| On File Upgrade | `Download` | `isUpgrade` true | `Upgraded: Dune (2021)` |
+| On Movie Added | `MovieAdded` | | `Monitored: Dune Messiah (2026)` |
+| On Movie Delete | `MovieDelete` | `deletedFiles` false | `Unmonitored: Dune (2021)` |
+| On Movie Delete | `MovieDelete` | `deletedFiles` true | `Removed: Dune (2021)` |
+| On Movie File Delete | `MovieFileDelete` | `deleteReason` is not `upgrade` | `Removed: Dune (2021)` |
 | On Movie File Delete | `MovieFileDelete` | `deleteReason` is `upgrade` | none |
 | On Movie File Delete For Upgrade, On Rename, On Health Issue/Restored, On Application Update, On Manual Interaction Required | | | none |
 
@@ -48,34 +50,34 @@ response. Test pings also produce no line.
 
 | Trigger (UI) | `eventType` | Condition | Event log line |
 |---|---|---|---|
-| On Grab | `Grab` | one episode | `Episode Downloading: Severance S02E03 · not guaranteed` |
-| On Grab | `Grab` | several episodes | `Episodes Downloading: The Bear S03 (8) · not guaranteed` |
-| On File Import | `Download` with `episodeFile` | `isUpgrade` false | `Episode Added: Severance S02E03` (grouped, see section 4) |
-| On File Upgrade | `Download` with `episodeFile` | `isUpgrade` true | `Episode Upgraded: Severance S02E03, now 4K` (grouped) |
-| On Import Complete | `Download` with `episodeFiles` | | one grouped line, e.g. `Episodes Added: The Bear S03 (8)` (section 4) |
+| On Grab | `Grab` | one episode | `Downloading: Severance S02E03 · not guaranteed` |
+| On Grab | `Grab` | several episodes | `Downloading: The Bear S03 (8 episodes) · not guaranteed` |
+| On File Import | `Download` with `episodeFile` | `isUpgrade` false | `Added: Severance S02E03` (grouped, see section 4) |
+| On File Upgrade | `Download` with `episodeFile` | `isUpgrade` true | `Upgraded: Severance S02E03` (grouped) |
+| On Import Complete | `Download` with `episodeFiles` | | one grouped line: `Added: Severance S02E03`, `Added: The Bear S03 (8 episodes)`, or `Upgraded: The Bear S03 (8 episodes)` (section 4) |
 | On Rename | `Rename` | | `Files Renamed: The Bear` |
-| On Series Add | `SeriesAdd` | | `Series Monitored: The Bear` |
-| On Series Delete | `SeriesDelete` | `deletedFiles` false | `Series Unmonitored: The Bear` |
-| On Series Delete | `SeriesDelete` | `deletedFiles` true | `Series Removed: The Bear` |
-| On Episode File Delete | `EpisodeFileDelete` | `deleteReason` is not `upgrade` | `Episode Removed: Severance S02E03` |
+| On Series Add | `SeriesAdd` | | `Monitored: The Bear` |
+| On Series Delete | `SeriesDelete` | `deletedFiles` false | `Unmonitored: The Bear` |
+| On Series Delete | `SeriesDelete` | `deletedFiles` true | `Removed: The Bear` |
+| On Episode File Delete | `EpisodeFileDelete` | `deleteReason` is not `upgrade` | `Removed: Severance S02E03`, or `Removed: The Bear S03 (8 episodes)` |
 | On Episode File Delete For Upgrade | `EpisodeFileDelete` | `deleteReason` is `upgrade` | none |
 | On Health Issue/Restored, On Application Update, On Manual Interaction Required | | | none |
 
 ### Chaptarr
 
-Format comes from the file quality (`M4B`/`MP3` mean Audiobook, `EPUB` means Ebook; the `/audiobooks` or
-`/ebooks` path root also says it). Use "Book" when it's unknown.
+Format comes from the file quality (`M4B`/`MP3` mean audiobook, `EPUB` means ebook; the `/audiobooks` or
+`/ebooks` path root also says it). When it's unknown the line has no format.
 
 | Trigger (UI) | `eventType` | Condition | Event log line |
 |---|---|---|---|
-| On Grab | `Grab` | | `Audiobook Downloading: Dune Messiah · not guaranteed` (or `Ebook`) |
-| On Release Import | `Download` | `isUpgrade` false | `Audiobook Added: Dune Messiah` (or `Ebook Added`) |
-| On Upgrade | `Download` | `isUpgrade` true | `Audiobook Upgraded: Dune Messiah` |
-| On Book Delete | `BookDelete` | `deletedFiles` false | `Book Unmonitored: Dune Messiah` |
-| On Book Delete | `BookDelete` | `deletedFiles` true | `Book Removed: Dune Messiah` |
-| On Book File Delete | `BookFileDelete` | | `Audiobook Removed: Dune Messiah` (or `Ebook Removed`) |
-| On Author Delete | `AuthorDelete` | `deletedFiles` false | `Author Unmonitored: Frank Herbert` |
-| On Author Delete | `AuthorDelete` | `deletedFiles` true | `Author Removed: Frank Herbert` |
+| On Grab | `Grab` | | `Downloading: Dune Messiah (audiobook) · not guaranteed` (or `(ebook)`) |
+| On Release Import | `Download` | `isUpgrade` false | `Added: Dune Messiah (audiobook)` (or `(ebook)`) |
+| On Upgrade | `Download` | `isUpgrade` true | `Upgraded: Dune Messiah (audiobook)` |
+| On Book Delete | `BookDelete` | `deletedFiles` false | `Unmonitored: Dune Messiah` |
+| On Book Delete | `BookDelete` | `deletedFiles` true | `Removed: Dune Messiah` |
+| On Book File Delete | `BookFileDelete` | | `Removed: Dune Messiah (audiobook)` (or `(ebook)`) |
+| On Author Delete | `AuthorDelete` | `deletedFiles` false | `Unmonitored: Frank Herbert (author)` |
+| On Author Delete | `AuthorDelete` | `deletedFiles` true | `Removed: Frank Herbert (author)` |
 | anything else | | | none |
 
 Chaptarr's Book File Delete has no reason field. Jordan should leave "On Book File Delete For Upgrade"
@@ -83,14 +85,19 @@ unticked in Chaptarr, or upgrades will show as "Removed".
 
 ### Formatting rules
 
-- **Episode codes:** `S02E03`. Several episodes in one season: `S03 (8)`. Across seasons: the series
-  title with a count, `The Bear (12)`.
+- **One short line:** `<Action>: <Title>` plus an optional suffix. The action never names the media type.
+- **Episode codes:** `S02E03`. Several episodes in one season: `S03 (8 episodes)`. Across seasons: the
+  series title with a count, `The Bear (12 episodes)`.
 - **Movie titles** include the year. Series titles include the year only when the title has a
   duplicate in Sonarr. Defaulting to no year is acceptable.
-- **"now X" on upgrades** comes from the new file's quality name, as a resolution: `2160p` becomes 4K;
-  `1080p` and `720p` stay as they are; anything else is left out.
+- **Books** carry their format after the title, `(audiobook)` or `(ebook)`, and nothing when it is
+  unknown. **Authors** carry `(author)`.
+- **Upgrades** name no resolution or quality.
 - **The table lives in code as one mapping,** so changing wording is a one-line edit with a test.
-- **Length:** each line stays under 200 characters, and titles are cut with an ellipsis.
+- **Length:** each line stays under 200 characters. Only the title is cut, with an ellipsis; the year,
+  episode code, count, format, `(author)` and the grab note are never cut.
+- **Stored lines keep their words.** A wording change applies to new events only; older rows age out
+  after 30 days.
 
 ## 4. Sonarr grouping
 
@@ -102,7 +109,7 @@ arrives as 11 posts. Only one line should show:
 2. **Import Complete** (`episodeFiles` present) consumes the pending rows for its file ids. It writes one
    line:
    - "Upgraded" if any consumed row was an upgrade, otherwise "Added";
-   - singular or plural by file count.
+   - the episode code for one file, else the count, `S03 (8 episodes)`.
 3. **Leftover pending rows:** any not consumed within 10 minutes are published individually. This covers
    Import Complete being unticked, or a lost post.
 4. **Import Complete with no matching pending rows** still writes its line.
@@ -164,7 +171,7 @@ Every write is idempotent across 2 workers, using a unique key per app, event an
 
 - Malformed or unknown payloads are logged at info level without the body, and get no line.
 - A line never contains a requester, a user, a path or a release name. It holds only the action, the
-  title, the year, the episode code, the count and the resolution.
+  title, the year, the episode code, the count, a book's format and `(author)`.
 
 ## 8. Plex reachability (ops, no code)
 
