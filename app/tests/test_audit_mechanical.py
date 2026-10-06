@@ -250,17 +250,20 @@ class OneHeadingPerPage(unittest.TestCase):
 
 
 class QuietMotion(unittest.TestCase):
-    """M11: the healthy dot never moves and the New! flag rests."""
+    """M11: the healthy dot never moves; the New! flag moves until reduced motion stops it."""
 
     def test_motion_means_a_change(self):
         theme = read("css/theme.css")
         self.assertNotRegex(theme, r'data-state="ok"\][^{]*::after\s*\{[^}]*animation:\s*ws-ping')
         self.assertIn('#systemStatus[data-state="err"] .ws-status-dot::after '
                       '{ animation: ws-ping 1.4s cubic-bezier(0, 0, .2, 1) 1; }', theme)
+        # The New! flag keeps moving for as long as it is shown (Jordan's
+        # call): a fixed count ran out under a sidebar that is never redrawn.
         flag = theme[theme.index(".nav-new-badge {"):]
         flag = flag[:flag.index("\n}")]
-        self.assertNotIn("infinite", flag)
-        self.assertIn("nav-new-throb 1.7s ease-in-out 3 forwards", flag)
+        self.assertIn("nav-new-shine 3.2s ease-in-out infinite", flag)
+        self.assertIn("nav-new-throb 1.7s ease-in-out infinite", flag)
+        self.assertIn("@media (prefers-reduced-motion: reduce) {\n  .nav-new-badge { animation: none; }", theme)
 
 
 class PlainCopy(unittest.TestCase):

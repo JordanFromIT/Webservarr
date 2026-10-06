@@ -265,12 +265,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
      glyphs stay sharp because the peak of the throb is scale(1): the browser
      rasterises an animated transform at its largest keyframe scale, so every
      other frame is a downscale of a full-resolution raster, never a blow-up. */
-  /* Three rounds when the page loads, then the flag rests: a flag that never
-     stops moving stops meaning anything. The throb holds its last frame, so
-     it does not snap to the resting scale when it stops. */
+  /* Both run for as long as the flag is on screen. A fixed number of rounds
+     ran out while the sidebar stayed put (the shell is never redrawn between
+     pages), so the flag looked frozen. */
   animation:
-    nav-new-shine 3.2s ease-in-out 3,
-    nav-new-throb 1.7s ease-in-out 3 forwards;
+    nav-new-shine 3.2s ease-in-out infinite,
+    nav-new-throb 1.7s ease-in-out infinite;
 }
 
 @keyframes nav-new-shine {
