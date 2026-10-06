@@ -525,18 +525,18 @@ class HomePage(unittest.TestCase):
 
     def test_every_read_is_on_the_pages_signal(self):
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 6,
-                         "continue, the event log, news, streams, requests, releases")
-        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 6)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 5,
+                         "the event log, news, streams, requests, releases")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 5)
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
         for at in fetches:
             self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 7,
-                         "six onError handlers and the gauges' catch")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 6,
+                         "five onError handlers and the gauges' catch")
         self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
-        for name in ("renderContinue", "renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
+        for name in ("renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
                      "renderUpcomingReleases"):
             self.assertRegex(function_body(code, name), r"^\s*if \(signal\.aborted\) return;", name)
 
@@ -687,7 +687,8 @@ class BooksPage(unittest.TestCase):
     def test_continue_is_always_shown_and_its_cards_room_held_only_when_this_person_had_some(self):
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         self.assertIn("data.page !== 'books'", loader)
-        self.assertIn("'webservarr_books_continue:'", loader)
+        self.assertIn("['continue', 'data-books-continue']", loader)
+        self.assertIn("'webservarr_books_' + rows[i][0] + ':' + name", loader)
         self.assertIn("const CONTINUE_KEY = 'webservarr_books_continue:';", module_source("books"))
         h = read("books")
         self.assertNotIn("#continueHost { display: none; }", h)

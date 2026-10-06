@@ -20,9 +20,8 @@ from app.tests.test_pages import branding, css_rules, html_tag, render, static_t
 
 KEY = "ui.section_icons"
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
-# Every section heading icon: Home's five sections (#iconSection*), its event
-# log, and its Continue row, both the skeleton in index.html and the row
-# books.js builds.
+# Every section heading icon: Home's five sections (#iconSection*) and its
+# event log. (Home's Continue row is gone: Continue is the Books page's.)
 HOME_SECTION_ICON_IDS = ("iconSectionServices", "iconSectionRequests", "iconSectionNews",
                          "iconSectionStreams", "iconSectionReleases")
 
@@ -102,12 +101,6 @@ class WhichIcons(unittest.TestCase):
             m = re.search(r'<span id="' + icon_id + r'" class="([^"]*)"', page)
             self.assertIsNotNone(m, icon_id)
             self.assertIn("ws-section-icon", m.group(1).split(), icon_id)
-        # The Continue skeleton's heading keeps the real row's shape: its icon too.
-        self.assertRegex(page, r'<span class="ws-section-icon [^"]*invisible">auto_stories</span><h2 ')
-
-    def test_continue_row_on_home_carries_the_class(self):
-        books = static_text("js", "pages", "books.js")
-        self.assertIn("head.appendChild(icon('auto_stories', 'ws-section-icon text-steel-blue'));", books)
 
     def test_the_event_log_icon_carries_the_class(self):
         page = static_text("index.html")
@@ -116,7 +109,7 @@ class WhichIcons(unittest.TestCase):
 
     def test_nothing_else_carries_the_class(self):
         # Nav, tab bar, buttons, pills, empty states and service tiles keep
-        # their icons: the class is on the seven heading icons above and nowhere else.
+        # their icons: the class is on the six heading icons above and nowhere else.
         found = {}
         for root, _dirs, files in os.walk(STATIC):
             for f in files:
@@ -126,7 +119,7 @@ class WhichIcons(unittest.TestCase):
                         n = fh.read().count("ws-section-icon")
                     if n:
                         found[os.path.relpath(path, STATIC)] = n
-        self.assertEqual(found, {"index.html": 7, os.path.join("js", "pages", "books.js"): 1})
+        self.assertEqual(found, {"index.html": 6})
 
 
 class SettingsPage(unittest.TestCase):
