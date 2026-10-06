@@ -636,10 +636,10 @@ export function createUI(env) {
   const ghost = h('div', { class: 'wsp-dock-ghost', 'aria-hidden': 'true' });
   // The handle's places, a menu under the pill's handle or over the bar's.
   const menuTop = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'top' }, [
-    icon('vertical_align_top'), h('span', { text: 'Move to top bar' })
+    icon('arrow_upward'), h('span', { text: 'Move to top bar' })
   ]);
   const menuBottom = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'bottom' }, [
-    icon('vertical_align_bottom'), h('span', { text: 'Move to bottom centre' })
+    icon('arrow_downward'), h('span', { text: 'Move to bottom centre' })
   ]);
   const dockMenu = h('div', { class: 'wsp-dock-menu', id: 'wspDockMenu', role: 'menu', 'aria-label': 'Move the player', hidden: true }, [menuTop, menuBottom]);
   // Where the player went, said once.
@@ -693,7 +693,7 @@ export function createUI(env) {
   ]);
   // The top bar's drop zone, shown in the slot while the bar is dragged.
   const dockTarget = h('div', { class: 'wsp-dock-target', 'aria-hidden': 'true' }, [
-    icon('vertical_align_top'), h('span', { class: 'wsp-dock-word', text: 'Top bar' })
+    icon('arrow_upward'), h('span', { class: 'wsp-dock-word', text: 'Top bar' })
   ]);
   if (pillSlot) {
     pillSlot.textContent = '';
