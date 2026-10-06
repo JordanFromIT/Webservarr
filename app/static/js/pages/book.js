@@ -261,7 +261,7 @@ export async function mount(ctx) {
     const key = edition.plex_book_key;
     state.opening = key;
     Promise.resolve(p.open(key, { autoplay: true })).then(function () {
-      // A place now exists, so the next Books or Home visit has a Continue row: it is told now.
+      // A place now exists, so the next Books visit has cards in Continue: it is told now.
       rememberContinue(who);
     }, function (e) {
       if (signal.aborted) return;

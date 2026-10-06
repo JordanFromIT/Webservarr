@@ -16,23 +16,25 @@
  * each visit has its own state, and every listener, fetch and timer ends with
  * ctx.signal. Markup is built with textContent only.
  *
- * Also exports what the other Books pages and Home draw with:
+ * Also exports what the other Books pages draw with:
  *   renderBookCard(card, { signal })                   a cover card (an <a>)
- *   renderContinueRow(items, notes, { compact, signal, connectHref }) the
- *                                                       Continue row (a <section>), or
- *                                                       null when nothing is in progress
+ *   renderContinueRow(items, { signal, failed })       the Continue section, always
+ *                                                       (with nothing in progress, one quiet line)
  *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
- *   noteLine(text)                                     a quiet line about a source that is down
+ *   noteLine(text, href)                               a quiet line about a source that is down
  *   rememberContinue(user)                             a book was just started: the next visit holds the row's room
  *   rememberRow(kind, user)                            the same for 'upnext' and 'mylist' (a book was just added)
  *   sendBooks(method, url, body)                       a write to the person's own Books data
  * They touch no DOM at import time.
  *
- * Above the library, as Continue is, two rows of the person's own (books 3b):
- * Up next (their queue, in order: each book with Play or Read, Move earlier,
- * Move later and Remove) and My list (newest first). Each is hidden while it
- * is empty, and held from the first paint for a person who had it last time,
- * exactly as Continue is (localStorage and an <html> flag each).
+ * Continue is always shown, so the first-visit guide has it to point at; a
+ * person who had books in progress last time gets the room of a row of cards
+ * from the first paint, anyone else the room of its one empty line
+ * (localStorage and an <html> flag). Under it, two rows of the person's own
+ * (books 3b): Up next (their queue, in order: each book with Play or Read,
+ * Move earlier, Move later and Remove) and My list (newest first). Each is
+ * hidden while it is empty, and held from the first paint for a person who
+ * had it last time (localStorage and an <html> flag each).
  *
  * Under them, two discovery shelves (books 3c), held and drawn the same way:
  * Recently added (the newest books, with New on those added since the
@@ -66,7 +68,7 @@ const GUIDE_WAIT_MS = 900;
 
 // The first-visit guide (the engine is js/tour.js, shared with the reader): what
 // the page can do, in the order a person meets it. A step whose target is not
-// on screen (no Continue row yet) is shown in the middle of the page instead.
+// on screen is shown in the middle of the page instead.
 const GUIDE_STEPS = [
   {
     target: '#booksSearch',
@@ -111,10 +113,10 @@ const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
 /**
- * Say that this person now has a Continue row, before its answer does. Books and
- * Home hold the row's room from the first frame for a person who had one last
- * time, so a book started here (the book page's Listen) is told to them at once:
- * the next visit does not meet a row it had no room for.
+ * Say that this person now has books in Continue, before its answer does. Books
+ * holds a row of cards' room from the first frame for a person who had some last
+ * time, so a book started here (the book page's Listen) is told to it at once:
+ * the next visit does not meet cards it had no room for.
  */
 export function rememberContinue(user) {
   try { localStorage.setItem(CONTINUE_KEY + (user || ''), '1'); } catch (e) { /* private mode: nothing is kept */ }
@@ -278,10 +280,9 @@ function resumeAudio(key) {
 }
 
 /** One Continue card: an ebook is a link into the reader, an audiobook a button for the player. */
-function continueCard(item, compact, signal) {
+function continueCard(item, signal) {
   const audio = item.format === 'audio';
-  const width = compact ? 'w-28' : 'w-36';
-  const base = 'group block ' + width + ' shrink-0 text-left ws-lift rounded-xl ' + LINK_FOCUS;
+  const base = 'group block w-36 shrink-0 text-left ws-lift rounded-xl ' + LINK_FOCUS;
   const resume = item.resume || {};
   let node;
   if (audio) {
@@ -305,8 +306,8 @@ function continueCard(item, compact, signal) {
     box.appendChild(track);
   }
   node.appendChild(box);
-  node.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue ' +
-    (compact ? 'line-clamp-1' : 'line-clamp-2 min-h-[2.75em]'), item.title || 'Untitled'));
+  node.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]',
+    item.title || 'Untitled'));
   node.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', item.progress_label || ''));
   return node;
 }
@@ -316,7 +317,7 @@ export function noteLine(text, href) {
   const p = el('p', 'flex items-center gap-2 text-[15px] text-frosted-blue/70');
   p.appendChild(icon('info', 'text-[20px]'));
   if (href) {
-    // A page that cannot run the Kavita hand-off itself (Home) sends the person to the one that can.
+    // A page that cannot run the Kavita hand-off itself (Your stats) sends the person to the one that can.
     const a = el('a', 'underline underline-offset-2 hover:text-frosted-blue ' + LINK_FOCUS, text);
     a.href = href;
     p.appendChild(a);
@@ -327,34 +328,30 @@ export function noteLine(text, href) {
 }
 
 /**
- * The Continue row: what the person is partway through, newest first, as one
- * section with a heading and a sideways row of cards. Null when there is
- * nothing (the caller hides the row). `notes` ([{source, reason, text}]) are
- * shown quietly beneath it, so a source that is down says so without taking
- * the other format's cards away. compact is Home's smaller row; connectHref,
- * when given, makes the "not connected" note a link to the page that can
- * connect (Books runs that itself and passes none).
+ * The Continue section: what the person is partway through, newest first, as
+ * a heading and a sideways row of cards. Always a section, so the first-visit
+ * guide has it to point at: with nothing in progress it says where those
+ * books will be, and when the list could not be read (failed) it says that.
+ * Either line is the height books.html's empty skeleton holds.
  */
-export function renderContinueRow(items, notes, opts) {
+export function renderContinueRow(items, opts) {
   const o = opts || {};
   const list = items || [];
-  if (!list.length) return null;
   const section = el('section', '');
   section.setAttribute('aria-label', 'Continue');
   section.setAttribute('data-continue', '');
-  if (o.compact) {
-    // Home's own section heading (an icon, then the title), so it reads as one of its sections.
-    const head = el('div', 'flex items-center gap-3 mb-4');
-    head.appendChild(icon('auto_stories', 'ws-section-icon text-steel-blue'));
-    head.appendChild(el('h2', 'text-xl font-bold text-frosted-blue', 'Continue'));
-    section.appendChild(head);
-  } else {
-    section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
+  section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
+  if (!list.length) {
+    const line = el('p', 'text-[15px] leading-6 text-frosted-blue/70',
+      o.failed ? 'Your books in progress didn’t load.' : 'Books you start will show up here.');
+    line.setAttribute('data-continue-empty', '');
+    section.appendChild(line);
+    return section;
   }
   const row = el('ul', 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
   list.forEach(function (item) {
     const li = el('li', 'shrink-0');
-    li.appendChild(continueCard(item, !!o.compact, o.signal));
+    li.appendChild(continueCard(item, o.signal));
     row.appendChild(li);
   });
   // A mouse drags the row, and a plain wheel moves it sideways until it can go
@@ -371,15 +368,6 @@ export function renderContinueRow(items, notes, opts) {
     e.preventDefault();
   }, { passive: false, signal: o.signal });
   section.appendChild(row);
-  const seen = {};
-  (notes || []).forEach(function (n) {
-    if (!n || !n.text || seen[n.text]) return;
-    seen[n.text] = true;
-    const line = noteLine(n.text, o.connectHref && n.reason === 'not_connected' ? o.connectHref : '');
-    line.className += ' mt-3';
-    line.setAttribute('data-continue-note', '');
-    section.appendChild(line);
-  });
   return section;
 }
 
@@ -436,9 +424,10 @@ export async function mount(ctx) {
     storageSet(VIEW_KEY + user, JSON.stringify({ format: state.format, sort: state.sort }));
   }
 
-  // Continue, Up next and My list are each reserved from the first paint for
-  // a person who had that row last time (theme-loader.js does the same on a
-  // full load); this is the soft-navigation visit, before anything is awaited.
+  // Up next and My list are each reserved from the first paint for a person
+  // who had that row last time, and Continue gets a row of cards' room rather
+  // than its empty line's (theme-loader.js does the same on a full load); this
+  // is the soft-navigation visit, before anything is awaited.
   function markRow(name, on) {
     const flag = name === 'continue' ? 'data-books-continue' : ROWS[name].flag;
     if (on) html.setAttribute(flag, '');
@@ -571,17 +560,19 @@ export async function mount(ctx) {
       host.textContent = '';
       host.setAttribute('aria-busy', 'false');
       if (held.row) host.appendChild(held.row);
-      markRow(name, !!held.row);
+      markRow(name, held.has);
     });
   }
 
   /** A row is drawn with the first books (commitFrame), or at once when they
-      are already in. A live answer (not a kept copy, not a failure) is what
-      the next visit remembers. */
-  function placeRow(name, row, remember) {
-    state.pending[name] = { row: row };
+      are already in. has: it has books (Continue is a section either way). A
+      live answer (not a kept copy, not a failure) is what the next visit
+      remembers. */
+  function placeRow(name, row, remember, has) {
+    const any = has === undefined ? !!row : has;
+    state.pending[name] = { row: row, has: any };
     if (state.committed) applyRows();
-    if (remember) storageSet(rowKey(name), row ? '1' : '0');
+    if (remember) storageSet(rowKey(name), any ? '1' : '0');
     settleRow(name);
   }
 
@@ -604,7 +595,7 @@ export async function mount(ctx) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('continue', data && data.notes);
-    placeRow('continue', renderContinueRow(items, [], { signal: signal }), !fromCache && !failed);
+    placeRow('continue', renderContinueRow(items, { signal: signal, failed: failed }), !fromCache && !failed, items.length > 0);
   }
 
   function loadContinue() {

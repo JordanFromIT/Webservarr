@@ -579,7 +579,7 @@ class HomePage(unittest.TestCase):
         # so nothing there can keep a node (or a visit's state) alive.
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
-        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_EMPTY_HTML", "NEWS_FRESH_MS",
+        self.assertEqual(sorted(names), ["HOMELAB_ICONS", "NEWS_EMPTY_HTML", "NEWS_FRESH_MS",
                                          "PINNED_ICON", "PINNED_PREFIX",
                                          "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
                                          "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
@@ -594,28 +594,19 @@ class HomePage(unittest.TestCase):
         self.assertIn("var barTitle = document.getElementById('wsBarTitle');", src)
         self.assertIn("return function () { removeHeaderGauges(); };", code)
 
-    def test_continue_is_the_books_row_in_its_compact_form(self):
+    def test_home_has_no_continue_row(self):
+        # Continue lives on Books only (Jordan, 2026-10-05): Home neither draws
+        # it, reserves room for it, nor loads books.js to do so.
         h = read("index")
         page = h[h.index('<div id="wsPage"'):h.index("</main>")]
-        # The first section to arrive; hidden (so the stack's gap skips it) until a visit says otherwise.
-        self.assertEqual(re.findall(r'data-arrive="(\w+)"', page)[0], "continue")
-        self.assertIn('<div id="homeContinue" data-arrive="continue" hidden aria-busy="true">', h)
-        self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', h)
+        self.assertNotIn('data-arrive="continue"', page)
+        self.assertNotIn("homeContinue", h)
+        self.assertNotIn("data-ws-dep", h)
         src = module_source("index")
-        # No import statement: the page names the file and the server stamps it (as the Books pages do).
-        self.assertNotRegex(js_code_only(src), r"(?m)^\s*import\b[^(]")
-        self.assertIn("import(root.getAttribute('data-ws-dep') || './books.js')", src)
-        self.assertIn("mod.renderContinueRow(items, notes, { compact: true, signal: signal, connectHref: '/books' })", src)
-        self.assertIn("return WS.getJSON('/api/books/continue', { signal: signal });", src)
-        # Not loaded at all while the Books page is off; decided before anything is awaited.
-        self.assertIn("var booksOn = !!features.books_configured && (branding.sidebar_enabled || {}).library !== false;", src)
-        self.assertLess(src.index("continueHost.hidden = !hadRow;"), src.index("const user = await checkAuth();"))
-        self.assertIn("if (continueHost && booksOn) first.push(loadContinue());", src)
-        # The room a row had last time, from the first paint of a full load.
+        for gone in ("renderContinueRow", "/api/books/continue", "data-ws-dep", "webservarr_books_continue"):
+            self.assertNotIn(gone, src, gone)
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
-        self.assertIn("data.page !== 'index'", loader)
-        self.assertIn("setAttribute('data-home-continue',", loader)
-        self.assertIn("html[data-home-continue] #homeContinue[hidden] { display: block; margin-bottom: 2rem; }", h)
+        self.assertNotIn("data-home-continue", loader)
 
     def test_the_buttons_are_data_actions(self):
         h = read("index")
@@ -693,14 +684,19 @@ class BooksPage(unittest.TestCase):
         self.assertIn("'/books/' + encodeURIComponent(String(card.id))", src)
         self.assertIn("'/books/series?name=' + encodeURIComponent(card.series || '')", src)
 
-    def test_the_continue_row_is_reserved_only_when_this_person_had_one(self):
+    def test_continue_is_always_shown_and_its_cards_room_held_only_when_this_person_had_some(self):
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         self.assertIn("data.page !== 'books'", loader)
         self.assertIn("'webservarr_books_continue:'", loader)
         self.assertIn("const CONTINUE_KEY = 'webservarr_books_continue:';", module_source("books"))
         h = read("books")
-        self.assertIn("html[data-books-continue] #continueHost { display: block; }", h)
-        self.assertIn("#continueHost { display: none; }", h)
+        self.assertNotIn("#continueHost { display: none; }", h)
+        self.assertIn('#continueHost [data-skel="row"] { display: none; }', h)
+        self.assertIn('html[data-books-continue] #continueHost [data-skel="row"] { display: flex; }', h)
+        self.assertIn('html[data-books-continue] #continueHost [data-skel="empty"] { display: none; }', h)
+        # The empty skeleton is the empty line's own box.
+        self.assertIn('<p data-skel="empty" class="text-[15px] leading-6" aria-hidden="true">&nbsp;</p>', h)
+        self.assertIn("el('p', 'text-[15px] leading-6 text-frosted-blue/70',", module_source("books"))
 
 
     def test_the_persons_own_writes_go_through_one_helper(self):

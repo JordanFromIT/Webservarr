@@ -9,12 +9,14 @@
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
-  /* The Continue row is reserved from the first paint only for a person who
-     had one last visit: theme-loader.js (a full load) and pages/books.js (every
-     visit, before its first await) put data-books-continue on <html>, and the
-     page takes it off again when the row comes back empty. */
-  #continueHost { display: none; }
-  html[data-books-continue] #continueHost { display: block; }
+  /* Continue is always there. Its skeleton is a row of cards for a person who
+     had books in progress last visit (theme-loader.js on a full load and
+     pages/books.js on every visit, before its first await, put
+     data-books-continue on <html>; the page takes it off when the list comes
+     back empty), and the one quiet line an empty Continue shows otherwise. */
+  #continueHost [data-skel="row"] { display: none; }
+  html[data-books-continue] #continueHost [data-skel="row"] { display: flex; }
+  html[data-books-continue] #continueHost [data-skel="empty"] { display: none; }
   /* Up next and My list (the person's own rows) are held the same way. */
   #upnextHost, #mylistHost { display: none; }
   html[data-books-upnext] #upnextHost { display: block; }
@@ -75,12 +77,13 @@
 
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
-      <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. -->
+      <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. Always shown (the first-visit guide points at it). -->
       <div id="continueHost" class="mb-8" aria-busy="true">
         <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
-        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+        <div data-skel="row" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
           <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
         </div>
+        <p data-skel="empty" class="text-[15px] leading-6" aria-hidden="true">&nbsp;</p>
       </div>
       <!-- Up next and My list (pages/books.js): the person's own rows, held like Continue
            and written in the same frame. Up next's cards carry Play or Read and its moves. -->

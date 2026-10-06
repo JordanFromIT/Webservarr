@@ -15,22 +15,10 @@
  * One delegated click listener on ctx.root serves the stream pager, a
  * stream's "More info" and the news cards' Read more (data-action,
  * data-news-toggle), however often the sections are rebuilt.
- *
- * Continue, the first section, is the Books page's own row in its compact
- * form (renderContinueRow from books.js, loaded from the address #wsPage
- * names in data-ws-dep, which the server stamps). Whether this person has one
- * is remembered per person, so a person who had a row last time gets its room
- * from the first paint (theme-loader.js on a full load, mount on a soft one)
- * and nothing below it moves; with nothing in progress the section stays
- * hidden, and it is not loaded at all while the Books page is off.
  */
 
 const SECTIONS = ['services', 'news', 'streams', 'releases', 'requests'];
 const STREAMS_PER_PAGE = 6;
-// Whether this person had a Continue row last time is the Books page's own
-// memory (pages/books.js); the second says the row had a note under it.
-const CONTINUE_KEY = 'webservarr_books_continue:';
-const CONTINUE_NOTE_KEY = 'webservarr_home_continue_note:';
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
@@ -1341,41 +1329,6 @@ export async function mount(ctx) {
         if (!sectionOn(id)) WS.arrive(id);
     });
 
-    // ---- Continue (the Books page's row, compact) ----
-    //
-    // Books is on while it has something to show and the admin has not
-    // switched it off (the same rule as its nav item).
-    var features = branding.features || {};
-    var booksOn = !!features.books_configured && (branding.sidebar_enabled || {}).library !== false;
-    var continueHost = byId('homeContinue');
-    var continueUser = ((ctx.data || {}).user || {}).username || '';
-    function remembered(key) {
-        try { return localStorage.getItem(key + continueUser); } catch (e) { return null; }
-    }
-    function remember(key, value) {
-        try { localStorage.setItem(key + continueUser, value); } catch (e) { /* private mode: nothing is kept */ }
-    }
-    var continueModule = null;
-    if (continueHost) {
-        // Decided before anything is awaited, so the first frame is the final
-        // one: the room a person's row had last time (a full load did it in
-        // <head>, theme-loader.js), or none.
-        var hadRow = booksOn && remembered(CONTINUE_KEY) === '1';
-        continueHost.hidden = !hadRow;
-        var noteSlot = continueHost.querySelector('[data-note-slot]');
-        if (noteSlot) noteSlot.hidden = !(hadRow && remembered(CONTINUE_NOTE_KEY) === '1');
-        document.documentElement.removeAttribute('data-home-continue');
-        if (booksOn) {
-            // Started now so it is in by the time the answer is.
-            continueModule = import(root.getAttribute('data-ws-dep') || './books.js').catch(function (e) {
-                console.error('The Continue row could not load:', e);
-                return null;
-            });
-        } else {
-            WS.arrive('continue');
-        }
-    }
-
     // ---- Event log (the status feed, on its wheel) ----
     //
     // Everyone signed in reads it (the feed's own rules decide what is in it).
@@ -1461,54 +1414,6 @@ export async function mount(ctx) {
             // nothing, including the admins' "Manage news" beside it.
             if (viewAll) {
                 viewAll.classList.remove('invisible');
-            }
-        });
-    }
-
-    // ---- Continue ----
-
-    function loadContinue() {
-        return continueModule.then(function (mod) {
-            if (signal.aborted) return;
-            if (!mod || typeof mod.renderContinueRow !== 'function') { hideContinue(); return; }
-            return WS.swr('books:continue', function () {
-                return WS.getJSON('/api/books/continue', { signal: signal });
-            }, function (data, fromCache) {
-                renderContinue(mod, data, fromCache);
-            }, {
-                onError: function (error) {
-                    if (signal.aborted || isAbort(error)) return;   // left the page: not an error
-                    // No Continue is not a reason to say anything on Home: the row stays away.
-                    hideContinue();
-                }
-            });
-        });
-    }
-
-    function hideContinue() {
-        WS.arrive('continue', function () {
-            if (signal.aborted) return;
-            continueHost.hidden = true;
-        });
-    }
-
-    function renderContinue(mod, data, fromCache) {
-        if (signal.aborted) return;
-        var items = (data && Array.isArray(data.items)) ? data.items : [];
-        var notes = (data && Array.isArray(data.notes)) ? data.notes : [];
-        WS.arrive('continue', function () {
-            if (signal.aborted) return;
-            // A person who is not connected to Kavita connects from Books (it
-            // runs the hand-off); Home only says so, and links there.
-            var row = mod.renderContinueRow(items, notes, { compact: true, signal: signal, connectHref: '/books' });
-            // What takes the skeleton's place is the row, or nothing at all.
-            continueHost.textContent = '';
-            if (row) continueHost.appendChild(row);
-            continueHost.hidden = !row;
-            continueHost.setAttribute('aria-busy', 'false');
-            if (!fromCache) {
-                remember(CONTINUE_KEY, row ? '1' : '0');
-                remember(CONTINUE_NOTE_KEY, row && row.querySelector('[data-continue-note]') ? '1' : '0');
             }
         });
     }
@@ -1819,7 +1724,6 @@ export async function mount(ctx) {
         user.is_admin === true && document.documentElement.hasAttribute('data-admin');
 
     var first = [];
-    if (continueHost && booksOn) first.push(loadContinue());
     first.push(loadEventLog());
     if (sectionOn('news')) first.push(loadNews());
     if (sectionOn('services')) { first.push(loadServices()); first.push(loadSystemStats()); }

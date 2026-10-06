@@ -254,11 +254,12 @@
 /*
  * The Books page's Continue row, reserved before the first paint.
  *
- * Whether there is a Continue row is only known once its answer is in, but a
- * row that appears (or goes) after the first paint pushes the library below it
- * down (or up). So a person who had a row last visit gets its slot from the
- * first paint: <html data-books-continue> shows #continueHost (books.html's
- * page style), whose skeleton is the row's own shape. pages/books.js writes
+ * Continue is always shown, but whether it has cards is only known once its
+ * answer is in, and cards that appear (or go) after the first paint push the
+ * library below them down (or up). So a person who had books in progress last
+ * visit gets a row of cards' room from the first paint: <html
+ * data-books-continue> switches #continueHost's skeleton from its one empty
+ * line to the row's own shape (books.html's page style). pages/books.js writes
  * the flag (localStorage webservarr_books_continue:<name>, "1" or "0") and
  * marks again on every soft visit; a full load of Books marks here. The router
  * takes the attribute off when the next page is swapped in.
@@ -297,33 +298,6 @@
   if (data.page !== 'reader') return;
   var m = /[?&]sample=([^&#]*)/.exec(window.location.search || '');
   if (m && m[1] === '1') document.documentElement.setAttribute('data-reader-sample', '');
-})();
-
-/*
- * Home's Continue row, reserved before the first paint.
- *
- * The same memory as Books' (localStorage webservarr_books_continue:<name>),
- * for the same reason: a row that appears after the first paint pushes the
- * sections below it down. A person who had one last time gets its room from
- * the first paint: <html data-home-continue> (the value "note" when the row
- * had a note under it, webservarr_home_continue_note:<name>) shows #homeContinue
- * (index.html's page style), whose skeleton is the row's own shape. Only while
- * the Books page is on. pages/home.js decides the section's hidden attribute
- * itself on every visit and takes the flag off.
- */
-(function () {
-  'use strict';
-  var data = window.WS_DATA || {};
-  if (data.page !== 'index') return;
-  var b = data.branding || {};
-  if (!(b.features || {}).books_configured || (b.sidebar_enabled || {}).library === false) return;
-  try {
-    var name = (data.user || {}).username || '';
-    if (localStorage.getItem('webservarr_books_continue:' + name) === '1') {
-      document.documentElement.setAttribute('data-home-continue',
-        localStorage.getItem('webservarr_home_continue_note:' + name) === '1' ? 'note' : '');
-    }
-  } catch (e) { /* private mode: no room reserved, the row arrives when it arrives */ }
 })();
 
 /*

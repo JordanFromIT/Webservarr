@@ -175,14 +175,12 @@ class MovedRoutes(PageRoutesBase):
             module = re.findall(r'data-ws-module="([^"]+)"', r.text)[0]
             self.assertNotEqual(module.split("?v=")[1], found[0].split("?v=")[1], "each file has its own stamp")
 
-    def test_home_names_books_js_the_same_way_for_its_continue_row(self):
-        # Home draws Books' Continue row, so it loads books.js from the address its page names, stamped.
-        import re
+    def test_home_loads_no_books_module(self):
+        # Continue is Books' alone: Home names no books.js dependency.
         r = self.get("/", MEMBER_SESSION, {"integration.kavita.url": "http://192.168.1.50:5000"})
         self.assertEqual(r.status_code, 200)
-        want = "/static/js/pages/books.js?v=" + pages.asset_stamp("/static/js/pages/books.js")
-        self.assertEqual(re.findall(r'data-ws-dep="([^"]+)"', r.text), [want])
-        self.assertIn('id="homeContinue" data-arrive="continue" hidden', r.text)
+        self.assertNotIn("data-ws-dep", r.text)
+        self.assertNotIn('id="homeContinue"', r.text)
 
     def test_a_stamp_is_written_into_a_dep_attribute_and_nothing_else_changes(self):
         out = pages._stamp_asset_versions('<div data-ws-module="/static/js/pages/book.js?v=1" data-ws-dep="/static/js/pages/books.js?v=1" data-x="/static/js/pages/books.js?v=1">')

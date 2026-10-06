@@ -647,16 +647,18 @@ await run('tapping an audiobook in Continue resumes it in the player', async (ma
   check('a page that was left no longer answers taps', u.toasts.length === 1);
 });
 
-await run('renderContinueRow: empty is nothing, notes are quiet lines, compact is smaller', async (make) => {
-  const t = make({ html: '<div id="wsPage"></div>' });
-  check('no items: no row', books.renderContinueRow([], [], {}) === null && books.renderContinueRow(null, [], {}) === null);
-  const row = books.renderContinueRow(CONT.slice(1), [{ source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }, { source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }, { source: 'plex', reason: 'unavailable', text: '' }], {});
-  const notes = Array.from(row.querySelectorAll(':scope > p'));
-  check('Kavita down: the audiobooks stay and one quiet note follows them', row.querySelectorAll('li').length === 2 && notes.length === 1 && notes[0].textContent.indexOf('Ebooks are unavailable right now') !== -1, notes.map((n) => n.textContent));
-  check('the note is under the row, not in it', row.lastElementChild === notes[0]);
-  const small = books.renderContinueRow(CONT, [], { compact: true });
-  check('compact cards are narrower', small.querySelector('li > a').className.indexOf('w-28') !== -1 && row.querySelector('li > button').className.indexOf('w-36') !== -1);
-  check('and the heading is Home\'s own section heading: an icon, then the title at the same size', /text-xl/.test(small.querySelector('h2').className) && small.querySelector('h2').previousElementSibling.textContent === 'auto_stories' && small.querySelector('h2').parentNode.className.indexOf('flex items-center gap-3 mb-4') !== -1 && !row.querySelector('h2').previousElementSibling);
+await run('renderContinueRow: always a section; with nothing in progress, one quiet line', async (make) => {
+  make({ html: '<div id="wsPage"></div>' });
+  for (const empty of [[], null]) {
+    const sec = books.renderContinueRow(empty, {});
+    check('no items: still the section, headed Continue', sec && sec.hasAttribute('data-continue') && sec.getAttribute('aria-label') === 'Continue' && sec.querySelector('h2').textContent === 'Continue');
+    check('and one quiet line instead of cards', !sec.querySelector('li') && sec.querySelector('[data-continue-empty]').textContent === 'Books you start will show up here.');
+  }
+  const failed = books.renderContinueRow([], { failed: true });
+  check('a list that could not be read says so, not that there is nothing', failed.querySelector('[data-continue-empty]').textContent === 'Your books in progress didn’t load.');
+  const row = books.renderContinueRow(CONT.slice(1), {});
+  check('with books: the cards and no empty line', row.querySelectorAll('li').length === 2 && !row.querySelector('[data-continue-empty]'));
+  check('the cards are Books\' size', row.querySelector('li > button').className.indexOf('w-36') !== -1);
 });
 
 await run('Kavita down: Continue keeps the audiobooks, the page shows one quiet note and still loads', async (make) => {
@@ -674,14 +676,15 @@ await run('Kavita down: Continue keeps the audiobooks, the page shows one quiet 
   check('it is not mistaken for a missing sign-in', t.kav.reconnect.length === 0 && t.hidden('#connectState'));
 });
 
-await run('Continue failing leaves the library alone and hides the row', async (make) => {
+await run('Continue failing leaves the library alone and says so in its own section', async (make) => {
   const t = make({ storage: { 'webservarr_books_continue:sam': '1' }, routes: (net) => { usual()(net); net.on('/api/books/continue', () => ({ status: 503, body: {} })); } });
   check('a person who had a row has its slot at once', t.doc.documentElement.hasAttribute('data-books-continue') === false);
   const mounted = t.mount();
   check('reserved before the first await', t.doc.documentElement.hasAttribute('data-books-continue'));
   await t.clock.advance(1600);
   await mounted;
-  check('the row is dropped', !t.doc.documentElement.hasAttribute('data-books-continue') && !t.q('#continueHost [data-continue]'));
+  check('the row\'s room is given back', !t.doc.documentElement.hasAttribute('data-books-continue') && !t.q('#continueHost li'));
+  check('the section stays, with its line', /didn’t load/.test(t.q('#continueHost [data-continue-empty]').textContent));
   check('the library shows', !t.hidden('#libraryGrid'));
   check('a failed read does not forget that they had a row', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1');
 });
@@ -1624,16 +1627,20 @@ await run('the guide: never over a page that could not load, a search or a faile
   check('a failed sign-in message is not toured over', !tourOn(connect));
 });
 
-await run('the guide: with no Continue row yet its step still shows, in the middle of the page', async (make) => {
+await run('the guide: with nothing in progress the Continue step still points at the section', async (make) => {
   const t = withTour(make({ routes: usual() }));
   const mounted = t.mount();
   await t.clock.advance(2600);
   await mounted;
+  const sec = t.q('#continueHost [data-continue]');
+  check('Continue is there, empty', !!sec && /Books you start will show up here/.test(sec.textContent) && !sec.querySelector('li'));
+  // A box with a size, so the step has something to point at (the test window lays nothing out).
+  sec.getBoundingClientRect = () => ({ left: 0, top: 200, right: 600, bottom: 260, width: 600, height: 60, x: 0, y: 200 });
+  sec.scrollIntoView = () => {};
   t.doc.getElementById('tourNext').click();
   await new Promise((r) => setTimeout(r, 450));   // the engine places the bubble after the scroll settles (a real timer)
   check('step two is the Continue step', tourTitle(t) === 'Pick up where you left off');
-  check('with no row the page has none to point at, and the step says what the row is', !t.q('#continueHost [data-continue]') && /Continue row/.test(t.doc.getElementById('tourBody').textContent));
-  check('so the spotlight cuts no hole (the bubble sits in the middle)', t.doc.getElementById('tourSpotlight').classList.contains('tour-spotlight-empty'));
+  check('so the spotlight is on the section, not the middle of the page', !t.doc.getElementById('tourSpotlight').classList.contains('tour-spotlight-empty'));
 });
 
 await run('the guide: reduced motion jumps to each step instead of gliding', async (make) => {
@@ -1709,21 +1716,6 @@ await run('T5H3: the guide is not offered, or marked seen, while a Kavita hand-o
   await going.clock.advance(2600);
   await g;
   check('a hand-off the page itself just started is the same: no guide, not seen', going.kav.reconnect.length === 1 && !tourOn(going) && going.win.localStorage.getItem(GUIDE_FLAG) === null);
-});
-
-await run('Home: the "not connected" note becomes a link to Books, the other notes stay plain', async (make) => {
-  make({ html: '<div id="wsPage"></div>' });
-  const notes = [
-    { source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' },
-    { source: 'plex', reason: 'unavailable', text: 'Audiobooks are unavailable right now' }
-  ];
-  const home = books.renderContinueRow(CONT.slice(0, 1), notes, { compact: true, connectHref: '/books' });
-  const lines = Array.from(home.querySelectorAll('[data-continue-note]'));
-  check('both notes are quiet lines marked as notes', lines.length === 2);
-  check('the not-connected one is a link to Books', lines[0].querySelector('a') && lines[0].querySelector('a').getAttribute('href') === '/books' && lines[0].textContent.indexOf('Connect to your ebook library to see ebooks') !== -1);
-  check('the one about a source being down is text', !lines[1].querySelector('a') && lines[1].textContent.indexOf('Audiobooks are unavailable right now') !== -1);
-  const books_ = books.renderContinueRow(CONT.slice(0, 1), notes, { compact: false });
-  check('on Books (no connectHref) neither is a link: the page runs the hand-off itself', !books_.querySelector('a[href="/books"]'));
 });
 
 // ---- Requests: ?q= runs the search on arrival ----

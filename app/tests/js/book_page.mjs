@@ -498,7 +498,7 @@ await run('Listen opens the player at the preferred edition and plays', async (m
   t.click('[data-action="listen"]');
   await flush();
   check('the player was opened with the preferred edition, playing', t.player.opened.length === 1 && t.player.opened[0][0] === '100:2' && t.player.opened[0][1].autoplay === true, t.player.opened);
-  check('and a Continue row is now told to Books and Home for the next visit (Task 5)', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1');
+  check('and a Continue row is now told to Books for the next visit (Task 5)', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1');
 });
 
 await run('Listen that cannot open the book tells no Continue row', async (make) => {
