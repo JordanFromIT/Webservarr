@@ -14,8 +14,8 @@ tests pin:
   * the settings that hold icons: their defaults and the picker's suggestions
     are in the list, and a stored name the font cannot draw is served as that
     slot's default (app/icons.py) instead of as letters;
-  * the page head: every page preloads the font from /static and declares it
-    with the same address; no page loads it from Google any more.
+  * the page head: every page declares the font from /static at a
+    content-stamped address; no page loads it from Google any more.
 """
 import hashlib
 import json
@@ -184,17 +184,20 @@ class PageHead(unittest.TestCase):
         for p in sorted(STATIC.glob("*.html")) + sorted((STATIC / "partials").glob("*.html")):
             self.assertNotIn("Material+Symbols", p.read_text(encoding="utf-8"), p.name)
 
-    def test_every_rendered_page_preloads_and_declares_the_same_address(self):
+    def test_every_rendered_page_declares_the_self_hosted_font(self):
         from app.tests.test_pages import render
         for name in ("index", "login", "settings", "setup"):
             page = (STATIC / f"{name}.html").read_text(encoding="utf-8")
             out = render(name=name, page=page)
             head = out.split("</head>", 1)[0]
-            pre = re.findall(r'<link rel="preload" href="([^"]+)" as="font" type="font/woff2" crossorigin>', head)
             face = re.findall(r"@font-face\{font-family:'Material Symbols Outlined';[^}]*src:url\(([^)]+)\)", head)
-            self.assertEqual(len(pre), 1, name)
-            self.assertEqual(pre, face, name)
-            self.assertRegex(pre[0], r"^/static/fonts/material-symbols-outlined\.woff2\?v=[\w.-]+-[0-9a-f]{8}$")
+            self.assertEqual(len(face), 1, name)
+            # Content-stamped, so it can be cached for a year (main.py).
+            self.assertRegex(face[0], r"^/static/fonts/material-symbols-outlined\.woff2\?v=[\w.-]+-[0-9a-f]{8}$")
+            self.assertIn("font-weight:400 700;font-display:block;", head)
+            # Not preloaded: on a slow phone that delayed the page's largest
+            # text (pages.icon_font_head).
+            self.assertNotIn('as="font"', head, name)
             # Before app.css, as Google's stylesheet was, so utilities on an
             # icon (font-bold) still win over the family's own rules.
             self.assertLess(head.index(".material-symbols-outlined{"), head.index("/static/css/app.css"), name)

@@ -190,20 +190,24 @@ ICON_FONT = "/static/fonts/material-symbols-outlined.woff2"
 def icon_font_head() -> str:
     """
     The icon font: a trimmed, self-hosted Material Symbols Outlined
-    (scripts/build_icon_font.py), preloaded because every page draws icons in
-    its first screen (the nav, the scroll hint).
+    (scripts/build_icon_font.py), about 33 KB.
 
-    Its address carries the file's content stamp, written here rather than by
-    the ?v= rewrite, which never reaches a url() inside CSS: the preload and
-    the @font-face must name the same address or the browser fetches it twice.
-    The class rules are Google's own for this family, and come before app.css
-    as Google's stylesheet did, so a utility on an icon (font-bold on the logo
-    stand-in) still wins. font-display: block, as before: the file is small,
-    and a ligature painted in a fallback font is a word, not an icon.
+    Not preloaded: measured on a throttled phone (1.6 Mbps, 150 ms), a
+    preload made it share the first second with the stylesheets and moved
+    the LCP (text) about 300 ms later on Home and 150 ms on /login, for icons
+    that arrive about half a second sooner. Fetched once the page lays out
+    an icon, it is still in well before the old 1.1 MB font was.
+
+    Its address carries the file's content stamp, written here because the
+    ?v= rewrite never reaches a url() inside CSS, so it is cached for a year
+    and a new build is fetched at once. The class rules are Google's own for
+    this family, and come before app.css as Google's stylesheet did, so a
+    utility on an icon (font-bold on the logo stand-in) still wins.
+    font-display: block, as before: a ligature painted in a fallback font is
+    a word, not an icon.
     """
     href = html.escape(f"{ICON_FONT}?v={asset_stamp(ICON_FONT)}", quote=True)
     return (
-        f'<link rel="preload" href="{href}" as="font" type="font/woff2" crossorigin>'
         "<style>"
         "@font-face{font-family:'Material Symbols Outlined';font-style:normal;font-weight:400 700;"
         f"font-display:block;src:url({href}) format('woff2')}}"
