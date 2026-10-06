@@ -167,11 +167,9 @@ RAW_ALLOWED = {
     ("login.html", 'id="plexLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
     ("login.html", 'id="plexLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
     ("login.html", 'd="M286.4,77.8L252.9', "#EBAF00", "M10: the chevron of Plex's wordmark on the Authentik sign-in button"),
-    # authentik's logo on the same button: its own orange, on its own white
-    # tile, because the orange is only 2.2:1 on the Primary fill and the
-    # tile lifts it to 3.4:1 whatever Primary the operator picks.
-    ("login.html", 'viewBox="-187.5 -71.8 4070.8 735.4"', "#FD4B2D", "M10: authentik's logo (its brand orange) on the Authentik sign-in button"),
-    ("login.html", '<rect x="-187.5" y="-71.8"', "#FFFFFF", "M10: the white tile authentik's orange logo sits on, so it clears 3:1"),
+    # authentik's logo on the same button, in its own orange (2.2:1 on the
+    # default Primary, kept on purpose; the button's name carries the meaning).
+    ("login.html", 'viewBox="28.5 36.2 3638.8 519.4"', "#FD4B2D", "M10: authentik's logo (its brand orange) on the Authentik sign-in button"),
     ("reader.js", "light: { bg:", "#FBFAF7", "M10: the light reading mode's page"),
     ("reader.js", "light: { bg:", "#1A1A1A", "M10: the light reading mode's text"),
     ("reader.js", "sepia: { bg:", "#F4ECD8", "M10: the sepia reading mode's page"),
