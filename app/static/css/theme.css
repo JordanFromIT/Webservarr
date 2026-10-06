@@ -517,10 +517,20 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-status-chip[data-state="off"] .ws-status-chip-word { color: rgb(var(--color-text) / .75); }
 .ws-status-chip[data-state="warn"] .ws-status-dot::after,
 .ws-status-chip[data-state="err"] .ws-status-dot::after { animation: ws-ping 1.4s cubic-bezier(0, 0, .2, 1) 1; }
-/* At 320px the top bar holds the title, the three gauges and the bell: the dot alone. */
+/* Room in the top bar. Below 360px the chip is the dot alone. On Home with
+ * Netdata the three gauges share the bar (they arrive after the first paint;
+ * html[data-page][data-netdata] is there from the start, so nothing moves
+ * when they do): the dot alone below 390px, and below 360px the smallest
+ * target (24px wide, 40px tall), so "Home" still fits whole at 320px. */
+@media (max-width: 389px) {
+  html[data-page="index"][data-netdata] .ws-status-chip-word { display: none; }
+  html[data-page="index"][data-netdata] .ws-status-chip-face { padding: 0 9px; }
+}
 @media (max-width: 359px) {
   .ws-status-chip-word { display: none; }
   .ws-status-chip-face { padding: 0 9px; }
+  html[data-page="index"][data-netdata] .ws-status-chip { min-width: 24px; padding: 0; margin-inline-end: -12px; }
+  html[data-page="index"][data-netdata] .ws-status-chip-face { width: 24px; height: 24px; padding: 0; justify-content: center; }
 }
 
 /* The popover hangs from the header's left group (positioned), under the pill. */
@@ -563,10 +573,10 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 
 /* The uptime window: a native radio group drawn as three segments. */
 .ws-sp-range {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
   margin: 0; padding: 0 12px 12px 20px; border: 0; min-width: 0;
 }
-.ws-sp-range-label { float: left; padding: 0; font-size: 13px; color: rgb(var(--color-text) / .75); }
+.ws-sp-range-label { float: left; padding: 0; font-size: 13px; white-space: nowrap; color: rgb(var(--color-text) / .75); }
 .ws-sp-segs { display: flex; padding: 2px; border-radius: 9999px; background: rgb(var(--color-text) / .06); }
 .ws-sp-seg { position: relative; }
 .ws-sp-seg-input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
