@@ -100,8 +100,8 @@ class RegistryView(SettingsApiBase):
         helpers.put(self.db, "pages.order", stale)
         body = self.client.get("/api/admin/settings?view=registry").json()
         self.assertEqual(body["page_order"], reg.normalize_page_order(stale))
-        self.assertEqual(body["page_order"], ["home", "wiki", "requests", "issues", "calendar", "tickets",
-                                              "library", "settings"])
+        self.assertEqual(body["page_order"], ["home", "wiki", "requests", "library", "issues", "calendar",
+                                              "tickets", "settings"])
         self.assertEqual(body["values"]["pages.order"], stale)
         helpers.put(self.db, "pages.order", "not json")
         body = self.client.get("/api/admin/settings?view=registry").json()
