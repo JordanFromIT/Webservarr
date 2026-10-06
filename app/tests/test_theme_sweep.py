@@ -167,6 +167,11 @@ RAW_ALLOWED = {
     ("login.html", 'id="plexLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
     ("login.html", 'id="plexLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
     ("login.html", 'd="M286.4,77.8L252.9', "#EBAF00", "M10: the chevron of Plex's wordmark on the Authentik sign-in button"),
+    # authentik's logo on the same button: its own orange, on its own white
+    # tile, because the orange is only 2.2:1 on the Primary fill and the
+    # tile lifts it to 3.4:1 whatever Primary the operator picks.
+    ("login.html", 'viewBox="-187.5 -71.8 4070.8 735.4"', "#FD4B2D", "M10: authentik's logo (its brand orange) on the Authentik sign-in button"),
+    ("login.html", '<rect x="-187.5" y="-71.8"', "#FFFFFF", "M10: the white tile authentik's orange logo sits on, so it clears 3:1"),
     ("reader.js", "light: { bg:", "#FBFAF7", "M10: the light reading mode's page"),
     ("reader.js", "light: { bg:", "#1A1A1A", "M10: the light reading mode's text"),
     ("reader.js", "sepia: { bg:", "#F4ECD8", "M10: the sepia reading mode's page"),
@@ -837,7 +842,7 @@ class NoPaletteColours(unittest.TestCase):
     def test_the_authentik_button_is_the_primary_button(self):
         # Its fill, hover and focus ring are the site's primary button's, as
         # "Make a request" and "Turn on" on Home draw them, so the wordmark's
-        # letters can be bright text and "via Authentik" bright text at 80%.
+        # letters can be bright text and "via" bright text at 80%.
         login = (STATIC / "login.html").read_text(encoding="utf-8")
         home = (STATIC / "index.html").read_text(encoding="utf-8")
         primary = ("bg-primary hover:bg-primary/90 text-bright",
@@ -852,7 +857,12 @@ class NoPaletteColours(unittest.TestCase):
         body = login[login.index('id="authentikLoginBtn"'):]
         body = body[:body.index("</button>")]
         self.assertNotIn("frosted-blue/", body)   # no light-text leftovers on the fill
-        self.assertIn('<span class="text-label font-medium text-bright/80">via Authentik</span>', body)
+        self.assertIn('<span class="text-label font-medium text-bright/80">via\n<svg', body)
+        # authentik's logo is hidden from assistive tech, and the hidden word
+        # after it keeps the name "Sign in with Plex via Authentik".
+        mark = body[body.index("via\n<svg"):]
+        self.assertIn('aria-hidden="true"', mark[:mark.index(">")])
+        self.assertIn('</svg>\n<span class="sr-only">Authentik</span></span>', body)
 
 
 if __name__ == "__main__":
