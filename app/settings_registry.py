@@ -48,6 +48,8 @@ DEFAULT_PAGE_ORDER = ["home", "requests", "library", "issues", "calendar", "tick
 # The shipped order before Books moved up, which that migration looks for.
 PAGE_ORDER_BEFORE_BOOKS_V1 = ["home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings"]
 HOME_SECTION_IDS = ("services", "news", "streams", "releases", "requests")
+# Home sections shipped switched off (Settings > Pages > Home turns them on).
+HOME_SECTIONS_OFF_BY_DEFAULT = ("services",)
 TYPES = ("text", "url", "bool", "int", "color", "icon", "enum", "json")
 
 # page id -> (label, sublabel, icon). Label names the destination; the
@@ -234,7 +236,12 @@ def _build() -> List[SettingDef]:
                    public=True, choices=("native", "seerr_embed"), allow_empty=False),
     ]
     for sid, (name, icon) in _HOME_SECTION_DEFAULTS.items():
-        d.append(_bool(f"home.section_{sid}", "true", f"Show {name} on the home page", public=True))
+        # Service Health is off by default: the header's status pill and its
+        # panel say whether everything is running. An operator can turn the
+        # section back on (seed.migrate_home_services_off_v1 moved the old
+        # default over).
+        on = "false" if sid in HOME_SECTIONS_OFF_BY_DEFAULT else "true"
+        d.append(_bool(f"home.section_{sid}", on, f"Show {name} on the home page", public=True))
         d.append(_icon(f"icon.section_{sid}", icon, f"Home page icon for {name}", public=True))
     d += [
         # The icon before each section heading (Home's Service Health, News &

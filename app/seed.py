@@ -1072,6 +1072,31 @@ def migrate_home_sublabel_v3(db: Session) -> None:
     logger.info("Home sublabel migration: %s", "updated" if changed else "nothing to change (customised)")
 
 
+def migrate_home_services_off_v1(db: Session) -> None:
+    """
+    One-time migration: Home's Service Health section is switched off.
+
+    The header's status pill (and the panel it opens) now says whether
+    everything is running, so the section is off by default. Only a row that
+    still holds the earlier default ("true") is switched off; a section the
+    admin already turned off stays off, and the admin can turn it back on in
+    Settings > Pages > Home (this runs once, so it never switches it off
+    again). A fresh install gets "false" from seed_default_settings.
+
+    Guarded by migration.home_services_off_v1.
+    """
+    marker = "migration.home_services_off_v1"
+    if _setting_row(db, marker):
+        return
+    row = _setting_row(db, "home.section_services")
+    changed = False
+    if row is not None and (row.value or "").strip().lower() == "true":
+        row.value = "false"
+        changed = True
+    if _finish_migration(db, marker, "One-time switch-off of Home's Service Health section"):
+        logger.info("Home Service Health migration: %s", "switched off" if changed else "nothing to change")
+
+
 def migrate_overseerr_to_seerr(db: Session) -> None:
     """One-time migration: rename integration.overseerr.* setting keys to
     integration.seerr.* and notifications.poll_interval_overseerr to

@@ -1726,7 +1726,12 @@ export async function mount(ctx) {
     var first = [];
     first.push(loadEventLog());
     if (sectionOn('news')) first.push(loadNews());
-    if (sectionOn('services')) { first.push(loadServices()); first.push(loadSystemStats()); }
+    // The header gauges are the server's (Netdata), not a part of Service
+    // Health: they show whenever Netdata is set up (html[data-netdata]),
+    // whether or not the section is on.
+    var netdataOn = document.documentElement.hasAttribute('data-netdata');
+    if (sectionOn('services')) first.push(loadServices());
+    if (netdataOn) first.push(loadSystemStats());
     if (sectionOn('streams')) first.push(loadActiveStreams());
     if (sectionOn('requests')) first.push(loadRecentRequests());
     if (sectionOn('releases')) first.push(loadUpcomingReleases());
@@ -1743,12 +1748,10 @@ export async function mount(ctx) {
         loadRequestCount();
     }, 30000);
 
-    if (sectionOn('services')) {
-        // Real-time Netdata gauges — poll every 1 second
-        ctx.poll(loadSystemStats, 1000);
-        // Live-update "Last checked" timer every second
-        ctx.poll(tickLastChecked, 1000);
-    }
+    // Real-time Netdata gauges: poll every 1 second
+    if (netdataOn) ctx.poll(loadSystemStats, 1000);
+    // Live-update Service Health's "Last checked" timer every second
+    if (sectionOn('services')) ctx.poll(tickLastChecked, 1000);
 
     // The sections are on screen (the last visit's copy, or fetched) before
     // mount resolves, so Back and Forward restore the scroll onto them. A slow

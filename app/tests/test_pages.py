@@ -61,11 +61,13 @@ def static_text(*parts):
 
 
 # Each Home loader and the section switch that must guard every call to it.
-# None: the call is not a home section and must stay unguarded.
+# None: the call is not a home section and must stay unguarded. "netdata": the
+# header gauges, guarded by Netdata being set up (if (netdataOn)), never by
+# the Service Health section, which is off by default.
 HOME_LOADERS = {
     "loadNews": "news",
     "loadServices": "services",
-    "loadSystemStats": "services",
+    "loadSystemStats": "netdata",
     "loadActiveStreams": "streams",
     "loadRecentRequests": "requests",
     "loadUpcomingReleases": "releases",
@@ -120,6 +122,8 @@ def home_guard_problems(page: str) -> list:
                     r"function sectionOn\(id\) \{ return homeSections\[id\] !== false; \}"):
         if only(pattern) is None:
             problems.append("missing live: " + pattern)
+    if only(r"var netdataOn = document\.documentElement\.hasAttribute\('data-netdata'\);") is None:
+        problems.append("netdataOn is not read from html[data-netdata]")
     arrive = only(r"if \(!sectionOn\(id\)\) WS\.arrive\(id\);")
     auth = only(r"await checkAuth\(\)")
     if arrive is None or auth is None or not arrive.start() < auth.start():
@@ -131,6 +135,10 @@ def home_guard_problems(page: str) -> list:
         e = at(m.end())
         end = matching_brace(code, e) if code[e] == "{" else code.index(";", e)
         guards.append((m.group(1), e, end))
+    for m in live_matches(raw, r"if\s*\(\s*netdataOn\s*\)\s*"):
+        e = at(m.end())
+        end = matching_brace(code, e) if code[e] == "{" else code.index(";", e)
+        guards.append(("netdata", e, end))
 
     def guard_of(c):
         inside = [g for g in guards if g[1] <= c <= g[2]]
@@ -178,8 +186,8 @@ def home_guard_problems(page: str) -> list:
     if intervals != [1000, 1000, 30000]:
         problems.append(f"unexpected polls {intervals}")
     for interval, o, _ in polls:
-        if interval == 1000 and guard_of(o) != "services":
-            problems.append("a 1 s poll runs outside the sectionOn('services') block")
+        if interval == 1000 and guard_of(o) not in ("services", "netdata"):
+            problems.append("a 1 s poll runs unguarded")
     return problems
 
 
@@ -468,8 +476,11 @@ class ShellRendering(unittest.TestCase):
 
     def test_home_sections_switched_off_are_listed_on_html(self):
         b = branding(**{"home.section_news": "false", "home.section_streams": "false"})
-        self.assertIn('data-home-hide="news streams"', html_tag(render(b=b, name="index")))
-        self.assertNotIn("data-home-hide", html_tag(render(name="index")))
+        self.assertIn('data-home-hide="services news streams"', html_tag(render(b=b, name="index")))
+        # Service Health is off by default (the header's status pill says it).
+        self.assertIn('data-home-hide="services"', html_tag(render(name="index")))
+        on = branding(**{"home.section_services": "true"})
+        self.assertNotIn("data-home-hide", html_tag(render(b=on, name="index")))
         self.assertNotIn("data-home-hide", html_tag(render(b=b, name="calendar")))
 
     def test_only_the_reader_hides_the_shell(self):
@@ -496,11 +507,17 @@ class ShellRendering(unittest.TestCase):
         for name, mutated in (("reverted", reverted), ("commented", commented)):
             self.assertIn("sectionOn(", mutated)
             problems = home_guard_problems(mutated)
-            for loader in ("loadNews", "loadServices", "loadSystemStats", "loadActiveStreams",
+            for loader in ("loadNews", "loadServices", "loadActiveStreams",
                            "loadRecentRequests", "loadUpcomingReleases"):
                 self.assertTrue(any(p.startswith(loader + " guarded by None") for p in problems),
                                 (name, loader, problems))
-            self.assertIn("a 1 s poll runs outside the sectionOn('services') block", problems, name)
+            self.assertIn("a 1 s poll runs unguarded", problems, name)
+        # The gauges follow Netdata, not Service Health: guarding them by the
+        # section (which is off by default) would hide them.
+        by_section = page.replace("if (netdataOn) first.push(loadSystemStats());",
+                                  "if (sectionOn('services')) first.push(loadSystemStats());", 1)
+        self.assertNotEqual(by_section, page)
+        self.assertIn("loadSystemStats guarded by 'services', expected 'netdata'", home_guard_problems(by_section))
         self.assertEqual(page.count("first.push(loadRequestCount());   //"), 1)
         badge = page.replace("first.push(loadRequestCount());   //",
                              "if (sectionOn('requests')) first.push(loadRequestCount());   //", 1)
@@ -759,7 +776,7 @@ class NavModel(unittest.TestCase):
         b = branding()
         self.assertEqual(b["requests_source"], "native")
         self.assertEqual(b["pages_order"][0], "home")
-        self.assertEqual(b["home_sections"], {"services": True, "news": True, "streams": True,
+        self.assertEqual(b["home_sections"], {"services": False, "news": True, "streams": True,
                                               "releases": True, "requests": True})
         self.assertNotIn("requests-embed", b["sidebar_labels"])
         self.assertNotIn("show_tickets", b["features"])

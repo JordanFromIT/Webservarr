@@ -238,7 +238,10 @@ class Coverage(unittest.TestCase):
         self.assertEqual(json.loads(reg.REGISTRY["pages.order"].default), reg.DEFAULT_PAGE_ORDER)
         self.assertEqual(reg.REGISTRY["requests.source"].default, "native")
         for sid in reg.HOME_SECTION_IDS:
-            self.assertEqual(reg.REGISTRY["home.section_" + sid].default, "true")
+            # Service Health ships off: the header's status pill says it.
+            want = "false" if sid in reg.HOME_SECTIONS_OFF_BY_DEFAULT else "true"
+            self.assertEqual(reg.REGISTRY["home.section_" + sid].default, want, sid)
+        self.assertEqual(reg.HOME_SECTIONS_OFF_BY_DEFAULT, ("services",))
 
     def test_seed_defaults_respect_flags(self):
         seeded = reg.seed_defaults()
@@ -551,7 +554,8 @@ class DerivedDefaults(unittest.TestCase):
             seed_default_settings(db)
             self.assertEqual(_json.loads(helpers.get(db, "pages.order")), reg.DEFAULT_PAGE_ORDER)
             for sid in reg.HOME_SECTION_IDS:
-                self.assertEqual(helpers.get(db, "home.section_" + sid), "true")
+                want = "false" if sid in reg.HOME_SECTIONS_OFF_BY_DEFAULT else "true"
+                self.assertEqual(helpers.get(db, "home.section_" + sid), want, sid)
             self.assertEqual(helpers.get(db, "requests.source"), "native")
             self.assertIsNone(helpers.get(db, "system.admin_email"))          # seed=False
             self.assertIsNone(helpers.get(db, "integration.uptime_kuma.api_key"))  # retired

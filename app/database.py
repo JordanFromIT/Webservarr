@@ -94,7 +94,7 @@ def init_db():
         migrate_user_uid, migrate_local_usernames_snapshot, migrate_listening_device_id,
         migrate_listening_book_fields, migrate_listening_claims, migrate_no_email_identity,
         migrate_tickets_page_switch_v1,
-        migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_catalog_v2,
+        migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_home_services_off_v1, migrate_books_catalog_v2,
         migrate_books_nav_v1, migrate_page_order_books_v1, migrate_book_announced, migrate_welcome_post_v2,
         migrate_status_feed_fields, migrate_status_preferences,
     )
@@ -133,6 +133,8 @@ def init_db():
         migrate_tickets_page_switch_v1(db)
         migrate_ebooks_page_switch_v1(db)
         migrate_requests_source_v1(db)
+        # Service Health off: the header's status pill says it now.
+        migrate_home_services_off_v1(db)
         migrate_setup_completed(db)
         migrate_drop_push_username_rows(db)
         migrate_no_email_identity(db)
