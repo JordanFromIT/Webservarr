@@ -801,6 +801,21 @@ class DotSegments(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         self.assertEqual(_RecordingProxyClient.asked, [])
 
+    def test_a_control_character_in_the_path_is_404_not_500(self):
+        # httpx refuses to build a URL with one (InvalidURL), which escaped as a 500.
+        for token in ("jwt-sam", None):
+            client = self.client_for(token)
+            for path in ("api/book/x%00", "api/book/x%09", "api/Book/136%0Ax/book-page",
+                         "api/Series/all-v2%0D", "api/Series/all-v2%7F", "api/Book/%015/book-page",
+                         "api/Book/%095/book-page?page=0&chapterId=2"):
+                with self.subTest(path=path, token=bool(token)):
+                    _RecordingProxyClient.asked = []
+                    self.check.reset_mock()
+                    r = client.get("/kavita/" + path)
+                    self.assertEqual(r.status_code, 404)
+                    self.assertEqual(_RecordingProxyClient.asked, [])
+                    self.check.assert_not_awaited()
+
     def test_the_path_sent_is_exactly_the_path_checked(self):
         client = self.client_for("jwt-sam")
         for path in ("api/Series/all-v2", "api/Book/136/book-info", "api/image/series-cover"):

@@ -864,7 +864,10 @@ async def kavita_proxy(
     # rewrites (F1), and the URL sent is held to exactly that path.
     if not _path_is_canonical(path) or not _kavita_path_allowed(path):
         raise HTTPException(status_code=404, detail="Not found")
-    target = httpx.URL(f"{base}/{path}")
+    try:
+        target = httpx.URL(f"{base}/{path}")
+    except httpx.InvalidURL:        # a control character (NUL, tab, newline) in the path
+        raise HTTPException(status_code=404, detail="Not found")
     if target.path != httpx.URL(base).path.rstrip("/") + "/" + path:
         raise HTTPException(status_code=404, detail="Not found")
 
