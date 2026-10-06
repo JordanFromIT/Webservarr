@@ -10,9 +10,9 @@
   notifications.js finds the bells here and in the mobile top bar by
   title="Notifications" and opens its dropdown in the tapped bell's parent -
   keep the title. #wsPlayerPill, left of the bell, is the audiobook player's
-  top-bar pill (js/player/ui.js fills it while a book is loaded). Its group
-  takes the free width from the start, so the pill coming and going moves
-  nothing, and the pill narrows into that width (theme.css). The bell is inline-flex so its height is the icon's own,
+  top-bar pill (js/player/ui.js fills it while a book is loaded); it narrows
+  into the free width (theme.css), and the status side never gives way to it
+  (shrink-0). The bell is inline-flex so its height is the icon's own,
   not a text line whose height changes when the icon font lands.
 -->
 <header id="appHeader" class="h-16 shrink-0 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-background-dark/40 backdrop-blur-md relative z-50">
@@ -24,7 +24,7 @@
       <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
     </button>
   </div>
-  <div class="flex-1 min-w-0 flex items-center justify-end gap-4">
+  <div class="flex items-center gap-4">
     <div id="wsPlayerPill" hidden></div>
     <button class="relative inline-flex p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications" aria-label="Notifications">
       <span class="material-symbols-outlined">notifications</span>
