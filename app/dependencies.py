@@ -85,8 +85,11 @@ def _origin(value: Optional[str]) -> str:
 def require_same_origin(request: Request) -> None:
     """403 unless the request comes from this site: its Origin (or, when the
     browser sends none, its Referer) is the configured app URL or this
-    request's own host. Browsers send Origin on every POST and PUT, including
-    sendBeacon; an opaque origin ("null") is refused.
+    request's own host, under the configured scheme or the one the browser is
+    really on (a TLS proxy's X-Forwarded-Proto, else the connection's own, so
+    the quick start on http://localhost:7979 works with APP_SCHEME=https).
+    Browsers send Origin on every POST and PUT, including sendBeacon; an
+    opaque origin ("null") is refused.
 
     The app has no CSRF token (the session cookie is SameSite=Lax, which still
     rides along from another subdomain of the same site), so every
@@ -98,7 +101,9 @@ def require_same_origin(request: Request) -> None:
     allowed = {_origin(settings.app_url)}
     host = request.headers.get("host")
     if host:
-        allowed.add(_origin(f"{settings.app_scheme}://{host}"))
+        forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+        for scheme in (settings.app_scheme, forwarded or request.url.scheme):
+            allowed.add(_origin(f"{scheme}://{host}"))
     allowed.discard("")
     if not got or got not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-origin request refused")

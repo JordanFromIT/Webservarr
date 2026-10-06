@@ -119,6 +119,79 @@ class SameOriginWrites(unittest.TestCase):
                     self.assertNotEqual(r.json().get("detail") if r.content else None, REFUSED, r.text)
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TheAddressInUse(unittest.TestCase):
+    """The check accepts the address the browser is really on, not only the
+    configured APP_SCHEME. The documented quick start opens
+    http://localhost:7979 with the shipped defaults (APP_SCHEME=https,
+    APP_DOMAIN=localhost); behind a TLS-terminating proxy such as a
+    Cloudflare tunnel the app itself is reached over http and the proxy says
+    https in X-Forwarded-Proto."""
+
+    SAVE = ("put", "/api/admin/settings/bulk",
+            {"settings": [{"key": "branding.tagline", "value": "My server"}]})
+
+    def setUp(self):
+        from app.config import settings
+        self.Session = helpers.make_sessionmaker()
+        self.addCleanup(helpers.reset_overrides)
+        for patch in (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                      mock.patch.object(settings, "app_scheme", "https"),
+                      mock.patch.object(settings, "app_domain", "localhost")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def client_at(self, base_url):
+        from fastapi.testclient import TestClient
+        helpers.api_client(self.Session, helpers.ADMIN)
+        return TestClient(app, base_url=base_url)
+
+    def save(self, client, headers):
+        method, path, body = self.SAVE
+        return client.request(method, path, json=body, headers=headers)
+
+    def test_quick_start_on_plain_http_localhost(self):
+        client = self.client_at("http://localhost:7979")
+        for headers in ({"Origin": "http://localhost:7979"},
+                        {"Referer": "http://localhost:7979/settings"}):
+            with self.subTest(headers=headers):
+                r = self.save(client, headers)
+                self.assertEqual(r.status_code, 200, r.text)
+        offline = httpx.ConnectError("offline in tests")
+        for path, body in (("/api/admin/test-connection",
+                            {"service": "plex", "url": "http://10.0.0.5:32400", "token": "t"}),
+                           ("/api/news/", {"title": "t", "content": "c", "published": True})):
+            with self.subTest(path=path), \
+                    mock.patch.object(httpx.AsyncClient, "send", side_effect=offline):
+                r = client.post(path, json=body, headers={"Origin": "http://localhost:7979"})
+                self.assertNotEqual(r.status_code, 403, r.text)
+
+    def test_quick_start_still_refuses_other_origins(self):
+        client = self.client_at("http://localhost:7979")
+        for headers in ({"Origin": "http://localhost:8080"}, {"Origin": "http://evil.example"},
+                        {"Origin": "http://localhost.evil.example:7979"}, {"Origin": "null"},
+                        {"Referer": "http://evil.example/page"}, {}):
+            with self.subTest(headers=headers):
+                r = self.save(client, headers)
+                self.assertEqual(r.status_code, 403, r.text)
+                self.assertEqual(r.json().get("detail"), REFUSED)
+
+    def test_https_behind_a_tls_proxy(self):
+        from app.config import settings
+        client = self.client_at("http://app.example.com")
+        proxied = {"X-Forwarded-Proto": "https"}
+        with mock.patch.object(settings, "app_domain", "app.example.com"):
+            r = self.save(client, dict(proxied, Origin="https://app.example.com"))
+            self.assertEqual(r.status_code, 200, r.text)
+            for headers in ({"Origin": "https://other.example.com"}, {"Origin": "https://example.com"},
+                            {"Origin": "null"}, {"Origin": "https://evil.example"},
+                            {"Origin": "http://app.example.com"},
+                            {"Referer": "https://evil.example/x"}, {}):
+                with self.subTest(headers=headers):
+                    r = self.save(client, dict(proxied, **headers))
+                    self.assertEqual(r.status_code, 403, r.text)
+
+
 class _ForwardNothing:
     asked = []
 
