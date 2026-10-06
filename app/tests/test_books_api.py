@@ -715,6 +715,110 @@ class Search(BooksBase):
         self.assertEqual(len(self.ok("/api/books/search", q="dune", limit=2)["items"]), 2)
 
 
+class Filtering(BooksBase):
+    """The toolbar's Author, Series and Narrator filters: on the library, on
+    search, and the values each picker offers (/api/books/facets)."""
+
+    def values(self, facet, **params):
+        body = self.ok("/api/books/facets", facet=facet, **params)
+        self.assertEqual(body["facet"], facet)
+        return [(v["name"], v["count"]) for v in body["values"]]
+
+    def test_an_author_keeps_their_books_and_their_series_stays_one_card(self):
+        body = self.ok("/api/books", sort="title", author="frank  HERBERT")       # case and spacing ignored
+        self.assertEqual([(i["kind"], i.get("title") or i.get("series")) for i in body["items"]], [("series", "Dune")])
+        self.assertEqual(body["items"][0]["count"], 3)
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", author="Jane Austen")), ["Emma"])
+
+    def test_a_series_lists_its_books_one_by_one(self):
+        body = self.ok("/api/books", sort="title", series="dune")
+        self.assertEqual([(i["kind"], i["title"]) for i in body["items"]],
+                         [("book", "Children of Dune"), ("book", "Dune"), ("book", "Dune Messiah")])
+
+    def test_a_narrator_keeps_the_books_an_edition_of_theirs_is_in(self):
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", narrator="Rob Inglis")), ["The Hobbit"])
+        dune = self.ok("/api/books", sort="title", narrator="Simon Vance")["items"]
+        self.assertEqual([(i["kind"], i.get("series"), i.get("count")) for i in dune], [("series", "Dune", 2)])
+        both = self.ok("/api/books", sort="title", narrator="Simon Vance", series="Dune")
+        self.assertEqual(self.titles(both), ["Children of Dune", "Dune"])
+
+    def test_filters_combine_with_each_other_and_the_format(self):
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", series="Dune", format="ebook")),
+                         ["Dune", "Dune Messiah"])
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", series="Dune", format="audio")),
+                         ["Children of Dune", "Dune"])
+        self.assertEqual(self.ok("/api/books", author="Jane Austen", series="Dune")["items"], [])
+        self.assertEqual(self.ok("/api/books", narrator="Rob Inglis", format="ebook")["items"], [])
+
+    def test_an_empty_or_blank_filter_is_no_filter(self):
+        everything = self.titles(self.ok("/api/books", sort="title"))
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", author="", series="  ")), everything)
+
+    def test_a_filtered_library_pages_by_cursor(self):
+        seen, cursor = [], None
+        for _round in range(5):
+            params = {"sort": "title", "limit": 1, "series": "Dune"}
+            if cursor:
+                params["cursor"] = cursor
+            body = self.ok("/api/books", **params)
+            seen += self.titles(body)
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        self.assertEqual(seen, ["Children of Dune", "Dune", "Dune Messiah"])
+
+    def test_names_on_hidden_books_are_never_listed_or_matched(self):
+        # Secret Book (Hidden Author) is in a Kavita library this caller cannot reach.
+        self.assertNotIn("Hidden Author", [n for n, _c in self.values("author")])
+        self.assertEqual(self.ok("/api/books", author="Hidden Author")["items"], [])
+        self.assertEqual(self.ok("/api/books/search", q="secret", author="Hidden Author")["items"], [])
+        self.reach = {1, 2}
+        self.assertIn(("Hidden Author", 1), self.values("author"))
+
+    def test_narrators_are_only_for_a_caller_who_can_hear_audiobooks(self):
+        self.assertEqual(self.values("narrator"), [("Le Guin, Ursula K.", 1), ("Nora Reed", 1), ("Rob Inglis", 1),
+                                                   ("Scott Brick", 1), ("Simon Vance", 2)])
+        self.as_user(LOCAL_ADMIN)
+        self.assertEqual(self.values("narrator"), [])
+        self.assertEqual(self.ok("/api/books", narrator="Rob Inglis")["items"], [])
+        self.assertNotIn("J. R. R. Tolkien", [n for n, _c in self.values("author")])     # audio only
+
+    def test_author_and_series_values_with_counts_in_name_order(self):
+        self.assertEqual(self.values("author"), [("A/B Author", 1), ("Charlotte Bront\u00eb", 1), ("Frank Herbert", 3),
+                                                 ("J. R. R. Tolkien", 1), ("Jane Austen", 1)])
+        self.assertEqual(self.values("series"), [("Dune", 3)])        # books in no series are not a value
+
+    def test_a_picker_applies_the_format_and_the_other_filters_but_not_its_own(self):
+        self.assertEqual(self.values("author", series="Dune"), [("Frank Herbert", 3)])
+        self.assertEqual(self.values("series", series="Nothing at all", author="Frank Herbert"), [("Dune", 3)])
+        self.assertEqual(self.values("series", format="ebook"), [("Dune", 2)])
+        self.assertEqual(self.values("narrator", format="ebook"), [("Nora Reed", 1), ("Scott Brick", 1),
+                                                                    ("Simon Vance", 1)])
+        self.assertEqual(self.values("author", narrator="Simon Vance"), [("Frank Herbert", 2)])
+
+    def test_a_name_spelled_two_ways_is_one_value_shown_the_way_most_books_spell_it(self):
+        make_book(self.db, 60, "Herbert Notes", "frank herbert", chapter=160)
+        authors = self.values("author")
+        self.assertIn(("Frank Herbert", 4), authors)
+        self.assertEqual([n for n, _c in authors if n.lower() == "frank herbert"], ["Frank Herbert"])
+
+    def test_search_is_narrowed_by_the_filters(self):
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="dune", narrator="Simon Vance")["items"]],
+                         [1, 3])
+        self.assertEqual(self.ok("/api/books/search", q="dune", author="Jane Austen")["items"], [])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="dune", series="Dune")["items"]], [1, 2, 3])
+
+    def test_validation(self):
+        for path, params in (("/api/books/facets", {}), ("/api/books/facets", {"facet": "genre"}),
+                             ("/api/books/facets", {"facet": "author", "format": "video"}),
+                             ("/api/books/facets", {"facet": "author", "series": "x" * 201}),
+                             ("/api/books", {"author": "x" * 201}),
+                             ("/api/books/search", {"q": "a", "narrator": "x" * 201})):
+            with self.subTest(path=path, params=params):
+                self.assertEqual(self.get(path, **params).status_code, 422)
+        self.assertEqual(self.get("/api/books", author="x" * 200).status_code, 200)
+
+
 class PeopleAndSeries(BooksBase):
     def test_author_page(self):
         body = self.ok("/api/books/person", role="author", name="Frank Herbert")
@@ -945,7 +1049,7 @@ class Cover(BooksBase):
 class Authentication(BooksBase):
     PATHS = ["/api/books", "/api/books/1", "/api/books/1/cover", "/api/books/search?q=a",
              "/api/books/person?role=author&name=a", "/api/books/series?name=a", "/api/books/continue",
-             "/api/admin/books/status", "/api/admin/books/unpaired", "/api/admin/books/overrides",
+             "/api/books/facets?facet=author", "/api/admin/books/status", "/api/admin/books/unpaired", "/api/admin/books/overrides",
              "/api/admin/books/paired"]
 
     def test_401_without_a_session(self):
@@ -961,12 +1065,13 @@ class Authentication(BooksBase):
 
     def test_every_route_works_for_a_member(self):
         for path in self.PATHS[:3] + ["/api/books/search?q=a", "/api/books/person?role=author&name=Jane%20Austen",
-                                      "/api/books/series?name=Dune", "/api/books/continue"]:
+                                      "/api/books/series?name=Dune", "/api/books/continue",
+                                      "/api/books/facets?facet=author"]:
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
     def test_admin_routes_refuse_a_member(self):
-        for path in self.PATHS[7:]:
+        for path in self.PATHS[8:]:
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 403)
         body = {"kavita_chapter_id": 101, "plex_book_key": "10:1", "action": "pair"}

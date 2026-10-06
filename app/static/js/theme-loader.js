@@ -281,6 +281,11 @@
       }
     }
   } catch (e) { /* private mode: no slot reserved, the row arrives when it arrives */ }
+  // The toolbar's filters: an address that carries one gets the room of the
+  // row of filters in use (pages/books.js keeps this in step on soft visits).
+  if (/[?&](author|series|narrator)=[^&]/.test(window.location.search)) {
+    document.documentElement.setAttribute('data-books-filtered', '');
+  }
 })();
 
 /*

@@ -40,6 +40,15 @@
  * Recently added (the newest books, with New on those added since the
  * person's previous visit; loading it records this visit) and Popular on the
  * server (books several people listened to, with the server's rounded label).
+ *
+ * The toolbar's filters (Author, Series, Narrator) narrow the grid and a
+ * search, together with the format chips. Each button opens a picker of the
+ * names in the books this person can see (/api/books/facets, with counts): a
+ * popover from PICKER_WIDE up, a bottom sheet below, run on the WSUI.modal
+ * stack. The filters live in the address (?author=, ?series=, ?narrator=), so
+ * Back, a refresh and a shared link keep them; a change is drawn here and the
+ * router, which this page asks to replace the address, hands it back
+ * (ctx.onNavigate). Exported for the tests: filtersFrom(url), filterHref(filters, base).
  */
 
 const PAGE_SIZE = 36;
@@ -99,6 +108,21 @@ const GUIDE_STEPS = [
 
 const FORMATS = ['all', 'ebook', 'audio'];
 const SORTS = ['added', 'title', 'author'];
+
+// The toolbar's filters: one name each, carried in the address (?author=,
+// ?series=, ?narrator=) so Back, a refresh and a shared link keep them. The
+// server matches a name ignoring case and spacing, among the books this
+// person may see.
+const FILTER_KINDS = ['author', 'series', 'narrator'];
+const FILTERS = {
+  author: { label: 'Author', plural: 'authors', every: 'All authors', find: 'Find an author' },
+  series: { label: 'Series', plural: 'series', every: 'All series', find: 'Find a series' },
+  narrator: { label: 'Narrator', plural: 'narrators', every: 'All narrators', find: 'Find a narrator' }
+};
+const NAME_MAX = 200;              // the longest name the server takes
+const PICKER_SHOWN = 200;          // names drawn at once; typing narrows the rest
+const PICKER_WIDE = '(min-width: 640px)';   // a popover from here up, a bottom sheet below
+const SHEET_CLOSE_MS = 200;
 const FORMAT_INFO = {
   ebook: { icon: 'menu_book', label: 'Ebook' },
   audio: { icon: 'headphones', label: 'Audiobook' }
@@ -109,8 +133,46 @@ const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-
 const CHIP_ON = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright';
 const CHIP_OFF = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
+// A filter button: a format chip's shape with a picker's arrow; filled like a pressed chip while it is in use.
+const FILTER_ON = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright';
+const FILTER_OFF = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
+// A filter in use: its kind, its name and a cross; the whole pill removes it.
+const ACTIVE_CHIP = 'inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full pl-3 pr-2 text-[15px] bg-frosted-blue/10 text-frosted-blue hover:bg-frosted-blue/[0.15] transition-colors ' + LINK_FOCUS;
+const CLEAR_ALL = 'inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue transition-colors ' + LINK_FOCUS;
+const OPTION = 'flex min-h-12 sm:min-h-10 cursor-pointer items-center gap-3 rounded-[10px] px-3 text-[15px] text-frosted-blue hover:bg-frosted-blue/[0.07]';
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
+
+/** A name as the address carries it: spacing collapsed, at most NAME_MAX. */
+function cleanName(value) {
+  return String(value || '').split(/\s+/).filter(Boolean).join(' ').slice(0, NAME_MAX);
+}
+
+/** The filters an address asks for ({ author, series, narrator }, '' for none). */
+export function filtersFrom(url) {
+  const params = url && url.searchParams;
+  const out = {};
+  FILTER_KINDS.forEach(function (k) { out[k] = cleanName(params ? params.get(k) : ''); });
+  return out;
+}
+
+/** The Books address for these filters, keeping any other part of `base`'s query. */
+export function filterHref(filters, base) {
+  const url = new URL(base || '/books', 'https://x.invalid');
+  FILTER_KINDS.forEach(function (k) {
+    url.searchParams.delete(k);
+    if (filters[k]) url.searchParams.set(k, filters[k]);
+  });
+  const qs = url.searchParams.toString();
+  return '/books' + (qs ? '?' + qs : '');
+}
+
+/** Text for matching a name as the person types: no accents, no case, spacing collapsed. */
+function foldName(text) {
+  let s = String(text || '');
+  if (typeof s.normalize === 'function') s = s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return s.toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+}
 
 /**
  * Say that this person now has books in Continue, before its answer does. Books
@@ -382,6 +444,10 @@ export async function mount(ctx) {
 
   const state = {
     format: 'all', sort: 'added',
+    // The toolbar's filters, from the address (filtersFrom); '' is no filter.
+    filters: filtersFrom(ctx.url),
+    // The address a filter change of ours asked the router for (it claims that one).
+    ownNav: null,
     query: '', searching: false,
     gen: 0, searchGen: 0,
     cursor: null, moreBusy: false,
@@ -444,7 +510,7 @@ export async function mount(ctx) {
 
   // ---- Showing one body at a time ----
 
-  const BODIES = ['gridSkeleton', 'libraryGrid', 'errorState', 'buildingState', 'emptyState'];
+  const BODIES = ['gridSkeleton', 'libraryGrid', 'errorState', 'buildingState', 'emptyState', 'filterEmpty'];
   function showBody(which) {
     BODIES.forEach(function (id) { $(id).classList.toggle('hidden', id !== which); });
     if (which !== 'libraryGrid') $('moreWrap').classList.add('hidden');
@@ -1118,12 +1184,14 @@ export async function mount(ctx) {
     }
     stopBuildingPoll();
     saveView();
+    // Filters that match nothing: one line and the way back, whatever the format says.
+    if (anyFilter()) { showBody('filterEmpty'); return; }
     showEmpty(state.notes.library.length > 0);
   }
 
   function libraryUrl(cursor) {
     return '/api/books?format=' + state.format + '&sort=' + state.sort + '&limit=' + PAGE_SIZE +
-      (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+      filterQuery('') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
   }
 
   function failedLibrary(err) {
@@ -1147,7 +1215,7 @@ export async function mount(ctx) {
     }
     showBody('gridSkeleton');
     showSkeleton($('gridSkeleton'), SKELETON_CARDS);
-    return WS.swr('books:list:' + state.format + ':' + state.sort, function () {
+    return WS.swr('books:list:' + state.format + ':' + state.sort + filterKey(), function () {
       return readLive(libraryUrl());
     }, function (data) {
       if (gen !== state.gen || signal.aborted) return;
@@ -1200,6 +1268,429 @@ export async function mount(ctx) {
     loadLibrary(false);
   }
 
+  // ---- Filters: Author, Series, Narrator ----
+
+  function anyFilter() {
+    return FILTER_KINDS.some(function (k) { return !!state.filters[k]; });
+  }
+
+  /** The filters as query parameters ('&author=…'), all but `skip`. */
+  function filterQuery(skip) {
+    return FILTER_KINDS.filter(function (k) { return k !== skip && state.filters[k]; }).map(function (k) {
+      return '&' + k + '=' + encodeURIComponent(state.filters[k]);
+    }).join('');
+  }
+
+  /** The part of a kept list's name that is the filters (nothing without any). */
+  function filterKey() {
+    return anyFilter() ? ':' + FILTER_KINDS.map(function (k) { return encodeURIComponent(state.filters[k]); }).join('|') : '';
+  }
+
+  /** The buttons (filled while in use, their names saying which), the rows of
+      filters in use (above the books and above a search's results), and the
+      skeleton's room for that row. */
+  function syncFilters() {
+    root.querySelectorAll('#filterButtons [data-filter]').forEach(function (b) {
+      const kind = b.getAttribute('data-filter');
+      const value = state.filters[kind];
+      b.className = value ? FILTER_ON : FILTER_OFF;
+      // The visible word first, so a voice command by it still finds the button.
+      if (value) b.setAttribute('aria-label', FILTERS[kind].label + ', ' + value);
+      else b.removeAttribute('aria-label');
+    });
+    root.querySelectorAll('[data-active-filters]').forEach(drawActive);
+    // The toolbar skeleton's room for that row (books.html; theme-loader.js on a full load).
+    if (anyFilter()) html.setAttribute('data-books-filtered', '');
+    else html.removeAttribute('data-books-filtered');
+  }
+
+  function drawActive(host) {
+    host.textContent = '';
+    const kinds = FILTER_KINDS.filter(function (k) { return !!state.filters[k]; });
+    host.classList.toggle('hidden', !kinds.length);
+    kinds.forEach(function (kind) {
+      const value = state.filters[kind];
+      const chip = el('button', ACTIVE_CHIP);
+      chip.type = 'button';
+      chip.setAttribute('data-remove', kind);
+      // Named by its own words, then what a press does: "Author Jane Austen, remove filter".
+      chip.title = value;
+      chip.appendChild(el('span', 'shrink-0 text-frosted-blue/70', FILTERS[kind].label));
+      chip.appendChild(document.createTextNode(' '));
+      chip.appendChild(el('span', 'min-w-0 truncate font-semibold', value));
+      chip.appendChild(el('span', 'sr-only', ', remove filter'));
+      chip.appendChild(icon('close', 'shrink-0 text-[18px]'));
+      host.appendChild(chip);
+    });
+    if (kinds.length) {
+      const clear = el('button', CLEAR_ALL, 'Clear all');
+      clear.type = 'button';
+      clear.setAttribute('data-clear-filters', '');
+      host.appendChild(clear);
+    }
+  }
+
+  /** Take these filters: the controls show them and the books (and a search
+      under way) are asked for again. False when nothing changed. */
+  function applyFilters(next) {
+    const same = FILTER_KINDS.every(function (k) { return (next[k] || '') === state.filters[k]; });
+    if (same) return false;
+    const was = state.filters;
+    state.filters = {};
+    FILTER_KINDS.forEach(function (k) { state.filters[k] = next[k] || ''; });
+    syncFilters();
+    stopBuildingPoll();
+    loadLibrary(false);
+    if (state.searching && state.query) runSearch(state.query);
+    const added = FILTER_KINDS.filter(function (k) { return state.filters[k] && state.filters[k] !== was[k]; })[0];
+    say(added ? 'Showing books filtered by ' + FILTERS[added].label.toLowerCase() + ': ' + state.filters[added]
+      : anyFilter() ? 'Filter removed' : 'Filters cleared');
+    return true;
+  }
+
+  /** A filter changed here: the books follow at once, and the address is
+      replaced with one that carries the filters (the router records it and
+      hands it back to this page, which already has it). */
+  function setFilters(next) {
+    if (!applyFilters(next)) return;
+    const href = filterHref(state.filters, window.location.pathname + window.location.search);
+    if (claiming && window.WS && WS.router && typeof WS.router.navigate === 'function') {
+      state.ownNav = new URL(href, window.location.href).href;
+      Promise.resolve(WS.router.navigate(href, { replace: true })).catch(function () { /* the books are already drawn */ });
+    } else {
+      try { window.history.replaceState(window.history.state, '', href); } catch (e) { /* the books still follow */ }
+    }
+  }
+
+  function setFilter(kind, value) {
+    const next = {};
+    FILTER_KINDS.forEach(function (k) { next[k] = state.filters[k]; });
+    next[kind] = cleanName(value);
+    setFilters(next);
+  }
+
+  /** A pill pressed (or Clear all): the filter goes, and the focus moves to
+      the next pill, else the one before, else the filter's own button (the
+      search box, over a search's results). */
+  function onActiveClick(e) {
+    const host = e.currentTarget;
+    const b = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!b || !host.contains(b)) return;
+    const inToolbar = host.id === 'activeFilters';
+    if (b.hasAttribute('data-clear-filters')) {
+      setFilters({ author: '', series: '', narrator: '' });
+      const first = inToolbar ? root.querySelector('#filterButtons [data-filter]') : input;
+      if (first) first.focus();
+      return;
+    }
+    const kind = b.getAttribute('data-remove');
+    if (!kind) return;
+    const pills = Array.prototype.slice.call(host.querySelectorAll('[data-remove]'));
+    const at = pills.indexOf(b);
+    const neighbour = pills[at + 1] || pills[at - 1];
+    const then = neighbour ? neighbour.getAttribute('data-remove') : null;
+    setFilter(kind, '');
+    const back = then ? host.querySelector('[data-remove="' + then + '"]')
+      : inToolbar ? root.querySelector('#filterButtons [data-filter="' + kind + '"]') : input;
+    if (back) back.focus();
+  }
+
+  // ---- The picker: a popover from PICKER_WIDE up, a bottom sheet below ----
+
+  // The names each picker offers, per address asked, for this visit.
+  const facetCache = {};
+  let picker = null;
+
+  function facetUrl(kind) {
+    return '/api/books/facets?facet=' + kind + '&format=' + state.format + filterQuery(kind);
+  }
+
+  function loadFacet(kind) {
+    const url = facetUrl(kind);
+    if (!facetCache[url]) {
+      // Through readLive, as every list is (on the visit's signal; a picker's list starts no hand-off).
+      facetCache[url] = readLive(url, true).then(function (data) {
+        const values = data && Array.isArray(data.values) ? data.values : [];
+        return values.filter(function (v) { return v && typeof v.name === 'string' && v.name; }).map(function (v) {
+          return { name: v.name, count: typeof v.count === 'number' ? v.count : 0, fold: foldName(v.name) };
+        });
+      });
+      // A failure is not kept: the picker's Try again asks again.
+      facetCache[url].catch(function () { delete facetCache[url]; });
+    }
+    return facetCache[url];
+  }
+
+  function wide() {
+    return typeof window.matchMedia === 'function' && window.matchMedia(PICKER_WIDE).matches;
+  }
+
+  /**
+   * One filter's picker: a search box over the names in the books this person
+   * can see, each with its count, and "All …" to drop the filter. The box is a
+   * combobox: the arrows move through the list, Enter picks, Escape closes
+   * (WSUI.modal: the focus stays inside and goes back to the button after).
+   */
+  function openPicker(kind, btn) {
+    if (picker) picker.close();
+    const info = FILTERS[kind];
+    const isWide = wide();
+    const ends = new AbortController();
+    const listId = 'booksPicker-' + kind;
+
+    let overlay, panel, head;
+    if (isWide) {
+      // ws-dialog / ws-dialog-box (theme.css): the box fades and lifts in, as a dialog's does.
+      overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
+      panel = el('div', 'ws-dialog-box absolute flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-frosted-blue/10 bg-background-dark shadow-2xl');
+      head = el('div', 'flex items-center gap-2 pb-2 pl-4 pr-2 pt-3');
+      head.appendChild(el('h2', 'min-w-0 flex-1 text-[17px] font-semibold text-frosted-blue', info.label));
+    } else {
+      // The More sheet's own pieces (theme.css ws-sheet-*): the same grip, title and close.
+      overlay = el('div', 'ws-sheet z-[95]');
+      overlay.appendChild(el('div', 'ws-sheet-scrim'));
+      // Focused itself on opening (the keyboard waits): a container, so no ring of its own.
+      panel = el('div', 'ws-sheet-panel focus:outline-none');
+      // The list scrolls, not the panel: the title and the search stay put.
+      panel.style.display = 'flex';
+      panel.style.flexDirection = 'column';
+      panel.style.overflow = 'hidden';
+      head = el('div', 'ws-sheet-head');
+      const grip = el('span', 'ws-sheet-grip');
+      grip.setAttribute('aria-hidden', 'true');
+      head.appendChild(grip);
+      head.appendChild(el('h2', 'ws-sheet-title', info.label));
+    }
+    const titleId = listId + '-title';
+    head.querySelector('h2').id = titleId;
+    panel.setAttribute('aria-labelledby', titleId);
+    const close = el('button', isWide
+      ? 'grid size-10 shrink-0 place-items-center rounded-full text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue ' + LINK_FOCUS
+      : 'ws-sheet-close');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    close.appendChild(icon('close', 'text-[24px]'));
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const find = el('div', isWide ? 'relative px-3 pb-2' : 'relative px-1 pb-2');
+    find.appendChild(icon('search', 'pointer-events-none absolute top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70 ' + (isWide ? 'left-6' : 'left-4')));
+    const box = el('input', 'h-11 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue');
+    box.type = 'search';
+    box.autocomplete = 'off';
+    box.maxLength = NAME_MAX;
+    box.placeholder = info.find;
+    box.setAttribute('role', 'combobox');
+    box.setAttribute('aria-label', info.find);
+    box.setAttribute('aria-controls', listId);
+    box.setAttribute('aria-expanded', 'true');
+    box.setAttribute('aria-autocomplete', 'list');
+    find.appendChild(box);
+    panel.appendChild(find);
+
+    const list = el('ul', 'min-h-0 flex-1 overflow-y-auto overscroll-contain ' + (isWide ? 'px-2 pb-2' : 'pb-2'));
+    list.id = listId;
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', info.label);
+    panel.appendChild(list);
+    const foot = el('p', 'hidden px-4 pb-3 pt-1 text-[13px] text-frosted-blue/70');
+    panel.appendChild(foot);
+    const heard = el('p', 'sr-only');
+    heard.setAttribute('role', 'status');
+    heard.setAttribute('aria-live', 'polite');
+    panel.appendChild(heard);
+    overlay.appendChild(panel);
+
+    let values = null;            // the names, once in
+    let shown = [];               // the options on screen: { value, node }
+    let active = -1;
+
+    function setActive(i) {
+      if (!shown.length) { active = -1; box.removeAttribute('aria-activedescendant'); return; }
+      active = clamp(i, 0, shown.length - 1);
+      shown.forEach(function (o, n) {
+        o.node.classList.toggle('bg-frosted-blue/10', n === active);
+        o.node.classList.toggle('hover:bg-frosted-blue/[0.07]', n !== active);
+      });
+      box.setAttribute('aria-activedescendant', shown[active].node.id);
+      if (typeof shown[active].node.scrollIntoView === 'function') shown[active].node.scrollIntoView({ block: 'nearest' });
+    }
+
+    function option(value, name, count, n) {
+      const picked = (state.filters[kind] || '') === value;
+      const li = el('li', OPTION + (picked ? ' font-semibold' : ''));
+      li.id = listId + '-' + n;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', picked ? 'true' : 'false');
+      if (value) li.setAttribute('data-value', value);
+      else li.setAttribute('data-every', '');
+      li.appendChild(icon('check', 'shrink-0 text-[20px] ' + (picked ? 'text-frosted-blue' : 'invisible')));
+      li.appendChild(el('span', 'min-w-0 flex-1 truncate', name));
+      if (typeof count === 'number') {
+        li.appendChild(el('span', 'shrink-0 tabular-nums text-[13px] text-frosted-blue/70', String(count)));
+        li.setAttribute('aria-label', name + ', ' + count + (count === 1 ? ' book' : ' books'));
+      }
+      return li;
+    }
+
+    function draw() {
+      list.textContent = '';
+      list.removeAttribute('aria-busy');
+      shown = [];
+      foot.classList.add('hidden');
+      const q = foldName(box.value);
+      const matches = q ? values.filter(function (v) { return v.fold.indexOf(q) !== -1; }) : values;
+      // "All …" drops the filter; while a name is typed only names are offered.
+      if (!q) shown.push({ value: '', node: option('', info.every, null, 0) });
+      matches.slice(0, PICKER_SHOWN).forEach(function (v, i) {
+        shown.push({ value: v.name, node: option(v.name, v.name, v.count, i + 1) });
+      });
+      shown.forEach(function (o) { list.appendChild(o.node); });
+      if (!values.length) {
+        foot.textContent = 'No ' + info.plural + ' in the books shown.';
+        foot.classList.remove('hidden');
+      } else if (q && !matches.length) {
+        foot.textContent = 'No ' + info.plural + ' match “' + box.value.trim() + '”.';
+        foot.classList.remove('hidden');
+      } else if (matches.length > PICKER_SHOWN) {
+        foot.textContent = 'Showing ' + PICKER_SHOWN + ' of ' + matches.length + '. Type to narrow the list.';
+        foot.classList.remove('hidden');
+      }
+      heard.textContent = q ? (matches.length === 1 ? '1 match' : matches.length + ' matches') : '';
+      // The pick in use starts highlighted; otherwise the first.
+      const picked = shown.map(function (o) { return o.value; }).indexOf(state.filters[kind] || '');
+      setActive(q ? 0 : Math.max(0, picked));
+    }
+
+    function loading() {
+      list.textContent = '';
+      list.setAttribute('aria-busy', 'true');
+      ['w-3/4', 'w-1/2', 'w-2/3', 'w-2/5', 'w-3/5'].forEach(function (w) {
+        const row = el('li', 'flex min-h-12 sm:min-h-10 items-center px-3');
+        row.setAttribute('aria-hidden', 'true');
+        row.appendChild(el('span', 'skel skel-line ' + w));
+        list.appendChild(row);
+      });
+    }
+
+    function failed() {
+      list.textContent = '';
+      list.removeAttribute('aria-busy');
+      shown = [];
+      setActive(-1);
+      const row = el('li', 'flex flex-wrap items-center gap-3 px-3 py-3');
+      row.appendChild(el('span', 'text-[15px] text-frosted-blue/70', 'The list didn’t load.'));
+      const again = el('button', 'inline-flex h-9 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 ' + LINK_FOCUS, 'Try again');
+      again.type = 'button';
+      again.addEventListener('click', function () { fill(); box.focus(); }, { signal: ends.signal });
+      row.appendChild(again);
+      list.appendChild(row);
+    }
+
+    function fill() {
+      loading();
+      loadFacet(kind).then(function (got) {
+        if (ends.signal.aborted) return;
+        values = got;
+        draw();
+      }, function (err) {
+        if (ends.signal.aborted || quiet(err)) return;
+        failed();
+      });
+    }
+
+    function pick(i) {
+      const o = shown[i];
+      if (!o) return;
+      picker.close();
+      setFilter(kind, o.value);
+    }
+
+    box.addEventListener('input', function () { if (values) draw(); }, { signal: ends.signal });
+    box.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'PageDown') { e.preventDefault(); setActive(active + 8); }
+      else if (e.key === 'PageUp') { e.preventDefault(); setActive(active - 8); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0) pick(active); }
+    }, { signal: ends.signal });
+    list.addEventListener('click', function (e) {
+      const li = e.target && e.target.closest ? e.target.closest('[role="option"]') : null;
+      if (!li) return;
+      pick(shown.map(function (o) { return o.node; }).indexOf(li));
+    }, { signal: ends.signal });
+    close.addEventListener('click', function () { picker.close(); }, { signal: ends.signal });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || (e.target.classList && e.target.classList.contains('ws-sheet-scrim'))) picker.close();
+    }, { signal: ends.signal });
+
+    let handle = null;
+    let gone = false;
+    function teardown() {
+      if (gone) return;
+      gone = true;
+      ends.abort();
+      btn.setAttribute('aria-expanded', 'false');
+      if (picker && picker.overlay === overlay) picker = null;
+      const remove = function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+      if (reduced()) { remove(); return; }
+      overlay.inert = true;
+      if (isWide) {
+        overlay.classList.add('is-closing');
+      } else {
+        overlay.classList.remove('is-open');
+        overlay.classList.add('is-closing');
+      }
+      window.setTimeout(remove, isWide ? 160 : SHEET_CLOSE_MS);
+    }
+    picker = {
+      overlay: overlay,
+      kind: kind,
+      close: function () { if (handle) handle.close(); else teardown(); }
+    };
+
+    document.body.appendChild(overlay);
+    if (isWide) place(panel, btn);
+    else {
+      // From its closed place, then open: the panel slides up as the More sheet's does.
+      void panel.offsetWidth;
+      overlay.classList.add('is-open');
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    // Leaving with it open takes it away (the router also closes every dialog first).
+    signal.addEventListener('abort', function () { if (picker) picker.close(); }, { once: true, signal: ends.signal });
+    fill();
+    // On a phone the keyboard waits for a tap in the search: most lists are short.
+    const first = isWide ? box : panel;
+    if (window.WSUI && typeof window.WSUI.modal === 'function') {
+      handle = window.WSUI.modal(overlay, { box: panel, initial: first, onClose: teardown });
+    } else {
+      if (first === panel) panel.setAttribute('tabindex', '-1');
+      first.focus();
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); picker.close(); btn.focus(); }
+      }, { signal: ends.signal });
+    }
+  }
+
+  /** The popover under its button (above it when there is more room there), inside the window. */
+  function place(panel, btn) {
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(320, window.innerWidth - 32);
+    const left = clamp(r.left, 16, Math.max(16, window.innerWidth - w - 16));
+    const below = window.innerHeight - r.bottom - 24;
+    const above = r.top - 24;
+    panel.style.left = left + 'px';
+    if (below >= 280 || below >= above) {
+      panel.style.top = (r.bottom + 8) + 'px';
+      panel.style.maxHeight = Math.min(448, below) + 'px';
+    } else {
+      panel.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+      panel.style.maxHeight = Math.min(448, above) + 'px';
+    }
+  }
+
   // ---- Search ----
 
   const SEARCH_PARTS = ['searchSkeleton', 'searchGrid', 'searchEmpty', 'searchError'];
@@ -1240,7 +1731,7 @@ export async function mount(ctx) {
     setStatus('Searching\u2026', false);
     showSkeleton($('searchSkeleton'), 6);
     showSearchPart('searchSkeleton');
-    readLive('/api/books/search?q=' + encodeURIComponent(query) + '&limit=' + SEARCH_LIMIT).then(function (data) {
+    readLive('/api/books/search?q=' + encodeURIComponent(query) + '&limit=' + SEARCH_LIMIT + filterQuery('')).then(function (data) {
       if (gen !== state.searchGen || signal.aborted) return;
       const items = (data && Array.isArray(data.items)) ? data.items : [];
       setNotes('library', data && data.notes);
@@ -1254,7 +1745,14 @@ export async function mount(ctx) {
       }
       setStatus('No matches', true);
       const held = data && data.request_url === null;
-      if (held) {
+      $('searchClear').classList.add('hidden');
+      if (anyFilter()) {
+        // The filters may be what hides it: the way out is to drop them, not to ask for the book.
+        $('searchEmptyTitle').textContent = 'No books match “' + query + '” with these filters';
+        $('searchEmptyText').textContent = 'Clear the filters to search the whole library.';
+        $('searchRequest').classList.add('hidden');
+        $('searchClear').classList.remove('hidden');
+      } else if (held) {
         // A source is not answering, so a book may be there that cannot be listed: no "request it".
         const why = (data.notes || []).filter(function (n) { return n && n.text; })[0];
         $('searchEmptyTitle').textContent = 'No matches right now';
@@ -1311,6 +1809,42 @@ export async function mount(ctx) {
   $('emptyReset').addEventListener('click', function () { choose('all', state.sort); }, { signal: signal });
   $('connectRetry').addEventListener('click', retryConnect, { signal: signal });
 
+  root.querySelectorAll('#filterButtons [data-filter]').forEach(function (b) {
+    const kind = b.getAttribute('data-filter');
+    b.addEventListener('click', function () { openPicker(kind, b); }, { signal: signal });
+    // A pointer on its way to the button: the names are asked for before the press.
+    b.addEventListener('pointerenter', function () { loadFacet(kind).catch(function () { /* the picker asks again */ }); }, { signal: signal });
+  });
+  root.querySelectorAll('[data-active-filters]').forEach(function (host) {
+    host.addEventListener('click', onActiveClick, { signal: signal });
+  });
+  $('filterEmptyClear').addEventListener('click', function () {
+    setFilters({ author: '', series: '', narrator: '' });
+    const first = root.querySelector('#filterButtons [data-filter]');
+    if (first) first.focus();
+  }, { signal: signal });
+  $('searchClear').addEventListener('click', function () {
+    setFilters({ author: '', series: '', narrator: '' });
+    input.focus();
+  }, { signal: signal });
+
+  // A filter change of ours, and Back or Forward between two Books
+  // addresses, are drawn here: the router only records the address. Any
+  // other way in (the sidebar's Books, a link) is a fresh visit, as before.
+  // Nothing is claimed for the prefetch, so links still warm as they did.
+  let claiming = false;
+  if (typeof ctx.onNavigate === 'function') {
+    claiming = true;
+    ctx.onNavigate(function (url, how) {
+      if (url.pathname.replace(/\/+$/, '') !== '/books') return false;
+      const mine = state.ownNav !== null && state.ownNav === url.href;
+      if (!mine && !(how && how.pop)) return false;
+      state.ownNav = null;
+      applyFilters(filtersFrom(url));
+      return true;
+    }, function () { return false; });
+  }
+
   // The next page comes in as the button nears the screen; the button is
   // still there for a keyboard or a browser without the observer.
   if (typeof IntersectionObserver === 'function') {
@@ -1328,6 +1862,7 @@ export async function mount(ctx) {
   // the first frame, and the skeletons already have their shape.
   readView();
   syncControls();
+  syncFilters();
   // The help button runs it on request, whenever.
   if (window.WebServarrTour && typeof window.WebServarrTour.init === 'function') {
     guide = window.WebServarrTour.init({
@@ -1360,5 +1895,6 @@ export async function mount(ctx) {
 
   return function () {
     ROW_ORDER.forEach(function (name) { markRow(name, false); });
+    html.removeAttribute('data-books-filtered');
   };
 }

@@ -731,6 +731,17 @@ class BooksPage(unittest.TestCase):
         self.assertLess(section.index('id="continueHost"'), section.index('id="upnextHost"'))
         self.assertLess(section.index('id="upnextHost"'), section.index('id="mylistHost"'))
 
+    def test_the_filters_row_is_held_from_the_first_paint(self):
+        # The toolbar's filters: an address that carries one holds the pills' row before the module runs.
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("/[?&](author|series|narrator)=[^&]/.test(window.location.search)", loader)
+        self.assertIn("setAttribute('data-books-filtered', '')", loader)
+        h = read("books")
+        self.assertIn('#toolbarSkel [data-skel="filters"] { display: none; }', h)
+        self.assertIn('html[data-books-filtered] #toolbarSkel [data-skel="filters"] { display: block; }', h)
+        src = module_source("books")
+        self.assertIn("html.removeAttribute('data-books-filtered');", src)
+
     def test_the_discovery_shelves_are_held_like_the_rows_above(self):
         # Books 3c: Recently added and Popular on the server, after My list and before the toolbar.
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")

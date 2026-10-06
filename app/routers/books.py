@@ -263,13 +263,15 @@ def _sort_key(sort: str, kind: str, ident: str, lead: CatalogRow, newest: int, n
     return [_author_sort(lead.author).replace("\x00", ""), book_catalog.fold(name).replace("\x00", ""), tie]
 
 
-def _cards(rows: List[CatalogRow], sort: str) -> List[Tuple[list, dict]]:
+def _cards(rows: List[CatalogRow], sort: str, collapse: bool = True) -> List[Tuple[list, dict]]:
     """(sort key, card) for every card of the library, in order. Each series
-    with SERIES_MIN_BOOKS or more books is one card; the rest are books."""
+    with SERIES_MIN_BOOKS or more books is one card; the rest are books.
+    Without `collapse` (a library filtered to one series) every book is its
+    own card."""
     by_series: Dict[str, List[CatalogRow]] = {}
     singles: List[CatalogRow] = []
     for row in rows:
-        key = book_catalog.name_key(row.series)
+        key = book_catalog.name_key(row.series) if collapse else ""
         (by_series.setdefault(key, []) if key else singles).append(row)
     cards = []
     for key, members in by_series.items():
@@ -323,6 +325,55 @@ def _kept_by_format(rows: List[CatalogRow], fmt: str) -> List[CatalogRow]:
     return rows
 
 
+# --- Filters (Books toolbar: Author, Series, Narrator) ----------------------------------
+#
+# A filter is one name, matched as the person and series pages match theirs
+# (name_key: case and spacing ignored, accents kept). Every filter works on
+# the rows the caller may see, so a name only ever lists or matches books
+# that are theirs to see, whatever name is asked for.
+
+FACETS = ("author", "series", "narrator")
+FACET_MAX = 5000                 # values one picker lists
+
+
+@dataclass(frozen=True)
+class Filters:
+    """The name keys asked for ("" is no filter)."""
+    author: str = ""
+    series: str = ""
+    narrator: str = ""
+
+    def any(self) -> bool:
+        return bool(self.author or self.series or self.narrator)
+
+
+def _filters(author: Optional[str], series: Optional[str], narrator: Optional[str]) -> Filters:
+    return Filters(book_catalog.name_key(author), book_catalog.name_key(series), book_catalog.name_key(narrator))
+
+
+def _narrators_for(db: Session, who: Scope, needed: bool) -> Dict[int, List[str]]:
+    """The editions' narrators, read only when a narrator is asked about and
+    the caller may hear audiobooks at all (otherwise no book has one)."""
+    return book_catalog.narrators_by_book(db) if (needed and who.audio) else {}
+
+
+def _filtered(rows: List[CatalogRow], f: Filters, narrators: Dict[int, List[str]],
+              skip: str = "") -> List[CatalogRow]:
+    """The rows every filter but `skip` keeps. A narrator belongs to a book's
+    audio editions, so only a book the caller can hear has one."""
+    out = []
+    for r in rows:
+        if f.author and skip != "author" and book_catalog.name_key(r.author) != f.author:
+            continue
+        if f.series and skip != "series" and book_catalog.name_key(r.series) != f.series:
+            continue
+        if f.narrator and skip != "narrator" and not (
+                r.audio and any(book_catalog.name_key(n) == f.narrator for n in narrators.get(r.id, []))):
+            continue
+        out.append(r)
+    return out
+
+
 @router.get("")
 @_limit(LIST_LIMIT, "list")
 @_db_503
@@ -331,6 +382,9 @@ async def library(request: Request,
                   sort: Literal["added", "title", "author"] = "added",
                   cursor: Optional[str] = Query(None, min_length=1, max_length=CURSOR_MAX),
                   limit: int = Query(PAGE_DEFAULT, ge=1, le=PAGE_MAX),
+                  author: Optional[str] = Query(None, max_length=NAME_MAX),
+                  series: Optional[str] = Query(None, max_length=NAME_MAX),
+                  narrator: Optional[str] = Query(None, max_length=NAME_MAX),
                   who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """One page of the library the caller may see: {"items": [BookCard],
     "next_cursor", "notes", "building"}. A series of SERIES_MIN_BOOKS or more
@@ -339,12 +393,19 @@ async def library(request: Request,
     formats}. `format` keeps the books that have it (a book in both still
     lists both badges).
 
+    `author`, `series` and `narrator` keep the books by that name (all of
+    them together). With a series asked for, its books are cards of their own
+    rather than one series card.
+
     `building` is true only for an empty first page (whatever the format) while
     the catalog itself is empty and has never been built or is being built
     now: the page says it is being put together instead of "no books"."""
     after = _decode_cursor(cursor, sort) if cursor else None
+    f = _filters(author, series, narrator)
     rows = _kept_by_format(book_catalog.visible_rows(db, who.series, who.audio), format)
-    cards = _cards(rows, sort)
+    if f.any():
+        rows = _filtered(rows, f, _narrators_for(db, who, bool(f.narrator)))
+    cards = _cards(rows, sort, collapse=not f.series)
     if after is not None:
         cards = [c for c in cards if c[0] > after]
     page = cards[:limit]
@@ -370,17 +431,24 @@ def _request_url(text: str) -> str:
 async def search(request: Request,
                  q: str = Query(..., min_length=1, max_length=100),
                  limit: int = Query(SEARCH_DEFAULT, ge=1, le=PAGE_MAX),
+                 author: Optional[str] = Query(None, max_length=NAME_MAX),
+                 series: Optional[str] = Query(None, max_length=NAME_MAX),
+                 narrator: Optional[str] = Query(None, max_length=NAME_MAX),
                  who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """Books matching `q` in their title, series, author or narrator, ignoring
     case and accents: {"items": [BookCard], "request_url" (null while a source is
     not reachable), "notes"}. Title
     matches come first, then series, then people; within a group a match at the
-    start of the field first, then by title."""
+    start of the field first, then by title. `author`, `series` and `narrator`
+    narrow the search as they narrow the library."""
     needle = book_catalog.fold(q)
     if not needle:
         raise HTTPException(status_code=422, detail="Search for at least one character")
+    f = _filters(author, series, narrator)
     rows = book_catalog.visible_rows(db, who.series, who.audio)
     narrators = book_catalog.narrators_by_book(db) if who.audio else {}
+    if f.any():
+        rows = _filtered(rows, f, narrators)
     ranked = []
     for row in rows:
         fields = [(0, book_catalog.fold(row.title)), (1, book_catalog.fold(row.series)),
@@ -475,6 +543,50 @@ async def series(request: Request,
     following = book_discovery.is_following(db, who.identity, found[0].series)
     return {"name": found[0].series, "items": items, "following": following,
             "notes": who.notes + ([note] if note else [])}
+
+
+@router.get("/facets")
+@_limit(LIST_LIMIT, "facets")
+@_db_503
+async def facets(request: Request,
+                 facet: Literal["author", "series", "narrator"],
+                 format: Literal["all", "ebook", "audio"] = "all",
+                 author: Optional[str] = Query(None, max_length=NAME_MAX),
+                 series: Optional[str] = Query(None, max_length=NAME_MAX),
+                 narrator: Optional[str] = Query(None, max_length=NAME_MAX),
+                 who: Scope = Depends(caller), db: Session = Depends(get_db)):
+    """What one toolbar filter can be set to: {"facet", "values": [{"name",
+    "count"}], "notes"}. Only names on books the caller may see, among the
+    books the format and the other filters keep (this filter's own value is
+    left out, so the picker can change it). `count` is books, a book with two
+    narrators counting for each. A name spelled more than one way is shown
+    the way most of its books spell it. Ordered by name, ignoring case and
+    accents; at most FACET_MAX."""
+    f = _filters(author, series, narrator)
+    narrators = _narrators_for(db, who, facet == "narrator" or bool(f.narrator))
+    rows = _filtered(_kept_by_format(book_catalog.visible_rows(db, who.series, who.audio), format), f, narrators,
+                     skip=facet)
+    found: Dict[str, list] = {}           # name key: [books, {spelling: books}]
+    for r in rows:
+        if facet == "author":
+            names = [r.author]
+        elif facet == "series":
+            names = [r.series]
+        else:
+            names = narrators.get(r.id, []) if r.audio else []
+        seen = set()
+        for raw in names:
+            name = " ".join(str(raw or "").split())
+            key = book_catalog.name_key(name)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            held = found.setdefault(key, [0, {}])
+            held[0] += 1
+            held[1][name] = held[1].get(name, 0) + 1
+    values = [{"name": max(spellings, key=spellings.get), "count": count} for count, spellings in found.values()]
+    values.sort(key=lambda v: (book_catalog.fold(v["name"]), v["name"]))
+    return {"facet": facet, "values": values[:FACET_MAX], "notes": who.notes}
 
 
 # --- Progress ---------------------------------------------------------------------------

@@ -25,6 +25,10 @@
   #recentHost, #popularHost { display: none; }
   html[data-books-recent] #recentHost { display: block; }
   html[data-books-popular] #popularHost { display: block; }
+  /* The row of filters in use, held in the toolbar's skeleton while the address
+     carries filters (theme-loader.js on a full load, pages/books.js on every visit). */
+  #toolbarSkel [data-skel="filters"] { display: none; }
+  html[data-books-filtered] #toolbarSkel [data-skel="filters"] { display: block; }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
      scrollbar would only take a strip of height from the cards. */
@@ -125,13 +129,29 @@
           <div class="skel h-10 w-[5rem] rounded-full"></div>
           <div class="skel h-10 w-[6.5rem] rounded-full"></div>
         </div>
+        <!-- The filter buttons' own words and arrow, unseen: the same widths, so the rows wrap where theirs will. -->
+        <div class="-m-1 flex min-w-0 max-w-full items-center gap-2 overflow-hidden p-1">
+          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Author</span><span class="invisible size-5"></span></div>
+          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Series</span><span class="invisible size-5"></span></div>
+          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Narrator</span><span class="invisible size-5"></span></div>
+        </div>
         <div class="skel h-10 w-44 rounded-[10px] lg:ml-auto"></div>
+        <!-- Shown while the address carries filters (html[data-books-filtered]): their row's room. -->
+        <div data-skel="filters" class="basis-full h-9"></div>
       </div>
       <div id="toolbar" class="hidden mb-6 flex flex-wrap items-center gap-3">
         <div id="formatChips" class="flex flex-wrap items-center gap-2" role="group" aria-label="Show">
           <button type="button" data-format="all" aria-pressed="true" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright">All</button>
           <button type="button" data-format="ebook" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Ebooks</button>
           <button type="button" data-format="audio" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Audiobooks</button>
+        </div>
+        <!-- Author, Series and Narrator: each opens a picker of the names in the books this
+             person can see (pages/books.js). Scrolls sideways inside itself on the narrowest
+             phones; the padding keeps the focus ring inside the scroll box. -->
+        <div id="filterButtons" class="books-row -m-1 flex min-w-0 max-w-full items-center gap-2 overflow-x-auto p-1" role="group" aria-label="Filter by">
+          <button type="button" data-filter="author" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Author</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
+          <button type="button" data-filter="series" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Series</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
+          <button type="button" data-filter="narrator" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Narrator</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
         </div>
         <div class="relative lg:ml-auto">
           <label for="sortSelect" class="sr-only">Sort by</label>
@@ -142,6 +162,8 @@
           </select>
           <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">expand_more</span>
         </div>
+        <!-- The filters in use, each removable, and Clear all (pages/books.js). -->
+        <div id="activeFilters" data-active-filters class="hidden basis-full min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
       </div>
 
       <!-- The ebook sign-in failed, or was just tried and still doesn't work (see
@@ -187,6 +209,12 @@
         </div>
       </div>
 
+      <!-- Filters that match nothing: one quiet line and the way back. -->
+      <div id="filterEmpty" class="hidden py-12 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-center">
+        <p class="text-[15px] text-frosted-blue/70">No books match these filters.</p>
+        <button id="filterEmptyClear" type="button" class="inline-flex h-10 items-center rounded-full px-4 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Clear filters</button>
+      </div>
+
       <div id="moreWrap" class="hidden mt-8 flex justify-center">
         <button id="moreBtn" type="button" class="ws-lift h-11 min-w-[10rem] px-6 rounded-[10px] bg-frosted-blue/[0.07] text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Show more</button>
       </div>
@@ -197,6 +225,8 @@
   <!-- Search results: take the place of Continue and the library. -->
   <section id="searchSection" class="hidden" aria-labelledby="searchTitle">
     <h2 id="searchTitle" class="sr-only">Search results</h2>
+    <!-- The filters narrow the search too: shown here while there is one. -->
+    <div id="searchFilters" data-active-filters class="hidden mb-4 min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
     <p id="searchStatus" class="mb-4 text-[15px] text-frosted-blue/70" role="status" aria-live="polite">&nbsp;</p>
     <div id="searchSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
       <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
@@ -207,6 +237,7 @@
       <p id="searchEmptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue break-words">No matches</p>
       <p id="searchEmptyText" class="mt-1 text-[15px] text-frosted-blue/70 break-words">Check the spelling, or ask for it.</p>
       <a id="searchRequest" href="/requests" class="ws-lift mt-4 inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Can't find it? Request it</a>
+      <button id="searchClear" type="button" class="hidden mt-4 inline-flex h-10 items-center rounded-full px-4 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Clear filters</button>
     </div>
     <div id="searchError" class="hidden py-12 text-center">
       <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">cloud_off</span>
