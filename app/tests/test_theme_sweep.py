@@ -155,11 +155,8 @@ RAW_COLOUR = re.compile(r"(?<![\w&#/-])(#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-
 # the line), so a new use elsewhere, even of the same class, still fails.
 M10_ALLOWED = {
     ("login.html", "text-black", 'id="plexLoginBtn"'),
-    ("login.html", "text-black", 'id="authentikLoginBtn"'),
     ("login.html", "bg-[#E5A00D]", 'id="plexLoginBtn"'),
-    ("login.html", "bg-[#E5A00D]", 'id="authentikLoginBtn"'),
     ("login.html", "hover:bg-[#cc8f0c]", 'id="plexLoginBtn"'),
-    ("login.html", "hover:bg-[#cc8f0c]", 'id="authentikLoginBtn"'),
 }
 
 
@@ -169,8 +166,7 @@ M10_ALLOWED = {
 RAW_ALLOWED = {
     ("login.html", 'id="plexLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
     ("login.html", 'id="plexLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
-    ("login.html", 'id="authentikLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
-    ("login.html", 'id="authentikLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
+    ("login.html", 'd="M286.4,77.8L252.9', "#EBAF00", "M10: the chevron of Plex's wordmark on the Authentik sign-in button"),
     ("reader.js", "light: { bg:", "#FBFAF7", "M10: the light reading mode's page"),
     ("reader.js", "light: { bg:", "#1A1A1A", "M10: the light reading mode's text"),
     ("reader.js", "sepia: { bg:", "#F4ECD8", "M10: the sepia reading mode's page"),
