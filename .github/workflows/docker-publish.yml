@@ -99,6 +99,7 @@ jobs:
           node app/tests/js/debug_leaks.mjs
           node app/tests/js/view_transition.mjs
           node app/tests/js/service_status.mjs
+          node app/tests/js/status_panel.mjs
           node app/tests/js/arrive_order.mjs
           node app/tests/js/news_cards.mjs
           node app/tests/js/reader_progress.mjs

@@ -13,11 +13,13 @@
   not a text line whose height changes when the icon font lands.
 -->
 <header id="appHeader" class="h-16 shrink-0 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-background-dark/40 backdrop-blur-md relative z-50">
-  <div class="flex items-center gap-6">
-    <div id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
+  <div class="relative flex items-center gap-6">
+    <!-- The status pill opens the status panel (status-panel.js): on hover
+         after a short pause, or pinned open by a click. -->
+    <button type="button" id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-expanded="false" aria-controls="wsStatusPop">
       <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
       <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
-    </div>
+    </button>
   </div>
   <div class="flex items-center gap-4">
     <button class="relative inline-flex p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications" aria-label="Notifications">

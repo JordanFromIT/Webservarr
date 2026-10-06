@@ -15,7 +15,10 @@
  *   WS.poll(fn, ms, signal) -> stop()
  *                                 visibility-aware interval, starts when active;
  *                                 an optional AbortSignal removes its listeners
- *   WS.serviceStatus()            deduplicated /api/integrations/service-status
+ *   WS.serviceStatus(opts)        deduplicated /api/integrations/service-status ({ fresh: true } skips the 5 s reuse)
+ *   WS.statusLast()               the last status answer { list, unavailable, at, known, lastGood }, or the kept copy
+ *   WS.statusModel(service)       one service's state: { k, kinds, since, usual } (status-panel.js)
+ *   WS.statusSummary(list)        { state: ok|warn|err, down } for a list, or null
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.applyShell(parts)          bring the branded shell and <head> up to date (see below)
  *   WS.clearPageCache()           drop the router's hover-prefetched pages (sign-out, a save)
@@ -365,64 +368,148 @@
     if (window.WS && WS.router && WS.router.clearPrefetch) WS.router.clearPrefetch();
   }
 
-  // ---- Status pill ----
+  // ---- Status pill (desktop) and status chip (phone top bar) ----
   //
   // Painted from the last known state at once, revalidated in the background.
-  // Unknown (first ever visit) reserves the space and says nothing. The script
-  // owns the state and the words only; every colour, and the live ring on
-  // "ok", is theme.css keyed on data-state (status tokens, not palette classes).
+  // Unknown (first ever visit, or no Uptime Kuma set up) reserves the space
+  // and says nothing. Uptime Kuma set up but not answering is "off": a grey
+  // "Status unavailable", never the last state it saw. The script owns the
+  // state and the words only; every colour, and the one ring on a turn for
+  // the worse, is theme.css keyed on data-state (status tokens, not palette
+  // classes). The panel that opens from either (status-panel.js) reads the
+  // same model through WS.statusModel and WS.statusLast.
   var PILL_LABEL = {
     ok: 'All Systems Online',
     warn: 'Degraded Performance',
-    err: 'System Issues Detected'
+    err: 'System Issues Detected',
+    off: 'Status Unavailable'
   };
+  var CHIP_WORD = { ok: 'Online', warn: 'Slow', off: 'Unknown' };
+  var SUMMARY_TITLE = { ok: 'Everything is running', off: 'Status unavailable right now' };
 
-  function paintStatus(state) {
-    var pill = document.getElementById('systemStatus');
-    if (!pill) return;
-    var label = PILL_LABEL[state];
-    if (!label) { pill.setAttribute('data-state', 'unknown'); return; }
-    if (pill.getAttribute('data-state') === state) return;
-    pill.setAttribute('data-state', state);
-    var text = pill.querySelector('[data-status-text]');
-    if (text) text.textContent = label;
+  function median(nums) {
+    var a = nums.slice().sort(function (x, y) { return x - y; });
+    return a.length ? a[Math.floor(a.length / 2)] : 0;
   }
 
+  // What one check was. "Slow" is ours, not Uptime Kuma's: an "up" check
+  // whose reply took over a second and over four times the monitor's usual
+  // (the median of its last 50). Kuma's "pending" is "trouble".
+  function checkKind(beat, usual) {
+    var st = beat && beat.status;
+    if (st === 'down') return 'down';
+    if (st === 'degraded') return 'trouble';
+    if (st === 'maintenance') return 'maint';
+    var ping = beat ? beat.ping : null;
+    if (typeof ping === 'number' && ping > 1000 && ping > usual * 4) return 'slow';
+    return 'up';
+  }
+
+  // One service as the pill, the chip and the panel see it: k (up, slow,
+  // trouble, down, maint), since (ms, when the current run began, or null
+  // when it fills the whole window), each check's kind, and the usual reply.
+  function statusModel(service) {
+    var beats = Array.isArray(service && service.beats) ? service.beats : [];
+    var pings = [];
+    beats.forEach(function (b) { if (typeof b.ping === 'number') pings.push(b.ping); });
+    var usual = median(pings);
+    var kinds = beats.map(function (b) { return checkKind(b, usual); });
+    var k = kinds.length ? kinds[kinds.length - 1] : checkKind({ status: service && service.status }, usual);
+    var since = null;
+    for (var i = kinds.length - 1; i >= 0 && kinds[i] === k; i--) {
+      since = i > 0 ? Date.parse(beats[i].time) || null : null;
+    }
+    return { service: service, k: k, kinds: kinds, usual: usual, since: since };
+  }
+
+  // The overall state of a list of services: ok, warn (something slow or
+  // having trouble), err (something down); null for no services at all.
   function summarise(services) {
     if (!Array.isArray(services) || services.length === 0) return null;
-    var down = false, degraded = false;
-    for (var i = 0; i < services.length; i++) {
-      if (services[i].status === 'down') down = true;
-      else if (services[i].status === 'degraded') degraded = true;
+    var down = 0, warn = false;
+    services.forEach(function (s) {
+      var k = statusModel(s).k;
+      if (k === 'down') down += 1;
+      else if (k === 'slow' || k === 'trouble') warn = true;
+    });
+    return { state: down ? 'err' : (warn ? 'warn' : 'ok'), down: down };
+  }
+
+  function paintStatus(state, down) {
+    var label = PILL_LABEL[state];
+    var pill = document.getElementById('systemStatus');
+    if (pill) {
+      if (!label) pill.setAttribute('data-state', 'unknown');
+      else if (pill.getAttribute('data-state') !== state) {
+        pill.setAttribute('data-state', state);
+        var text = pill.querySelector('[data-status-text]');
+        if (text) text.textContent = label;
+      }
     }
-    return down ? 'err' : (degraded ? 'warn' : 'ok');
+    var chip = document.getElementById('wsStatusChip');
+    if (chip) {
+      var word = state === 'err' ? (down || 1) + ' down' : CHIP_WORD[state];
+      chip.setAttribute('data-state', label ? state : 'unknown');
+      var w = chip.querySelector('[data-status-word]');
+      if (w && word && w.textContent !== word) w.textContent = word;
+      chip.setAttribute('aria-label', 'Service status: ' + (label
+        ? (state === 'err' ? word : (SUMMARY_TITLE[state] || label.toLowerCase()))
+        : 'not known yet'));
+    }
   }
 
   var statusPromise = null;
   var statusAt = 0;   // performance.now() when the last answer landed; 0 while one is on its way
+  // The last answer: { list, unavailable, at (Date.now() it landed) }, or null.
+  var statusLast = null;
 
-  /* One request shared by the pill and any page that lists services (the
-     dashboard tiles), cached for the next visit. A request on its way is
-     shared, and its answer is reused for 5 s after it lands. That is timed
-     by the clock, not a timer: the request outlives the page that asked (it
-     is the pill's too), and so must nothing it leaves behind. The monotonic
-     clock, so a wall clock set back (a resync on wake) cannot stretch it. */
-  function serviceStatus() {
-    if (statusPromise && (!statusAt || performance.now() - statusAt < 5000)) return statusPromise;
+  /* One request shared by the pill, the chip, the panel and any page that
+     lists services (the dashboard tiles), cached for the next visit. A
+     request on its way is shared, and its answer is reused for 5 s after it
+     lands ({ fresh: true }, the panel's "Try again", skips the reuse). That is
+     timed by the clock, not a timer: the request outlives the page that asked
+     (it is the pill's too), and so must nothing it leaves behind. The
+     monotonic clock, so a wall clock set back (a resync on wake) cannot
+     stretch it. Resolves to the list ([] when there is none, or no answer);
+     ws:status on document carries each answer to the panel. */
+  function serviceStatus(opts) {
+    var fresh = !!(opts && opts.fresh === true);
+    if (statusPromise && (!statusAt || (!fresh && performance.now() - statusAt < 5000))) return statusPromise;
     statusAt = 0;
     statusPromise = fetch('/api/integrations/service-status')
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .catch(function () { return []; })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
       .then(function (list) {
-        var state = summarise(list);
-        if (state) {
-          paintStatus(state);
-          cacheSet('status', { state: state, list: list, t: Date.now() });
+        var unavailable = !Array.isArray(list);
+        var kept = cacheGet('status') || {};
+        if (unavailable) {
+          // Keep the last good names and time (the panel lists them), never its state.
+          paintStatus('off');
+          cacheSet('status', { state: 'off', list: kept.list || [], t: kept.t || 0 });
+          list = [];
+        } else {
+          var sum = summarise(list);
+          paintStatus(sum ? sum.state : null, sum ? sum.down : 0);
+          if (sum) cacheSet('status', { state: sum.state, down: sum.down, list: list, t: Date.now() });
         }
+        statusLast = { list: list, unavailable: unavailable, at: Date.now() };
+        if (unavailable) { statusLast.known = kept.list || []; statusLast.lastGood = kept.t || 0; }
         statusAt = performance.now();
+        document.dispatchEvent(new CustomEvent('ws:status', { detail: statusLast }));
         return list;
       });
     return statusPromise;
+  }
+
+  // The last answer, or the copy kept from an earlier visit (cached: true)
+  // before the first answer lands. While Uptime Kuma is not answering, list
+  // is empty and known / lastGood are the names and time of the last good one.
+  function getStatusLast() {
+    if (statusLast) return statusLast;
+    var c = cacheGet('status');
+    if (!c || !c.state) return null;
+    if (c.state === 'off') return { list: [], unavailable: true, at: 0, cached: true, known: c.list || [], lastGood: c.t || 0 };
+    return { list: c.list || [], unavailable: false, at: c.t || 0, cached: true };
   }
 
   // ---- Soft open and close of a .ws-pop panel (the account menus, the bell) ----
@@ -933,6 +1020,9 @@
     swr: swr,
     getJSON: getJSON,
     serviceStatus: serviceStatus,
+    statusLast: getStatusLast,
+    statusModel: statusModel,
+    statusSummary: summarise,
     clearCache: clearCache,
     dropCache: dropCache,
     clearPageCache: clearPageCache,
@@ -956,7 +1046,7 @@
     wireScrollHint();
 
     var cached = cacheGet('status');
-    if (cached && cached.state) paintStatus(cached.state);
+    if (cached && cached.state) paintStatus(cached.state, cached.down);
 
     whenActive(function () {
       serviceStatus();

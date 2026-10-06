@@ -30,6 +30,8 @@ function boot() {
   FakeDate.now = () => clock.wall;
   const ctx = {
     console, setTimeout, clearTimeout, Promise, JSON, WeakMap, Math,
+    // Each answer is announced (ws:status, for the status panel).
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init ? init.detail : null; } },
     Date: FakeDate,
     performance: { now: () => clock.mono },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {}, key: () => null, length: 0 },

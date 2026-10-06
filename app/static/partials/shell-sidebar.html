@@ -30,6 +30,12 @@
 <div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 bg-background-dark/80 backdrop-blur-md border-b border-steel-blue/20">
   <div class="h-14 flex items-center justify-between gap-3 px-4">
     <p id="wsBarTitle" class="min-w-0 truncate text-[17px] font-bold tracking-[-0.02em] text-frosted-blue">{{bar_title}}</p>
+    <!-- Service status: a dot and one word (Online, Slow, 1 down, Unknown);
+         below 360px the dot alone. Opens the status sheet (status-panel.js).
+         shell.js paints it with the desktop pill; unknown keeps its box. -->
+    <button type="button" id="wsStatusChip" data-state="unknown" class="ws-status-chip" aria-haspopup="dialog" aria-label="Service status: not known yet">
+      <span class="ws-status-chip-face"><span data-status-dot class="ws-status-dot" aria-hidden="true"></span><span data-status-word class="ws-status-chip-word" aria-hidden="true">&nbsp;</span></span>
+    </button>
     <div class="relative flex items-center shrink-0">
       <button class="relative inline-flex p-2.5 -mr-2.5 rounded-full text-steel-blue hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-frosted-blue" title="Notifications" aria-label="Notifications">
         <span class="material-symbols-outlined">notifications</span>
@@ -111,6 +117,10 @@
      Home's card. Before the router, so Home's first mount finds it. A module
      runs after the page is parsed, so shell.js has made window.WS. -->
 <script type="module" src="/static/js/install.js?v=1"></script>
+
+<!-- The service status panel (status-panel.js): the header pill's popover
+     and the top bar chip's sheet. A module, so shell.js has made window.WS. -->
+<script type="module" src="/static/js/status-panel.js?v=1"></script>
 
 <!-- Soft navigation (router.js). A module runs after the page is parsed, so
      shell.js (a classic script at the end of every page) has made window.WS. -->

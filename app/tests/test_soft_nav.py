@@ -550,7 +550,8 @@ class HomePage(unittest.TestCase):
         # would be the asking page's, and outlive it. The monotonic clock, so
         # a wall clock set back cannot stretch it (app/tests/js/service_status.mjs
         # runs it).
-        self.assertIn("if (statusPromise && (!statusAt || performance.now() - statusAt < 5000)) return statusPromise;", body)
+        # ({ fresh: true }, the status panel's "Try again", skips the reuse.)
+        self.assertIn("if (statusPromise && (!statusAt || (!fresh && performance.now() - statusAt < 5000))) return statusPromise;", body)
         self.assertIn("statusAt = performance.now();", body)
         self.assertNotIn("statusAt = Date.now()", body)
         self.assertNotRegex(body, r"\bsetTimeout\(")

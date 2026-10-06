@@ -481,6 +481,159 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   #systemStatus[data-state="err"] .ws-status-dot::after { animation: none; }
 }
 
+/* ---- Service status panel (status-panel.js) ----
+ *
+ * The header pill (#systemStatus) opens it as a popover from lg; below lg the
+ * top bar's chip (#wsStatusChip, a dot and one word) opens it as a bottom
+ * sheet (the More sheet's .ws-sheet). Status colours are the status tokens:
+ * --ws-status-* for marks (dots, bars, tints), the -text mixes for words.
+ * Planned work is the accent; a service with no answer is the text colour,
+ * faint, like the "off" pill.
+ */
+#systemStatus { cursor: pointer; transition: border-color 160ms ease-out; }
+#systemStatus:hover, #systemStatus[aria-expanded="true"] { border-color: rgb(var(--ws-pill) / .7); }
+#systemStatus[data-state="off"] .ws-pill-label { color: rgb(var(--color-text) / .75); }
+#systemStatus[data-state="off"] [data-status-dot],
+.ws-status-chip[data-state="off"] [data-status-dot] { opacity: .5; }
+
+.ws-status-chip {
+  --ws-pill: var(--ws-status-off);
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  min-width: 40px; min-height: 40px; padding: 0 2px; margin-inline: auto -8px;
+  border-radius: 9999px; color: rgb(var(--color-text)); -webkit-tap-highlight-color: transparent;
+}
+.ws-status-chip[data-state="unknown"] { visibility: hidden; }
+.ws-status-chip[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
+.ws-status-chip[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
+.ws-status-chip[data-state="err"]  { --ws-pill: var(--ws-status-err); }
+.ws-status-chip:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-status-chip-face {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border-radius: 9999px; border: 1px solid rgb(var(--ws-pill) / .30); background: rgb(var(--ws-pill) / .10);
+  font-size: 13px; line-height: 1; font-weight: 500; white-space: nowrap;
+}
+.ws-status-chip[data-state="warn"] .ws-status-chip-word { color: var(--ws-status-warn-text); }
+.ws-status-chip[data-state="err"] .ws-status-chip-word { color: var(--ws-status-err-text); }
+.ws-status-chip[data-state="off"] .ws-status-chip-word { color: rgb(var(--color-text) / .75); }
+.ws-status-chip[data-state="warn"] .ws-status-dot::after,
+.ws-status-chip[data-state="err"] .ws-status-dot::after { animation: ws-ping 1.4s cubic-bezier(0, 0, .2, 1) 1; }
+/* At 320px the top bar holds the title, the three gauges and the bell: the dot alone. */
+@media (max-width: 359px) {
+  .ws-status-chip-word { display: none; }
+  .ws-status-chip-face { padding: 0 9px; }
+}
+
+/* The popover hangs from the header's left group (positioned), under the pill. */
+.ws-sp-pop {
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: 420px;
+  max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 16px; border: 1px solid rgb(var(--color-accent) / .4); color: rgb(var(--color-text));
+  background: linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)), rgb(var(--color-background));
+  box-shadow: 0 28px 56px -16px var(--ws-shade);
+}
+
+.ws-sp-summary {
+  --ws-pill: var(--ws-status-off);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 12px; align-items: start;
+  padding: 16px 12px 14px 20px;
+}
+.ws-sp-summary[data-tone="ok"]   { --ws-pill: var(--ws-status-ok); }
+.ws-sp-summary[data-tone="warn"] { --ws-pill: var(--ws-status-warn); }
+.ws-sp-summary[data-tone="err"]  { --ws-pill: var(--ws-status-err); }
+.ws-sp-summary-dot { width: 10px; height: 10px; margin-top: 7px; border-radius: 9999px; background: rgb(var(--ws-pill)); }
+.ws-sp-summary[data-tone="off"] .ws-sp-summary-dot { opacity: .5; }
+.ws-sp-title { grid-column: 2; font-size: 17px; font-weight: 700; line-height: 1.4; text-wrap: balance; }
+.ws-sp-close {
+  grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; margin: -6px 0 0; border-radius: 9999px; color: rgb(var(--color-text) / .7);
+}
+.ws-sp-close[hidden] { display: none; }
+.ws-sp-close:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
+.ws-sp-sub { grid-column: 2 / -1; font-size: 14px; line-height: 1.5; color: rgb(var(--color-text) / .75); text-wrap: pretty; max-width: 52ch; }
+.ws-sp-checked { grid-column: 2 / -1; margin-top: 4px; font-size: 12px; color: rgb(var(--color-text) / .65); }
+.ws-sp-retry {
+  grid-column: 2 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; margin-top: 12px; padding: 6px 14px; border-radius: 9999px;
+  border: 1px solid rgb(var(--color-accent) / .4); font-size: 14px; font-weight: 500;
+}
+.ws-sp-retry:hover { background: rgb(var(--color-accent) / .12); }
+.ws-sp-retry:disabled { opacity: .6; cursor: progress; }
+.ws-sp-retry .material-symbols-outlined { font-size: 18px; color: rgb(var(--color-accent)); }
+.ws-sp-summary [hidden], .ws-sp-pop [hidden], .ws-sp-sheet [hidden] { display: none; }
+
+/* The uptime window: a native radio group drawn as three segments. */
+.ws-sp-range {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0; padding: 0 12px 12px 20px; border: 0; min-width: 0;
+}
+.ws-sp-range-label { float: left; padding: 0; font-size: 13px; color: rgb(var(--color-text) / .75); }
+.ws-sp-segs { display: flex; padding: 2px; border-radius: 9999px; background: rgb(var(--color-text) / .06); }
+.ws-sp-seg { position: relative; }
+.ws-sp-seg-input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.ws-sp-seg span {
+  display: flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 9999px;
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: rgb(var(--color-text) / .75);
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+.ws-sp-seg:hover span { color: rgb(var(--color-text)); }
+.ws-sp-seg-input:checked + span { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-sp-seg-input:focus-visible + span { outline: 2px solid rgb(var(--color-text)); outline-offset: 1px; }
+
+.ws-sp-list { border-top: 1px solid rgb(var(--color-accent) / .2); }
+.ws-sp-row {
+  display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 10px;
+  padding: 14px 20px; border-bottom: 1px solid rgb(var(--color-accent) / .2);
+}
+.ws-sp-row[data-k="down"] { background: rgb(var(--ws-status-err) / .10); }
+.ws-sp-row[data-k="slow"], .ws-sp-row[data-k="trouble"] { background: rgb(var(--ws-status-warn) / .10); }
+.ws-sp-list-unknown .ws-sp-row { opacity: .8; }
+.ws-sp-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 9999px; background: rgb(var(--ws-status-ok)); }
+.ws-sp-dot[data-k="slow"], .ws-sp-dot[data-k="trouble"] { background: rgb(var(--ws-status-warn)); }
+.ws-sp-dot[data-k="down"] { background: rgb(var(--ws-status-err)); }
+.ws-sp-dot[data-k="maint"] { background: rgb(var(--color-accent)); }
+.ws-sp-dot[data-k="unknown"] { background: rgb(var(--color-text) / .45); }
+.ws-sp-who { min-width: 0; }
+.ws-sp-name { font-size: 15px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.ws-sp-state { font-size: 13px; line-height: 1.4; color: rgb(var(--color-text) / .75); }
+.ws-sp-row[data-k="down"] .ws-sp-state { color: var(--ws-status-err-text); }
+.ws-sp-row[data-k="slow"] .ws-sp-state, .ws-sp-row[data-k="trouble"] .ws-sp-state { color: var(--ws-status-warn-text); }
+.ws-sp-up { text-align: right; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.ws-sp-pct { display: block; font-size: 15px; font-weight: 700; }
+.ws-sp-na { display: block; font-size: 13px; color: rgb(var(--color-text) / .75); }
+.ws-sp-window { display: block; font-size: 12px; color: rgb(var(--color-text) / .65); }
+.ws-sp-graphs {
+  container-type: inline-size; grid-column: 2 / -1;
+  display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px; align-items: center; gap: 12px;
+}
+.ws-sp-strip { display: flex; align-items: stretch; gap: 2px; height: 20px; min-width: 0; }
+.ws-sp-strip i { flex: 1 1 0; min-width: 0; border-radius: 2px; background: rgb(var(--ws-status-ok)); }
+.ws-sp-strip i[data-k="slow"], .ws-sp-strip i[data-k="trouble"] { background: rgb(var(--ws-status-warn)); }
+.ws-sp-strip i[data-k="down"] { background: rgb(var(--ws-status-err)); }
+.ws-sp-strip i[data-k="maint"] { background: rgb(var(--color-accent)); }
+/* A narrow list (a phone) keeps all 50 bars by tightening the gaps. */
+@container (max-width: 340px) { .ws-sp-strip { gap: 1px; } .ws-sp-strip i { border-radius: 1px; } }
+.ws-sp-spark { display: block; width: 64px; height: 20px; overflow: visible; }
+.ws-sp-spark polyline {
+  fill: none; stroke: rgb(var(--color-accent)); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.ws-sp-ms { font-size: 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: rgb(var(--color-text) / .75); }
+.ws-sp-ms[data-k="slow"] { color: var(--ws-status-warn-text); }
+.ws-sp-ms[data-k="down"] { color: var(--ws-status-err-text); }
+.ws-sp-foot { padding: 12px 20px 14px; font-size: 12px; line-height: 1.5; color: rgb(var(--color-text) / .65); }
+
+/* In the sheet the panel's own gutters follow the sheet's. */
+.ws-sp-sheet .ws-sp-summary { padding: 4px 4px 14px 12px; }
+.ws-sp-sheet .ws-sp-range { padding: 0 4px 12px 12px; }
+.ws-sp-sheet .ws-sp-row { padding-inline: 12px; }
+.ws-sp-sheet .ws-sp-foot { padding-inline: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  #systemStatus, .ws-sp-seg span { transition: none; }
+  .ws-status-chip[data-state="warn"] .ws-status-dot::after,
+  .ws-status-chip[data-state="err"] .ws-status-dot::after { animation: none; }
+}
+
 /* ---- The soft navigation's view transition ----
  *
  * router.js swaps #wsPage inside document.startViewTransition. The sidebar,
