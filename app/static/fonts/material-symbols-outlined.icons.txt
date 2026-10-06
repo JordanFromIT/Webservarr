@@ -88,6 +88,7 @@ palette
 password
 pause
 person
+picture_in_picture_alt
 play_arrow
 play_circle
 playlist_add
