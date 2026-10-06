@@ -89,6 +89,8 @@ function fakeShell(doc, clock, feed) {
     arriveReset() {
       arr.order = Array.from(doc.querySelectorAll('[data-arrive]')).map((n) => n.getAttribute('data-arrive'));
       arr.done = {}; arr.queue = {}; arr.gate = false;
+      // As shell.js: a section the server wrote in full (Home's news) has arrived.
+      doc.querySelectorAll('[data-arrive][data-arrived]').forEach((n) => { arr.done[n.getAttribute('data-arrive')] = true; });
       clock.setTimeout(() => { arr.gate = true; flushArrive(); }, 300);
     },
     arrive(key, write) {
@@ -146,6 +148,9 @@ function visit(o = {}) {
   const doc = win.document;
   doc.body.innerHTML = HOME_HTML.match(NAV)[0].replace(/<\/main>$/, '');
   if (o.serverHidden) doc.getElementById('homeEventLog').hidden = true;
+  // The server writes the news cards and marks News arrived (app/pages.py),
+  // so the event log under it on a phone never waits for it.
+  doc.querySelector('[data-arrive="news"]').setAttribute('data-arrived', '');
   if (o.pinnedHTML !== undefined) {
     // As the server writes them (app/home_event_log.py).
     const tpl = doc.createElement('template');
@@ -269,13 +274,18 @@ const QUIET_OK = answer('ok', [], [
 
 // ---------------------------------------------------------------------------
 
-await run('the section sits right above News and Service Health, with Home\'s heading and a wheel that holds its room', async (make) => {
+await run('the section sits in Home\'s grid after News and before Recent Requests, with Home\'s heading and a wheel that holds its room', async (make) => {
   const t = make({ answer: QUIET_OK });
   const order = t.doc.querySelectorAll('[data-arrive]');
   const keys = Array.from(order).map((n) => n.getAttribute('data-arrive'));
-  check('in the document it comes just before News, then Service Health', keys.indexOf('feed') === keys.indexOf('news') - 1 && keys.indexOf('news') === keys.indexOf('services') - 1, keys);
-  const grid = t.section.nextElementSibling;
-  check('the next thing is the grid that holds them, News first', grid && grid.hasAttribute('data-home-pair') && grid.firstElementChild && grid.firstElementChild.getAttribute('data-arrive') === 'news' && grid.firstElementChild.nextElementSibling.getAttribute('data-arrive') === 'services');
+  // The phone's order, which is the document's (and so Tab's): News, the
+  // event log, Recent Requests, Service Health, then the rest.
+  check('in the document: News, the event log, Recent Requests, Service Health, Active Streams, Upcoming Releases',
+        keys.join() === 'news,feed,requests,services,streams,releases', keys);
+  const grid = t.section.parentElement;
+  check('it is in the grid that holds them', grid && grid.hasAttribute('data-home-pair') && grid.firstElementChild.getAttribute('data-arrive') === 'news');
+  // From lg the grid order puts it in a strip across the top, as before.
+  check('from lg: first, across the page', t.section.classList.contains('lg:order-first') && t.section.classList.contains('lg:col-span-full'));
   const h = t.section.querySelector('h3');
   check('the heading is "Event log", styled like the other sections, closer to its wheel', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-2');
   check('a compact section: less room below it than between the other sections', t.section.classList.contains('-mb-3'));

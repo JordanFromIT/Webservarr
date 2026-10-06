@@ -1,16 +1,10 @@
 // "Add to home screen" (spec 2026-10-04-mobile-nav-and-home-screen-design.md,
 // Part 2), run for real in happy-dom:
 //  * theme-loader.js: catches Chromium's beforeinstallprompt before anything
-//    paints (keeps it, remembers it was offered, says so), and
-//    WSInstallOffer(key) decides Home's card: below lg, signed in, not
-//    already an installed app, not "Not now"-ed on this device; 'ios' on an
-//    iPhone or iPad, 'prompt' where the browser offers its own install;
-//    otherwise none. Storage that throws counts as never dismissed.
-//  * install.js: the card's buttons (Add calls the browser's prompt once,
-//    Not now remembers, the card goes once installed or once the prompt is
-//    spent, a remembered prompt that never comes hides it) and the More
-//    sheet's row (gone in an installed app; the prompt where there is one,
-//    else the two iOS steps or the browser-menu steps, as a disclosure).
+//    paints and keeps it; Home has no install card and is never marked for one.
+//  * install.js: the More sheet's row (gone in an installed app; the prompt
+//    where there is one, else the two iOS steps or the browser-menu steps, as
+//    a disclosure).
 //
 // INSTALL_JS=<path> runs the same cases against another copy of install.js.
 // Run: node app/tests/js/install.mjs (npm run test:js; CI js-checks).
@@ -23,7 +17,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(here, '../../static');
 const LOADER = readFileSync(join(STATIC, 'js/theme-loader.js'), 'utf8');
 const INSTALL_PATH = process.env.INSTALL_JS || join(STATIC, 'js/install.js');
-const INDEX = readFileSync(join(STATIC, 'index.html'), 'utf8');
 const PARTIAL = readFileSync(join(STATIC, 'partials/shell-sidebar.html'), 'utf8');
 
 let failed = 0;
@@ -47,9 +40,6 @@ const UA = {
   firefox: 'Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0'
 };
 
-function card() {
-  return INDEX.match(/<section\b[^>]*id="installCard"[\s\S]*?<\/section>/)[0];
-}
 function sheet() {
   return PARTIAL.match(/<dialog id="wsMoreSheet"[\s\S]*?<\/dialog>/)[0]
     .replace(/\{\{\{\w+\}\}\}/g, '').replace(/\{\{\w+\}\}/g, 'x');
@@ -57,7 +47,7 @@ function sheet() {
 
 /* A browser: its width, its kind, whether it runs as an installed app, its
    storage, and whether it offers beforeinstallprompt. Runs theme-loader.js
-   as the <head> does, then puts Home's card and the More sheet in. */
+   as the <head> does, then puts the More sheet in. */
 function browser({ width = 390, ua = 'android', standalone = false, navStandalone, storage = 'ok', bip = true,
                    user = true, page = 'index', store = {} } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: 800 });
@@ -78,7 +68,7 @@ function browser({ width = 390, ua = 'android', standalone = false, navStandalon
   const data = { branding: { app_name: 'WebServarr' }, user: user ? { username: 'sam' } : null, page };
   w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';
   w.eval(LOADER);
-  w.document.body.innerHTML = card() + sheet();
+  w.document.body.innerHTML = sheet();
   w.WS = { closeChrome() { w.__closed = (w.__closed || 0) + 1; } };
   return w;
 }
@@ -100,157 +90,38 @@ async function scenario(name, fn) {
 
 await scenario('the prompt is caught before anything paints', async () => {
   const w = browser();
-  const heard = [];
-  w.addEventListener('ws:install-prompt', () => heard.push(1));
   const e = bipEvent(w);
   w.dispatchEvent(e);
   check('the mini-infobar is held back', e.defaultPrevented);
   check('kept for later', w.WSInstallPrompt === e);
-  check('remembered on this device', w.localStorage.getItem('ws-install-prompt-seen') === '1');
-  check('announced', heard.length === 1);
-  check('Home offers the card now', w.WSInstallOffer('ws-install-card-dismissed') === 'prompt');
+  check('nothing written to storage', w.localStorage.length === 0);
   await w.happyDOM.close();
 });
 
-await scenario('who gets the card', async () => {
-  const cases = [
-    ['an Android phone that was offered the prompt before', { store: { 'ws-install-prompt-seen': '1' } }, 'prompt'],
-    ['an Android phone never offered it', {}, ''],
-    ['a browser with no install prompt', { bip: false, ua: 'firefox', store: { 'ws-install-prompt-seen': '1' } }, ''],
-    ['an iPhone', { ua: 'iphone', bip: false }, 'ios'],
-    ['an iPad (it says Macintosh)', { ua: 'ipad', bip: false }, 'ios'],
-    ['a wide screen', { width: 1280, store: { 'ws-install-prompt-seen': '1' } }, ''],
-    ['an iPad at desktop width', { ua: 'ipad', bip: false, width: 1180 }, ''],
-    ['already installed (display-mode)', { standalone: true, store: { 'ws-install-prompt-seen': '1' } }, ''],
-    ['already installed (iOS home-screen app)', { ua: 'iphone', bip: false, navStandalone: true }, ''],
-    ['said Not now on this device', { ua: 'iphone', bip: false, store: { 'ws-install-card-dismissed': '1' } }, ''],
-    ['storage blocked: shows again', { ua: 'iphone', bip: false, storage: 'throw' }, 'ios'],
-    ['signed out', { ua: 'iphone', bip: false, user: false }, '']
-  ];
-  for (const [what, opts, want] of cases) {
+await scenario('Home is never marked for an install card', async () => {
+  for (const opts of [{ ua: 'iphone', bip: false }, { store: { 'ws-install-prompt-seen': '1' } }, {}]) {
     const w = browser(opts);
-    const got = w.WSInstallOffer('ws-install-card-dismissed');
-    check(what, got === want, { got, want });
-    check(what + ': Home is marked for the first paint', (w.document.documentElement.getAttribute('data-install-offer') || '') === want);
+    w.dispatchEvent(bipEvent(w));
+    check('no mark', !w.document.documentElement.hasAttribute('data-install-offer'), opts);
+    check('no offer function', typeof w.WSInstallOffer === 'undefined');
     await w.happyDOM.close();
   }
-  const w = browser({ ua: 'iphone', bip: false, page: 'issues' });
-  check('only Home is marked', !w.document.documentElement.hasAttribute('data-install-offer'));
+  const w = browser({ ua: 'iphone', bip: false });
   check('installed is known', w.WSInstalled() === false && w.WSInstallIOS() === true);
   await w.happyDOM.close();
 });
 
-// ---- install.js: Home's card ----
-
-function decide(w, api) {
-  const c = w.document.getElementById('installCard');
-  const mode = w.WSInstallOffer(c.dataset.dismissKey);
-  c.hidden = !mode;
-  if (mode) c.dataset.mode = mode;
-  const ctl = new w.AbortController();
-  if (mode) api.wireCard(c, ctl.signal);
-  return { c, ctl, mode };
-}
-
-await scenario('Android: Add asks the browser once, and the card goes when it is installed', async () => {
-  const w = browser();
-  const e = bipEvent(w, 'accepted');
-  w.dispatchEvent(e);
-  const api = install.create(w);
-  const { c } = decide(w, api);
-  const add = c.querySelector('[data-install-add]');
-  check('shown', !c.hidden);
-  check('ready', add.getAttribute('aria-disabled') !== 'true');
-  add.click();
-  add.click();
-  await wait(10);
-  check('the browser asked once', e.prompts === 1, e.prompts);
-  check('spent', w.WSInstallPrompt === null);
-  check('the card goes', c.hidden);
-  await w.happyDOM.close();
-});
-
-await scenario('Android: a prompt the person turns down is spent, so the card goes for now', async () => {
-  const w = browser();
-  const e = bipEvent(w, 'dismissed');
-  w.dispatchEvent(e);
-  const api = install.create(w);
-  const { c } = decide(w, api);
-  c.querySelector('[data-install-add]').click();
-  await wait(10);
-  check('hidden', c.hidden);
-  check('not remembered as Not now', w.localStorage.getItem('ws-install-card-dismissed') === null);
-  await w.happyDOM.close();
-});
-
-await scenario('Android: a remembered prompt is waited for, then used', async () => {
-  const w = browser({ store: { 'ws-install-prompt-seen': '1' } });
-  const api = install.create(w, { waitMs: 200 });
-  const { c } = decide(w, api);
-  const add = c.querySelector('[data-install-add]');
-  check('shown from the first paint', !c.hidden);
-  check('waits for the browser', add.getAttribute('aria-disabled') === 'true');
-  add.click();
-  const e = bipEvent(w);
-  w.dispatchEvent(e);
-  check('ready once offered', add.getAttribute('aria-disabled') === 'false');
-  check('a press while waiting asked nothing', e.prompts === 0);
-  add.click();
-  await wait(10);
-  check('asked', e.prompts === 1);
-  await w.happyDOM.close();
-});
-
-await scenario('Android: a remembered prompt that never comes hides the card and is forgotten', async () => {
-  const w = browser({ store: { 'ws-install-prompt-seen': '1' } });
-  const api = install.create(w, { waitMs: 60 });
-  const { c } = decide(w, api);
-  await wait(120);
-  check('hidden', c.hidden);
-  check('forgotten', w.localStorage.getItem('ws-install-prompt-seen') === null);
-  await w.happyDOM.close();
-});
-
-await scenario('Not now remembers on this device; blocked storage still hides it', async () => {
-  let w = browser({ ua: 'iphone', bip: false });
-  let api = install.create(w);
-  let { c } = decide(w, api);
-  check('iOS shows the steps, not a button', c.dataset.mode === 'ios');
-  c.querySelector('[data-install-later]').click();
-  check('hidden', c.hidden);
-  check('remembered', w.localStorage.getItem('ws-install-card-dismissed') !== null);
-  check('Home no longer offers it', w.WSInstallOffer('ws-install-card-dismissed') === '');
-  await w.happyDOM.close();
-  w = browser({ ua: 'iphone', bip: false, storage: 'throw' });
-  api = install.create(w);
-  ({ c } = decide(w, api));
-  c.querySelector('[data-install-later]').click();
-  check('hidden without storage', c.hidden);
-  await w.happyDOM.close();
-});
-
-await scenario('the card ends with the visit', async () => {
-  const w = browser({ ua: 'iphone', bip: false });
-  const api = install.create(w);
-  const { c, ctl } = decide(w, api);
-  ctl.abort();
-  c.querySelector('[data-install-later]').click();
-  check('no longer wired', !c.hidden && w.localStorage.getItem('ws-install-card-dismissed') === null);
-  await w.happyDOM.close();
-});
-
-await scenario('installing from anywhere removes the card and the row', async () => {
+await scenario('installing from anywhere removes the row', async () => {
   const w = browser();
   w.dispatchEvent(bipEvent(w));
   const api = install.create(w);
+  check('no card API left', typeof api.wireCard === 'undefined');
   api.wireRow();
-  const { c } = decide(w, api);
   const row = w.document.querySelector('[data-install-row]');
   check('the row shows while not installed', !row.hidden);
   w.dispatchEvent(new w.Event('appinstalled'));
-  check('card gone', c.hidden);
   check('row gone', row.hidden);
-  check('nothing to remember', w.localStorage.getItem('ws-install-prompt-seen') === null);
+  check('the prompt is spent', w.WSInstallPrompt === null);
   await w.happyDOM.close();
 });
 

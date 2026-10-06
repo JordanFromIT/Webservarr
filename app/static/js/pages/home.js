@@ -1277,25 +1277,11 @@ export async function mount(ctx) {
 
     function byId(id) { return root.querySelector('#' + id); }
 
-    // Add to home screen. A full load decided it before the first paint
-    // (theme-loader.js WSInstallOffer: html[data-install-offer] shows the
-    // card); a soft navigation decides it here, before the swapped page is
-    // drawn. install.js (WS.install) wires its buttons for this visit.
-    var install = byId('installCard');
-    if (install) {
-        var installMode = typeof window.WSInstallOffer === 'function'
-            ? window.WSInstallOffer(install.dataset.dismissKey) : '';
-        install.hidden = !installMode;
-        if (installMode) install.dataset.mode = installMode;
-        document.documentElement.removeAttribute('data-install-offer');
-        if (installMode && window.WS && WS.install) WS.install.wireCard(install, signal);
-    }
-
-    // Push opt-in. A full load decided it before the first paint
-    // (theme-loader.js WSPushOffer: html[data-push-offer] shows the card); a
-    // soft navigation decides it here, before the swapped page is drawn. From
-    // now on the card's hidden attribute says it, and notifications.js wires
-    // its buttons and writes the dismissal under data-dismiss-key.
+    // Push opt-in, the slim banner at the top. A full load decided it before
+    // the first paint (theme-loader.js WSPushOffer: html[data-push-offer]
+    // shows it); a soft navigation decides it here, before the swapped page
+    // is drawn. From now on its hidden attribute says it, and notifications.js
+    // wires its buttons and writes the dismissal under data-dismiss-key.
     var card = byId('pushPrompt');
     if (card) {
         card.hidden = !(typeof window.WSPushOffer === 'function' &&

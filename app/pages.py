@@ -598,8 +598,6 @@ def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -
 
 SIDEBAR_MARKER = "<!-- ws:sidebar -->"
 HEADER_MARKER = "<!-- ws:header -->"
-# In page copy: the site's name, HTML-escaped (render_html).
-APP_NAME_MARKER = "<!-- ws:app-name -->"
 # Home's event log section; flags["feed_off"] renders it hidden (render_html).
 EVENT_LOG_OPEN = '<section id="homeEventLog"'
 # Home's pinned problems: flags["event_pinned"] ({"items", "now_ms"}) writes
@@ -610,8 +608,6 @@ HOME_NEWS_OPEN = "<!-- ws:home-news -->"
 HOME_NEWS_CLOSE = "<!-- /ws:home-news -->"
 HOME_NEWS_SECTION = '<section data-arrive="news" class="lg:order-3"'
 HOME_NEWS_VIEW_ALL = 'id="newsViewAll" class="invisible '
-# An <img data-ws-app-icon src="..."> shows the home-screen icon (render_html).
-_APP_ICON_IMG_RE = re.compile(r'(<img data-ws-app-icon src=")[^"]*(")')
 
 
 def _partial(filename: str) -> str:
@@ -1024,11 +1020,6 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     static_title = title.group(0)[len("<title>"):-len("</title>")] if title else ""
     out = _inject_head(_tag_page_styles(page_html), branding, user, version, name, base_url, path,
                        flags.get("setup"), custom_css=not safe)
-
-    # Page copy that names the site ("Add <name> to your home screen") and
-    # shows its home-screen icon, written by the server like the shell is.
-    out = out.replace(APP_NAME_MARKER, html.escape(_site_name(branding) or NO_NAME))
-    out = _APP_ICON_IMG_RE.sub(lambda m: m.group(1) + html.escape(touch_icon(branding), quote=True) + m.group(2), out)
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         out = _cover_viewport(out)

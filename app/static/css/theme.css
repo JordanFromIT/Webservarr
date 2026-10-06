@@ -992,8 +992,7 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
 .ws-sheet-row[aria-current] .ws-sheet-row-icon { font-variation-settings: 'FILL' 1; }
 .ws-sheet-version { padding: 12px 12px 0; font-size: 12px; color: rgb(var(--color-text) / .7); }
 
-/* "Add to home screen": the steps, in More and on Home's card. A real
-   sequence, so numbered. */
+/* "Add to home screen": the steps in More. A real sequence, so numbered. */
 .ws-install-help { padding: 4px 12px 12px 52px; }
 .ws-install-steps { display: flex; flex-direction: column; gap: 12px; }
 .ws-install-steps[hidden] { display: none; }
@@ -1004,19 +1003,6 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
   font-size: 13px; line-height: 24px; font-weight: 700; background: rgb(var(--color-text) / .08);
 }
 .ws-step-glyph { font-size: 20px; vertical-align: -4px; }
-
-/* Home's card (index.html #installCard). Decided before the first paint:
-   theme-loader.js marks <html data-install-offer> ("ios" or "prompt"), the
-   page module then sets the card's hidden and data-mode. An [hidden] card
-   gets no space-y gap, hence its own margin while the mark shows it. Never
-   on a wide screen. */
-html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }
-@media (min-width: 1024px) { #installCard { display: none !important; } }
-#installCard [data-install-mode="ios"] { display: none; }
-#installCard[data-mode="ios"] [data-install-mode="prompt"],
-html[data-install-offer="ios"] #installCard [data-install-mode="prompt"] { display: none; }
-#installCard[data-mode="ios"] [data-install-mode="ios"],
-html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display: flex; }
 
 @media (prefers-reduced-motion: reduce) {
   .ws-navtab-icon, .ws-sheet-row, .ws-sheet-scrim { transition: none; }
@@ -1114,9 +1100,10 @@ html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display:
  *
  * The server lists them on <html data-home-hide="news streams">, so a section
  * that is off is never painted and index.html never loads it. News, Service
- * Health and Recent Requests share one grid ([data-home-pair]); from lg Recent
- * Requests and News share a row under Service Health: with one of them off the
- * other takes the full width, and with all three off the grid goes away.
+ * Health, Recent Requests and the event log share one grid ([data-home-pair]);
+ * from lg Recent Requests and News share a row under Service Health: with one
+ * of them off the other takes the full width, and with all three off the grid
+ * goes away once the event log is hidden too (the feed off, or nothing in it).
  */
 html[data-home-hide~="services"] [data-arrive="services"],
 html[data-home-hide~="news"] [data-arrive="news"],
@@ -1125,7 +1112,7 @@ html[data-home-hide~="releases"] [data-arrive="releases"],
 html[data-home-hide~="requests"] [data-arrive="requests"] { display: none; }
 html[data-home-hide~="requests"] [data-home-pair],
 html[data-home-hide~="news"] [data-home-pair] { grid-template-columns: minmax(0, 1fr); }
-html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair] { display: none; }
+html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]:has(> #homeEventLog[hidden]) { display: none; }
 /* space-y-8 spaces every child that follows one without the hidden attribute,
  * and a row hidden by the rules above still counts: with Service Health off,
  * the first section left would open with a stray gap. While
@@ -1157,9 +1144,9 @@ html[data-nav-icons-off] .ws-nav-icon { display: none; }
 /* ---- Home's push offer on a full load ----
  *
  * theme-loader.js marks <html data-push-offer> in <head> when Home is to offer
- * push, so the card is there at the first paint. The page module
- * (pages/home.js) then takes the card's hidden attribute off and the mark
- * away. Until it does the card still carries hidden, which space-y-8 skips, so
+ * push, so the banner is there at the first paint. The page module
+ * (pages/home.js) then takes the banner's hidden attribute off and the mark
+ * away. Until it does the banner still carries hidden, which space-y-8 skips, so
  * the gap under it is given here and nothing moves when the attribute goes.
  * (With a section off, the stack's flex gap already spaces it.)
  */

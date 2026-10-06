@@ -149,16 +149,19 @@
 })();
 
 /*
- * Home's offer to turn on push (#pushPrompt, index.html), decided before the
- * first paint so the card never pushes the page down after load.
+ * Home's offer to turn on push (#pushPrompt, index.html, a slim banner at
+ * the top), decided before the first paint so it never pushes the page down
+ * after load.
  *
  * WSPushOffer(key, days) is true for an account push can reach, on a browser
- * that supports it, that has never been asked, and that did not say "Not now"
- * (localStorage[key], a time) within days. A full load of Home decides here
- * and marks <html data-push-offer>, which shows the card (theme.css); the page
- * module (pages/home.js) then decides again for every visit, soft ones
- * included, sets the card's hidden attribute and takes the mark off. The key
- * and days are the card's data-dismiss-key and data-dismiss-days.
+ * that supports it (an iPhone only in a home-screen app: Safari has no push in
+ * a tab), that has never been asked, and that did not say "Not now" (the
+ * banner's close button: localStorage[key], a time) within days. A full load
+ * of Home decides here and marks <html data-push-offer>, which shows the
+ * banner (theme.css); the page module (pages/home.js) then decides again for
+ * every visit, soft ones included, sets the banner's hidden attribute and
+ * takes the mark off. The key and days are the banner's data-dismiss-key and
+ * data-dismiss-days.
  */
 (function () {
   'use strict';
@@ -186,34 +189,20 @@
 
 /*
  * "Add to home screen" (spec 2026-10-04-mobile-nav-and-home-screen-design.md,
- * Part 2), decided before the first paint.
+ * Part 2): the More sheet's row (install.js).
  *
  * Chromium offers its own install prompt through beforeinstallprompt, which
- * can arrive at any time after load: it is caught here, in <head>, kept as
- * window.WSInstallPrompt (install.js uses it once), remembered on this
- * device ('ws-install-prompt-seen'), and announced as ws:install-prompt on
- * window. Its default (Chrome's own mini-infobar) is held back: the site
- * offers it itself, on Home's card and in More.
- *
- * WSInstallOffer(key) says which card Home shows: 'ios' (the two Share steps:
- * Apple has no prompt), 'prompt' (the browser's own, now or as it was last
- * time, so the card holds its place from the first paint), or '' for none:
- * signed out, already an installed app, a wide screen, or "Not now" on this
- * device (localStorage[key]; storage that throws counts as never dismissed,
- * so the card shows again). A full load of Home marks <html
- * data-install-offer> (theme.css shows the card); pages/home.js decides
- * again on every visit. WSInstalled() and WSInstallIOS() for install.js.
+ * can arrive at any time after load: it is caught here, in <head>, and kept as
+ * window.WSInstallPrompt (install.js uses it once). Its default (Chrome's own
+ * mini-infobar) is held back: the site offers it itself, in More. Home has no
+ * install card (it took most of a phone's first screen).
+ * WSInstalled() and WSInstallIOS() for install.js.
  */
 (function () {
   'use strict';
-  var DISMISS_KEY = 'ws-install-card-dismissed';
-  var SEEN_KEY = 'ws-install-prompt-seen';
 
   function matches(q) {
     try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; }
-  }
-  function stored(key) {
-    try { return window.localStorage.getItem(key); } catch (e) { return null; }
   }
   // Running as a home-screen app: display-mode, or Safari's own flag on iOS.
   function installed() {
@@ -230,25 +219,10 @@
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     window.WSInstallPrompt = e;
-    try { window.localStorage.setItem(SEEN_KEY, '1'); } catch (err) { /* this visit only */ }
-    window.dispatchEvent(new CustomEvent('ws:install-prompt'));
   });
 
-  function offer(key) {
-    if (!(window.WS_DATA || {}).user || installed() || !matches('(max-width: 1023.98px)')) return '';
-    if (stored(key)) return '';
-    if (ios()) return 'ios';
-    if (window.WSInstallPrompt) return 'prompt';
-    if ('onbeforeinstallprompt' in window && stored(SEEN_KEY) === '1') return 'prompt';
-    return '';
-  }
-
-  window.WSInstallOffer = offer;
   window.WSInstalled = installed;
   window.WSInstallIOS = ios;
-
-  var mode = (window.WS_DATA || {}).page === 'index' ? offer(DISMISS_KEY) : '';
-  if (mode) document.documentElement.setAttribute('data-install-offer', mode);
 })();
 
 /*

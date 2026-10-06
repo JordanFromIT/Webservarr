@@ -531,9 +531,11 @@ class ShellRendering(unittest.TestCase):
         for sid in ("requests", "news"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
                              .get("grid-template-columns"), "minmax(0, 1fr)", sid)
-        # The grid holds Service Health too, so it goes away only with all three off.
+        # The grid holds Service Health and the event log too, so it goes away
+        # only with all three off and the event log hidden.
         self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="requests"]'
-                                   '[data-home-hide~="news"] [data-home-pair]', {}).get("display"), "none")
+                                   '[data-home-hide~="news"] [data-home-pair]:has(> #homeEventLog[hidden])', {})
+                         .get("display"), "none")
         self.assertNotIn('html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]', rules)
         stack = rules.get("html[data-home-hide] [data-home-stack]", {})
         self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
@@ -555,19 +557,22 @@ class ShellRendering(unittest.TestCase):
         pair_tag = re.search(r'<div class="([^"]*)" data-home-pair>', page)
         self.assertIsNotNone(pair_tag)
         pair = pair_tag.end()
-        services, requests, news, streams = (page.index(f'data-arrive="{sid}"')
-                                             for sid in ("services", "requests", "news", "streams"))
-        # Written in the phone's order: News, Service Health, Recent Requests,
-        # one column below lg (so Tab follows what is seen there).
-        self.assertTrue(stack.end() < pair < news < services < requests < streams)
-        # From lg the grid order makes Service Health a strip across the top,
-        # with Recent Requests and News sharing the row under it, as before.
+        services, requests, news, feed, streams = (page.index(f'data-arrive="{sid}"')
+                                                   for sid in ("services", "requests", "news", "feed", "streams"))
+        # Written in the phone's order: News, the event log, Recent Requests,
+        # Service Health, one column below lg (so Tab follows what is seen there).
+        self.assertTrue(stack.end() < pair < news < feed < requests < services < streams)
+        # From lg the grid order makes the event log and then Service Health
+        # strips across the top, with Recent Requests and News sharing the row
+        # under them, as before.
         pair_classes = pair_tag.group(1).split()
         for cls in ("grid", "grid-cols-1", "lg:grid-cols-2", "gap-8", "items-start",
                     "lg:[reading-flow:grid-order]"):
             self.assertIn(cls, pair_classes, cls)
         self.assertIn('<section data-arrive="news" class="lg:order-3">', page)
         self.assertIn('<section data-arrive="services" class="lg:order-1 lg:col-span-full">', page)
+        self.assertIn('<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" '
+                      'class="relative -mb-3 lg:order-first lg:col-span-full">', page)
         self.assertIn('<section data-arrive="requests" class="lg:order-2">', page)
         # The grid closes before Active Streams: all three sections sit inside it.
         between = page[pair:streams]
@@ -1069,12 +1074,13 @@ class EventLogNeverMovesThePage(unittest.TestCase):
         # Only Home has the section.
         self.assertNotIn("homeEventLog", render(name="index", flags={"feed_off": True}))
 
-    def test_it_sits_right_above_news_and_service_health(self):
+    def test_it_sits_after_news_and_above_recent_requests(self):
         page = static_text("index.html")
         order = re.findall(r'data-arrive="(\w+)"', page)
-        # News comes next on a phone; from lg the grid puts Service Health first.
-        self.assertEqual(order[order.index("feed") + 1:order.index("feed") + 3], ["news", "services"])
-        log = page[page.index('<section id="homeEventLog"'):page.index('<div class="grid grid-cols-1 lg:grid-cols-2')]
+        # On a phone: News, the event log, Recent Requests; from lg the grid
+        # order puts it first, across the page.
+        self.assertEqual(order[order.index("feed") - 1:order.index("feed") + 2], ["news", "feed", "requests"])
+        log = page[page.index('<section id="homeEventLog"'):page.index('<!-- Recent Requests, compact -->')]
         self.assertEqual(log.count("<section"), 1)
         self.assertIn('<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>', log)
         # Focusable and named, to turn back through the history with the keys.

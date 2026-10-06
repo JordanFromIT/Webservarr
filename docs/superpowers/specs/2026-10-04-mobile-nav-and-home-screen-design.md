@@ -78,7 +78,10 @@ Applies below `lg` (under 1024px). It replaces the hamburger button, the drawer
    - Also add `apple-touch-icon` and the `theme-color` meta, using the same icon.
    - The existing service worker (`app/static/sw.js`, push only) is enough for Android to treat
      the site as installable. It needs no fetch handler or offline page.
-2. **"Add to home screen" card on Home:**
+2. **"Add to home screen" card on Home** (removed 2026-10-06: on a phone it and the push card took
+   most of the first screen. Install lives in the More row only, item 3; Home's push offer became
+   a one-row banner at the top, and on phones News now comes first, then the event log, then
+   Recent Requests):
    - **When it shows:** below `lg`, signed in, and not already running as an installed app.
      "Installed" means `display-mode: standalone`, or `navigator.standalone` on iOS.
    - **Android/Chromium:** capture `beforeinstallprompt`. The card's button calls `prompt()`,

@@ -259,18 +259,6 @@ class HeadLinks(unittest.TestCase):
                 head = render(b=branding(**{"branding.app_icon_url": bad})).split("</head>")[0]
                 self.assertIn('<link rel="apple-touch-icon" href="/static/webservarr-app-192.png">', head)
 
-    def test_the_app_name_marker_is_filled(self):
-        page = PAGE.replace("<p>hi</p>", "<h2>Add <!-- ws:app-name --> to your home screen</h2>")
-        out = render(page=page, b=branding(**{"branding.app_name": "A & B"}))
-        self.assertIn("<h2>Add A &amp; B to your home screen</h2>", out)
-        out = render(page=page, b=branding(**{"branding.app_name": " "}))
-        self.assertIn("<h2>Add this site to your home screen</h2>", out)
-
-    def test_the_app_icon_image_is_filled(self):
-        page = PAGE.replace("<p>hi</p>", '<img data-ws-app-icon src="/static/webservarr-app-192.png" alt="">')
-        out = render(page=page, b=branding(**{"branding.app_icon_url": "https://cdn.example.test/i.png"}))
-        self.assertIn('<img data-ws-app-icon src="https://cdn.example.test/i.png" alt="">', out)
-
 
 if __name__ == "__main__":
     unittest.main()

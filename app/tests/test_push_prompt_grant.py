@@ -62,7 +62,11 @@ class PushPromptLeavesOnGrant(unittest.TestCase):
         button = re.search(r"<button[^>]*data-push-prompt-enable[^>]*>(.*?)</button>", page, re.S).group(1)
         self.assertIn('<span class="inline-grid">', button)
         self.assertRegex(button, r'<span data-push-label-idle class="col-start-1 row-start-1">Turn on</span>')
-        self.assertRegex(button, r'<span data-push-label-busy class="col-start-1 row-start-1 invisible">Turning on…</span>')
+        # The busy one is a spinner, its words for screen readers, so the
+        # button is only as wide as "Turn on" (the banner's words keep the room).
+        self.assertIn('<span data-push-label-busy class="col-start-1 row-start-1 invisible flex items-center justify-center">'
+                      '<span class="material-symbols-outlined text-xl leading-5 motion-safe:animate-spin" aria-hidden="true">'
+                      'progress_activity</span><span class="sr-only">Turning on…</span></span>', button)
 
     def test_a_failure_after_the_grant_toasts_and_brings_the_card_back(self):
         handler = enable_handler()

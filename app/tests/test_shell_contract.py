@@ -641,44 +641,49 @@ class PhoneShellContract(unittest.TestCase):
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         code = js_code_only(loader)
         self.assertRegex(code, r"window\.addEventListener\('                   ', function \(e\) \{\s*e\.preventDefault\(\);")
-        self.assertIn("window.WSInstallOffer = offer;", loader)
-        self.assertIn("var DISMISS_KEY = 'ws-install-card-dismissed';", loader)
-        self.assertIn("document.documentElement.setAttribute('data-install-offer', mode);", loader)
+        self.assertIn("window.WSInstalled = installed;", loader)
+        self.assertIn("window.WSInstallIOS = ios;", loader)
 
-    def test_home_install_card_contract(self):
+    def test_home_has_no_install_card(self):
+        # Removed 2026-10-06: on a phone it took most of the first screen.
+        # "Add to home screen" lives in More only, with its iOS steps.
         page = read("index")
-        m = re.search(r"<section\b([^>]*)\bid=\"installCard\"([^>]*)>(.*?)</section>", page, re.S)
-        self.assertIsNotNone(m, "index.html: #installCard")
-        attrs, inner = m.group(1) + m.group(2), m.group(3)
-        self.assertRegex(attrs, r"\bhidden\b")
-        self.assertNotIn("class=", attrs)
-        self.assertIn('data-dismiss-key="ws-install-card-dismissed"', attrs)
-        # A fixed place: the top of Home, ahead of the push offer, not a Home section.
-        self.assertLess(page.index('id="installCard"'), page.index('id="pushPrompt"'))
-        self.assertNotIn("data-arrive", attrs)
-        self.assertIn("<!-- ws:app-name -->", inner)
-        self.assertRegex(inner, r'<img data-ws-app-icon src="/static/webservarr-app-192\.png"[^>]*width="48" height="48"')
-        for hook in ("data-install-later", "data-install-add", 'data-install-mode="prompt"', 'data-install-mode="ios"'):
-            self.assertIn(hook, inner, hook)
-        self.assertNotIn("<script", inner)
-        # The two iOS steps say the same thing on the card and in More.
-        def steps(html):
-            ol = re.search(r'<ol[^>]*data-install-(?:mode|steps)="ios"[^>]*>(.*?)</ol>', html, re.S).group(1)
-            return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", li)).strip()
-                    for li in re.findall(r"<li\b[^>]*>(.*?)</li>", ol, re.S)]
-        self.assertEqual(steps(inner), steps(self.side))
-        self.assertEqual(len(steps(inner)), 2)
-        # Decided before the first paint (theme-loader) and again by the page
-        # module before anything it awaits; never on a wide screen.
-        theme = self.theme
-        self.assertIn("html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }", theme)
-        self.assertIn("@media (min-width: 1024px) { #installCard { display: none !important; } }", theme)
+        self.assertNotIn("installCard", page)
+        self.assertNotIn("data-install", page)
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        for gone in ("WSInstallOffer", "data-install-offer", "ws-install-card-dismissed", "ws-install-prompt-seen"):
+            self.assertNotIn(gone, loader, gone)
+        self.assertNotIn("installCard", self.theme)
+        self.assertNotIn("data-install-offer", self.theme)
         home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
-        mount = home[home.index("export async function mount(ctx) {"):]
-        decide = mount.index("window.WSInstallOffer(install.dataset.dismissKey)")
-        self.assertLess(decide, mount.index("await "))
-        self.assertLess(decide, mount.index("document.documentElement.removeAttribute('data-install-offer');"))
-        self.assertIn("WS.install.wireCard(install, signal);", mount)
+        self.assertNotIn("install", home.lower())
+        install = (STATIC / "js" / "install.js").read_text(encoding="utf-8")
+        self.assertFalse(live_matches(install, r"\bwireCard\b"))
+        # The More row keeps its two pictured iOS steps.
+        ol = re.search(r'<ol[^>]*data-install-steps="ios"[^>]*>(.*?)</ol>', self.side, re.S)
+        self.assertIsNotNone(ol)
+        steps = [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", li)).strip()
+                 for li in re.findall(r"<li\b[^>]*>(.*?)</li>", ol.group(1), re.S)]
+        self.assertEqual(steps, ["1 Tap ios_share Share in the browser toolbar", "2 Tap Add to Home Screen"])
+
+    def test_home_push_prompt_is_one_slim_line(self):
+        page = read("index")
+        m = re.search(r"<section\b([^>]*)\bid=\"pushPrompt\"([^>]*)>(.*?)</section>", page, re.S)
+        inner = m.group(3)
+        # The first thing on Home, on every width (no lg/sm layout switch).
+        stack = page.index("data-home-stack>")
+        self.assertEqual(page.index("<section", stack), m.start())
+        row = re.search(r'<div class="([^"]*)">', inner).group(1).split()
+        for c in ("flex", "items-center", "min-h-12", "py-1.5"):
+            self.assertIn(c, row, c)
+        self.assertFalse([c for c in row if "flex-col" in c or c.startswith("lg:p")], row)
+        self.assertIn('<p id="pushPromptTitle"', inner)
+        self.assertNotIn("We'll send an alert", inner)
+        later = re.search(r"<button\b[^>]*data-push-prompt-later[^>]*>(.*?)</button>", inner, re.S)
+        self.assertIn('aria-label="Not now"', later.group(0))
+        self.assertIn('<span class="material-symbols-outlined text-xl" aria-hidden="true">close</span>', later.group(1))
+        self.assertIn("size-8", later.group(0), "a 32px target (24px is the floor)")
+        self.assertLess(inner.index("data-push-prompt-enable"), inner.index("data-push-prompt-later"))
 
     def test_home_gauges_fit_a_small_phone(self):
         # The gauges live in the headers, one copy each from one template:

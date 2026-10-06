@@ -19,86 +19,39 @@
 <h1 class="sr-only">Home</h1>
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8" data-home-stack>
-<!-- Add to home screen (phones only). Decided before the page is drawn,
-     like the push offer below: on a full load theme-loader.js marks
-     html[data-install-offer] ("ios" or "prompt"), and pages/home.js decides on
-     every visit, setting hidden and data-mode, then has install.js wire the
-     buttons. "prompt" asks the browser to install; "ios" shows the two Share
-     steps (the same words as the More sheet's). Not a Home section: its place
-     is fixed. The server writes the site name and its home-screen icon. -->
-<section id="installCard" hidden aria-labelledby="installCardTitle" data-dismiss-key="ws-install-card-dismissed">
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4">
-<div class="flex items-start gap-4">
-<img data-ws-app-icon src="/static/webservarr-app-192.png" alt="" width="48" height="48" loading="lazy" decoding="async" class="size-12 shrink-0 rounded-[12px] object-cover">
-<div class="min-w-0 flex-1">
-<h2 id="installCardTitle" class="text-[17px] font-bold tracking-[-0.02em] leading-snug text-frosted-blue [text-wrap:balance]">Add <!-- ws:app-name --> to your home screen</h2>
-<p data-install-mode="prompt" class="text-[15px] leading-relaxed text-frosted-blue/70 mt-1">Open it from an icon like any other app, with no link to find.</p>
-<ol class="ws-install-steps mt-3" data-install-mode="ios">
-<li><span class="ws-step-n" aria-hidden="true">1</span><span>Tap <span class="material-symbols-outlined ws-step-glyph" aria-hidden="true">ios_share</span> <strong>Share</strong> in the browser toolbar</span></li>
-<li><span class="ws-step-n" aria-hidden="true">2</span><span>Tap <strong>Add to Home Screen</strong></span></li>
-</ol>
-</div>
-</div>
-<div class="flex gap-2 mt-4">
-<button type="button" data-install-later class="flex-1 px-4 py-2.5 rounded-[10px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue">Not now</button>
-<button type="button" data-install-add data-install-mode="prompt" class="flex-1 bg-primary hover:bg-primary/90 text-bright px-4 py-2.5 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark aria-disabled:opacity-50 aria-disabled:cursor-wait">Add to home screen</button>
-</div>
-</div>
-</section>
-<!-- Push opt-in. Everything that decides whether to offer it is known before
-     the page is drawn, so it never pushes content down after load: on a full
-     load theme-loader.js decides in <head> (html[data-push-offer] shows it),
-     and pages/home.js decides on every visit and sets the hidden attribute.
-     notifications.js wires the buttons and writes the dismissal under
-     data-dismiss-key. The section has no display utility (one would override
-     the hidden attribute). -->
+<!-- Push opt-in: one slim line at the top of Home, on every width. The
+     decision is known before the page is drawn, so it never pushes content
+     down after load: on a full load theme-loader.js decides in <head>
+     (html[data-push-offer] shows it), and pages/home.js decides on every
+     visit and sets the hidden attribute. notifications.js wires the buttons
+     (Turn on asks the browser, which needs the tap; the close button is
+     "Not now") and writes the dismissal under data-dismiss-key. The section
+     has no display utility (one would override the hidden attribute). The
+     line wraps only where it must (phones), and both labels of Turn on are
+     laid out so the button never changes width: the busy one is a spinner
+     (its words are for screen readers), so the button is only as wide as
+     "Turn on" and the words keep the room. -->
 <section id="pushPrompt" hidden aria-labelledby="pushPromptTitle" data-dismiss-key="ws-push-prompt-dismissed" data-dismiss-days="30">
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 lg:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
-<div class="flex items-start gap-4 flex-1 min-w-0">
-<span class="material-symbols-outlined text-steel-blue bg-primary/20 rounded-full size-11 shrink-0 flex items-center justify-center" aria-hidden="true">notifications_active</span>
-<div class="min-w-0">
-<h2 id="pushPromptTitle" class="text-[17px] font-bold tracking-[-0.02em] leading-snug text-frosted-blue">Get notified when your requests are ready</h2>
-<p class="text-[15px] leading-relaxed text-frosted-blue/70 mt-1">We'll send an alert to this device when something you asked for is ready to watch or someone replies to you.</p>
-<p data-push-prompt-msg role="status" aria-live="polite" class="text-[15px] leading-relaxed text-frosted-blue mt-2 empty:hidden"></p>
+<div class="flex items-center gap-1.5 min-h-12 py-1.5 pl-3 pr-1 bg-baltic-blue/10 border border-steel-blue/20 rounded-xl">
+<span class="material-symbols-outlined text-xl text-steel-blue shrink-0 mr-1 hidden sm:inline" aria-hidden="true">notifications_active</span>
+<div class="min-w-0 flex-1">
+<p id="pushPromptTitle" class="text-sm font-semibold leading-5 text-frosted-blue [text-wrap:balance]">Get notified when your requests are ready</p>
+<p data-push-prompt-msg role="status" aria-live="polite" class="text-sm leading-5 text-frosted-blue/80 mt-0.5 empty:hidden"></p>
 </div>
-</div>
-<div data-push-prompt-actions class="flex gap-2 shrink-0">
-<button type="button" data-push-prompt-later class="flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">Not now</button>
-<button type="button" data-push-prompt-enable class="flex-1 sm:flex-none bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark disabled:opacity-50"><span class="inline-grid"><span data-push-label-idle class="col-start-1 row-start-1">Turn on</span><span data-push-label-busy class="col-start-1 row-start-1 invisible">Turning on…</span></span></button>
+<div data-push-prompt-actions class="flex items-center gap-1 shrink-0">
+<button type="button" data-push-prompt-enable class="bg-primary hover:bg-primary/90 text-bright px-3 py-1.5 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark disabled:opacity-50"><span class="inline-grid"><span data-push-label-idle class="col-start-1 row-start-1">Turn on</span><span data-push-label-busy class="col-start-1 row-start-1 invisible flex items-center justify-center"><span class="material-symbols-outlined text-xl leading-5 motion-safe:animate-spin" aria-hidden="true">progress_activity</span><span class="sr-only">Turning on…</span></span></span></button>
+<button type="button" data-push-prompt-later aria-label="Not now" class="size-8 inline-flex items-center justify-center rounded-[10px] text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue disabled:opacity-50"><span class="material-symbols-outlined text-xl" aria-hidden="true">close</span></button>
 </div>
 </div>
 </section>
-<!-- Event log: the status feed's newest events (GET /api/status/feed) on a
-     wheel that turns on a horizontal axis. The newest line sits flat at the
-     bottom; older ones curl up over the top and dim. pages/home.js builds the
-     lines (createEventLog) and theme.css draws the wheel (.ws-wheel). The
-     wheel's height is fixed, so its answer never moves anything below it.
-     With no Uptime Kuma and nothing in the feed the server renders the
-     section hidden (pages.py, feed_off), so a person who never sees it never
-     has its room. Until the first answer the front line is a skeleton.
-     The wheel turns back through the history (wheel, drag, arrow keys);
-     "Latest", placed in the gap below so it moves nothing, turns it back. -->
-<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" class="relative -mb-3">
-<div class="flex items-center gap-3 mb-2">
-<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
-<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
-</div>
-<!-- Open outages and important notes, held above the wheel until they are
-     resolved (theme.css .ws-pinned). The server writes the rows in
-     (app/home_event_log.py) and pages/home.js takes them over. -->
-<ul class="ws-pinned" data-event-pinned role="list" aria-label="Current problems" hidden></ul>
-<div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
-<button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>
-<p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
-</section>
-<!-- News & Updates, Service Health and Recent Requests. Below lg they are one
-     column in the order written here, so on a phone the news comes straight
-     after the event log and Tab meets each section where it is seen. From lg
-     the grid order puts Service Health in a strip across the page and Recent
-     Requests and News side by side under it, and reading-flow takes Tab
-     through them in that order where the browser has it. A section that is
-     switched off is not displayed, so it takes no cell and no gap (theme.css,
-     "Home sections switched off"). -->
+<!-- News & Updates, the event log, Recent Requests and Service Health. Below
+     lg they are one column in the order written here, so on a phone the news
+     comes first and Tab meets each section where it is seen. From lg the grid
+     order puts the event log and then Service Health in strips across the
+     page and Recent Requests and News side by side under them, and
+     reading-flow takes Tab through them in that order where the browser has
+     it. A section that is switched off or hidden is not displayed, so it
+     takes no cell and no gap (theme.css, "Home sections switched off"). -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start lg:[reading-flow:grid-order]" data-home-pair>
 <!-- News & Updates -->
 <section data-arrive="news" class="lg:order-3">
@@ -116,8 +69,8 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 <!-- The server writes the real cards between the markers (app/home_news.py:
      renderNewsCard's markup for the posts the script will read, or its empty
-     state) and marks the section data-arrived, so on a phone, where News sits
-     above Service Health, nothing under it moves when the script takes over.
+     state) and marks the section data-arrived, so on a phone, where News is
+     the first section, nothing under it moves when the script takes over.
      The skeleton is what is left when the server cannot read the news:
      renderNewsCard's collapsed card with nothing in it (the title, two lines
      on a phone and one from sm, a two-line excerpt and Read more). -->
@@ -126,6 +79,83 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 <!-- /ws:home-news -->
+</div>
+</section>
+<!-- Event log: the status feed's newest events (GET /api/status/feed) on a
+     wheel that turns on a horizontal axis. The newest line sits flat at the
+     bottom; older ones curl up over the top and dim. pages/home.js builds the
+     lines (createEventLog) and theme.css draws the wheel (.ws-wheel). The
+     wheel's height is fixed, so its answer never moves anything below it.
+     On a phone it follows News; from lg it is the strip at the top.
+     With no Uptime Kuma and nothing in the feed the server renders the
+     section hidden (pages.py, feed_off), so a person who never sees it never
+     has its room. Until the first answer the front line is a skeleton.
+     The wheel turns back through the history (wheel, drag, arrow keys);
+     "Latest", placed in the gap below so it moves nothing, turns it back. -->
+<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" class="relative -mb-3 lg:order-first lg:col-span-full">
+<div class="flex items-center gap-3 mb-2">
+<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
+<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
+</div>
+<!-- Open outages and important notes, held above the wheel until they are
+     resolved (theme.css .ws-pinned). The server writes the rows in
+     (app/home_event_log.py) and pages/home.js takes them over. -->
+<ul class="ws-pinned" data-event-pinned role="list" aria-label="Current problems" hidden></ul>
+<div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
+<button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>
+<p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
+</section>
+<!-- Recent Requests, compact -->
+<section data-arrive="requests" class="lg:order-2">
+<!-- Wraps only on the narrowest phones (320px), where the heading and the
+     link cannot share a line: the link then sits under the heading. The link
+     is the site's primary button (as "Turn on" on the push card), one line
+     high (py-1) so the row is no taller than its heading. -->
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
+<div class="flex items-center gap-3">
+<span id="iconSectionRequests" class="ws-section-icon material-symbols-outlined text-steel-blue">shopping_cart</span>
+<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
+</div>
+<a id="viewRequestsLink" href="/requests" class="inline-flex items-center whitespace-nowrap bg-primary hover:bg-primary/90 text-bright px-4 py-1 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Make a request</a>
+</div>
+<!-- A container: the card is half the page from lg and the whole page below
+     it, so its own width (not the screen's) decides the Type column. Under
+     28rem the type folds into a pill under the title (see renderRequestRow)
+     and its column closes to no width rather than going away, so the table
+     always has three columns: the skeleton and empty rows span three, and a
+     two-column table would move Status when the real rows land.
+     table-fixed so the title column takes what is left and truncates: with
+     auto layout a long title sets the table's min-content width and the
+     table overflows the card. -->
+<div class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
+<table class="w-full table-fixed text-left text-sm">
+<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
+<tr>
+<th class="px-3 py-2">Content</th>
+<th class="w-0 p-0 @md:w-28 @md:px-3 @md:py-2"><span class="hidden @md:inline">Type</span></th>
+<th class="w-36 px-3 py-2">Status</th>
+</tr>
+</thead>
+<!-- Ten skeleton rows, the most the API returns (and what an active server
+     has): the card sits above Active Streams, so it holds that room from the
+     first paint and the sections under it never move when the rows land.
+     Each is built like the real row in renderRequestRow (same padding, 32px
+     thumbnail, one text line, and in a narrow card the type pill, made from
+     the real pill's markup with its content hidden) so it is the height of
+     the row that replaces it. -->
+<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/4 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+</tbody>
+</table>
 </div>
 </section>
 <!-- Service Health: from lg one strip across the page. The server's gauges
@@ -201,59 +231,6 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 <div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
 <div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
 <div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
-</div>
-</section>
-<!-- Recent Requests, compact -->
-<section data-arrive="requests" class="lg:order-2">
-<!-- Wraps only on the narrowest phones (320px), where the heading and the
-     link cannot share a line: the link then sits under the heading. The link
-     is the site's primary button (as "Turn on" on the push card), one line
-     high (py-1) so the row is no taller than its heading. -->
-<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
-<div class="flex items-center gap-3">
-<span id="iconSectionRequests" class="ws-section-icon material-symbols-outlined text-steel-blue">shopping_cart</span>
-<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
-</div>
-<a id="viewRequestsLink" href="/requests" class="inline-flex items-center whitespace-nowrap bg-primary hover:bg-primary/90 text-bright px-4 py-1 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Make a request</a>
-</div>
-<!-- A container: the card is half the page from lg and the whole page below
-     it, so its own width (not the screen's) decides the Type column. Under
-     28rem the type folds into a pill under the title (see renderRequestRow)
-     and its column closes to no width rather than going away, so the table
-     always has three columns: the skeleton and empty rows span three, and a
-     two-column table would move Status when the real rows land.
-     table-fixed so the title column takes what is left and truncates: with
-     auto layout a long title sets the table's min-content width and the
-     table overflows the card. -->
-<div class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
-<table class="w-full table-fixed text-left text-sm">
-<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
-<tr>
-<th class="px-3 py-2">Content</th>
-<th class="w-0 p-0 @md:w-28 @md:px-3 @md:py-2"><span class="hidden @md:inline">Type</span></th>
-<th class="w-36 px-3 py-2">Status</th>
-</tr>
-</thead>
-<!-- Ten skeleton rows, the most the API returns (and what an active server
-     has): the card sits above Active Streams, so it holds that room from the
-     first paint and the sections under it never move when the rows land.
-     Each is built like the real row in renderRequestRow (same padding, 32px
-     thumbnail, one text line, and in a narrow card the type pill, made from
-     the real pill's markup with its content hidden) so it is the height of
-     the row that replaces it. -->
-<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/4 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/3 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-</tbody>
-</table>
 </div>
 </section>
 </div>
