@@ -413,9 +413,36 @@ class RawPageFiles(PageRoutesBase):
                         r = self.get(path, session)
                         self.assertEqual((r.status_code, r.content), (404, missing.content))
 
+    def test_a_path_that_leaves_static_and_comes_back_is_404(self):
+        # A leading ".." survives normalisation ("../static/settings.html"),
+        # resolves back inside the directory and named a page's file. Sent as
+        # spelled: httpx would collapse a literal ".." before sending, while
+        # curl --path-as-is and the tunnel forward it.
+        async def literal(scope, receive, send):
+            if scope["type"] == "http":
+                for name, value in scope["headers"]:
+                    if name == b"x-literal-path":
+                        scope = dict(scope, path=value.decode(), raw_path=value)
+            await app(scope, receive, send)
+
+        client = TestClient(literal)
+        missing = self.get("/static/no-such-file.html", None)
+        for path in ("/static/../static/settings.html", "/static/js/../../static/tickets.html",
+                     "/static/../static/player-test.html", "/static/../static/css/app.css",
+                     "/static/partials/../../static/partials/shell-header.html"):
+            with self.subTest(path=path):
+                r = client.get("/placeholder", headers={"X-Literal-Path": path})
+                self.assertEqual((r.status_code, r.content), (404, missing.content))
+        for path in ("/static/%2e%2e/static/settings.html", "/static/%2e%2e/static/player-test.html",
+                     "/static/css/%2e%2e/%2e%2e/static/tickets.html", "/static/%2E%2E/static/index.html"):
+            with self.subTest(path=path):
+                r = self.get(path, None)
+                self.assertEqual((r.status_code, r.content), (404, missing.content))
+
     def test_partials_and_assets_are_still_served(self):
         for path in ("/static/partials/shell-sidebar.html", "/static/partials/shell-header.html",
-                     "/static/css/app.css", "/static/js/shell.js", "/static/webservarr.svg"):
+                     "/static/css/app.css", "/static/js/shell.js", "/static/webservarr.svg",
+                     "/static/js/../css/app.css"):
             with self.subTest(path=path):
                 self.assertEqual(self.get(path, None).status_code, 200)
 

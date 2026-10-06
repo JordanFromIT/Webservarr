@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
+import os
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -762,14 +763,27 @@ class _StaticFiles(StaticFiles):
     page switch, admin only) and fills in its data. Served raw from /static,
     the player's test launcher would let the router mount its module for
     anyone, and every other page would skip its gate. `path` here is already
-    normalised (StaticFiles.get_path), so every spelling that would reach the
-    file ("//", "./", "js/../", an encoded character) is caught, and gets the
+    normalised (StaticFiles.get_path), but a leading ".." survives that
+    ("../static/settings.html" leaves the directory and comes back), so any
+    path with a ".." component is refused, and the decision is made on the
+    file the path really resolves to. Every spelling that would reach a page
+    ("//", "./", "js/../", "%2e%2e/static/", an encoded character) gets the
     404 a missing file gets."""
 
     async def get_response(self, path: str, scope):
-        if path.endswith(".html") and "/" not in path:
+        if ".." in path.split(os.sep) or self._is_page_file(path):
             raise StarletteHTTPException(status_code=404)
         return await super().get_response(path, scope)
+
+    def _is_page_file(self, path: str) -> bool:
+        """True for an .html file directly in the static directory, read from
+        the real path (symlinks resolved) the request would be served from."""
+        root = os.path.realpath(self.directory)
+        try:
+            real = os.path.realpath(os.path.join(root, path))
+        except ValueError:         # a NUL byte: StaticFiles answers 404 for it too
+            return False
+        return os.path.dirname(real) == root and real.lower().endswith(".html")
 
 
 # Mount static files (CSS, JS, images, etc.)
