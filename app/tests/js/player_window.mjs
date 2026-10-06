@@ -1,7 +1,8 @@
 // The desktop player (app/static/js/player/ui.js and popout.js, and the
 // remote window's app/static/js/player-remote.js) in
 // happy-dom: the top bar's pill and its states, the floating window (open,
-// minimise, Escape, Stop and close with Resume, panels opening below and
+// its X and Escape back to the pill, the pill's Stop while paused with
+// Resume, panels opening below and
 // closing again, Playback settings back to Chapters), moving and sizing it
 // by pointer and keyboard inside the viewport, its remembered place per
 // listener, soft navigation leaving it open, the phone keeping the sheet,
@@ -251,7 +252,9 @@ await run('the window: part of the page, not a dialog', async () => {
   check('the page is not marked or blocked', !t.doc.documentElement.hasAttribute('data-player-full') && captures.length === 0, captures);
   check('focus on the title', t.doc.activeElement === t.q('#wspTitle'));
   check('the sheet\'s close button gives way to the window\'s', t.q('.wsp-full [aria-label="Close the player"]').hidden &&
-    !label(t, 'Minimise to the top bar').hidden && !label(t, 'Stop and close the book').hidden && !label(t, 'Move the player. Arrow keys move it, Home puts it back.').hidden);
+    !label(t, 'Close player window').hidden && !label(t, 'Move the player. Arrow keys move it, Home puts it back.').hidden);
+  check('one close, no Minimise or Stop in the window', !label(t, 'Minimise to the top bar') && !label(t, 'Stop and close the book') &&
+    !t.full.querySelector('[aria-label^="Stop"]'));
   check('no Pop out until popout.js offers it', label(t, 'Pop out into its own window').hidden);
   const tab = t.key(t.q('#wspTitle'), 'Tab');
   check('Tab is never trapped', !tab.defaultPrevented);
@@ -263,7 +266,7 @@ await run('the window: part of the page, not a dialog', async () => {
   check('which ends', !t.full.classList.contains('is-opening'));
 });
 
-await run('Escape and Minimise send it to the pill; the pill hides it; focus follows', async () => {
+await run('Escape and the X send it to the pill and it plays on; the pill hides it; focus follows', async () => {
   const t = setup({ state: BOOK });
   t.ui.open();
   t.q('.wsp-pill-open').click();
@@ -276,8 +279,12 @@ await run('Escape and Minimise send it to the pill; the pill hides it; focus fol
   check('focus to the pill', t.doc.activeElement === t.q('.wsp-pill-open'));
   await t.clock.advance(200);
   t.ui.open();
-  label(t, 'Minimise to the top bar').click();
-  check('Minimise minimises', !t.ui.isOpen() && t.doc.activeElement === t.q('.wsp-pill-open'));
+  const x = label(t, 'Close player window');
+  check('the X is the close icon', x.textContent === 'close');
+  x.click();
+  check('the X minimises', !t.ui.isOpen() && t.doc.activeElement === t.q('.wsp-pill-open'));
+  check('and the book plays on', t.engine.calls.length === 0 && t.engine.state().playing === true && !t.q('#wsPlayerPill').hidden &&
+    t.q('.wsp-pill').getAttribute('data-state') === 'playing', t.engine.calls);
   await t.clock.advance(200);
   t.ui.open();
   t.q('#pageBtn').focus();
@@ -345,7 +352,7 @@ await run('dragged by its top bar, kept inside the viewport, remembered', () => 
   check('done', !t.full.classList.contains('is-moving'));
   const kept = JSON.parse(t.storage.getItem('ws-player-window:abc0123456789def'));
   check('kept for this listener', kept.x === 1052 && kept.y === 492, kept);
-  const b = t.q('.wsp-top [aria-label="Minimise to the top bar"]');
+  const b = t.q('.wsp-top [aria-label="Close player window"]');
   t.pointer(b, 'pointerdown', 1300, 500);
   check('its buttons do not start a move', !t.full.classList.contains('is-moving'));
 
@@ -484,11 +491,31 @@ await run('prompts and notices show inside the window while it is open', () => {
   pr.remove();
 });
 
-await run('Stop and close: the book closes, the place is saved, Resume', async () => {
+await run('the pill\'s Stop: only while paused; the book closes, the place is saved, Resume', async () => {
   const t = setup({ state: BOOK });
+  const stop = t.q('.wsp-pill-stop');
+  check('playing: no Stop', stop.hidden);
+  t.engine.set({ playing: false }, 'pause');
+  check('paused: Stop, named for what it does', !stop.hidden && stop.getAttribute('aria-label') === 'Stop listening, your place is saved' &&
+    stop.textContent === 'close');
+  check('left of Play, so Play stays put', stop.nextElementSibling === t.q('.wsp-pill-play'));
+  t.engine.set({ playing: true }, 'play');
+  check('playing again: gone', stop.hidden);
+  t.engine.set({ loading: true, playing: false }, 'loading');
+  check('opening: none', stop.hidden);
+  t.engine.set({ loading: false, checking: true }, 'loading');
+  check('reading the saved places: none', stop.hidden);
+  t.engine.set({ checking: false }, 'pause');
+  stop.focus();
+  t.engine.set({ playing: true }, 'play');
+  check('focus on it when play starts elsewhere: to Play', stop.hidden && t.doc.activeElement === t.q('.wsp-pill-play'));
+  t.engine.set({ playing: false }, 'pause');
+
   t.ui.open();
-  label(t, 'Stop and close the book').click();
-  check('the book is closed', t.engine.calls.some((c) => c[0] === 'close') && !t.ui.isOpen());
+  check('the window open: Stop is still the pill\'s', !stop.hidden);
+  stop.focus();
+  stop.click();
+  check('the book is closed, the window too', t.engine.calls.some((c) => c[0] === 'close') && !t.ui.isOpen());
   const n = t.q('.wsp-notice');
   check('says where, and that it is saved', n && n.textContent.indexOf('Stopped at 11:40. Your place is saved.') !== -1, n && n.textContent);
   check('the pill goes', t.q('#wsPlayerPill').hidden);
@@ -499,9 +526,14 @@ await run('Stop and close: the book closes, the place is saved, Resume', async (
   const o = t.engine.calls.find((c) => c[0] === 'open');
   check('Resume opens the same book where it was left, playing', o && o[1] === '500:1' && o[2].autoplay === true, o);
 
-  const h = setup({ state: Object.assign({}, BOOK, { safetyNet: { failed: false, orphans: [] } }) });
-  h.ui.open();
-  label(h, 'Stop and close the book').click();
+  const c = setup({ state: Object.assign({}, BOOK, { playing: false }) });
+  c.q('.wsp-pill-stop').click();
+  check('window closed: the same', c.engine.calls.some((x) => x[0] === 'close') && c.q('#wsPlayerPill').hidden &&
+    c.doc.activeElement === Array.from(c.q('.wsp-notice').querySelectorAll('button')).find((b) => b.textContent === 'Resume'));
+
+  const h = setup({ state: Object.assign({}, BOOK, { playing: false, safetyNet: { failed: false, orphans: [] } }) });
+  check('held: no claim of a save in its name', h.q('.wsp-pill-stop').getAttribute('aria-label') === 'Stop listening');
+  h.q('.wsp-pill-stop').click();
   check('held: no claim that anything was saved', h.q('.wsp-notice').textContent.indexOf('Your place is as it was.') !== -1);
 });
 
@@ -546,7 +578,7 @@ await run('Pop out with Picture-in-Picture: the window moves into it and back', 
   check('dressed like the page', !!pdoc.getElementById('ws-theme') && pdoc.documentElement.getAttribute('data-shell') === 'hidden');
   check('inside #wsPlayer there, so its rules hold', pdoc.getElementById('wsPlayer').contains(t.full));
   check('nothing to move, size, minimise or pop', label(t, 'Move the player. Arrow keys move it, Home puts it back.').hidden &&
-    label(t, 'Minimise to the top bar').hidden && label(t, 'Pop out into its own window').hidden);
+    label(t, 'Close player window').hidden && label(t, 'Pop out into its own window').hidden);
   check('the pill says it is popped out', t.q('.wsp-pill').hasAttribute('data-popped') && po.active() === 'docked');
   check('the audio host stays in the page', t.doc.getElementById('wsPlayer') !== null);
   t.key(t.q('#wspTitle') || pdoc.getElementById('wspTitle'), 'Escape');
@@ -555,6 +587,7 @@ await run('Pop out with Picture-in-Picture: the window moves into it and back', 
   check('it still draws the player', pdoc.querySelector('.wsp-play-lg').getAttribute('aria-label') === 'Play');
 
   pip.win.close();
+  check('its own close never stops the book', !t.engine.calls.some((c) => c[0] === 'close') && t.engine.state().book === '500:1');
   check('its own close: back in the page, minimised to the pill', t.doc.getElementById('wsPlayer').contains(t.full) && !t.ui.isOpen() &&
     !t.q('.wsp-pill').hasAttribute('data-popped') && po.active() === null);
   await t.clock.advance(200);
@@ -667,6 +700,7 @@ await run('the remote window: plays the tab, which keeps the audio', async () =>
   r.remote.leave();
   await flush();
   check('remote closed: the pill comes back', !t.q('.wsp-pill').hasAttribute('data-popped') && po.active() === null);
+  check('and the book was never stopped', !t.engine.calls.some((c) => c[0] === 'close') && t.engine.state().book === '500:1' && !t.q('#wsPlayerPill').hidden);
 });
 
 await run('the remote window: the tab closes, Play here carries on', async () => {

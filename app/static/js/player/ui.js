@@ -122,9 +122,11 @@
  * it back; the corner's arrows size it), stays inside the viewport, and its
  * place and size are kept per listener on this device. Its panels open
  * below the player and close again from the same button (Playback settings
- * gives way to Chapters). Escape or Minimise sends it back to the pill and
- * focus with it; Stop and close closes the book ("Your place is saved",
- * Resume). A full-screen view (the reader) keeps the bar and the sheet.
+ * gives way to Chapters). Escape or its X (Close player window) sends it back
+ * to the pill and focus with it; the book plays on. Only the pill stops a
+ * book: while paused it shows a ✕ (Stop listening) that closes the book
+ * ("Your place is saved", Resume). A full-screen view (the reader) keeps the
+ * bar and the sheet.
  *
  * Pop out (popout.js) moves the window into a window of its own: dock()
  * puts this same window in a Document Picture-in-Picture document, and
@@ -502,8 +504,9 @@ export function createUI(env) {
   }, [icon('drag_indicator')]);
   const popBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Pop out', 'aria-label': 'Pop out into its own window' }, [icon('picture_in_picture_alt')]);
   const winSep = h('span', { class: 'wsp-win-sep', 'aria-hidden': 'true', hidden: true });
-  const minBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Minimise', 'aria-label': 'Minimise to the top bar' }, [icon('remove')]);
-  const stopBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Stop and close', 'aria-label': 'Stop and close the book' }, [icon('close')]);
+  // The window's X only closes the window: the book plays on in the pill.
+  // Stopping is the pill's own ✕, offered while paused.
+  const winCloseBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Close player window', 'aria-label': 'Close player window' }, [icon('close')]);
   const resizeBtn = h('button', {
     type: 'button', class: 'wsp-win-resize', hidden: true, title: 'Resize',
     'aria-label': 'Resize the player. Arrow keys change its size.'
@@ -533,8 +536,7 @@ export function createUI(env) {
     slots.menu,
     popBtn,
     winSep,
-    minBtn,
-    stopBtn
+    winCloseBtn
   ]);
   const sheet = h('div', { class: 'wsp-sheet', tabindex: '-1' }, [
     h('div', { class: 'wsp-ambient', 'aria-hidden': 'true' }, [ambientImg]),
@@ -567,12 +569,17 @@ export function createUI(env) {
     h('span', { class: 'wsp-pill-text' }, [pillTitle, pillMeta])
   ]);
   const pillPlay = h('button', { type: 'button', class: 'wsp-play wsp-pill-play', 'aria-label': 'Play' }, [icon('play_arrow')]);
+  // Stop: shown only while paused, so a book playing can't be stopped by a
+  // stray click. It sits left of Play, so Play never moves when it comes
+  // (a second click on Pause lands on Play, not here).
+  const pillStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-pill-stop', hidden: true }, [icon('close')]);
   const pillFill = h('span', { class: 'wsp-pill-fill' });
   // The not-saved warning, said here while the window is not open (the
   // window's own says it then), so it is announced once.
   const pillWarn = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const pill = h('div', { class: 'wsp-pill', role: 'group', 'aria-label': 'Audiobook player', 'data-state': 'paused' }, [
     pillOpen,
+    pillStop,
     pillPlay,
     h('span', { class: 'wsp-pill-line', 'aria-hidden': 'true' }, [pillFill]),
     pillWarn
@@ -1100,6 +1107,14 @@ export function createUI(env) {
     if (pillFill.style.transform !== tf) pillFill.style.transform = tf;
     setArt(pillArt, s.cover || '');
     drawPlay(pillPlay, s);
+    // Stop is offered only for a loaded book at rest (not playing, opening
+    // or reading its saved places).
+    const canStop = !loadingOnly && !playing(s) && !s.loading && !s.checking;
+    const held = !!(s.filesChanged || s.safetyNet);
+    if (!canStop && pillStop === doc.activeElement) pillPlay.focus({ preventScroll: true });
+    setHidden(pillStop, !canStop);
+    setAttr(pillStop, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
+    setAttr(pillStop, 'title', 'Stop listening');
     const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
     setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
     setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
@@ -1385,7 +1400,7 @@ export function createUI(env) {
     setAttr(full, 'aria-label', on ? 'Audiobook player' : null);
     setAttr(title, 'tabindex', on ? '-1' : null);
     setHidden(closeBtn, on);
-    [grip, popBtn, winSep, minBtn, stopBtn, resizeBtn].forEach(function (b) { setHidden(b, !on); });
+    [grip, popBtn, winSep, winCloseBtn, resizeBtn].forEach(function (b) { setHidden(b, !on); });
     drawWindowChrome();
     if (!on) {
       full.classList.remove('is-pip', 'is-opening', 'is-closing', 'is-moving');
@@ -1394,10 +1409,11 @@ export function createUI(env) {
     drawPanels();
   }
 
-  // In a window of its own there is nothing to move, size, pop or minimise.
+  // In a window of its own there is nothing to move, size or pop, and that
+  // window's own close brings the player back to the pill.
   function drawWindowChrome() {
     const free = windowed && !docked;
-    [grip, minBtn, stopBtn, resizeBtn].forEach(function (b) { setHidden(b, !free); });
+    [grip, winCloseBtn, resizeBtn].forEach(function (b) { setHidden(b, !free); });
     setHidden(popBtn, !free || !popOutFn);
     setHidden(winSep, !free);
   }
@@ -1588,29 +1604,30 @@ export function createUI(env) {
     saveGeo();
   });
 
-  minBtn.addEventListener('click', function () { close(); });
+  // The window's X: back to the pill, as Escape does; the book plays on.
+  winCloseBtn.addEventListener('click', function () { close(); });
   popBtn.addEventListener('click', function () {
     if (popOutFn) safely(popOutFn)();
   });
 
-  // Stop and close: the book closes (its last save goes as it does), with
+  // The pill's Stop: the book closes (its last save goes as it does), with
   // a way back to the same place.
-  stopBtn.addEventListener('click', function () {
+  pillStop.addEventListener('click', function () {
     const s = player.state();
-    if (!s || !s.book) {
-      close();
-      return;
-    }
+    if (!s || !s.book || s.playing) return;
     const key = s.book;
     const held = !!(s.filesChanged || s.safetyNet);
     const msg = held ? 'Stopped. Your place is as it was.' : 'Stopped at ' + formatClock(s.bookMs) + '. Your place is saved.';
-    // The notice first, so the focus has somewhere to go when the window does.
     notify(msg, {
       id: 'stopped',
       action: { label: 'Resume', run: guarded(function () { return player.open(key, { autoplay: true }); }) }
     });
+    const stopped = notices.get('stopped');
     player.close();
     if (isOpen) close();
+    // The pill has gone with the book: focus to Resume.
+    const resume = stopped && stopped.el.querySelector('.wsp-notice-btn');
+    if (resume && resume.isConnected) resume.focus({ preventScroll: true });
   });
 
   // ---- Its own window (popout.js) ----

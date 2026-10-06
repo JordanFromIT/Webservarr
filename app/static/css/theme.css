@@ -1968,6 +1968,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-pill-play { width: 36px; height: 36px; }
 .wsp-pill-play .material-symbols-outlined { font-size: 24px; }
 .wsp-pill-play:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+/* Stop, while paused: quieter than Play (the icon button's muted text). */
+.wsp-pill-stop { width: 32px; height: 32px; }
+.wsp-pill-stop .material-symbols-outlined { font-size: 20px; }
 .wsp-pill-line { position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; pointer-events: none; background: rgb(var(--color-text) / .12); }
 .wsp-pill-fill { display: block; height: 100%; background: rgb(var(--color-accent)); transform-origin: 0 50%; transform: scaleX(0); }
 .wsp-pill[data-open] { background: rgb(var(--color-primary) / .3); border-color: rgb(var(--color-accent) / .5); }
@@ -2021,7 +2024,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window .wsp-ambient, .wsp-full.is-window .wsp-grab, .wsp-full.is-window .wsp-panel-back { display: none; }
 
 /* Its top bar: the grip, "Now playing", Playback settings, Pop out, then
-   Minimise and Stop and close. The bar itself moves the window too. */
+   Close player window (back to the pill). The bar itself moves the window too. */
 .wsp-full.is-window .wsp-top {
   display: flex; align-items: center; gap: 2px; height: 48px; padding: 0 6px 0 4px;
   background: rgb(var(--color-text) / .04); border-bottom: 1px solid rgb(var(--color-text) / .08);
