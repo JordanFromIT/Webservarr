@@ -103,22 +103,6 @@
     @media (prefers-reduced-motion: reduce) {
       .backdrop-slide.is-moving, .backdrop-slide.is-solo { animation: none; }
     }
-    /* The Authentik button carries Plex's full-colour wordmark, whose amber
-       chevron would vanish into an amber fill, so this button is dark: the
-       page's background colour (opaque, so the artwork never shows through
-       behind the words) lifted by a wash of the text colour, edged in the
-       accent. Hover lifts the wash and brightens the edge. Keyboard focus is
-       the site's one ring (theme.css). No display here: .hidden must win. */
-    .login-sso-dark {
-      background: linear-gradient(rgb(var(--color-text) / 0.06), rgb(var(--color-text) / 0.06)),
-                  rgb(var(--color-background));
-      border: 1px solid rgb(var(--color-accent) / 0.5);
-    }
-    .login-sso-dark:hover {
-      background: linear-gradient(rgb(var(--color-text) / 0.12), rgb(var(--color-text) / 0.12)),
-                  rgb(var(--color-background));
-      border-color: rgb(var(--color-accent));
-    }
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
        configured auth methods, then reveal via .auth-ready. */
@@ -196,15 +180,15 @@
 <span class="font-black text-xl tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
 </button>
 <!-- Authentik SSO Button (hidden by default, shown when configured) -->
-<button id="authentikLoginBtn" class="hidden w-full login-sso-dark text-frosted-blue font-bold py-3 rounded-lg flex flex-col items-center justify-center transition-all active:scale-[0.98]" type="button">
+<button id="authentikLoginBtn" class="hidden w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3 rounded-lg flex flex-col items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark active:scale-[0.98]" type="button">
 <div class="flex items-center gap-1.5">
 <span class="text-sm font-medium">Sign in with</span>
-<!-- Plex's full-colour wordmark: the letters in the button's text colour
-     (the theme's light text, not bright text, which is only for words on a
-     Primary fill and would go white on white in a light theme), the chevron
-     in Plex's own amber. The amber is the brand mark's fixed fill, not a
-     theme colour, like the direct Plex button's fill (audit M10). The hidden
-     "Plex" keeps the name "Sign in with Plex via Authentik". -->
+<!-- The site's primary button (as "Turn on" on Home's push card), carrying
+     Plex's full-colour wordmark: the letters and the white strokes of the x
+     in the button's bright text (R153: words on a solid Primary fill), the
+     chevron in Plex's own amber. The amber is the brand mark's fixed fill,
+     not a theme colour, like the direct Plex button's fill (audit M10). The
+     hidden "Plex" keeps the name "Sign in with Plex via Authentik". -->
 <svg class="h-[1.125rem] w-auto shrink-0" viewBox="0.4 0.4 359 155" fill="currentColor" aria-hidden="true" focusable="false">
 <path d="M59.3,28.2c-14.3,0-23.5,3.9-31.3,13v-10H.4v123.7s.5.2,1.9.5c1.9.5,12.1,2.5,19.6-3.4,6.5-5.3,8-11.4,8-18.3v-17.8c8,8,17,11.4,29.6,11.4,27.2,0,48-20.8,48-48.4s-20.1-50.7-48.3-50.7h0ZM54,103.8c-15.3,0-27.4-11.9-27.4-26.3s14.3-25.6,27.4-25.6,27.4,11.2,27.4,25.8-12.1,26-27.4,26Z"/>
 <path d="M146.9,75.9c0,10.7,1.2,23.7,12.4,37.9.2.2.7.9.7.9-4.6,7.3-10.2,12.3-17.7,12.3s-11.6-3-16.5-8c-5.1-5.5-7.5-12.6-7.5-20.1V.4h28.4l.2,75.6Z"/>
@@ -215,7 +199,7 @@
 </svg>
 <span class="sr-only">Plex</span>
 </div>
-<span class="text-label font-medium text-frosted-blue/70">via Authentik</span>
+<span class="text-label font-medium text-bright/80">via Authentik</span>
 </button>
 </form>
 <!-- Shown by CSS alone, only when login.js never ran (see #loginLoadHint above). -->

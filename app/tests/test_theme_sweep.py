@@ -417,6 +417,7 @@ BRIGHT_ON_PRIMARY = {
     ("pages.py", 'subcls="text-bright/80" if active', "the active nav pill (_LINK_ACTIVE, bg-primary)"),
     ("pages.py", "text-bright font-bold text-3xl", "the logo-fallback tile (size-14 bg-primary)"),
     ("pages.py", "text-bright text-xl", "the phone bar's logo-fallback tile (size-8 bg-primary)"),
+    ("login.html", "text-label font-medium text-bright/80", "the Authentik sign-in button (#authentikLoginBtn, bg-primary)"),
 }
 BRIGHT = re.compile(r"(?<![\w-])(?:[\w:-]+:)?text-bright(?:/\d+)?(?![\w-])")
 ON_PRIMARY = re.compile(r"(?<![\w/:-])bg-primary(?![\w/:-])")
@@ -832,6 +833,26 @@ class NoPaletteColours(unittest.TestCase):
         for _f, cls, mark in M10_ALLOWED:
             line = next(l for l in login.splitlines() if mark in l)
             self.assertIn(cls, line)
+
+    def test_the_authentik_button_is_the_primary_button(self):
+        # Its fill, hover and focus ring are the site's primary button's, as
+        # "Make a request" and "Turn on" on Home draw them, so the wordmark's
+        # letters can be bright text and "via Authentik" bright text at 80%.
+        login = (STATIC / "login.html").read_text(encoding="utf-8")
+        home = (STATIC / "index.html").read_text(encoding="utf-8")
+        primary = ("bg-primary hover:bg-primary/90 text-bright",
+                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue "
+                   "focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark")
+        btn = next(l for l in login.splitlines() if 'id="authentikLoginBtn"' in l)
+        for mark in ('id="viewRequestsLink"', "data-push-prompt-enable"):
+            ref = next(l for l in home.splitlines() if mark in l)
+            for cls in primary:
+                self.assertIn(cls, ref, mark)
+                self.assertIn(cls, btn)
+        body = login[login.index('id="authentikLoginBtn"'):]
+        body = body[:body.index("</button>")]
+        self.assertNotIn("frosted-blue/", body)   # no light-text leftovers on the fill
+        self.assertIn('<span class="text-label font-medium text-bright/80">via Authentik</span>', body)
 
 
 if __name__ == "__main__":
