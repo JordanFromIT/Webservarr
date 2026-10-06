@@ -1,5 +1,5 @@
 /**
- * WebServarr — the player's remote window (/player/remote; ES module)
+ * WebServarr: the player's remote window (/player/remote; ES module)
  *
  * Pop out (popout.js) opens this page in a small window of its own where the
  * browser has no always-on-top window for pages (Firefox, Safari). It is a

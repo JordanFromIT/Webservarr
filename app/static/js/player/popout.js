@@ -1,5 +1,5 @@
 /**
- * WebServarr — Pop out: the desktop player in a window of its own
+ * WebServarr: Pop out, the desktop player in a window of its own
  * (ES module, document-lifetime)
  *
  * The desktop player window (ui.js, WS.playerUI) has a Pop out button. What

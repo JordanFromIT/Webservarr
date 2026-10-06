@@ -1915,6 +1915,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-pill {
   position: relative; display: flex; align-items: center; gap: 4px;
   width: clamp(232px, 22vw, 300px); height: 48px; padding: 0 4px 0 0; overflow: hidden;
+  /* Taller than the bell's row: it takes no more of it, so the top bar's
+     items never move when it comes and goes. */
+  margin-block: -4px;
   border-radius: 9999px; color: rgb(var(--color-text));
   background: rgb(var(--color-text) / .06); border: 1px solid rgb(var(--color-text) / .10);
   transition: background-color 150ms ease-out, border-color 150ms ease-out;
