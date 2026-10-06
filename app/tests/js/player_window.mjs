@@ -499,8 +499,9 @@ await run('the pill\'s Stop: only while paused; the book closes, the place is sa
   check('paused: Stop, named for what it does', !stop.hidden && stop.getAttribute('aria-label') === 'Stop listening, your place is saved' &&
     stop.textContent === 'close');
   check('left of Play, so Play stays put', stop.nextElementSibling === t.q('.wsp-pill-play'));
+  check('the pill is marked for the narrow top bar', t.q('.wsp-pill').hasAttribute('data-stop'));
   t.engine.set({ playing: true }, 'play');
-  check('playing again: gone', stop.hidden);
+  check('playing again: gone', stop.hidden && !t.q('.wsp-pill').hasAttribute('data-stop'));
   t.engine.set({ loading: true, playing: false }, 'loading');
   check('opening: none', stop.hidden);
   t.engine.set({ loading: false, checking: true }, 'loading');

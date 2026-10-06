@@ -1113,6 +1113,9 @@ export function createUI(env) {
     const held = !!(s.filesChanged || s.safetyNet);
     if (!canStop && pillStop === doc.activeElement) pillPlay.focus({ preventScroll: true });
     setHidden(pillStop, !canStop);
+    // In the narrowest top bar Stop takes the cover's place (theme.css).
+    setAttr(pill, 'data-stop', canStop ? '' : null);
+    if (canStop && pillOpen === doc.activeElement && !isVisible(pillOpen)) pillPlay.focus({ preventScroll: true });
     setAttr(pillStop, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
     setAttr(pillStop, 'title', 'Stop listening');
     const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';

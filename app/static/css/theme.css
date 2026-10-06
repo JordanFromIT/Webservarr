@@ -1998,6 +1998,12 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-pill-play { width: 32px; height: 32px; }
   .wsp-pill-line { left: 12px; right: 12px; }
 }
+/* Too narrow for the cover, Stop and Play together (about 1024 to 1050px
+   wide): while Stop shows, it takes the cover's place. */
+@container (max-width: 111px) {
+  .wsp-pill[data-stop] .wsp-pill-open { display: none; }
+  .wsp-pill[data-stop] .wsp-pill-stop { margin-left: 6px; }
+}
 @media (hover: hover) and (pointer: fine) {
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }
 }
