@@ -1900,12 +1900,16 @@ class PlayerView(unittest.TestCase):
         self.assertNotRegex(code, r"\bhistory\s*\.|pushState|replaceState|popstate|pushOverlay")
         self.assertIn("new CW()", code)
         # Keys pressed in the full player are handled on it; the only document
-        # listener is the capture-phase guard, there while it is open, so a
-        # page's own keys (the reader's) never see a key meant for the player.
+        # listeners are capture-phase guards that are there only for a while:
+        # one while the full player is open, so a page's own keys (the
+        # reader's) never see a key meant for the player, and one while the
+        # desktop bar is dragged, so Escape cancels the drag.
         kept = js_code_only(src, keep_strings=True)
         self.assertIn("full.addEventListener('keydown', onKey);", kept)
         docs = re.findall(r"(?:doc|document|window|win)\.(?:add|remove)EventListener\('keydown'[^)]*\)", kept)
-        self.assertEqual(sorted(docs), ["doc.addEventListener('keydown', onDocKey, true)",
+        self.assertEqual(sorted(docs), ["doc.addEventListener('keydown', onBarDragKey, true)",
+                                        "doc.addEventListener('keydown', onDocKey, true)",
+                                        "doc.removeEventListener('keydown', onBarDragKey, true)",
                                         "doc.removeEventListener('keydown', onDocKey, true)"])
 
     def test_its_styles_are_theme_variables_only(self):
