@@ -142,9 +142,10 @@ function setup(o = {}) {
       get matches() { return q.indexOf('reduce') !== -1 ? env.reduce : q.indexOf('min-width') !== -1 ? env.wide : false; },
       addEventListener(type, fn) { if (type === 'change' && q.indexOf('min-width') !== -1) env.wideFns.push(fn); }
     }),
-    // The floating bar on a desktop page is 66 px tall, the phone's 72; the
-    // window, with no panel, is 400 px tall.
-    measure: (el) => (el.classList.contains('wsp-full') ? 400 : el.classList.contains('wsp-bar') ? (env.wide ? 66 : 72) : 0),
+    // The long bar on a desktop page is 73 px tall (its row and top border),
+    // the square 168, the phone's bar 72; the window, with no panel, 400.
+    measure: (el) => (el.classList.contains('wsp-full') ? 400 : el.classList.contains('wsp-bar')
+      ? (!env.wide ? 72 : el.getAttribute('data-shape') === 'square' ? 168 : 73) : 0),
     isVisible: (el) => !el.closest('[hidden]'),
     now: () => clock.now,
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
@@ -550,17 +551,20 @@ await run('the pill\'s Stop: right of Play, playing or paused; the book closes, 
 });
 
 // ---------------------------------------------------------------------------
-// The desktop bar's place: the bottom centre, a spot of its own, the top bar
+// The desktop bar's place: the long bar at the bottom, the square, the top bar
 // ---------------------------------------------------------------------------
 
-// At 1440x900 with a 256 px sidebar the bottom centre is 720 px wide at
-// x 488, y 810 (66 px tall, 24 px above the bottom); its grip's centre is
-// at 504, 843. The top bar ends at 64 (the window's limit, 72, less 8).
-const HOME = { x: 488, y: 810, w: 720, h: 66 };
+// At 1440x900 with a 256 px sidebar the long bar spans x 256 to 1440 on the
+// bottom edge, 73 px tall; its grip is at its left end, about 276, 863. The
+// square is 168 px; a drag from the long bar or the pill holds it by the
+// middle of its handle strip (84, 12 in from its top left). The top bar ends
+// at 64 (the window's limit, 72, less 8); the bottom band starts at 780.
 const dockOf = (t) => JSON.parse(t.storage.getItem('ws-player-dock:abc0123456789def'));
 const spot = (t) => [parseInt(t.q('.wsp-bar').style.getPropertyValue('--wsp-x'), 10), parseInt(t.q('.wsp-bar').style.getPropertyValue('--wsp-y'), 10)];
 const roomOf = (t) => t.doc.documentElement.style.getPropertyValue('--ws-player-h');
 const said = (t) => t.q('#wsPlayer > [role="status"]').textContent;
+const shapeOf = (t) => t.q('.wsp-bar').getAttribute('data-shape');
+const placeOf = (t) => t.q('.wsp-bar').getAttribute('data-dock');
 function drag(t, from, path, end = 'pointerup') {
   t.pointer(from, 'pointerdown', path[0][0], path[0][1]);
   for (const [x, y] of path.slice(1)) t.pointer(t.doc.body, 'pointermove', x, y);
@@ -568,21 +572,21 @@ function drag(t, from, path, end = 'pointerup') {
   if (end) t.pointer(t.doc.body, end, last[0], last[1]);
 }
 
-await run('the bar: at the bottom centre by default, with its handle and Stop; the page keeps room for it', () => {
+await run('the long bar along the bottom by default, with its handle and Stop; the page keeps room for it', () => {
   const t = setup({ state: BOOK });
   const bar = t.q('.wsp-bar');
-  check('floats (a desktop page)', bar.classList.contains('wsp-bar-dockable') && bar.getAttribute('data-dock') === 'bottom');
+  check('a desktop page: the long bar at the bottom', bar.classList.contains('wsp-bar-dockable') && placeOf(t) === 'bottom' && shapeOf(t) === 'long');
   check('nothing kept yet', t.storage.getItem('ws-player-dock:abc0123456789def') === null);
   check('the pill\'s slot is hidden', t.q('#wsPlayerPill').hidden === true);
-  check('room for the bar and the gap under it', roomOf(t) === '90px', roomOf(t));
+  check('room for the whole bar, and nothing more', roomOf(t) === '73px', roomOf(t));
   const grip = t.q('.wsp-bar-grip');
   check('the handle comes first and offers a menu', bar.querySelector('.wsp-bar-row').firstElementChild === grip &&
     grip.getAttribute('aria-haspopup') === 'menu' && grip.getAttribute('aria-expanded') === 'false' &&
-    grip.getAttribute('aria-label') === 'Move the player. Press for places to put it, or use the arrow keys.');
+    grip.getAttribute('aria-label') === 'Move the player. Press for places to put it.', grip.getAttribute('aria-label'));
   const stop = t.q('.wsp-bar-stop');
   check('Stop, right of Play', t.q('.wsp-bar .wsp-play').nextElementSibling === stop && stop.getAttribute('aria-label') === 'Stop listening, your place is saved');
   check('the cover and title say they open the player', t.q('.wsp-bar-open').textContent.indexOf('Open the player: ') === 0 &&
-    !t.q('.wsp-bar-open').hasAttribute('aria-haspopup'));
+    !t.q('.wsp-bar-open').hasAttribute('aria-haspopup') && t.q('.wsp-bar-open').getAttribute('title') === 'Open the player: Three Parts');
 });
 
 await run('the bar opens the window and hides it; Escape and the X come back to it; its Stop stops', async () => {
@@ -591,7 +595,8 @@ await run('the bar opens the window and hides it; Escape and the X come back to 
   open.focus();
   open.click();
   check('the window, as from the pill', t.ui.isOpen() && t.ui.isWindow() && t.q('.wsp-bar').hasAttribute('data-open') &&
-    open.getAttribute('aria-expanded') === 'true' && open.textContent.indexOf('Hide the player: ') === 0);
+    open.getAttribute('aria-expanded') === 'true' && open.textContent.indexOf('Hide the player: ') === 0 &&
+    open.getAttribute('title') === 'Hide the player: Three Parts');
   check('the bar\'s warning is not said twice', t.q('.wsp-bar .wsp-warn-live').getAttribute('aria-hidden') === 'true');
   open.click();
   check('pressed again it hides it', !t.ui.isOpen() && !t.q('.wsp-bar').hasAttribute('data-open'));
@@ -609,59 +614,66 @@ await run('the bar opens the window and hides it; Escape and the X come back to 
   check('focus on Resume', t.doc.activeElement && t.doc.activeElement.textContent === 'Resume');
 });
 
-await run('dragged anywhere else it stays there; the snap zones show while it moves', async () => {
+await run('dragged it is the square; let go anywhere else it stays there; both snap zones show while it moves', async () => {
   const t = setup({ state: BOOK });
   const menus = [];
   t.doc.addEventListener('ws:menu-open', (e) => menus.push(e.detail));
   const grip = t.q('.wsp-bar-grip');
-  drag(t, grip, [[504, 843], [506, 844]], null);
-  check('a press that has not travelled is not a drag yet', !t.doc.documentElement.hasAttribute('data-wsp-drag'));
+  drag(t, grip, [[276, 863], [278, 864]], null);
+  check('a press that has not travelled is not a drag yet', !t.doc.documentElement.hasAttribute('data-wsp-drag') && shapeOf(t) === 'long');
   t.pointer(t.doc.body, 'pointermove', 700, 400);
   const root = t.doc.documentElement;
-  check('dragging: both zones show', root.hasAttribute('data-wsp-drag') && t.q('#wsPlayerPill').hidden === false &&
-    t.q('.wsp-bar').classList.contains('is-dragging'));
+  check('dragging: the square', shapeOf(t) === 'square' && t.q('.wsp-bar').classList.contains('is-dragging'));
+  check('both zones show: the top bar\'s slot and the bottom band', root.hasAttribute('data-wsp-drag') && t.q('#wsPlayerPill').hidden === false &&
+    !!t.q('#wsPlayer > .wsp-dock-ghost .wsp-dock-zone') && t.q('#wsPlayerPill .wsp-dock-target') !== null);
   check('the bell panel and the account menu are told to close', menus.length === 1 && menus[0] === t.q('#wspDockMenu'));
-  check('held where the pointer took it', JSON.stringify(spot(t)) === JSON.stringify([684, 367]), spot(t));
+  check('held by its handle under the pointer', JSON.stringify(spot(t)) === JSON.stringify([616, 388]), spot(t));
   check('no zone under it', !root.hasAttribute('data-wsp-drop'));
-  check('the page keeps its room until it is let go', roomOf(t) === '90px');
+  check('the page keeps its room until it is let go', roomOf(t) === '73px', roomOf(t));
   t.pointer(t.doc.body, 'pointerup', 700, 400);
-  check('let go: it stays there', t.q('.wsp-bar').getAttribute('data-dock') === 'free' && JSON.stringify(spot(t)) === JSON.stringify([684, 367]));
+  check('let go: it stays there, a square', placeOf(t) === 'free' && shapeOf(t) === 'square' && JSON.stringify(spot(t)) === JSON.stringify([616, 388]));
   check('the zones go', !root.hasAttribute('data-wsp-drag') && t.q('#wsPlayerPill').hidden === true && !t.q('.wsp-bar').classList.contains('is-dragging'));
-  check('kept on this device', JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 684, y: 367 }), dockOf(t));
+  check('kept on this device', JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 616, y: 388 }), dockOf(t));
   check('the page needs no room for it now', roomOf(t) === '0px', roomOf(t));
+  check('its handle now offers the arrow keys', grip.getAttribute('aria-label') === 'Move the player. Press for places to put it, or use the arrow keys.');
+  check('let go where it was drawn, it does not arrive again', !t.q('.wsp-bar').classList.contains('is-arriving'));
   await t.clock.advance(100);
   check('said', said(t) === 'Player moved.', said(t));
   t.q('.wsp-bar-grip').click();
   check('the click that ends a drag opens no menu', t.q('#wspDockMenu').hidden);
   drag(t, grip, [[700, 400], [-500, 2000]]);
-  check('kept inside the viewport and below the top bar', JSON.stringify(spot(t)) === JSON.stringify([8, 900 - 66 - 8]), spot(t));
-  drag(t, grip, [[24, 859], [5000, -400], [5000, 300]]);
-  check('never past the right edge or under the top bar', JSON.stringify(spot(t)) === JSON.stringify([1440 - 720 - 8, 300 - 33]), spot(t));
+  check('the square moves from where it was taken, kept inside the viewport and below the top bar',
+    JSON.stringify(spot(t)) === JSON.stringify([8, 900 - 168 - 8]) && placeOf(t) === 'free', spot(t));
+  drag(t, grip, [[100, 736], [5000, 300]]);
+  check('never past the right edge', JSON.stringify(spot(t)) === JSON.stringify([1440 - 168 - 8, 288]), spot(t));
 });
 
-await run('let go near the bottom centre it snaps back there', async () => {
+await run('let go on the bottom band it is the long bar again', async () => {
   const t = setup({ state: BOOK, dock: { at: 'free', x: 100, y: 200 } });
-  check('starts where it was kept', t.q('.wsp-bar').getAttribute('data-dock') === 'free' && JSON.stringify(spot(t)) === JSON.stringify([100, 200]) && roomOf(t) === '0px');
-  drag(t, t.q('.wsp-bar-grip'), [[116, 233], [300, 500], [564, 803]], null);
-  check('over the bottom centre: that zone lights', t.doc.documentElement.getAttribute('data-wsp-drop') === 'bottom');
-  t.pointer(t.doc.body, 'pointerup', 564, 803);
-  check('snapped', t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' && dockOf(t).at === 'bottom' && dockOf(t).x === undefined);
-  check('its spot is gone and the room is back', t.q('.wsp-bar').style.getPropertyValue('--wsp-x') === '' && roomOf(t) === '90px');
-  check('it flies home from where it was let go', t.q('.wsp-bar').classList.contains('is-settling'));
+  check('starts where it was kept, a square', placeOf(t) === 'free' && shapeOf(t) === 'square' && JSON.stringify(spot(t)) === JSON.stringify([100, 200]) && roomOf(t) === '0px');
+  drag(t, t.q('.wsp-bar-grip'), [[150, 210], [300, 500], [200, 850]], null);
+  check('over the sidebar: no zone', !t.doc.documentElement.hasAttribute('data-wsp-drop'));
+  t.pointer(t.doc.body, 'pointermove', 600, 820);
+  check('over the bottom band: that zone lights', t.doc.documentElement.getAttribute('data-wsp-drop') === 'bottom' && !t.q('.wsp-bar').classList.contains('is-near'));
+  check('the square stays inside the viewport', JSON.stringify(spot(t)) === JSON.stringify([550, 724]), spot(t));
+  t.pointer(t.doc.body, 'pointerup', 600, 820);
+  check('snapped: the long bar', placeOf(t) === 'bottom' && shapeOf(t) === 'long' && dockOf(t).at === 'bottom' && dockOf(t).x === undefined);
+  check('its spot is gone and the room is back', t.q('.wsp-bar').style.getPropertyValue('--wsp-x') === '' && roomOf(t) === '73px');
+  check('it rises into place', t.q('.wsp-bar').classList.contains('is-arriving'));
   await t.clock.advance(300);
-  check('then rests', !t.q('.wsp-bar').classList.contains('is-settling'));
-  check('said', said(t) === 'Player moved to the bottom centre.', said(t));
+  check('then rests', !t.q('.wsp-bar').classList.contains('is-arriving'));
+  check('said', said(t) === 'Player moved to the bottom bar.', said(t));
 });
 
-await run('let go on the top bar it becomes the pill; dragged out of the pill it is the bar again', async () => {
+await run('let go on the top bar it becomes the pill; dragged out of the pill it is the square again', async () => {
   const t = setup({ state: BOOK });
   const grip = t.q('.wsp-bar-grip');
   grip.focus();
-  drag(t, grip, [[504, 843], [800, 300], [900, 100]], null);
-  check('over the top bar: that zone lights and the bar gives way', t.doc.documentElement.getAttribute('data-wsp-drop') === 'top' &&
+  drag(t, grip, [[276, 863], [800, 300], [900, 100]], null);
+  check('over the top bar: that zone lights and the square gives way', t.doc.documentElement.getAttribute('data-wsp-drop') === 'top' &&
     t.q('.wsp-bar').classList.contains('is-near'));
   t.pointer(t.doc.body, 'pointerup', 900, 100);
-  check('in the top bar', t.q('.wsp-bar').getAttribute('data-dock') === 'top' && dockOf(t).at === 'top' && t.q('#wsPlayerPill').hidden === false);
+  check('in the top bar', placeOf(t) === 'top' && dockOf(t).at === 'top' && t.q('#wsPlayerPill').hidden === false);
   check('the page needs no room', roomOf(t) === '0px');
   check('the pill arrives', t.q('.wsp-pill').classList.contains('is-arriving'));
   check('focus follows to its handle', t.doc.activeElement === t.q('.wsp-pill-grip'));
@@ -670,98 +682,161 @@ await run('let go on the top bar it becomes the pill; dragged out of the pill it
   check('then rests', !t.q('.wsp-pill').classList.contains('is-arriving'));
 
   drag(t, t.q('.wsp-pill-grip'), [[1000, 32], [990, 40], [700, 500]], null);
-  check('out of the top bar: the bar, held by its handle', t.q('.wsp-bar').classList.contains('is-dragging') &&
-    JSON.stringify(spot(t)) === JSON.stringify([684, 467]), spot(t));
+  check('out of the top bar: the square, held by its handle', t.q('.wsp-bar').classList.contains('is-dragging') && shapeOf(t) === 'square' &&
+    JSON.stringify(spot(t)) === JSON.stringify([616, 488]), spot(t));
   check('the top bar still offers itself', t.q('#wsPlayerPill').hidden === false);
   t.pointer(t.doc.body, 'pointerup', 700, 500);
-  check('let go there: it stays there', t.q('.wsp-bar').getAttribute('data-dock') === 'free' && t.q('#wsPlayerPill').hidden === true &&
-    JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 684, y: 467 }));
+  check('let go there: it stays there', placeOf(t) === 'free' && t.q('#wsPlayerPill').hidden === true &&
+    JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 616, y: 488 }));
 
   t.ui.open();
   drag(t, t.q('.wsp-bar-grip'), [[700, 500], [900, 120]]);
-  drag(t, t.q('.wsp-pill-grip'), [[1000, 32], [990, 40], [504, 843]]);
-  check('from the pill to the bottom centre', t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' && roomOf(t) === '90px');
+  check('from the square to the top bar', placeOf(t) === 'top');
+  drag(t, t.q('.wsp-pill-grip'), [[1000, 32], [990, 40], [600, 860]]);
+  check('from the pill to the bottom', placeOf(t) === 'bottom' && shapeOf(t) === 'long' && roomOf(t) === '73px');
   check('the window stayed open through it all', t.ui.isOpen() && t.ui.isWindow());
 });
 
 await run('Escape cancels a drag', () => {
   const t = setup({ state: BOOK });
-  drag(t, t.q('.wsp-bar-grip'), [[504, 843], [700, 300]], null);
+  drag(t, t.q('.wsp-bar-grip'), [[276, 863], [700, 300]], null);
   const ev = t.key(t.doc.body, 'Escape');
-  check('back where it was', ev.defaultPrevented && t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' &&
-    !t.doc.documentElement.hasAttribute('data-wsp-drag') && t.storage.getItem('ws-player-dock:abc0123456789def') === null);
+  check('back where it was, the long bar', ev.defaultPrevented && placeOf(t) === 'bottom' && shapeOf(t) === 'long' &&
+    !t.doc.documentElement.hasAttribute('data-wsp-drag') && t.storage.getItem('ws-player-dock:abc0123456789def') === null && roomOf(t) === '73px');
   t.pointer(t.doc.body, 'pointermove', 900, 100);
   t.pointer(t.doc.body, 'pointerup', 900, 100);
-  check('the rest of that drag does nothing', t.q('.wsp-bar').getAttribute('data-dock') === 'bottom');
+  check('the rest of that drag does nothing', placeOf(t) === 'bottom');
 });
 
-await run('the keyboard: the handle\'s menu, the arrows, Home; focus follows', async () => {
+await run('the keyboard: the handle\'s menu with Float, the square\'s arrows, Home; focus follows', async () => {
   const t = setup({ state: BOOK });
   const grip = t.q('.wsp-bar-grip');
   const menu = t.q('#wspDockMenu');
   const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]')).filter((b) => !b.hidden).map((b) => b.textContent);
   grip.focus();
   grip.click();
-  check('pressed: the places, focus on the first', !menu.hidden && grip.getAttribute('aria-expanded') === 'true' &&
-    JSON.stringify(items()) === JSON.stringify(['arrow_upwardMove to top bar']) && t.doc.activeElement === menu.querySelector('[data-to="top"]'), items());
+  check('pressed: the other places, focus on the first', !menu.hidden && grip.getAttribute('aria-expanded') === 'true' &&
+    JSON.stringify(items()) === JSON.stringify(['arrow_upwardMove to top bar', 'open_withFloat']) && t.doc.activeElement === menu.querySelector('[data-to="top"]'), items());
   t.key(t.doc.activeElement, 'Escape');
   check('Escape closes it, focus back on the handle', menu.hidden && grip.getAttribute('aria-expanded') === 'false' && t.doc.activeElement === grip);
+  let ev = t.key(grip, 'ArrowUp');
+  check('the long bar\'s handle has no arrow keys', !ev.defaultPrevented && placeOf(t) === 'bottom');
+  ev = t.key(grip, 'Home');
+  check('nor Home', !ev.defaultPrevented && placeOf(t) === 'bottom');
   grip.click();
   t.doc.activeElement.click();
   check('Move to top bar: the bar flies there', t.q('.wsp-bar').classList.contains('is-leaving') && menu.hidden);
   await t.clock.advance(300);
-  check('then it is the pill, focus on its handle', t.q('.wsp-bar').getAttribute('data-dock') === 'top' && t.doc.activeElement === t.q('.wsp-pill-grip'));
+  check('then it is the pill, focus on its handle', placeOf(t) === 'top' && t.doc.activeElement === t.q('.wsp-pill-grip'));
   check('said', said(t) === 'Player moved to the top bar.');
   const pg = t.q('.wsp-pill-grip');
   pg.click();
-  check('the pill\'s menu offers the bottom centre', JSON.stringify(items()) === JSON.stringify(['arrow_downwardMove to bottom centre']) &&
-    pg.getAttribute('aria-expanded') === 'true');
+  check('the pill\'s menu offers the bottom bar and Float', JSON.stringify(items()) === JSON.stringify(['arrow_downwardMove to bottom bar', 'open_withFloat']) &&
+    pg.getAttribute('aria-expanded') === 'true', items());
+  t.key(t.doc.activeElement, 'ArrowDown');
+  check('the arrows move through them', t.doc.activeElement === menu.querySelector('[data-to="free"]'));
   t.doc.activeElement.click();
-  check('Move to bottom centre: there, focus on the bar\'s handle', t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' && t.doc.activeElement === grip);
+  check('Float: the square at the bottom right, focus on its handle', placeOf(t) === 'free' && shapeOf(t) === 'square' &&
+    JSON.stringify(spot(t)) === JSON.stringify([1440 - 168 - 24, 900 - 168 - 24]) && t.doc.activeElement === grip, spot(t));
+  check('it arrives there', t.q('.wsp-bar').classList.contains('is-arriving'));
+  check('the page needs no room', roomOf(t) === '0px');
   await t.clock.advance(300);
-  check('said', said(t) === 'Player moved to the bottom centre.');
+  check('said, with how to move it', said(t) === 'Player floating at the bottom right. The arrow keys on its handle move it.', said(t));
 
-  let ev = t.key(grip, 'ArrowUp');
-  check('an arrow: a spot of its own, 16 px up', ev.defaultPrevented && t.q('.wsp-bar').getAttribute('data-dock') === 'free' &&
-    JSON.stringify(spot(t)) === JSON.stringify([HOME.x, HOME.y - 16]), spot(t));
+  ev = t.key(grip, 'ArrowUp');
+  check('an arrow: 16 px up', ev.defaultPrevented && placeOf(t) === 'free' && JSON.stringify(spot(t)) === JSON.stringify([1248, 692]), spot(t));
   t.key(grip, 'ArrowLeft', { shiftKey: true });
-  check('Shift: 64 px', JSON.stringify(spot(t)) === JSON.stringify([HOME.x - 64, HOME.y - 16]) &&
-    JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: HOME.x - 64, y: HOME.y - 16 }), spot(t));
+  check('Shift: 64 px', JSON.stringify(spot(t)) === JSON.stringify([1184, 692]) &&
+    JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 1184, y: 692 }), spot(t));
   for (let i = 0; i < 30; i++) t.key(grip, 'ArrowUp', { shiftKey: true });
   check('kept below the top bar', spot(t)[1] === 72, spot(t));
   check('the arrows never reach the player\'s shortcuts', t.engine.calls.every((c) => c[0] !== 'skip'));
+  check('the arrows say nothing', said(t) === 'Player floating at the bottom right. The arrow keys on its handle move it.');
+  grip.getBoundingClientRect = () => ({ left: 1184, right: 1352, top: 72, bottom: 96, width: 168, height: 24 });
   grip.click();
-  check('from a spot of its own: both places', items().length === 2);
+  check('from the square: the top bar and the bottom bar', JSON.stringify(items()) === JSON.stringify(['arrow_upwardMove to top bar', 'arrow_downwardMove to bottom bar']), items());
+  check('near the top of the screen its menu opens below the handle', menu.style.top === '104px' && menu.style.bottom === '', menu.style.top);
   t.key(t.doc.activeElement, 'ArrowDown');
-  check('the arrows move through them', t.doc.activeElement === menu.querySelector('[data-to="bottom"]'));
   t.key(t.doc.activeElement, 'ArrowDown');
   check('and round', t.doc.activeElement === menu.querySelector('[data-to="top"]'));
   t.key(t.doc.activeElement, 'Tab');
   check('Tab leaves it from the handle', menu.hidden && t.doc.activeElement === grip);
   ev = t.key(grip, 'Home');
-  check('Home: back to the bottom centre', ev.defaultPrevented && t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' && t.doc.activeElement === grip);
+  check('Home: back to the bottom bar', ev.defaultPrevented && placeOf(t) === 'bottom' && shapeOf(t) === 'long' && t.doc.activeElement === grip && roomOf(t) === '73px');
+  await t.clock.advance(300);
+  check('said', said(t) === 'Player moved to the bottom bar.');
+  grip.getBoundingClientRect = () => ({ left: 256, right: 296, top: 828, bottom: 900, width: 40, height: 72 });
   grip.click();
+  check('over the long bar\'s handle', menu.style.bottom === '80px' && menu.style.top === '', menu.style.bottom);
   t.pointer(t.q('#pageBtn'), 'pointerdown', 10, 10);
   check('a press elsewhere closes the menu', menu.hidden);
   grip.click();
   t.doc.dispatchEvent(new t.win.CustomEvent('ws:menu-open', { detail: null }));
   check('so does another menu opening', menu.hidden && grip.getAttribute('aria-expanded') === 'false');
+  grip.click();
+  menu.querySelector('[data-to="free"]').click();
+  check('Float from the long bar too', placeOf(t) === 'free' && JSON.stringify(spot(t)) === JSON.stringify([1248, 708]));
 });
 
-await run('a spot of its own: remembered, kept inside a smaller window, back when it grows', () => {
+await run('the square: remembered, kept inside a smaller window, back when it grows', () => {
   const t = setup({ state: BOOK });
-  drag(t, t.q('.wsp-bar-grip'), [[504, 843], [616, 733]]);
+  drag(t, t.q('.wsp-bar-grip'), [[276, 863], [684, 712]]);
   check('kept', JSON.stringify(dockOf(t)) === JSON.stringify({ at: 'free', x: 600, y: 700 }), dockOf(t));
   const again = setup({ state: BOOK, storage: t.storage });
-  check('the same spot next time', again.q('.wsp-bar').getAttribute('data-dock') === 'free' && JSON.stringify(spot(again)) === JSON.stringify([600, 700]));
+  check('the same spot next time, a square, no room', placeOf(again) === 'free' && shapeOf(again) === 'square' &&
+    JSON.stringify(spot(again)) === JSON.stringify([600, 700]) && roomOf(again) === '0px');
   const other = setup({ state: BOOK, storage: t.storage, identity: 'fff0123456789aaa' });
-  check('another listener has their own', other.q('.wsp-bar').getAttribute('data-dock') === 'bottom');
+  check('another listener has their own', placeOf(other) === 'bottom');
   t.env.vp = { w: 1100, h: 640 };
   t.win.dispatchEvent(new t.win.Event('resize'));
-  check('a smaller window: kept inside it', JSON.stringify(spot(t)) === JSON.stringify([1100 - 720 - 8, 640 - 66 - 8]), spot(t));
+  check('a smaller window: kept inside it', JSON.stringify(spot(t)) === JSON.stringify([600, 640 - 168 - 8]), spot(t));
+  t.env.vp = { w: 700, h: 640 };
+  t.win.dispatchEvent(new t.win.Event('resize'));
+  check('narrower still: in from the right edge too', JSON.stringify(spot(t)) === JSON.stringify([700 - 168 - 8, 640 - 168 - 8]), spot(t));
   t.env.vp = { w: 1440, h: 900 };
   t.win.dispatchEvent(new t.win.Event('resize'));
   check('and back where it was when it grows', JSON.stringify(spot(t)) === JSON.stringify([600, 700]), spot(t));
+});
+
+await run('a place kept by the earlier floating bar', () => {
+  const bottom = setup({ state: BOOK, dock: { at: 'bottom' } });
+  check('its bottom centre: the long bar', placeOf(bottom) === 'bottom' && shapeOf(bottom) === 'long' && roomOf(bottom) === '73px');
+  const free = setup({ state: BOOK, dock: { at: 'free', x: 684, y: 367 } });
+  check('its spot of its own: the square there', placeOf(free) === 'free' && shapeOf(free) === 'square' &&
+    JSON.stringify(spot(free)) === JSON.stringify([684, 367]) && roomOf(free) === '0px');
+  const low = setup({ state: BOOK, dock: { at: 'free', x: 1300, y: 826 } });
+  check('a spot the wider bar fitted is kept inside the viewport', JSON.stringify(spot(low)) === JSON.stringify([1264, 724]), spot(low));
+  const top = setup({ state: BOOK, dock: { at: 'top' } });
+  check('the top bar stays the top bar', placeOf(top) === 'top' && top.q('#wsPlayerPill').hidden === false && roomOf(top) === '0px');
+  const odd = setup({ state: BOOK, dock: { at: 'centre' } });
+  check('anything else: the long bar', placeOf(odd) === 'bottom' && shapeOf(odd) === 'long');
+});
+
+await run('the window opens, and Stop stops, from every shape', () => {
+  for (const dock of ['bottom', { at: 'free', x: 400, y: 300 }, 'top']) {
+    const t = setup({ state: BOOK, dock });
+    const name = typeof dock === 'string' ? dock : 'square';
+    const open = name === 'top' ? t.q('.wsp-pill-open') : t.q('.wsp-bar-open');
+    open.click();
+    check(name + ': the window opens', t.ui.isOpen() && t.ui.isWindow());
+    open.click();
+    check(name + ': and hides', !t.ui.isOpen());
+    (name === 'top' ? t.q('.wsp-pill-stop') : t.q('.wsp-bar-stop')).click();
+    check(name + ': Stop closes the book', t.engine.calls.some((c) => c[0] === 'close') && t.q('.wsp-bar').hidden && t.q('#wsPlayerPill').hidden);
+  }
+});
+
+await run('the square shows no words: its cover\'s tooltip names the book, or says the warning', () => {
+  const t = setup({ state: BOOK, dock: { at: 'free', x: 400, y: 300 } });
+  const open = t.q('.wsp-bar-open');
+  check('named by the book', open.getAttribute('title') === 'Open the player: Three Parts' && open.textContent.indexOf('Three Parts') !== -1);
+  t.engine.emit('warning', { kind: 'not-saved', active: true, message: "Your place isn't being saved. Last saved 9:41 PM." });
+  check('the warning: in its tooltip, its border says so', open.getAttribute('title') === "Your place isn't being saved. Last saved 9:41 PM." &&
+    t.q('.wsp-bar').hasAttribute('data-warn'));
+  check('and it is still said', t.q('.wsp-bar .wsp-warn-live').textContent.indexOf("isn't being saved") !== -1 &&
+    !t.q('.wsp-bar .wsp-warn-live').hasAttribute('aria-hidden'));
+  t.engine.emit('warning', { kind: 'not-saved', active: false });
+  check('gone again', open.getAttribute('title') === 'Open the player: Three Parts' && !t.q('.wsp-bar').hasAttribute('data-warn'));
 });
 
 await run('tablets and phones: the bar, no handle to drag, room as before; a kept place waits for the desktop', () => {
@@ -773,30 +848,33 @@ await run('tablets and phones: the bar, no handle to drag, room as before; a kep
   check('nothing to choose', t.q('#wspDockMenu').hidden);
   t.q('.wsp-bar-open').click();
   check('the bar opens the full player, as ever', t.ui.isOpen() && !t.ui.isWindow());
+  check('no tooltip there', !t.q('.wsp-bar-open').hasAttribute('title'));
   t.ui.close();
   t.env.setWide(true);
   check('widened: back in the top bar', roomOf(t) === '0px' && t.q('#wsPlayerPill').hidden === false);
   t.env.setWide(false);
   check('narrowed again: the bar\'s room', roomOf(t) === '72px');
+  const f = setup({ state: BOOK, wide: false, dock: { at: 'free', x: 400, y: 300 } });
+  check('a kept square: no spot and no arrows below lg', f.q('.wsp-bar').style.getPropertyValue('--wsp-x') === '' && roomOf(f) === '72px' &&
+    !f.key(f.q('.wsp-bar-grip'), 'ArrowUp').defaultPrevented);
   const r = setup({ state: BOOK, shellHidden: true, dock: 'top' });
-  check('a full-screen view: the phone\'s bar there too', roomOf(r) === '66px', roomOf(r));
+  check('a full-screen view: the phone\'s bar there too', roomOf(r) === '73px', roomOf(r));
 });
 
-await run('readDock, homeRect, fitBar, dropZone', () => {
-  check('the bottom centre by default', JSON.stringify(U.readDock(null)) === JSON.stringify({ at: 'bottom' }) &&
+await run('readDock, fitSquare, floatSpot, dropZone', () => {
+  check('the long bar by default', JSON.stringify(U.readDock(null)) === JSON.stringify({ at: 'bottom' }) &&
     JSON.stringify(U.readDock({ at: 'sideways' })) === JSON.stringify({ at: 'bottom' }));
   check('a spot needs both numbers', JSON.stringify(U.readDock({ at: 'free', x: 3 })) === JSON.stringify({ at: 'bottom' }) &&
     JSON.stringify(U.readDock({ at: 'free', x: 3.4, y: 9.6 })) === JSON.stringify({ at: 'free', x: 3, y: 10 }));
   check('the top bar', JSON.stringify(U.readDock({ at: 'top', x: 1, y: 2 })) === JSON.stringify({ at: 'top' }));
-  check('home at 1440', JSON.stringify(U.homeRect({ w: 1440, h: 900 }, 256, 66)) === JSON.stringify(HOME), U.homeRect({ w: 1440, h: 900 }, 256, 66));
-  const narrow = U.homeRect({ w: 1024, h: 768 }, 256, 66);
-  check('home at 1024: the column less 24 a side', narrow.w === 1024 - 256 - 48 && narrow.x === 280 && narrow.y === 768 - 24 - 66, narrow);
-  check('fitBar keeps it in', JSON.stringify(U.fitBar({ x: -50, y: 0 }, { w: 1440, h: 900, top: 72 }, { w: 720, h: 66 })) === JSON.stringify({ x: 8, y: 72 }));
-  check('the top band', U.dropZone({ x: 900, y: 135 }, { x: 0, y: 0, w: 720, h: 66 }, HOME, 64, 256) === 'top' &&
-    U.dropZone({ x: 900, y: 136 }, { x: 0, y: 0, w: 720, h: 66 }, HOME, 64, 256) === 'free');
-  check('not over the sidebar', U.dropZone({ x: 200, y: 30 }, { x: 0, y: 0, w: 720, h: 66 }, HOME, 64, 256) === 'free');
-  check('near the bottom centre', U.dropZone({ x: 0, y: 500 }, { x: 488 + 120, y: 810 - 72, w: 720, h: 66 }, HOME, 64, 256) === 'bottom' &&
-    U.dropZone({ x: 0, y: 500 }, { x: 488 + 121, y: 810, w: 720, h: 66 }, HOME, 64, 256) === 'free');
+  const vp = { w: 1440, h: 900, top: 72 };
+  check('fitSquare keeps it in', JSON.stringify(U.fitSquare({ x: -50, y: 0 }, vp)) === JSON.stringify({ x: 8, y: 72 }) &&
+    JSON.stringify(U.fitSquare({ x: 5000, y: 5000 }, vp)) === JSON.stringify({ x: 1264, y: 724 }));
+  check('Float: the bottom right', JSON.stringify(U.floatSpot(vp)) === JSON.stringify({ x: 1248, y: 708 }) &&
+    JSON.stringify(U.floatSpot({ w: 1024, h: 600, top: 72 })) === JSON.stringify({ x: 832, y: 408 }));
+  check('the top band', U.dropZone({ x: 900, y: 135 }, vp, 64, 256) === 'top' && U.dropZone({ x: 900, y: 136 }, vp, 64, 256) === 'free');
+  check('the bottom band', U.dropZone({ x: 900, y: 780 }, vp, 64, 256) === 'bottom' && U.dropZone({ x: 900, y: 779 }, vp, 64, 256) === 'free');
+  check('neither over the sidebar', U.dropZone({ x: 200, y: 30 }, vp, 64, 256) === 'free' && U.dropZone({ x: 200, y: 880 }, vp, 64, 256) === 'free');
 });
 
 await run('the pill stays openable in the narrowest top bar', () => {

@@ -111,14 +111,18 @@
  * including Back on a desktop browser, which is no close request.
  *
  * Desktop (lg and up, where the shell's top bar shows and has the pill's
- * slot, #wsPlayerPill): the mini bar floats, at the bottom centre of the
- * page column by default, with a handle and Stop; dragged by the handle it
- * stays where it is let go, or snaps to the bottom centre or into the top
- * bar, where it is the pill (handle, cover, title, chapter and time left,
- * play/pause, a thin progress line; playing, paused, open, popped out and
- * loading). The handle's menu and arrow keys do the same without a drag
- * (see "The desktop bar's place"). The bar's cover and title open and hide
- * the window as the pill's do. Below lg a tablet's bar floats over the tab
+ * slot, #wsPlayerPill): the mini bar is kept in one of three places. By
+ * default it is a long bar along the bottom of the page column (handle,
+ * cover, title, chapter and time left, play/pause, Stop, a thin progress
+ * line), and the page keeps room for it. Dragged by its handle it becomes a
+ * small square (cover, play/pause, Stop, the line, the handle; the title is
+ * its name and tooltip), which stays where it is let go, or snaps back to
+ * the bottom, or into the top bar, where it is the pill (handle, cover,
+ * title, chapter and time left, play/pause, Stop, the line; playing,
+ * paused, open, popped out and loading). The handle's menu does the same
+ * without a drag, and the square's arrow keys move it (see "The desktop
+ * bar's place"). The bar's cover opens and hides the window in every one
+ * of its shapes, as the pill's does. Below lg a tablet's bar floats over the tab
  * bar (no handle) and a phone's is as it was. open() shows the same
  * player as a floating window instead of the full-screen sheet. The window
  * is part of the page, not a dialog: Tab goes in and out of it, nothing
@@ -161,21 +165,21 @@ export const WIN_IN_MS = 200;          // its open (opacity only with reduced mo
 export const WIN_OUT_MS = 160;         // ...and its close
 export const WIN_KEY = 'ws-player-window';   // + ':' + the listener's identity key
 
-// The desktop bar: where it is kept (the bottom centre, the top bar, or a
-// spot of the listener's own), per listener on this device; its size at the
-// bottom centre; and what counts as letting go on a snap zone.
+// The desktop bar: where it is kept (the long bar at the bottom, the top
+// bar, or the square at a spot of the listener's own), per listener on this
+// device; the square's size; and what counts as letting go on a snap zone.
+// A place kept by the earlier floating bar reads the same: its bottom centre
+// is the long bar now, and its spot of its own the square's.
 export const DOCK_KEY = 'ws-player-dock';     // + ':' + the listener's identity key
 export const DOCK_PLACES = ['bottom', 'top', 'free'];
-export const BAR_MAX_W = 720;
-export const BAR_H = 66;               // the row and its border, before it is measured
-export const BAR_GAP = 24;             // the bottom centre: this far above the bottom edge
-export const BAR_SIDE = 24;            // ...and at least this far inside the page column
-export const BAR_EDGE = 8;             // a spot of its own: this far inside the viewport
-export const BAR_GRIP_X = 16;          // the grip's centre, from the bar's left edge
+export const SQUARE = 168;             // the square, border included (theme.css)
+export const SQUARE_GRIP_Y = 12;       // its handle's middle, from its top edge
+export const BAR_EDGE = 8;             // the square stays this far inside the viewport
+export const FLOAT_INSET = 24;         // Float puts it this far in from the bottom right
+export const BAR_SIDE = 24;            // the snap zones reach this far over the sidebar
 export const DRAG_PX = 5;              // a press that travels this far is a drag, not a click
 export const TOP_BAND = 72;            // px under the top bar that still count as the top bar
-export const SNAP_X = 120;             // the bottom centre catches a bar this close to it
-export const SNAP_Y = 72;
+export const BOTTOM_BAND = 120;        // px above the bottom edge that count as the bottom bar
 export const MOVE_MS = 240;            // a move between places (a fade with reduced motion)
 
 const WIDE = '(min-width: 1024px)';
@@ -287,7 +291,8 @@ export function fitWindow(geo, vp, collapsedH) {
 }
 
 /* Where the desktop bar is kept, from what was stored: { at, x, y }, the
-   bottom centre for anything else. */
+   long bar at the bottom for anything else. The earlier floating bar's
+   places are the same shape and read the same way. */
 export function readDock(v) {
   const d = v && typeof v === 'object' ? v : {};
   const at = DOCK_PLACES.indexOf(d.at) !== -1 ? d.at : 'bottom';
@@ -295,33 +300,28 @@ export function readDock(v) {
   return at === 'free' ? { at: at, x: Math.round(d.x), y: Math.round(d.y) } : { at: at };
 }
 
-/* The bottom centre: the bar centred over the page column (vp: w, h;
-   lane: the column's left edge), BAR_GAP above the bottom, h tall. */
-export function homeRect(vp, lane, h) {
-  const left = Math.max(0, num(lane));
-  const w = Math.max(0, Math.min(BAR_MAX_W, num(vp.w) - left - 2 * BAR_SIDE));
-  const bh = num(h) || BAR_H;
-  return { x: Math.round(left + (num(vp.w) - left - w) / 2), y: Math.round(num(vp.h) - BAR_GAP - bh), w: Math.round(w), h: Math.round(bh) };
-}
-
-/* A spot of its own (pos: x, y of its top left), kept inside the viewport
-   (vp: w, h, top: the first row under the top bar) for a bar of size (w, h). */
-export function fitBar(pos, vp, size) {
+/* The square at a spot of its own (pos: x, y of its top left), kept inside
+   the viewport (vp: w, h, top: the first row under the top bar). */
+export function fitSquare(pos, vp) {
   const top = num(vp.top);
-  const x = clampN(num(pos.x), BAR_EDGE, Math.max(BAR_EDGE, num(vp.w) - num(size.w) - BAR_EDGE));
-  const y = clampN(num(pos.y), top, Math.max(top, num(vp.h) - num(size.h) - BAR_EDGE));
+  const x = clampN(num(pos.x), BAR_EDGE, Math.max(BAR_EDGE, num(vp.w) - SQUARE - BAR_EDGE));
+  const y = clampN(num(pos.y), top, Math.max(top, num(vp.h) - SQUARE - BAR_EDGE));
   return { x: Math.round(x), y: Math.round(y) };
 }
 
+/* Where Float puts the square: the bottom right of the viewport. */
+export function floatSpot(vp) {
+  return fitSquare({ x: num(vp.w) - SQUARE - FLOAT_INSET, y: num(vp.h) - SQUARE - FLOAT_INSET }, vp);
+}
+
 /* What letting go here gives: 'top' with the pointer (p) over the top bar
-   or the TOP_BAND under it (edge: the top bar's bottom; lane: the page
-   column's left edge), 'bottom' with the bar (bar: x, y, w, h) near the
-   bottom centre (home), else 'free'. */
-export function dropZone(p, bar, home, edge, lane) {
-  if (num(p.y) < num(edge) + TOP_BAND && num(p.x) >= num(lane) - BAR_SIDE) return 'top';
-  const dx = (num(bar.x) + num(bar.w) / 2) - (num(home.x) + num(home.w) / 2);
-  const dy = (num(bar.y) + num(bar.h) / 2) - (num(home.y) + num(home.h) / 2);
-  if (Math.abs(dx) <= SNAP_X && Math.abs(dy) <= SNAP_Y) return 'bottom';
+   or the TOP_BAND under it (edge: the top bar's bottom), 'bottom' with it
+   in the BOTTOM_BAND above the viewport's bottom edge (vp: h), both only
+   over the page column (lane: its left edge), else 'free'. */
+export function dropZone(p, vp, edge, lane) {
+  if (num(p.x) < num(lane) - BAR_SIDE) return 'free';
+  if (num(p.y) < num(edge) + TOP_BAND) return 'top';
+  if (num(p.y) >= num(vp.h) - BOTTOM_BAND) return 'bottom';
   return 'free';
 }
 
@@ -532,17 +532,19 @@ export function createUI(env) {
   ]);
   const barPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-sm', 'aria-label': 'Play' }, [icon('play_arrow')]);
   // The desktop bar's handle (theme.css shows it only there): drag it, or
-  // press it for the places to put the bar; its arrows move it.
+  // press it for the places to put the bar; the square's arrows move it.
   const barGrip = h('button', {
     type: 'button', class: 'wsp-grip wsp-bar-grip', title: 'Drag to move, or click for places to put it',
-    'aria-label': 'Move the player. Press for places to put it, or use the arrow keys.',
+    'aria-label': 'Move the player. Press for places to put it.',
     'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'wspDockMenu'
   }, [icon('drag_indicator')]);
   // Stop, right of Play, from tablet width up (theme.css), as on the pill.
   const barStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-bar-stop', title: 'Stop listening' }, [icon('stop')]);
-  // With the top bar's slot (a desktop page) the bar floats: at the bottom
-  // centre, where it was let go, or not at all while it is in the top bar
-  // (data-dock). Below lg and on a full-screen view it is the phone's bar.
+  // With the top bar's slot (a desktop page) the bar is kept in one of three
+  // places (data-dock) and has two shapes (data-shape): the long bar along
+  // the bottom, the square at a spot of its own (and while it is dragged),
+  // or none while it is in the top bar. Below lg and on a full-screen view
+  // it is the phone's bar.
   const bar = h('section', { class: 'wsp-bar' + (pillSlot ? ' wsp-bar-dockable' : ''), 'aria-label': 'Audiobook player', hidden: true }, [
     h('div', { class: 'wsp-line', 'aria-hidden': 'true' }, [barLine]),
     barWarn,
@@ -631,17 +633,24 @@ export function createUI(env) {
   ]);
   const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
 
-  // While the bar is dragged: where letting go puts it back at the bottom
-  // centre (the top bar's zone is in its slot, below).
-  const ghost = h('div', { class: 'wsp-dock-ghost', 'aria-hidden': 'true' });
-  // The handle's places, a menu under the pill's handle or over the bar's.
+  // While the bar is dragged: the bottom bar's zone, a band along the bottom
+  // of the page column with a target in it, drawn as the top bar and its
+  // target are (that one is in the pill's slot, below).
+  const ghost = h('div', { class: 'wsp-dock-ghost', 'aria-hidden': 'true' }, [
+    h('div', { class: 'wsp-dock-zone' }, [icon('arrow_downward'), h('span', { class: 'wsp-dock-word', text: 'Bottom bar' })])
+  ]);
+  // The handle's places, a menu under the pill's handle, over the long
+  // bar's, and over or under the square's.
   const menuTop = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'top' }, [
     icon('arrow_upward'), h('span', { text: 'Move to top bar' })
   ]);
   const menuBottom = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'bottom' }, [
-    icon('arrow_downward'), h('span', { text: 'Move to bottom centre' })
+    icon('arrow_downward'), h('span', { text: 'Move to bottom bar' })
   ]);
-  const dockMenu = h('div', { class: 'wsp-dock-menu', id: 'wspDockMenu', role: 'menu', 'aria-label': 'Move the player', hidden: true }, [menuTop, menuBottom]);
+  const menuFloat = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'free' }, [
+    icon('open_with'), h('span', { text: 'Float' })
+  ]);
+  const dockMenu = h('div', { class: 'wsp-dock-menu', id: 'wspDockMenu', role: 'menu', 'aria-label': 'Move the player', hidden: true }, [menuTop, menuBottom, menuFloat]);
   // Where the player went, said once.
   const dockSay = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
 
@@ -788,7 +797,7 @@ export function createUI(env) {
 
   // The screen turned: a panel is a layer only while it covers the player.
   function onWideChange() {
-    // Across lg the floating bar and the phone's bar trade places.
+    // Across lg the desktop bar's shapes and the phone's bar trade places.
     endBarDrag('cancel');
     closeDockMenu(false);
     if (barShown) applyDock();
@@ -1058,13 +1067,15 @@ export function createUI(env) {
 
   // The room the page keeps at the bottom: the bar and the space under it
   // (on a tablet, the gap above the tab bar: theme.css --wsp-bar-gap). On a
-  // desktop page only at the bottom centre: in the top bar or at a spot of
-  // its own the bar asks for none.
+  // desktop page only for the long bar at the bottom: in the top bar or as
+  // the square the bar asks for none. While it is dragged the room stays as
+  // it was until it is let go, so the page never jumps under the pointer.
   function measureBar() {
+    if (barDrag && barDrag.started) return;
     let px = 0;
     if (barShown) {
       if (!windowable()) px = num(measure(bar)) + barGap();
-      else if (dockPlace().at === 'bottom') px = num(measure(bar)) + BAR_GAP;
+      else if (dockPlace().at === 'bottom') px = num(measure(bar));
     }
     px = Math.max(0, Math.round(px));
     if (px === lastPx) return;
@@ -1265,20 +1276,26 @@ export function createUI(env) {
 
   // The bar on a desktop page: its cover and title open and hide the window
   // as the pill's do, and its warning is not said twice while the window's
-  // own says it. Elsewhere it opens the full player, as ever.
+  // own says it. The square shows no words, so the cover's tooltip names
+  // the book (or says the warning) and its border turns the warn colour.
+  // Elsewhere it opens the full player, as ever.
   function drawDeskBar(s, up) {
     const desk = windowable();
     setAttr(bar, 'data-open', desk && up ? '' : null);
     setAttr(bar, 'data-state', !s.book ? 'loading' : playing(s) ? 'playing' : 'paused');
+    setAttr(bar, 'data-warn', desk && warnText ? '' : null);
     setAttr(barWarn, 'aria-hidden', desk && isOpen ? 'true' : null);
     if (!desk) {
       setAttr(openBtn, 'aria-haspopup', 'dialog');
+      setAttr(openBtn, 'title', null);
       setText(openSr, 'Open the player: ');
       return;
     }
+    const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
     setAttr(openBtn, 'aria-haspopup', null);
     setAttr(openBtn, 'aria-expanded', up ? 'true' : 'false');
-    setText(openSr, popped ? 'Bring the player back: ' : up ? 'Hide the player: ' : 'Open the player: ');
+    setAttr(openBtn, 'title', warnText || (what + (s.title ? ': ' + s.title : '')));
+    setText(openSr, what + ': ');
   }
 
   function render(s) {
@@ -1773,8 +1790,9 @@ export function createUI(env) {
     if (popOutFn) safely(popOutFn)();
   });
 
-  // The pill's Stop (and the floating bar's): the book closes, playing or
-  // paused (its last save goes as it does), with a way back to the same place.
+  // The pill's Stop (and the desktop bar's, in either shape): the book
+  // closes, playing or paused (its last save goes as it does), with a way
+  // back to the same place.
   function stopBook() {
     const s = player.state();
     if (!s || !s.book || s.loading || s.checking) return;
@@ -1884,17 +1902,19 @@ export function createUI(env) {
 
   // ---- The desktop bar's place ----
   //
-  // On a desktop page the bar floats. It starts at the bottom centre of the
-  // page column, where the page keeps room for it. Dragged by its handle it
-  // goes where it is let go and stays there (inside the viewport, below the
-  // top bar; the page keeps no room for it then), unless it is let go on one
-  // of the two snap zones that show while it is dragged: the top bar, where
-  // it becomes the pill left of the bell, and the bottom centre. The pill's
-  // handle drags it out again. Pressing either handle offers the places in a
-  // small menu; the bar's arrows move it (Shift: further), Home puts it back
-  // at the bottom centre. Focus follows a move and a polite line says where
-  // the player went. Escape cancels a drag. Kept per listener on this
-  // device. With reduced motion a move fades instead of flying.
+  // On a desktop page the bar is kept in one of three places. It starts as
+  // the long bar along the bottom of the page column, where the page keeps
+  // room for it. Dragged by its handle, from any place, it is the square:
+  // let go, the square stays there (inside the viewport, below the top bar;
+  // the page keeps no room for it), unless it is let go on one of the two
+  // snap zones that show while it is dragged: the top bar, where it becomes
+  // the pill left of the bell, and the bottom, where it is the long bar
+  // again. Pressing a handle offers the other places in a small menu (Float
+  // puts the square at the bottom right); the square's arrows move it
+  // (Shift: further) and Home on its handle puts it back at the bottom.
+  // Focus follows a move and a polite line says where the player went.
+  // Escape cancels a drag. Kept per listener on this device. With reduced
+  // motion a move fades instead of flying.
 
   function dockKey() {
     let id = '';
@@ -1928,33 +1948,16 @@ export function createUI(env) {
     return r && r.width ? Math.max(0, r.right) : 0;
   }
 
-  function barHeight() {
-    return num(measure(bar)) || BAR_H;
-  }
-
   function vpTop() {
     const vp = viewport();
     vp.top = topLimit();
     return vp;
   }
 
-  function home() {
-    return homeRect(viewport(), laneLeft(), barHeight());
-  }
-
-  // Its spot of its own, as it shows now: kept inside the viewport.
+  // The square's spot of its own, as it shows now: kept inside the viewport.
   function freeSpot() {
     const d = dockPlace();
-    const hm = home();
-    return fitBar({ x: d.x, y: d.y }, vpTop(), { w: hm.w, h: hm.h });
-  }
-
-  // Where it is drawn now: its spot, or the bottom centre.
-  function barSpot() {
-    const hm = home();
-    if (dockPlace().at !== 'free') return hm;
-    const p = freeSpot();
-    return { x: p.x, y: p.y, w: hm.w, h: hm.h };
+    return fitSquare({ x: d.x, y: d.y }, vpTop());
   }
 
   function setSpot(p) {
@@ -1967,14 +1970,28 @@ export function createUI(env) {
     bar.style.removeProperty('--wsp-y');
   }
 
+  function dragging() {
+    return !!(barDrag && barDrag.started);
+  }
+
+  // The bar's shape: the square at a spot of its own and while it is
+  // dragged, else the long bar (not shown while it is in the top bar). Only
+  // the square's handle has arrow keys, and its name says so.
+  function syncShape() {
+    const free = dockPlace().at === 'free';
+    setAttr(bar, 'data-shape', pillSlot ? (free || dragging() ? 'square' : 'long') : null);
+    setAttr(barGrip, 'aria-label', 'Move the player. Press for places to put it' + (free ? ', or use the arrow keys.' : '.'));
+  }
+
   // The slot in the top bar shows while the player is kept there, and while
   // the bar is dragged (the top bar's zone).
   function syncSlot() {
     if (!pillSlot) return;
-    setHidden(pillSlot, !(barShown && (dockPlace().at === 'top' || !!(barDrag && barDrag.started))));
+    setHidden(pillSlot, !(barShown && (dockPlace().at === 'top' || dragging())));
   }
 
-  // Draws the place: the bar's data-dock, its spot, the slot, the page's room.
+  // Draws the place: the bar's data-dock and shape, its spot, the slot, the
+  // page's room.
   function applyDock() {
     const at = dockPlace().at;
     setAttr(bar, 'data-dock', pillSlot ? at : null);
@@ -1982,6 +1999,7 @@ export function createUI(env) {
       if (at === 'free' && windowable()) setSpot(freeSpot());
       else clearSpot();
     }
+    syncShape();
     syncSlot();
     measureBar();
   }
@@ -1993,9 +2011,10 @@ export function createUI(env) {
 
   const SAID = {
     top: 'Player moved to the top bar.',
-    bottom: 'Player moved to the bottom centre.',
+    bottom: 'Player moved to the bottom bar.',
     free: 'Player moved.'
   };
+  const FLOATED = 'Player floating at the bottom right. The arrow keys on its handle move it.';
 
   function classFor(el, cls, ms) {
     el.classList.remove(cls);
@@ -2004,42 +2023,28 @@ export function createUI(env) {
     return setT(function () { el.classList.remove(cls); }, ms);
   }
 
-  // The bar flies (or, with reduced motion, fades) from rect `from` into its
-  // place at the bottom centre.
-  function settleFrom(from) {
-    const hm = home();
+  function stopArrive() {
     if (arriveTimer !== null) clearT(arriveTimer);
-    if (!motion() || !from) {
-      arriveTimer = classFor(bar, 'is-arriving', MOVE_MS);
-      return;
-    }
-    bar.classList.remove('is-settling');
-    bar.style.transform = 'translate(' + Math.round(from.x - hm.x) + 'px, ' + Math.round(from.y - hm.y) + 'px)';
-    void bar.offsetWidth;
-    bar.classList.add('is-settling');
-    bar.style.transform = '';
-    arriveTimer = setT(function () {
-      arriveTimer = null;
-      bar.classList.remove('is-settling');
-    }, MOVE_MS + 20);
+    arriveTimer = null;
+    bar.classList.remove('is-arriving');
+    pill.classList.remove('is-arriving');
   }
 
   /* The bar to a place: 'top', 'bottom', or 'free' at o.x, o.y. o.focus:
-     focus goes to the handle in the new place. o.from: the rect it was drawn
-     at, to fly from. o.quiet: nothing said (the arrow keys). */
+     focus goes to the handle in the new place. o.dropped: let go there at
+     the end of a drag. o.said: what is said instead of the usual line.
+     o.quiet: nothing said (the arrow keys). The new shape arrives (rises,
+     grows, or with reduced motion fades in), except for the square where
+     it was let go, which is already there. */
   function putBar(at, o) {
     o = o || {};
     const before = dockPlace().at;
     place = at === 'free' ? readDock({ at: 'free', x: o.x, y: o.y }) : { at: at };
     saveDock();
     applyDock();
-    if (at === 'top') {
-      if (arriveTimer !== null) clearT(arriveTimer);
-      arriveTimer = classFor(pill, 'is-arriving', MOVE_MS);
-    } else if (at === 'bottom' && (o.from || before === 'top')) {
-      settleFrom(o.from || null);
-    } else if (at === 'free' && before === 'top' && !o.dropped) {
-      if (arriveTimer !== null) clearT(arriveTimer);
+    stopArrive();
+    if (at === 'top') arriveTimer = classFor(pill, 'is-arriving', MOVE_MS);
+    else if (at === 'bottom' ? (o.dropped || before !== 'bottom') : (before !== 'free' && !o.dropped)) {
       arriveTimer = classFor(bar, 'is-arriving', MOVE_MS);
     }
     if (o.focus) {
@@ -2048,7 +2053,7 @@ export function createUI(env) {
         g.focus({ preventScroll: true });
       } catch (e) { /* not focusable */ }
     }
-    if (!o.quiet && (before !== at || at === 'free')) say(SAID[at]);
+    if (!o.quiet && (before !== at || at === 'free')) say(o.said || SAID[at]);
   }
 
   // Into the top bar from the menu: the bar flies to the slot and the pill
@@ -2080,13 +2085,23 @@ export function createUI(env) {
 
   function toBottom(focus) {
     if (moveTimer !== null) return;
-    putBar('bottom', { focus: focus, from: dockPlace().at === 'free' ? barSpot() : null });
+    putBar('bottom', { focus: focus });
+  }
+
+  // Float: the square, at the bottom right; its arrows move it from there.
+  function toFloat(focus) {
+    if (moveTimer !== null) return;
+    const p = floatSpot(vpTop());
+    putBar('free', { focus: focus, x: p.x, y: p.y, said: FLOATED });
   }
 
   // ---- The handle's menu ----
 
+  // Room for the menu above a handle; nearer the top it opens below.
+  const MENU_ROOM = 136;
+
   function menuItems() {
-    return [menuTop, menuBottom].filter(function (b) { return !b.hidden; });
+    return [menuTop, menuBottom, menuFloat].filter(function (b) { return !b.hidden; });
   }
 
   function openDockMenu(grip) {
@@ -2094,11 +2109,14 @@ export function createUI(env) {
     const at = dockPlace().at;
     setHidden(menuTop, at === 'top');
     setHidden(menuBottom, at === 'bottom');
+    setHidden(menuFloat, at === 'free');
     dockMenu.hidden = false;
     const r = grip.getBoundingClientRect();
     const vp = viewport();
     dockMenu.style.left = Math.round(Math.max(BAR_EDGE, Math.min(r.left, vp.w - 240))) + 'px';
-    if (grip === pillGrip) {
+    // Under the pill's handle, and under the square's near the top of the
+    // screen; over the long bar's, and the square's anywhere else.
+    if (grip === pillGrip || r.top < MENU_ROOM) {
       dockMenu.style.top = Math.round(r.bottom + 8) + 'px';
       dockMenu.style.bottom = '';
     } else {
@@ -2168,7 +2186,9 @@ export function createUI(env) {
     const b = e.target && e.target.closest ? e.target.closest('.wsp-dock-item') : null;
     if (!b) return;
     closeDockMenu(false);
-    if (b.getAttribute('data-to') === 'top') toTop(true);
+    const to = b.getAttribute('data-to');
+    if (to === 'top') toTop(true);
+    else if (to === 'free') toFloat(true);
     else toBottom(true);
   });
 
@@ -2185,8 +2205,10 @@ export function createUI(env) {
     g.addEventListener('pointerdown', function (e) { gripDown(e, g); });
   });
 
+  // The square's handle: the arrows move it, Home puts it back at the bottom.
   barGrip.addEventListener('keydown', function (e) {
     if (!windowable() || barDrag || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (dockPlace().at !== 'free') return;
     if (e.key === 'Home') {
       e.preventDefault();
       closeDockMenu(false);
@@ -2197,8 +2219,8 @@ export function createUI(env) {
     if (!d || moveTimer !== null) return;
     e.preventDefault();
     closeDockMenu(false);
-    const from = barSpot();
-    const p = fitBar({ x: from.x + d[0], y: from.y + d[1] }, vpTop(), { w: from.w, h: from.h });
+    const from = freeSpot();
+    const p = fitSquare({ x: from.x + d[0], y: from.y + d[1] }, vpTop());
     putBar('free', { x: p.x, y: p.y, quiet: true });
   });
 
@@ -2210,6 +2232,13 @@ export function createUI(env) {
     hostWin.addEventListener('pointermove', onBarMove);
     hostWin.addEventListener('pointerup', onBarUp);
     hostWin.addEventListener('pointercancel', onBarCancel);
+    // The square takes shape under the pointer: the browser must not start
+    // dragging its cover (or anything else) in place of the bar.
+    hostWin.addEventListener('dragstart', onBarNativeDrag, true);
+  }
+
+  function onBarNativeDrag(e) {
+    if (barDrag) e.preventDefault();
   }
 
   function startBarDrag() {
@@ -2218,34 +2247,31 @@ export function createUI(env) {
     d.focus = doc.activeElement === d.grip;
     closeDockMenu(false);
     announceMenu(dockMenu);
-    const hm = home();
-    d.home = hm;
-    if (d.from === 'top') {
-      // The pill lifts out as the bar, held by its handle.
-      d.offX = BAR_GRIP_X;
-      d.offY = hm.h / 2;
-      d.start = null;
-    } else {
-      const r = barSpot();
+    if (d.from === 'free') {
+      // The square, held where it was taken.
+      const r = freeSpot();
       d.offX = d.sx - r.x;
       d.offY = d.sy - r.y;
-      d.start = r;
+    } else {
+      // The long bar or the pill becomes the square, held by its handle.
+      d.offX = SQUARE / 2;
+      d.offY = SQUARE_GRIP_Y;
     }
-    ghost.style.height = hm.h + 'px';
+    stopArrive();
     bar.classList.add('is-dragging');
     root.setAttribute('data-wsp-drag', '');
+    syncShape();
     syncSlot();
     doc.addEventListener('keydown', onBarDragKey, true);
   }
 
   function moveBar(x, y) {
     const d = barDrag;
-    const hm = d.home;
-    const p = fitBar({ x: x - d.offX, y: y - d.offY }, vpTop(), { w: hm.w, h: hm.h });
+    const p = fitSquare({ x: x - d.offX, y: y - d.offY }, vpTop());
     d.x = p.x;
     d.y = p.y;
     setSpot(p);
-    const zone = dropZone({ x: x, y: y }, { x: p.x, y: p.y, w: hm.w, h: hm.h }, hm, topLimit() - WIN_GAP, laneLeft());
+    const zone = dropZone({ x: x, y: y }, viewport(), topLimit() - WIN_GAP, laneLeft());
     if (zone !== d.zone) {
       d.zone = zone;
       setAttr(root, 'data-wsp-drop', zone === 'free' ? null : zone);
@@ -2287,6 +2313,7 @@ export function createUI(env) {
     hostWin.removeEventListener('pointermove', onBarMove);
     hostWin.removeEventListener('pointerup', onBarUp);
     hostWin.removeEventListener('pointercancel', onBarCancel);
+    hostWin.removeEventListener('dragstart', onBarNativeDrag, true);
     doc.removeEventListener('keydown', onBarDragKey, true);
     if (!d.started) return;
     lastBarDrag = now();
@@ -2301,12 +2328,12 @@ export function createUI(env) {
       }
       return;
     }
-    if (d.zone === 'top') putBar('top', { focus: d.focus });
-    else if (d.zone === 'bottom') putBar('bottom', { focus: d.focus, from: { x: d.x, y: d.y } });
+    if (d.zone === 'top') putBar('top', { focus: d.focus, dropped: true });
+    else if (d.zone === 'bottom') putBar('bottom', { focus: d.focus, dropped: true });
     else putBar('free', { focus: d.focus, x: d.x, y: d.y, dropped: true });
   }
 
-  // A smaller or larger window: a spot of its own kept inside it.
+  // A smaller or larger window: the square kept inside it.
   if (hostWin && typeof hostWin.addEventListener === 'function') {
     hostWin.addEventListener('resize', function () {
       if (barDrag) return;
@@ -2451,7 +2478,7 @@ export function createUI(env) {
       lastFocus = null;
       if (lastState) drawPill(lastState);
       if (focusIn) {
-        // Back to what opens it: the pill's cover, or the floating bar's.
+        // Back to what opens it: the pill's cover, or the desktop bar's (long or square).
         const back = pillOnScreen() ? pillOpen : barShown && dockPlace().at !== 'top' && isVisible(openBtn) ? openBtn : fallbackFocus();
         if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
       }

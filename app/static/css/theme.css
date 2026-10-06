@@ -722,10 +722,10 @@ html.ws-vt #wsPlayer       { view-transition-name: ws-player; }
  * ever under the player: below lg the document scrolls, so <body> pads its
  * bottom; from lg the sidebar and <main> are one screen tall and scroll
  * inside, so they end that much higher (max-height wins over h-screen).
- * On a desktop page the bar floats over the page column only (from
+ * On a desktop page the long bar spans the page column only (from
  * --ws-lane-left, the sidebar's width), so only <main> ends higher, and
  * <body> pads nothing; the room is 0px while the bar is kept in the top bar
- * or at a spot of its own (ui.js).
+ * or is the square at a spot of its own (ui.js).
  */
 html { --ws-player-h: 0px; --ws-lane-left: 0px; }
 #wsPlayer { position: fixed; left: 0; right: 0; bottom: var(--ws-tabbar-h); z-index: 45; }
@@ -1927,26 +1927,29 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 
 /* ---- The desktop player (js/player/ui.js, popout.js, remote.js) ----
- * From lg, on a page whose top bar shows: the bar floats (below), or the
- * listener keeps it in the top bar as the pill; the player opens as a
+ * From lg, on a page whose top bar shows: the bar runs along the bottom
+ * or floats as a square (below), or the listener keeps it in the top bar
+ * as the pill; the player opens as a
  * floating window instead of the full-screen sheet (the same element,
  * .wsp-full.is-window). A full-screen view (the reader), where the top bar
  * is hidden, keeps the phone's bar. The window sits over the page under the
  * top bar (#wsPlayer's z 45, the header's 50), so the bell panel and the
- * account menu open over it. Its surface, the floating bar's and the
+ * account menu open over it. Its surface, the desktop bar's and the
  * handle's menu's is the background with a primary tint; text as the rest
  * of the player. Motion: the window opens and closes with a short scale and
  * fade, the bar flies between its places (opacity only with reduced
  * motion); the pill's three bars move only while it plays.
  */
 
-/* The floating bar: from 640px on a page with the shell. On a tablet it sits
-   over the tab bar, 16px in from each side and 12px above it, with no handle
-   (there is no top bar to keep it in). On a desktop page it is a card at the
-   bottom centre of the page column (720px at most, 24px above the bottom),
-   or at a spot of its own (ui.js sets --wsp-x and --wsp-y), or hidden while
-   it is kept in the top bar (data-dock="top"), with a handle on its left.
-   The handle and Stop are hidden on a phone, which keeps its bar as it was. */
+/* The bar from 640px on a page with the shell. On a tablet it floats over
+   the tab bar, 16px in from each side and 12px above it, with no handle
+   (there is no top bar to keep it in). On a desktop page it has a handle and
+   one of two shapes (ui.js data-shape): the long bar along the bottom of the
+   page column, edge to edge under it, the phone's layout with Stop
+   (data-shape="long"); or the square at a spot of its own and while it is
+   dragged (data-shape="square", at --wsp-x and --wsp-y). It is not shown
+   while it is kept in the top bar (data-dock="top"). The handle and Stop are
+   hidden on a phone, which keeps its bar as it was. */
 .wsp-grip, .wsp-bar-stop { display: none; }
 .wsp-grip {
   align-items: center; justify-content: center; flex-shrink: 0; color: rgb(var(--color-text) / .7);
@@ -1977,27 +1980,65 @@ html[data-player-full] #scrollDownHint { display: none; }
   html:not([data-shell="hidden"]) .wsp-bar { width: min(720px, calc(100% - 32px)); }
 }
 @media (min-width: 1024px) {
+  /* The long bar: the page column's width, on its bottom edge. */
   html:not([data-shell="hidden"]) .wsp-bar-dockable {
     --wsp-bar-gap: 0px;
-    position: fixed; left: var(--ws-lane-left); right: 0; bottom: 24px; margin: 0 auto;
-    width: min(720px, calc(100vw - var(--ws-lane-left) - 48px));
+    position: fixed; left: var(--ws-lane-left); right: 0; bottom: 0; width: auto; margin: 0;
+    border-width: 1px 0 0; border-color: rgb(var(--color-text) / .12); border-radius: 0; box-shadow: none;
     animation: wsp-bar-in 220ms cubic-bezier(.2, .8, .2, 1);
     transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out;
   }
   html:not([data-shell="hidden"]) .wsp-bar-dockable[data-dock="top"]:not(.is-dragging) { display: none; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-dock="free"],
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-dragging {
-    left: var(--wsp-x, 8px); top: var(--wsp-y, 72px); right: auto; bottom: auto; margin: 0;
-  }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-row { height: 64px; padding: 0 12px 0 0; gap: 8px; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-open { height: 52px; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-grip { display: inline-flex; width: 32px; align-self: stretch; border-radius: 15px 0 0 15px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-row { height: 72px; padding: 0 24px 0 0; gap: 12px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-open { height: 56px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-grip { display: inline-flex; width: 40px; align-self: stretch; }
   /* The window it opened is open. */
   html:not([data-shell="hidden"]) .wsp-bar-dockable[data-open] {
     border-color: rgb(var(--color-accent) / .5);
     background: linear-gradient(rgb(var(--color-primary) / .22), rgb(var(--color-primary) / .22)), rgb(var(--color-background));
   }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-arriving { animation: wsp-fade-in 160ms ease-out; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-warn] { border-color: rgb(var(--ws-status-warn) / .6); }
+
+  /* The square: the cover fills it under a strip that is its handle, Play
+     and Stop sit on the cover's corner, the progress line runs along its
+     foot, and the title is the cover's name and tooltip (ui.js). Play has
+     its own fill and Stop a background one, so both read on any cover. */
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] {
+    left: var(--wsp-x, 8px); top: var(--wsp-y, 72px); right: auto; bottom: auto;
+    width: 168px; height: 168px; padding: 0;
+    border-width: 1px; border-color: rgb(var(--color-text) / .14); border-radius: 16px;
+    box-shadow: 0 16px 40px -12px var(--ws-shade), 0 2px 6px var(--ws-shade);
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"][data-open] { border-color: rgb(var(--color-accent) / .5); }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"][data-warn] { border-color: rgb(var(--ws-status-warn) / .6); }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-row { position: absolute; inset: 0; display: block; height: auto; padding: 0; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-grip {
+    position: absolute; top: 0; left: 0; right: 0; width: auto; height: 24px; border-radius: 15px 15px 0 0;
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-grip .material-symbols-outlined { transform: rotate(90deg); }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-open {
+    position: absolute; top: 24px; left: 8px; right: 8px; bottom: 10px; height: auto; padding: 0; gap: 0; justify-content: center; border-radius: 10px;
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-art { width: 100%; height: 100%; border-radius: 10px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-art img { border-radius: 8px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-art .wsp-art-mark { font-size: 48px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-text,
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-warn-live {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-play {
+    position: absolute; right: 52px; bottom: 16px; width: 40px; height: 40px; box-shadow: 0 2px 8px var(--ws-shade);
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-play .material-symbols-outlined { font-size: 26px; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-stop {
+    position: absolute; right: 14px; bottom: 20px; width: 32px; height: 32px; color: rgb(var(--color-text));
+    background: rgb(var(--color-background) / .85); border: 1px solid rgb(var(--color-text) / .2); box-shadow: 0 2px 8px var(--ws-shade);
+  }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-line { top: auto; bottom: 0; }
+
+  /* A move arrives with a name of its own, so it runs again whatever ran last. */
+  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-arriving { animation: wsp-bar-arrive 220ms cubic-bezier(.2, .8, .2, 1); }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"].is-arriving { animation: wsp-square-in 200ms cubic-bezier(.2, .8, .2, 1); }
   html:not([data-shell="hidden"]) .wsp-bar-dockable.is-dragging {
     cursor: grabbing; box-shadow: 0 28px 64px -12px var(--ws-shade), 0 2px 8px var(--ws-shade);
   }
@@ -2005,39 +2046,51 @@ html[data-player-full] #scrollDownHint { display: none; }
   /* Over the top bar it gives way to the pill shown there (the pointer
      still holds it). */
   html:not([data-shell="hidden"]) .wsp-bar-dockable.is-near { opacity: 0; transition: opacity 120ms ease-out; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-settling { transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
   html:not([data-shell="hidden"]) .wsp-bar-dockable.is-leaving {
     opacity: 0; pointer-events: none;
     transition: transform 240ms cubic-bezier(.4, 0, .2, 1), opacity 240ms ease-in;
   }
 }
 @keyframes wsp-bar-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes wsp-square-in { from { opacity: 0; transform: scale(.92); } }
+@keyframes wsp-bar-arrive { from { opacity: 0; transform: translateY(16px); } }
 @media (hover: hover) and (pointer: fine) {
   html:not([data-shell="hidden"]) .wsp-bar-dockable:not([data-open]) .wsp-bar-open:hover { background: rgb(var(--color-text) / .05); }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"] .wsp-bar-stop:not([aria-disabled="true"]):hover { background: rgb(var(--color-background)); }
 }
 
-/* While it is dragged: the two snap zones, the bottom centre (a dashed
-   outline where it goes back to) and the top bar (a dashed slot left of the
-   bell). The one letting go would snap to turns solid; over the top bar the
-   pill itself shows in the slot and the top bar takes the primary tint. */
+/* While it is dragged: the two snap zones, drawn alike. The top bar shows a
+   dashed target in the pill's slot left of the bell; the bottom shows a band
+   along the bottom of the page column, as tall as the long bar, with the
+   same target across it. The one letting go would snap to lights: over the
+   top bar the pill itself shows in the slot and the top bar takes the
+   primary tint; over the bottom band the target turns solid and the band
+   takes the same tint. */
 html[data-wsp-drag], html[data-wsp-drag] * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .wsp-dock-ghost { display: none; }
 @media (min-width: 1024px) {
   html[data-wsp-drag]:not([data-shell="hidden"]) .wsp-dock-ghost {
-    display: block; position: fixed; z-index: -1; left: var(--ws-lane-left); right: 0; bottom: 24px; margin: 0 auto;
-    width: min(720px, calc(100vw - var(--ws-lane-left) - 48px)); height: 66px;
-    border: 2px dashed rgb(var(--color-text) / .45); border-radius: 16px; pointer-events: none;
+    display: flex; align-items: center; position: fixed; z-index: -1; left: var(--ws-lane-left); right: 0; bottom: 0; height: 73px;
+    padding: 0 32px; pointer-events: none;
+    border-top: 1px solid rgb(var(--color-accent) / .2); background: rgb(var(--color-background) / .4);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    transition: background-color 150ms ease-out, border-color 150ms ease-out;
   }
-  html[data-wsp-drop="bottom"]:not([data-shell="hidden"]) .wsp-dock-ghost { border-style: solid; border-color: rgb(var(--color-accent)); background: rgb(var(--color-primary) / .2); }
+  html[data-wsp-drop="bottom"]:not([data-shell="hidden"]) .wsp-dock-ghost {
+    background: linear-gradient(rgb(var(--color-primary) / .2), rgb(var(--color-primary) / .2)), rgb(var(--color-background));
+    border-top-color: rgb(var(--color-accent) / .7);
+  }
 }
 .wsp-dock-target { display: none; }
-html[data-wsp-drag] .wsp-dock-target, html[data-wsp-docking] .wsp-dock-target {
+html[data-wsp-drag] .wsp-dock-target, html[data-wsp-docking] .wsp-dock-target, .wsp-dock-zone {
   display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; margin-block: -4px; padding: 0 12px;
   border-radius: 9999px; border: 2px dashed rgb(var(--color-accent) / .8); background: rgb(var(--color-primary) / .12);
   color: rgb(var(--color-text) / .85); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
 }
-.wsp-dock-target .material-symbols-outlined { font-size: 20px; }
-html[data-wsp-docking] .wsp-dock-target { border-style: solid; border-color: rgb(var(--color-accent)); background: rgb(var(--color-primary) / .4); }
+.wsp-dock-zone { margin-block: 0; }
+.wsp-dock-target .material-symbols-outlined, .wsp-dock-zone .material-symbols-outlined { font-size: 20px; }
+html[data-wsp-docking] .wsp-dock-target,
+html[data-wsp-drop="bottom"] .wsp-dock-zone { border-style: solid; border-color: rgb(var(--color-accent)); background: rgb(var(--color-primary) / .4); }
 html[data-wsp-drag] .wsp-pill, html[data-wsp-docking] .wsp-pill { display: none; }
 html[data-wsp-drop="top"] .wsp-dock-target { display: none; }
 html[data-wsp-drop="top"] .wsp-pill {
@@ -2313,12 +2366,14 @@ html[data-wsp-drop="top"] #appHeader {
   .wsp-pill[data-state="playing"] .wsp-eq span { animation: none; }
   .wsp-pill.is-arriving { animation: wsp-fade-in 160ms ease-out both; }
   html:not([data-shell="hidden"]) .wsp-bar-dockable { animation: wsp-fade-in 160ms ease-out; transition: none; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-settling { transition: none; }
+  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-arriving,
+  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-shape="square"].is-arriving { animation: wsp-fade-arrive 160ms ease-out; }
   html:not([data-shell="hidden"]) .wsp-bar-dockable.is-leaving { transition: opacity 160ms ease-in; }
   .wsp-full.is-window.is-opening { animation: wsp-fade-in 160ms ease-out both; }
   .wsp-full.is-window.is-closing { animation: wsp-fade-out 120ms ease-in both; }
 }
 @keyframes wsp-fade-in { from { opacity: 0; } }
+@keyframes wsp-fade-arrive { from { opacity: 0; } }
 @keyframes wsp-fade-out { to { opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
