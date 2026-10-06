@@ -1625,10 +1625,16 @@ export function createFeatures(env) {
     }
   }
 
-  // With the full player closed: a key on the page that nobody else owns.
+  // With the full player closed (or open as the desktop window, which keeps
+  // its own keys and leaves the page's alone): a key on the page that nobody
+  // else owns.
+  function modal() {
+    return ui.isOpen() && !(typeof ui.isWindow === 'function' && ui.isWindow());
+  }
+
   function onDocKey(e) {
     try {
-      if (e.defaultPrevented || ui.isOpen() || owned(e.target) || onReader() || tourActive() || dialogOpen()) return;
+      if (e.defaultPrevented || modal() || owned(e.target) || onReader() || tourActive() || dialogOpen()) return;
       act(e, false);
     } catch (err) {
       logError(err);

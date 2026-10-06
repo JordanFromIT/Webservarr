@@ -557,7 +557,7 @@ class HomePage(unittest.TestCase):
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
         self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', "
-                      "'saves.js', 'features.js',\n  'findplace.js', 'safetynet.js'];", leaks)
+                      "'saves.js', 'features.js',\n  'findplace.js', 'safetynet.js', 'popout.js'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file

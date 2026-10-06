@@ -61,10 +61,10 @@
 
 // Files are matched by name, wherever they are: 'ui.js' is both js/ui.js and
 // the player's view, js/player/ui.js. engine.js, saves.js, features.js and
-// findplace.js and safetynet.js are the audiobook player's (js/player/), which
-// lives as long as the document.
+// findplace.js, safetynet.js and popout.js are the audiobook player's
+// (js/player/), which lives as long as the document.
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js',
-  'install.js', 'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js'];
+  'install.js', 'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js', 'popout.js'];
 // Shell code whose timers and listeners live as long as the shell's own UI,
 // not the page that called it: ui.js (a toast dismisses itself, a dialog stops
 // listening when it closes) and shell.js's serviceStatus (the one
@@ -81,7 +81,7 @@ export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js'
 // (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
 // they create stays the page's.
 export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', 'saves.js', 'features.js',
-  'findplace.js', 'safetynet.js'];
+  'findplace.js', 'safetynet.js', 'popout.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;

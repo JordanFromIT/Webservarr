@@ -109,6 +109,26 @@
  * page-turn keys, say); a feature that wants a key there listens inside it.
  * The full player closes whenever a page (or a wiki view) is shown under it,
  * including Back on a desktop browser, which is no close request.
+ *
+ * Desktop (lg and up, where the shell's top bar shows and has the pill's
+ * slot, #wsPlayerPill): the mini bar gives way to a pill in the top bar
+ * (cover, title, chapter and time left, play/pause, a thin progress line;
+ * playing, paused, open, popped out and loading), and open() shows the same
+ * player as a floating window instead of the full-screen sheet. The window
+ * is part of the page, not a dialog: Tab goes in and out of it, nothing
+ * behind it is blocked, page keys still reach the page, and soft navigation
+ * leaves it open. It moves by its top bar and resizes from its corner (and by
+ * the keyboard: the grip's arrows move it, Shift for bigger steps, Home puts
+ * it back; the corner's arrows size it), stays inside the viewport, and its
+ * place and size are kept per listener on this device. Its panels open
+ * below the player and close again from the same button (Playback settings
+ * gives way to Chapters). Escape or Minimise sends it back to the pill and
+ * focus with it; Stop and close closes the book ("Your place is saved",
+ * Resume). A full-screen view (the reader) keeps the bar and the sheet.
+ *
+ * Pop out (popout.js) moves the window into a window of its own: dock()
+ * puts this same window in a Document Picture-in-Picture document, and
+ * setPopped() marks the pill while a remote-control window plays the tab.
  */
 
 export const SWIPE_CLOSE_PX = 120;     // a swipe down this far closes the full player
@@ -122,6 +142,16 @@ export const ACTION_EXTRA_MS = 4000;   // more time to reach a notice's button
 export const MAX_NOTICES = 3;
 export const CLOCK_MS = 30000;         // the "finishes around" clock, while paused
 export const SLOTS = ['menu', 'speed', 'sleep', 'history'];
+
+// The desktop window: its size and limits, the gap it keeps from the
+// viewport's edges, and the arrow keys' steps.
+export const WIN = { w: 380, minW: 340, maxW: 520, h: 600, minH: 480, maxH: 900 };
+export const WIN_GAP = 8;
+export const WIN_STEP = 16;
+export const WIN_STEP_BIG = 64;
+export const WIN_IN_MS = 200;          // its open (opacity only with reduced motion)
+export const WIN_OUT_MS = 160;         // ...and its close
+export const WIN_KEY = 'ws-player-window';   // + ':' + the listener's identity key
 
 const WIDE = '(min-width: 1024px)';
 const RESUME_LOST = "Couldn't find your saved place in this book";
@@ -205,6 +235,32 @@ export function chapterSpan(state) {
   return { index: i, label: String(c.label || ''), start: start, end: Math.max(start, end) };
 }
 
+function clampN(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function given(v) {
+  return typeof v === 'number' && isFinite(v);
+}
+
+/* Where the desktop window goes: the listener's place and size (geo: x, y,
+   w, h, each may be missing) kept inside the viewport (vp: w, h, top: the
+   first row under the top bar), at the size limits (WIN). collapsedH: the
+   window's own height when no panel is open (it sizes to its content), else
+   null. Missing values are the default: WIN's size, at the top right. */
+export function fitWindow(geo, vp, collapsedH) {
+  const g = geo || {};
+  const top = num(vp.top);
+  const room = Math.max(0, num(vp.h) - top - WIN_GAP);
+  const w = clampN(given(g.w) ? g.w : WIN.w, Math.min(WIN.minW, num(vp.w) - 2 * WIN_GAP), Math.min(WIN.maxW, num(vp.w) - 2 * WIN_GAP));
+  const h = collapsedH !== null && collapsedH !== undefined
+    ? Math.min(num(collapsedH), room)
+    : clampN(given(g.h) ? g.h : WIN.h, Math.min(WIN.minH, room), Math.min(WIN.maxH, room));
+  const x = clampN(given(g.x) ? g.x : num(vp.w) - w - 3 * WIN_GAP, WIN_GAP, Math.max(WIN_GAP, num(vp.w) - w - WIN_GAP));
+  const y = clampN(given(g.y) ? g.y : top + WIN_GAP / 2, top, Math.max(top, num(vp.h) - h - WIN_GAP));
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), room: Math.round(room) };
+}
+
 // ---------------------------------------------------------------------------
 // The UI
 // ---------------------------------------------------------------------------
@@ -213,12 +269,16 @@ export function chapterSpan(state) {
    measure(el) -> px, isVisible(el), now(), setTimeout, clearTimeout,
    ResizeObserver, isDialogOpen(), leaveTo(url), win (for the router's
    events), CloseWatcher (the browser's, or none), hasActivation() (a tap or
-   a key is being handled now) }. */
+   a key is being handled now), pillSlot (the top bar's #wsPlayerPill, or
+   none: no desktop window), storage (localStorage, or none), identity() (the
+   listener's identity key), viewport() -> { w, h }, topLimit() (px: the
+   window stays below the top bar) }. */
 export function createUI(env) {
   const doc = env.doc;
   const host = env.host;
   const player = env.player;
   const root = doc.documentElement;
+  const pillSlot = env.pillSlot === undefined ? doc.getElementById('wsPlayerPill') : env.pillSlot;
   const setT = env.setTimeout;
   const clearT = env.clearTimeout;
   const now = env.now || Date.now;
@@ -261,6 +321,16 @@ export function createUI(env) {
   // two would share one close request, and one Back would close both).
   // Escape still closes it first.
   let watcherTap = false;
+  // The desktop window: the open player is the floating window (not the
+  // sheet); docked: it sits in a Picture-in-Picture document ({ doc, holder });
+  // popped: it plays in a window of its own ({ kind, end }), shown on the pill.
+  let windowed = false;
+  let docked = null;
+  let popped = null;
+  let popOutFn = null;         // popout.js: what Pop out does
+  let winDrag = null;          // a move or resize: { kind, id, x0, y0, from }
+  let winWatch = null;         // the viewport's resize listener while it shows
+  let winAnim = null;          // the open's class timer
 
   // again: re-made for a layer that had one (the screen turned), not a new
   // layer, so no tap is needed.
@@ -385,7 +455,9 @@ export function createUI(env) {
     h('span', { class: 'wsp-bar-text' }, [barTitle, barMeta])
   ]);
   const barPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-sm', 'aria-label': 'Play' }, [icon('play_arrow')]);
-  const bar = h('section', { class: 'wsp-bar', 'aria-label': 'Audiobook player', hidden: true }, [
+  // With the top bar's pill (a desktop page), the bar shows only below lg and
+  // on a full-screen view (theme.css): its measured height is 0 elsewhere.
+  const bar = h('section', { class: 'wsp-bar' + (pillSlot ? ' wsp-bar-pilled' : ''), 'aria-label': 'Audiobook player', hidden: true }, [
     h('div', { class: 'wsp-line', 'aria-hidden': 'true' }, [barLine]),
     barWarn,
     h('div', { class: 'wsp-bar-row' }, [openBtn, barPlay])
@@ -422,6 +494,20 @@ export function createUI(env) {
   const fullPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-lg', 'aria-label': 'Play' }, [icon('play_arrow')]);
   const chaptersBtn = actionButton({ icon: 'format_list_bulleted', label: 'Chapters' });
   const chaptersSlot = h('div', { class: 'wsp-slot', 'data-no-swipe': '', hidden: true }, [chaptersBtn]);
+  const actionsRow = h('div', { class: 'wsp-actions' }, [slots.speed, chaptersSlot, slots.sleep, slots.history]);
+  // The desktop window's own controls, in its top bar (hidden on the sheet).
+  const grip = h('button', {
+    type: 'button', class: 'wsp-icon-btn wsp-win-grip', hidden: true, title: 'Move',
+    'aria-label': 'Move the player. Arrow keys move it, Home puts it back.'
+  }, [icon('drag_indicator')]);
+  const popBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Pop out', 'aria-label': 'Pop out into its own window' }, [icon('picture_in_picture_alt')]);
+  const winSep = h('span', { class: 'wsp-win-sep', 'aria-hidden': 'true', hidden: true });
+  const minBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Minimise', 'aria-label': 'Minimise to the top bar' }, [icon('remove')]);
+  const stopBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Stop and close', 'aria-label': 'Stop and close the book' }, [icon('close')]);
+  const resizeBtn = h('button', {
+    type: 'button', class: 'wsp-win-resize', hidden: true, title: 'Resize',
+    'aria-label': 'Resize the player. Arrow keys change its size.'
+  });
   const main = h('div', { class: 'wsp-main' }, [
     fullArt.frame,
     h('div', { class: 'wsp-meta', 'data-swipe': '' }, [series, title, byline]),
@@ -432,29 +518,69 @@ export function createUI(env) {
     ]),
     leftLine,
     h('div', { class: 'wsp-controls' }, [backBtn, fullPlay, fwdBtn]),
-    h('div', { class: 'wsp-actions' }, [slots.speed, chaptersSlot, slots.sleep, slots.history])
+    actionsRow
   ]);
   const side = h('div', { class: 'wsp-side' });
   const noticeBox = h('div', { class: 'wsp-notices', 'aria-live': 'polite' });
   // The warning and, while the player is open, the notices: one column under
   // the top bar, above whichever view shows, so neither covers the other.
   const alerts = h('div', { class: 'wsp-alerts' }, [fullWarn]);
+  const topBar = h('div', { class: 'wsp-top', 'data-swipe': '' }, [
+    h('span', { class: 'wsp-grab', 'aria-hidden': 'true' }),
+    closeBtn,
+    grip,
+    h('span', { class: 'wsp-top-label', text: 'Now playing' }),
+    slots.menu,
+    popBtn,
+    winSep,
+    minBtn,
+    stopBtn
+  ]);
   const sheet = h('div', { class: 'wsp-sheet', tabindex: '-1' }, [
     h('div', { class: 'wsp-ambient', 'aria-hidden': 'true' }, [ambientImg]),
-    h('div', { class: 'wsp-top', 'data-swipe': '' }, [
-      h('span', { class: 'wsp-grab', 'aria-hidden': 'true' }),
-      closeBtn,
-      h('span', { class: 'wsp-top-label', text: 'Now playing' }),
-      slots.menu
-    ]),
+    topBar,
     alerts,
-    h('div', { class: 'wsp-body' }, [main, side])
+    h('div', { class: 'wsp-body' }, [main, side]),
+    resizeBtn
   ]);
   const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
 
   host.appendChild(bar);
   host.appendChild(full);
   host.appendChild(noticeBox);
+
+  // ---- The top bar's pill (desktop) ----
+  //
+  // In the shell's top bar, left of the bell: the cover and title open the
+  // window (or hide it, or bring a popped-out player back); the round button
+  // plays and pauses without opening anything. Shown while the bar would be.
+
+  const pillArt = art('wsp-pill-art');
+  const pillTitle = h('span', { class: 'wsp-pill-title' });
+  const pillWords = h('span', { class: 'wsp-pill-words' });
+  const pillMeta = h('span', { class: 'wsp-pill-meta' }, [
+    h('span', { class: 'wsp-eq', 'aria-hidden': 'true' }, [h('span'), h('span'), h('span')]),
+    pillWords
+  ]);
+  const pillOpen = h('button', { type: 'button', class: 'wsp-pill-open', 'aria-expanded': 'false' }, [
+    pillArt.frame,
+    h('span', { class: 'wsp-pill-text' }, [pillTitle, pillMeta])
+  ]);
+  const pillPlay = h('button', { type: 'button', class: 'wsp-play wsp-pill-play', 'aria-label': 'Play' }, [icon('play_arrow')]);
+  const pillFill = h('span', { class: 'wsp-pill-fill' });
+  // The not-saved warning, said here while the window is not open (the
+  // window's own says it then), so it is announced once.
+  const pillWarn = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
+  const pill = h('div', { class: 'wsp-pill', role: 'group', 'aria-label': 'Audiobook player', 'data-state': 'paused' }, [
+    pillOpen,
+    pillPlay,
+    h('span', { class: 'wsp-pill-line', 'aria-hidden': 'true' }, [pillFill]),
+    pillWarn
+  ]);
+  if (pillSlot) {
+    pillSlot.textContent = '';
+    pillSlot.appendChild(pill);
+  }
 
   // ---- Panels ----
 
@@ -491,12 +617,25 @@ export function createUI(env) {
     if (p && p.onHide) safely(p.onHide)();
   }
 
+  // The slot a panel's button sits in, and back.
+  function slotPanel(s) {
+    if (s === chaptersSlot) return 'chapters';
+    return s ? s.getAttribute('data-slot') : null;
+  }
+
   function drawPanels() {
     const many = chapterCount() > 1;
-    const shown = view || (many ? 'chapters' : null);
+    // The window opens a panel below the player only when asked, and
+    // closes it again; the sheet on a wide screen keeps Chapters beside it.
+    const shown = windowed ? view : view || (many ? 'chapters' : null);
     panels.forEach(function (p, name) { setHidden(p.section, name !== shown); });
     setAttr(full, 'data-view', view);
     setAttr(full, 'data-side', shown ? '' : null);
+    // In the window each action button opens and closes its panel: it says so.
+    [chaptersSlot, slots.speed, slots.sleep, slots.history].forEach(function (s) {
+      const b = s.querySelector('button');
+      if (b) setAttr(b, 'aria-expanded', windowed ? (view === slotPanel(s) ? 'true' : 'false') : null);
+    });
   }
 
   // opener: the button that showed it, for focus on the way back (a tap does
@@ -507,8 +646,11 @@ export function createUI(env) {
     const was = view;
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
-    if (isOpen && !panelWatcher && !watcherTap && !matches(WIDE)) panelTapped = watchPanel(false);
+    if (isOpen && !windowed && !panelWatcher && !watcherTap && !matches(WIDE)) panelTapped = watchPanel(false);
     drawPanels();
+    // The window grows to hold it (and stays on screen).
+    placeWindow();
+    fitDocked();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
     try {
@@ -527,6 +669,12 @@ export function createUI(env) {
 
   // The screen turned: a panel is a layer only while it covers the player.
   function onWideChange() {
+    // Across lg the window and the sheet trade places: the open one closes
+    // (in its own window it stays).
+    if (isOpen && !docked && windowed !== windowable()) {
+      close();
+      return;
+    }
     if (!isOpen || view === null) return;
     if (matches(WIDE)) {
       const w = panelWatcher;
@@ -544,12 +692,17 @@ export function createUI(env) {
     if (name && view !== name) return;
     if (view === null) return;
     const was = view;
-    view = null;
+    // In the window, Playback settings gives way to Chapters (as the sheet
+    // on a wide screen shows them beside it), not to nothing.
+    view = windowed && was === 'settings' && chapterCount() > 1 ? 'chapters' : null;
     panelTapped = false;
     const w = panelWatcher;
     panelWatcher = null;
     unwatch(w);
     drawPanels();
+    if (view === 'chapters') centreCurrent();
+    fitDocked();
+    placeWindow();
     const back = panelFrom;
     panelFrom = null;
     if (isOpen && back && back.isConnected && full.contains(back) && isVisible(back)) back.focus({ preventScroll: true });
@@ -617,6 +770,16 @@ export function createUI(env) {
     if (!matches(WIDE)) hidePanel('chapters');
   });
   chaptersBtn.addEventListener('click', function () { showPanel('chapters', chaptersBtn); });
+  // In the window an action button pressed again closes its panel (before
+  // the button's own handler, which only ever shows it).
+  actionsRow.addEventListener('click', function (e) {
+    if (!windowed || !e.target || !e.target.closest) return;
+    const s = e.target.closest('.wsp-slot');
+    const name = s ? slotPanel(s) : null;
+    if (!name || view !== name || !e.target.closest('button')) return;
+    e.stopPropagation();
+    hidePanel(name);
+  }, true);
 
   // ---- Slots ----
 
@@ -630,6 +793,7 @@ export function createUI(env) {
     s.textContent = '';
     if (node) s.appendChild(node);
     setHidden(s, !node);
+    drawPanels();
     return s;
   }
 
@@ -667,7 +831,7 @@ export function createUI(env) {
       if (gone) return;
       gone = true;
       if (timer !== null) clearT(timer);
-      const hadFocus = el.contains(doc.activeElement);
+      const hadFocus = el.contains((el.ownerDocument || doc).activeElement);
       if (el.parentNode) el.parentNode.removeChild(el);
       if (id && notices.get(id) === entry) notices.delete(id);
       const at = order.indexOf(entry);
@@ -675,7 +839,7 @@ export function createUI(env) {
       syncHost();
       syncScroll();
       if (hadFocus) {
-        const back = isOpen ? fullPlay : (barShown ? barPlay : null);
+        const back = isOpen ? fullPlay : barShown ? (pillOnScreen() ? pillPlay : barPlay) : null;
         if (back) back.focus({ preventScroll: true });
       }
     }
@@ -783,8 +947,13 @@ export function createUI(env) {
     if (show === barShown) return;
     barShown = show;
     setHidden(bar, !show);
+    if (pillSlot) setHidden(pillSlot, !show);
     syncHost();
     measureBar();
+  }
+
+  function pillOnScreen() {
+    return !!pillSlot && barShown && isVisible(pill);
   }
 
   if (typeof env.ResizeObserver === 'function') {
@@ -824,6 +993,7 @@ export function createUI(env) {
     });
     measureBar();
     syncScroll();
+    if (lastState) drawPill(lastState);
   }
 
   // ---- Drawing ----
@@ -913,6 +1083,32 @@ export function createUI(env) {
     markChapter(span ? span.index : -1);
   }
 
+  // The pill: the bar's words and line, and which of its states it is in.
+  function drawPill(s) {
+    if (!pillSlot || !s) return;
+    const loadingOnly = !s.book;
+    const up = isOpen && windowed && !docked;
+    setAttr(pill, 'data-state', loadingOnly ? 'loading' : playing(s) ? 'playing' : 'paused');
+    setAttr(pill, 'data-open', up ? '' : null);
+    setAttr(pill, 'data-popped', popped ? '' : null);
+    setAttr(pill, 'data-warn', warnText ? '' : null);
+    setText(pillTitle, s.title);
+    let words = '';
+    if (!loadingOnly) words = warnText || (popped ? 'Playing in its own window' : barMeta.textContent);
+    setText(pillWords, words);
+    const tf = barLine.style.transform;
+    if (pillFill.style.transform !== tf) pillFill.style.transform = tf;
+    setArt(pillArt, s.cover || '');
+    drawPlay(pillPlay, s);
+    const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
+    setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
+    setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
+    setAttr(pillOpen, 'title', warnText || (popped ? 'Bring the player back into the page' : what));
+    // The warning is said here only while the window's own is not showing.
+    const say = warnText && !isOpen ? warnText : '';
+    if (pillWarn.textContent !== say) pillWarn.textContent = say;
+  }
+
   function render(s) {
     if (!s) return;
     lastState = s;
@@ -931,6 +1127,7 @@ export function createUI(env) {
     drawTime(s);
     if (!s.saveError) setWarn('');
     if (!s.error) dropNotice('error');
+    drawPill(s);
   }
 
   // ---- The scrubber ----
@@ -1009,14 +1206,21 @@ export function createUI(env) {
   // for the safety net's question, where it is asked.
   // Playing a preview (it reads Pause) or reading the saved places, it is
   // the toggle as ever.
-  barPlay.addEventListener('click', guarded(function () {
+  const miniPlay = guarded(function () {
     const s = player.state();
     if (s && s.book && (s.safetyNet || (s.filesChanged && !s.playing && !s.checking))) {
       open();
       return null;
     }
     return player.toggle();
-  }));
+  });
+  barPlay.addEventListener('click', miniPlay);
+  pillPlay.addEventListener('click', miniPlay);
+  pillOpen.addEventListener('click', function () {
+    if (popped) bringBack();
+    else if (isOpen && windowed) close();
+    else open();
+  });
   fullPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
   full.addEventListener('keydown', onKey);
   backBtn.addEventListener('click', function () { player.skip(-(num(player.setSkip()) || 10)); });
@@ -1077,25 +1281,42 @@ export function createUI(env) {
     }
   }
 
+  // The features' shortcuts (features.js): keys pressed in the player.
+  function runKeys(e) {
+    keyFns.forEach(function (fn) {
+      try {
+        fn(e);
+      } catch (err) {
+        logError(err);
+      }
+    });
+  }
+
   // On the full player itself: a key pressed in it is the player's, and never
   // reaches the page under it (a reader's Space and arrows turn its pages).
   function onKey(e) {
     if (!isOpen) return;
     e.stopPropagation();
     if (dialogOpen() || e.defaultPrevented) return;
+    if (windowed) {
+      // The window: Escape sends it back to the top bar (in its own window
+      // it stays), Tab goes on through the page, other keys are the
+      // features' shortcuts.
+      if (e.key === 'Escape' && !e.isComposing) {
+        if (docked) return;
+        e.preventDefault();
+        close();
+      } else if (e.key !== 'Tab') {
+        runKeys(e);
+      }
+      return;
+    }
     if (e.key === 'Escape' && !e.isComposing) {
       escapeInnermost(e);
       return;
     }
     if (e.key !== 'Tab') {
-      // The features' shortcuts (features.js): keys pressed in the player.
-      keyFns.forEach(function (fn) {
-        try {
-          fn(e);
-        } catch (err) {
-          logError(err);
-        }
-      });
+      runKeys(e);
       return;
     }
     const f = focusables();
@@ -1133,6 +1354,10 @@ export function createUI(env) {
     closing = null;
     full.hidden = true;
     root.removeAttribute('data-player-full');
+    if (windowed) {
+      windowed = false;
+      shapeWindow(false);
+    }
     syncHost();
   }
 
@@ -1143,22 +1368,394 @@ export function createUI(env) {
     clockTimer = setT(tickClock, CLOCK_MS);
   }
 
+  // ---- The desktop window ----
+
+  // The window, rather than the sheet: a desktop page whose top bar shows
+  // (and holds the pill), not a full-screen view such as the reader.
+  function windowable() {
+    return !!pillSlot && matches(WIDE) && root.getAttribute('data-shell') !== 'hidden';
+  }
+
+  // The same element as the sheet, dressed as a window or back.
+  function shapeWindow(on) {
+    full.classList.toggle('is-window', on);
+    setAttr(full, 'role', on ? 'region' : 'dialog');
+    setAttr(full, 'aria-modal', on ? null : 'true');
+    setAttr(full, 'aria-labelledby', on ? null : 'wspTitle');
+    setAttr(full, 'aria-label', on ? 'Audiobook player' : null);
+    setAttr(title, 'tabindex', on ? '-1' : null);
+    setHidden(closeBtn, on);
+    [grip, popBtn, winSep, minBtn, stopBtn, resizeBtn].forEach(function (b) { setHidden(b, !on); });
+    drawWindowChrome();
+    if (!on) {
+      full.classList.remove('is-pip', 'is-opening', 'is-closing', 'is-moving');
+      ['left', 'top', 'width', 'height', 'maxHeight'].forEach(function (k) { full.style[k] = ''; });
+    }
+    drawPanels();
+  }
+
+  // In a window of its own there is nothing to move, size, pop or minimise.
+  function drawWindowChrome() {
+    const free = windowed && !docked;
+    [grip, minBtn, stopBtn, resizeBtn].forEach(function (b) { setHidden(b, !free); });
+    setHidden(popBtn, !free || !popOutFn);
+    setHidden(winSep, !free);
+  }
+
+  function storeKey() {
+    let id = '';
+    try {
+      id = String((env.identity && env.identity()) || '');
+    } catch (e) { /* none */ }
+    return WIN_KEY + (id ? ':' + id : '');
+  }
+
+  // Where the listener left it, on this device; {} when nothing is kept (or
+  // storage is off: a private window simply forgets).
+  let geo = null;
+  function readGeo() {
+    if (geo) return geo;
+    geo = {};
+    try {
+      const raw = env.storage ? env.storage.getItem(storeKey()) : null;
+      const v = raw ? JSON.parse(raw) : null;
+      if (v && typeof v === 'object') ['x', 'y', 'w', 'h'].forEach(function (k) { if (given(v[k])) geo[k] = v[k]; });
+    } catch (e) { /* not remembered */ }
+    return geo;
+  }
+  function saveGeo() {
+    try {
+      if (env.storage) env.storage.setItem(storeKey(), JSON.stringify(readGeo()));
+    } catch (e) { /* not remembered */ }
+  }
+
+  function viewport() {
+    if (env.viewport) return env.viewport();
+    return { w: root.clientWidth || 0, h: root.clientHeight || 0 };
+  }
+  function topLimit() {
+    if (env.topLimit) return num(env.topLimit());
+    const hdr = doc.getElementById('appHeader');
+    const b = hdr ? hdr.getBoundingClientRect().bottom : 0;
+    return Math.max(0, b) + WIN_GAP;
+  }
+
+  // Puts it where it belongs: the kept place and size, inside the viewport.
+  function placeWindow() {
+    if (!isOpen || !windowed || docked) return null;
+    const vp = viewport();
+    vp.top = topLimit();
+    const g = readGeo();
+    const collapsed = view === null;
+    let r = fitWindow(g, vp, collapsed ? 0 : null);
+    full.style.width = r.w + 'px';
+    full.style.maxHeight = r.room + 'px';
+    if (collapsed) {
+      full.style.height = '';
+      r = fitWindow(g, vp, num(measure(full)));
+    } else {
+      full.style.height = r.h + 'px';
+    }
+    full.style.left = r.x + 'px';
+    full.style.top = r.y + 'px';
+    return r;
+  }
+
+  function onViewport() {
+    if (!winDrag) placeWindow();
+  }
+
+  function watchWindow(on) {
+    const w = env.win || doc.defaultView;
+    if (!w || typeof w.addEventListener !== 'function') return;
+    if (on && !winWatch) {
+      winWatch = onViewport;
+      w.addEventListener('resize', winWatch);
+    } else if (!on && winWatch) {
+      w.removeEventListener('resize', winWatch);
+      winWatch = null;
+    }
+  }
+
+  // Its height follows its content while no panel is open (a prompt, the
+  // warning): kept on screen as it grows.
+  if (typeof env.ResizeObserver === 'function') {
+    try {
+      new env.ResizeObserver(function () { if (windowed && !winDrag && view === null) placeWindow(); }).observe(full);
+    } catch (e) { /* placed on each change instead */ }
+  }
+
+  // ---- Moving and sizing it ----
+
+  function startDrag(kind, e) {
+    if (!windowed || docked || winDrag || (e.button !== undefined && e.button > 0)) return;
+    const r = placeWindow();
+    if (!r) return;
+    winDrag = { kind: kind, id: e.pointerId, x0: e.clientX, y0: e.clientY, from: r, el: e.currentTarget };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) { /* moves still arrive while over it */ }
+    full.classList.add('is-moving');
+    e.preventDefault();
+  }
+
+  function moveDrag(e) {
+    const d = winDrag;
+    if (!d || e.pointerId !== d.id) return;
+    const g = readGeo();
+    const dx = e.clientX - d.x0;
+    const dy = e.clientY - d.y0;
+    if (d.kind === 'move') {
+      g.x = d.from.x + dx;
+      g.y = d.from.y + dy;
+    } else {
+      g.w = d.from.w + dx;
+      if (view !== null) g.h = d.from.h + dy;
+    }
+    keepPlaced();
+  }
+
+  function endWinDrag(e) {
+    const d = winDrag;
+    if (!d || (e && e.pointerId !== d.id)) return;
+    winDrag = null;
+    full.classList.remove('is-moving');
+    saveGeo();
+  }
+
+  // What was applied is what is kept, so the limits stick.
+  function keepPlaced() {
+    const r = placeWindow();
+    if (!r) return;
+    const g = readGeo();
+    if (given(g.x)) g.x = r.x;
+    if (given(g.y)) g.y = r.y;
+    if (given(g.w)) g.w = r.w;
+    if (given(g.h) && view !== null) g.h = r.h;
+  }
+
+  topBar.addEventListener('pointerdown', function (e) {
+    const t = e.target;
+    if (!windowed || !t || !t.closest) return;
+    // Its buttons are buttons; the grip and the bar itself move it.
+    const b = t.closest('button');
+    if (b && b !== grip) return;
+    startDrag('move', e);
+  });
+  resizeBtn.addEventListener('pointerdown', function (e) { startDrag('size', e); });
+  [topBar, resizeBtn].forEach(function (n) {
+    n.addEventListener('pointermove', moveDrag);
+    n.addEventListener('pointerup', endWinDrag);
+    n.addEventListener('pointercancel', endWinDrag);
+  });
+
+  function arrowStep(e) {
+    const step = e.shiftKey ? WIN_STEP_BIG : WIN_STEP;
+    return { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] || null;
+  }
+
+  grip.addEventListener('keydown', function (e) {
+    if (!windowed || docked || e.altKey || e.ctrlKey || e.metaKey) return;
+    const g = readGeo();
+    const d = arrowStep(e);
+    if (e.key === 'Home') {
+      delete g.x;
+      delete g.y;
+    } else if (d) {
+      const r = placeWindow();
+      if (!r) return;
+      g.x = r.x + d[0];
+      g.y = r.y + d[1];
+    } else {
+      return;
+    }
+    e.preventDefault();
+    keepPlaced();
+    saveGeo();
+  });
+
+  resizeBtn.addEventListener('keydown', function (e) {
+    if (!windowed || docked || e.altKey || e.ctrlKey || e.metaKey) return;
+    const d = arrowStep(e);
+    if (!d) return;
+    e.preventDefault();
+    const r = placeWindow();
+    if (!r) return;
+    const g = readGeo();
+    g.w = r.w + d[0];
+    if (view !== null) g.h = r.h + d[1];
+    keepPlaced();
+    saveGeo();
+  });
+
+  minBtn.addEventListener('click', function () { close(); });
+  popBtn.addEventListener('click', function () {
+    if (popOutFn) safely(popOutFn)();
+  });
+
+  // Stop and close: the book closes (its last save goes as it does), with
+  // a way back to the same place.
+  stopBtn.addEventListener('click', function () {
+    const s = player.state();
+    if (!s || !s.book) {
+      close();
+      return;
+    }
+    const key = s.book;
+    const held = !!(s.filesChanged || s.safetyNet);
+    const msg = held ? 'Stopped. Your place is as it was.' : 'Stopped at ' + formatClock(s.bookMs) + '. Your place is saved.';
+    // The notice first, so the focus has somewhere to go when the window does.
+    notify(msg, {
+      id: 'stopped',
+      action: { label: 'Resume', run: guarded(function () { return player.open(key, { autoplay: true }); }) }
+    });
+    player.close();
+    if (isOpen) close();
+  });
+
+  // ---- Its own window (popout.js) ----
+
+  // The window into a Picture-in-Picture document (it must be open in the
+  // page): the same nodes, so every control, panel and prompt goes with it;
+  // the audio stays in this tab. end() closes that window.
+  function dock(pdoc, end) {
+    if (!isOpen || !windowed || docked || !pdoc || !pdoc.body) return false;
+    endWinDrag();
+    watchWindow(false);
+    const holder = pdoc.createElement('div');
+    holder.id = 'wsPlayer';
+    holder.className = 'wsp-pip-host';
+    pdoc.body.appendChild(holder);
+    ['left', 'top', 'width', 'height', 'maxHeight'].forEach(function (k) { full.style[k] = ''; });
+    full.classList.remove('is-opening', 'is-closing');
+    full.classList.add('is-pip');
+    holder.appendChild(full);
+    docked = { doc: pdoc, holder: holder };
+    popped = { kind: 'docked', end: typeof end === 'function' ? end : function () {} };
+    drawWindowChrome();
+    if (lastState) drawPill(lastState);
+    try {
+      title.focus({ preventScroll: true });
+    } catch (e) { /* not focusable there yet */ }
+    return true;
+  }
+
+  // Back from it: into the page, open (stay) or minimised to the pill.
+  function undock(stay) {
+    if (!docked) return;
+    const d = docked;
+    docked = null;
+    popped = null;
+    full.classList.remove('is-pip');
+    host.insertBefore(full, bar.nextSibling);
+    if (d.holder.parentNode) d.holder.parentNode.removeChild(d.holder);
+    drawWindowChrome();
+    if (stay && isOpen) {
+      placeWindow();
+      watchWindow(true);
+      try {
+        title.focus({ preventScroll: true });
+      } catch (e) { /* not focusable */ }
+    } else if (isOpen) {
+      close();
+    }
+    if (lastState) drawPill(lastState);
+  }
+
+  // A window of its own plays the tab (remote control): the window here
+  // closes and the pill says so; end() closes that one. null: it ended.
+  function setPopped(end) {
+    if (docked) return;
+    popped = typeof end === 'function' ? { kind: 'remote', end: end } : null;
+    if (popped && isOpen) close();
+    if (lastState) drawPill(lastState);
+  }
+
+  // The pill pressed while it plays elsewhere: the player comes back here.
+  function bringBack() {
+    const p = popped;
+    if (!p) return;
+    if (docked) {
+      undock(true);
+    } else {
+      popped = null;
+      open();
+    }
+    safely(p.end)();
+    if (lastState) drawPill(lastState);
+  }
+
+  // Its own window is the size of this one; with a panel open it wants room.
+  function windowRect() {
+    const r = isOpen && windowed && !docked ? full.getBoundingClientRect() : null;
+    return { w: r && r.width ? Math.round(r.width) : WIN.w, h: r && r.height ? Math.round(r.height) : WIN.minH - 80 };
+  }
+
+  // In its own window, a panel opening asks for the height to show it.
+  function fitDocked() {
+    if (!docked || view === null) return;
+    const w = docked.doc.defaultView;
+    try {
+      if (w && w.innerHeight < WIN.minH && typeof w.resizeTo === 'function') w.resizeTo(w.outerWidth, w.outerHeight + (WIN.minH - w.innerHeight));
+    } catch (e) { /* the browser decides */ }
+  }
+
+  // ---- Open and close ----
+
   function open() {
     if (!barShown) return false;
+    // Playing in a remote window: the player comes back into the page.
+    if (popped && !docked) {
+      const p = popped;
+      popped = null;
+      safely(p.end)();
+    }
     if (closing) {
       clearT(closing.timer);
       sheet.removeEventListener('transitionend', closing.onEnd);
       closing = null;
+      if (windowed && !windowable()) {
+        windowed = false;
+        shapeWindow(false);
+      }
     }
     if (isOpen) return true;
     isOpen = true;
+    if (!windowed) {
+      windowed = windowable();
+      if (windowed) shapeWindow(true);
+    }
     lastFocus = doc.activeElement;
     openedAt = address();
     full.hidden = false;
+    alerts.appendChild(noticeBox);
+    if (windowed) {
+      full.classList.remove('is-closing');
+      full.classList.add('is-open');
+      syncHost();
+      render(player.state());
+      placeWindow();
+      watchWindow(true);
+      if (winAnim !== null) clearT(winAnim);
+      full.classList.remove('is-opening');
+      void full.offsetWidth;
+      full.classList.add('is-opening');
+      winAnim = setT(function () {
+        winAnim = null;
+        full.classList.remove('is-opening');
+      }, WIN_IN_MS + 50);
+      centreCurrent();
+      syncScroll();
+      if (clockTimer === null) clockTimer = setT(tickClock, CLOCK_MS);
+      try {
+        title.focus({ preventScroll: true });
+      } catch (e) { /* not focusable */ }
+      emit('open');
+      return true;
+    }
     root.setAttribute('data-player-full', '');
     bar.setAttribute('inert', '');
     setAttr(openBtn, 'aria-expanded', 'true');
-    alerts.appendChild(noticeBox);
     syncHost();
     // The closed place is drawn first, so the slide runs from it.
     if (motion()) void sheet.offsetWidth;
@@ -1186,6 +1783,18 @@ export function createUI(env) {
 
   function close() {
     if (!isOpen) return;
+    // In its own window: that window goes, and the player comes back here.
+    if (docked) {
+      const p = popped;
+      docked.holder.parentNode && docked.holder.parentNode.removeChild(docked.holder);
+      docked = null;
+      popped = null;
+      full.classList.remove('is-pip');
+      host.insertBefore(full, bar.nextSibling);
+      drawWindowChrome();
+      if (p) safely(p.end)();
+    }
+    const focusIn = full.contains(doc.activeElement) || doc.activeElement === doc.body || !doc.activeElement;
     isOpen = false;
     // Whatever closed it, its watchers go (a watcher the browser just closed
     // is gone already).
@@ -1197,6 +1806,8 @@ export function createUI(env) {
     unwatch(pw);
     unwatch(w);
     endDrag();
+    endWinDrag();
+    watchWindow(false);
     full.classList.remove('is-open');
     doc.removeEventListener('focusin', onFocusIn);
     doc.removeEventListener('keydown', onDocKey, true);
@@ -1212,6 +1823,25 @@ export function createUI(env) {
     panelFrom = null;
     drawPanels();
     left(was);
+    if (windowed) {
+      // A short fade back towards the top bar (opacity only with reduced
+      // motion), then gone. Focus goes to the pill when it was in the window.
+      if (winAnim !== null) {
+        clearT(winAnim);
+        winAnim = null;
+      }
+      full.classList.remove('is-opening');
+      full.classList.add('is-closing');
+      closing = { timer: setT(finishClose, WIN_OUT_MS), onEnd: null };
+      lastFocus = null;
+      if (lastState) drawPill(lastState);
+      if (focusIn) {
+        const back = pillOnScreen() ? pillOpen : fallbackFocus();
+        if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
+      }
+      emit('close');
+      return;
+    }
     // The top bar and the page stay under the sheet until it has slid away.
     closing = { timer: null, onEnd: null };
     closing.onEnd = function (e) {
@@ -1259,7 +1889,7 @@ export function createUI(env) {
     } catch (err) { /* not focusable here */ }
   });
   sheet.addEventListener('pointerdown', function (e) {
-    if (!isOpen || drag || (e.button !== undefined && e.button > 0)) return;
+    if (!isOpen || windowed || drag || (e.button !== undefined && e.button > 0)) return;
     const t = e.target;
     if (!t || !t.closest || !t.closest('[data-swipe]') || t.closest('button, input, a, [data-no-swipe]')) return;
     drag = { id: e.pointerId, y0: e.clientY, dy: 0, moving: false, samples: [[now(), e.clientY]] };
@@ -1383,7 +2013,14 @@ export function createUI(env) {
         // A page mounts after its first fetches: one the player was opened
         // over (tapped while it loaded) is the page it opened on.
         const url = e && e.detail && e.detail.url;
-        if (isOpen && (!url || withoutHash(url) !== withoutHash(openedAt))) close();
+        if (!isOpen) return;
+        // The window stays open from page to page (in its own window it is
+        // no page's); a full-screen view (the reader) is the sheet's.
+        if (windowed) {
+          if (!docked && !windowable()) close();
+          return;
+        }
+        if (!url || withoutHash(url) !== withoutHash(openedAt)) close();
       });
     });
   }
@@ -1394,6 +2031,19 @@ export function createUI(env) {
     open: open,
     close: close,
     isOpen: function () { return isOpen; },
+    // The open player is the floating window (desktop), not a modal sheet:
+    // keys on the page are still the page's (features.js).
+    isWindow: function () { return isOpen && windowed; },
+    // Pop out (popout.js): fn() runs from the window's Pop out press.
+    popOut: function (fn) {
+      popOutFn = typeof fn === 'function' ? fn : null;
+      drawWindowChrome();
+    },
+    dock: dock,
+    undock: undock,
+    setPopped: setPopped,
+    popped: function () { return popped ? popped.kind : null; },
+    windowRect: windowRect,
     notify: notify,
     prompt: prompt,
     slot: slot,
@@ -1449,6 +2099,17 @@ export function boot(win, overrides) {
     leaveTo: function (url) {
       if (WS.leaveTo) WS.leaveTo(url);
       else win.location.href = url;
+    },
+    storage: (function () {
+      try {
+        return win.localStorage || null;
+      } catch (e) {
+        return null;
+      }
+    })(),
+    identity: function () {
+      const u = WS.user;
+      return u && typeof u.identity_key === 'string' ? u.identity_key : '';
     }
   }, overrides || {}));
   WS.playerUI = ui;

@@ -106,6 +106,7 @@ jobs:
           node app/tests/js/player_engine.mjs
           node app/tests/js/player_saves.mjs
           node app/tests/js/player_ui.mjs
+          node app/tests/js/player_window.mjs
           node app/tests/js/player_features.mjs
           node app/tests/js/player_findplace.mjs
           node app/tests/js/books_page.mjs

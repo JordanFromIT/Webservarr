@@ -749,6 +749,22 @@ async def player_test_page(
     return render_page("player-test", request, user)
 
 
+# The player's remote window (desktop Pop out where the browser has no
+# Picture-in-Picture for pages): a small window that controls the player in
+# the tab that opened it, and can carry on playing from the saved place.
+@app.get("/player/remote", response_class=HTMLResponse, include_in_schema=False)
+async def player_remote_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the player's remote window. It plays nothing until the listener
+    asks it to, and then it is the shell's own player, under Books' gate."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return render_page("player-remote", request, user, gate="library")
+
+
 @app.get("/settings/next", include_in_schema=False)
 async def settings_next_redirect():
     """The redesign was previewed here during v1.11 development."""

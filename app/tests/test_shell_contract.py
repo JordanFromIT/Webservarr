@@ -625,7 +625,7 @@ class PhoneShellContract(unittest.TestCase):
         # (first paint about 300 ms later on a throttled cold load).
         side = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
         tags = re.findall(r'<script type="module" src="/static/js/player/[a-z]+\.js\?v=1"[^>]*>', side)
-        self.assertEqual(len(tags), 6)
+        self.assertEqual(len(tags), 7)
         for tag in tags:
             self.assertIn(' fetchpriority="low"', tag)
         for name in ("install.js", "router.js"):

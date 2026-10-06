@@ -1886,6 +1886,218 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-action.is-on:hover { background: rgb(var(--color-primary) / .26); }
 }
 
+/* ---- The desktop player (js/player/ui.js, popout.js, remote.js) ----
+ * From lg, on a page whose top bar shows: a pill in the top bar instead of
+ * the bar, and the player as a floating window instead of the full-screen
+ * sheet (the same element, .wsp-full.is-window). The bar still shows on a
+ * full-screen view (the reader), where the top bar is hidden. The window
+ * sits over the page under the top bar (#wsPlayer's z 45, the header's 50),
+ * so the bell panel and the account menu open over it. Its surface is the
+ * background with a primary tint; text as the rest of the player. Motion:
+ * the window opens and closes with a short scale and fade (opacity only
+ * with reduced motion); the pill's three bars move only while it plays.
+ */
+@media (min-width: 1024px) {
+  html:not([data-shell="hidden"]) .wsp-bar.wsp-bar-pilled { display: none; }
+}
+#wsPlayerPill[hidden], #wsPlayerPill [hidden] { display: none !important; }
+
+.wsp-pill {
+  position: relative; display: flex; align-items: center; gap: 4px;
+  width: clamp(232px, 22vw, 300px); height: 48px; padding: 0 4px 0 0; overflow: hidden;
+  border-radius: 9999px; color: rgb(var(--color-text));
+  background: rgb(var(--color-text) / .06); border: 1px solid rgb(var(--color-text) / .10);
+  transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+.wsp-pill-open {
+  flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 0 4px 0 6px; border-radius: 9999px; text-align: left; color: inherit;
+  transition: background-color 150ms ease-out;
+}
+.wsp-pill-open:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.wsp-pill-art { width: 36px; height: 36px; border-radius: 6px; }
+.wsp-pill-art img { border-radius: 4px; }
+.wsp-pill-art .wsp-art-mark { font-size: 20px; }
+.wsp-pill-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wsp-pill-title, .wsp-pill-meta { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsp-pill-title { font-size: 14px; font-weight: 600; line-height: 18px; }
+.wsp-pill-meta { font-size: 13px; line-height: 17px; color: rgb(var(--color-text) / .7); font-variant-numeric: tabular-nums; }
+.wsp-pill-play { width: 36px; height: 36px; }
+.wsp-pill-play .material-symbols-outlined { font-size: 24px; }
+.wsp-pill-play:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsp-pill-line { position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; pointer-events: none; background: rgb(var(--color-text) / .12); }
+.wsp-pill-fill { display: block; height: 100%; background: rgb(var(--color-accent)); transform-origin: 0 50%; transform: scaleX(0); }
+.wsp-pill[data-open] { background: rgb(var(--color-primary) / .3); border-color: rgb(var(--color-accent) / .5); }
+.wsp-pill[data-state="paused"] .wsp-pill-title { color: rgb(var(--color-text) / .85); }
+.wsp-pill[data-warn] { border-color: rgb(var(--ws-status-warn) / .6); }
+.wsp-pill[data-warn] .wsp-pill-meta { color: var(--ws-status-warn-text); font-weight: 600; }
+/* Opening a book: the shape of the words to come. */
+.wsp-pill[data-state="loading"] .wsp-pill-title,
+.wsp-pill[data-state="loading"] .wsp-pill-meta { color: transparent; height: 13px; margin: 2px 0; border-radius: 6px; background: rgb(var(--color-text) / .1); }
+.wsp-pill[data-state="loading"] .wsp-pill-title { width: 70%; }
+.wsp-pill[data-state="loading"] .wsp-pill-meta { width: 45%; }
+/* Playing: three bars that move (a state, so it earns the motion). */
+.wsp-eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-right: 4px; vertical-align: -1px; }
+.wsp-eq span { display: block; width: 3px; height: 12px; border-radius: 1px; background: rgb(var(--color-accent)); transform-origin: 50% 100%; transform: scaleY(.33); }
+.wsp-pill[data-state="playing"] .wsp-eq span { animation: wsp-eq 900ms ease-in-out infinite alternate; }
+.wsp-pill[data-state="playing"] .wsp-eq span:nth-child(2) { animation-delay: -300ms; }
+.wsp-pill[data-state="playing"] .wsp-eq span:nth-child(3) { animation-delay: -600ms; }
+.wsp-pill:not([data-state="playing"]) .wsp-eq, .wsp-pill[data-warn] .wsp-eq { display: none; }
+@keyframes wsp-eq { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+@media (hover: hover) and (pointer: fine) {
+  .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }
+}
+
+/* The window. Placed and sized by ui.js (left, top, width; a height only
+   while a panel is open, else it fits its content). */
+.wsp-full.is-window {
+  inset: auto; left: 0; top: 0; width: 380px; display: flex; flex-direction: column; overflow: hidden;
+  color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid rgb(var(--color-text) / .14);
+  background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
+  box-shadow: 0 24px 56px -12px var(--ws-shade), 0 2px 8px var(--ws-shade);
+  transform-origin: 100% 0;
+}
+.wsp-full.is-window.is-opening { animation: wsp-win-in 200ms cubic-bezier(.2, .8, .2, 1) both; }
+.wsp-full.is-window.is-closing { animation: wsp-win-out 160ms ease-in both; pointer-events: none; }
+@keyframes wsp-win-in { from { opacity: 0; transform: translateY(-12px) scale(.96); } }
+@keyframes wsp-win-out { to { opacity: 0; transform: translateY(-12px) scale(.96); } }
+.wsp-full.is-window.is-moving { box-shadow: 0 32px 72px -12px var(--ws-shade), 0 2px 8px var(--ws-shade); }
+.wsp-full.is-window.is-moving, .wsp-full.is-window.is-moving * { cursor: grabbing !important; user-select: none; }
+.wsp-full.is-window .wsp-sheet {
+  position: relative; inset: auto; flex: 1 1 auto; min-height: 0; padding: 0;
+  background: transparent; transform: none; transition: none;
+}
+.wsp-full.is-window .wsp-ambient, .wsp-full.is-window .wsp-grab, .wsp-full.is-window .wsp-panel-back { display: none; }
+
+/* Its top bar: the grip, "Now playing", Playback settings, Pop out, then
+   Minimise and Stop and close. The bar itself moves the window too. */
+.wsp-full.is-window .wsp-top {
+  display: flex; align-items: center; gap: 2px; height: 48px; padding: 0 6px 0 4px;
+  background: rgb(var(--color-text) / .04); border-bottom: 1px solid rgb(var(--color-text) / .08);
+  cursor: grab; touch-action: none; user-select: none;
+}
+.wsp-full.is-window .wsp-top-label {
+  flex: 1; min-width: 0; text-align: left; font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wsp-full.is-window .wsp-top .wsp-icon-btn { width: 36px; height: 36px; }
+.wsp-full.is-window .wsp-top .wsp-icon-btn .material-symbols-outlined { font-size: 20px; }
+.wsp-win-grip { cursor: grab; }
+.wsp-win-sep { flex-shrink: 0; width: 1px; height: 20px; margin: 0 4px; background: rgb(var(--color-text) / .14); }
+
+/* The player: the cover beside the title, then the scrubber, the time left,
+   the controls and the row of actions. */
+.wsp-full.is-window .wsp-alerts { padding: 0 16px; }
+.wsp-full.is-window .wsp-alerts > :not(:empty) { margin: 12px 0 0; }
+.wsp-full.is-window .wsp-body { flex: 1 1 auto; min-height: 0; flex-direction: column; justify-content: flex-start; gap: 0; padding: 0; overflow-y: auto; }
+.wsp-full.is-window .wsp-main {
+  flex: 0 0 auto; display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 14px; align-items: center;
+  padding: 16px 20px 12px; overflow: visible;
+}
+.wsp-full.is-window .wsp-main > * { grid-column: 1 / -1; width: auto; max-width: none; }
+.wsp-full.is-window .wsp-main > .wsp-full-art {
+  grid-column: 1; width: 72px; height: 72px; max-height: none; margin: 0; flex: none;
+  container-type: normal; touch-action: auto;
+}
+.wsp-full.is-window .wsp-full-art img { border-radius: 6px; box-shadow: none; }
+.wsp-full.is-window .wsp-full-art .wsp-art-mark { width: 100%; font-size: 32px; border-radius: 8px; }
+.wsp-full.is-window .wsp-meta { grid-column: 2; text-align: left; touch-action: auto; }
+.wsp-full.is-window .wsp-series { margin-bottom: 2px; }
+.wsp-full.is-window .wsp-title { font-size: 18px; line-height: 1.25; letter-spacing: -0.01em; }
+.wsp-full.is-window .wsp-title:focus { outline: none; }
+.wsp-full.is-window .wsp-title:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; border-radius: 4px; }
+.wsp-full.is-window .wsp-byline { font-size: 13px; margin-top: 2px; }
+.wsp-full.is-window .wsp-scrub { margin-top: 14px; }
+.wsp-full.is-window .wsp-chapter { margin-bottom: 4px; text-align: left; font-size: 14px; }
+.wsp-full.is-window .wsp-left { margin-top: 6px; }
+.wsp-full.is-window .wsp-controls { gap: 24px; margin-top: 10px; }
+.wsp-full.is-window .wsp-skip { width: 48px; height: 48px; }
+.wsp-full.is-window .wsp-skip .material-symbols-outlined { font-size: 38px; }
+.wsp-full.is-window .wsp-skip-n { font-size: 11px; }
+.wsp-full.is-window .wsp-play-lg { width: 56px; height: 56px; }
+.wsp-full.is-window .wsp-play-lg .material-symbols-outlined { font-size: 34px; }
+.wsp-full.is-window .wsp-actions { flex-wrap: nowrap; gap: 4px; margin-top: 10px; }
+.wsp-full.is-window .wsp-action { min-width: 72px; padding: 6px 8px; border-radius: 12px; }
+.wsp-full.is-window .wsp-action[aria-expanded="true"] { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .35); }
+
+/* A panel opens below the player and closes again. */
+.wsp-full.is-window .wsp-side { display: none; }
+.wsp-full.is-window[data-view] .wsp-side {
+  display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
+  border-top: 1px solid rgb(var(--color-text) / .08);
+}
+.wsp-full.is-window .wsp-panel { border-radius: 0; background: none; padding-top: 0; }
+.wsp-full.is-window .wsp-panel-head { height: 44px; padding: 0 20px; }
+.wsp-full.is-window .wsp-panel-title { font-size: 16px; }
+
+/* Its size, from the corner (only its width while no panel is open). */
+.wsp-win-resize { position: absolute; right: 0; bottom: 0; z-index: 2; width: 24px; height: 24px; border-radius: 0 0 16px 0; cursor: nwse-resize; }
+.wsp-full.is-window:not([data-view]) .wsp-win-resize { cursor: ew-resize; }
+.wsp-win-resize::before, .wsp-win-resize::after {
+  content: ""; position: absolute; right: 5px; bottom: 5px; height: 2px; border-radius: 2px;
+  background: rgb(var(--color-text) / .45); transform: rotate(-45deg); transform-origin: 100% 50%;
+}
+.wsp-win-resize::before { width: 14px; }
+.wsp-win-resize::after { width: 7px; bottom: 9px; }
+.wsp-win-resize:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: -2px; }
+
+/* In a Picture-in-Picture window of its own: the whole of it, nothing to
+   move or size. */
+.wsp-pip-body { margin: 0; padding: 0; overflow: hidden; background: rgb(var(--color-background)); }
+#wsPlayer.wsp-pip-host { position: static; }
+.wsp-full.is-window.is-pip {
+  position: relative; left: auto; top: auto; width: 100%; height: 100vh; max-height: none;
+  border: 0; border-radius: 0; box-shadow: none; animation: none;
+}
+.wsp-full.is-pip .wsp-top { cursor: default; }
+
+/* The remote window (/player/remote): a small remote control, then Play
+   here once the tab it worked is gone. */
+.wsr [hidden] { display: none !important; }
+.wsr { display: flex; flex-direction: column; justify-content: center; min-height: 100svh; padding: 16px; }
+.wsr-card, .wsr-gone { display: flex; flex-direction: column; width: 100%; max-width: 420px; margin: 0 auto; }
+.wsr-card { gap: 10px; }
+.wsr-hero { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wsr-art { width: 52px; height: 52px; border-radius: 6px; }
+.wsr-art img { border-radius: 4px; }
+.wsr-art .wsp-art-mark { font-size: 24px; }
+.wsr-text { flex: 1; min-width: 0; }
+.wsr-title { margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsr-title.wsp-skel { height: 15px; }
+.wsr-chapter { margin: 0; font-size: 13px; color: rgb(var(--color-text) / .7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsr-controls { gap: 20px; margin-top: 0; }
+.wsr .wsp-skip { width: 48px; height: 48px; }
+.wsr .wsp-skip .material-symbols-outlined { font-size: 38px; }
+.wsr .wsp-skip:disabled, .wsr .wsp-play:disabled { opacity: .45; cursor: default; }
+.wsr-play { width: 44px; height: 44px; }
+.wsr-play .material-symbols-outlined { font-size: 28px; }
+.wsr-status { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: rgb(var(--color-text) / .75); }
+.wsr-gone { gap: 12px; }
+.wsr-gone-text { margin: 0; font-size: 15px; line-height: 1.45; }
+.wsr-gone-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.wsr-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px;
+  border-radius: 9999px; font-size: 14px; font-weight: 600; color: rgb(var(--color-text)); background: rgb(var(--color-text) / .08);
+  transition: background-color 150ms ease-out;
+}
+.wsr-btn.is-primary { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
+.wsr-btn[aria-disabled="true"] { opacity: .45; cursor: default; }
+.wsr-btn:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsr-btn-icon { font-size: 20px; font-variation-settings: 'FILL' 1; }
+@media (hover: hover) and (pointer: fine) {
+  .wsr-btn:hover:not([aria-disabled="true"]) { background: rgb(var(--color-text) / .14); }
+  .wsr-btn.is-primary:hover:not([aria-disabled="true"]) { background: rgb(var(--color-primary)); filter: brightness(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wsp-pill, .wsp-pill-open, .wsr-btn { transition: none; }
+  .wsp-pill[data-state="playing"] .wsp-eq span { animation: none; }
+  .wsp-full.is-window.is-opening { animation: wsp-fade-in 160ms ease-out both; }
+  .wsp-full.is-window.is-closing { animation: wsp-fade-out 120ms ease-in both; }
+}
+@keyframes wsp-fade-in { from { opacity: 0; } }
+@keyframes wsp-fade-out { to { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   .wsp-bar, .wsp-notice, .wsp-spin { animation: none; }
   .wsp-sheet, .wsp-bar-open, .wsp-play, .wsp-icon-btn, .wsp-skip, .wsp-action, .wsp-chapter-item, .wsp-notice-btn { transition: none; }

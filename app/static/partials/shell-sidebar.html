@@ -136,7 +136,9 @@
      skip, speed, sleep timer, smart rewind, undo, keys) load next, onto
      both, then the "Find your place" helper (WS.playerFindPlace: a book
      whose files changed), and the safety net (WS.playerSafetyNet: "Were
-     you listening to one of these?") last, onto all of them. They are
+     you listening to one of these?") after them, and Pop out
+     (WS.playerPopOut: the desktop window in a window of its own) last,
+     onto the view. They are
      fetched at low priority, so on a slow phone the stylesheets the first
      paint waits for come first; modules still run in this order. -->
 <script type="module" src="/static/js/player/saves.js?v=1" fetchpriority="low"></script>
@@ -145,3 +147,4 @@
 <script type="module" src="/static/js/player/features.js?v=1" fetchpriority="low"></script>
 <script type="module" src="/static/js/player/findplace.js?v=1" fetchpriority="low"></script>
 <script type="module" src="/static/js/player/safetynet.js?v=1" fetchpriority="low"></script>
+<script type="module" src="/static/js/player/popout.js?v=1" fetchpriority="low"></script>
