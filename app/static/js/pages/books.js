@@ -4,7 +4,8 @@
  * One library of ebooks (Kavita) and audiobooks (Plex): a search box, a
  * Continue row of what the person is partway through, and a cover grid with
  * format chips and a sort. A cover opens the book's own page (/books/<id>); a
- * series is one card that opens the series page.
+ * series is one card that opens the series page. In Continue, the round play
+ * button on a cover is what picks up from the person's place.
  *
  * Everything comes from the Books APIs (/api/books, /search, /continue). A
  * book's progress is read live by the server, never kept by this page. A
@@ -89,7 +90,7 @@ const GUIDE_STEPS = [
     target: '#continueHost [data-continue]',
     icon: 'bookmark',
     title: 'Pick up where you left off',
-    body: 'Books you’ve started, to read or to listen to, wait in a Continue row. Tap one to carry on from your place.'
+    body: 'Books you’ve started, to read or to listen to, wait in a Continue row. Press play on a cover to carry on from your place.'
   },
   {
     target: '#formatChips',
@@ -108,6 +109,8 @@ const GUIDE_STEPS = [
 
 const FORMATS = ['all', 'ebook', 'audio'];
 const SORTS = ['added', 'title', 'author'];
+const SORT_LABELS = { added: 'Recently added', title: 'Title', author: 'Author' };
+const TYPEAHEAD_MS = 500;          // letters typed within this of each other are one search
 
 // The toolbar's filters: one name each, carried in the address (?author=,
 // ?series=, ?narrator=) so Back, a refresh and a shared link keep them. The
@@ -341,21 +344,29 @@ function resumeAudio(key) {
   });
 }
 
-/** One Continue card: an ebook is a link into the reader, an audiobook a button for the player. */
+// The round button on a Continue cover. Shown on hover or focus where there is
+// a mouse; always shown on touch, where there is no hover to find it with.
+const RESUME_BTN = 'pointer-events-auto grid size-12 place-items-center rounded-full bg-background-dark/80 text-bright ' +
+  'ring-1 ring-frosted-blue/25 shadow-lg transition-[opacity,background-color] duration-150 hover:bg-primary ' +
+  '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 ' + LINK_FOCUS;
+let continueIds = 0;
+
+/**
+ * One Continue card. The cover and its words open the book's own page; a
+ * round button centred on the cover picks up from the person's place (an
+ * audiobook in the player, an ebook in the reader). The two are siblings,
+ * the button laid over the cover, so neither control sits inside the other.
+ */
 function continueCard(item, signal) {
   const audio = item.format === 'audio';
-  const base = 'group block w-36 shrink-0 text-left ws-lift rounded-xl ' + LINK_FOCUS;
   const resume = item.resume || {};
-  let node;
-  if (audio) {
-    node = el('button', base);
-    node.type = 'button';
-    node.setAttribute('data-resume-audio', resume.plex_book_key || '');
-    node.addEventListener('click', function () { resumeAudio(resume.plex_book_key); }, { signal: signal });
-  } else {
-    node = el('a', base);
-    node.href = resume.read_url || '/books/' + encodeURIComponent(String(item.book_id));
-  }
+  const title = item.title || 'Untitled';
+  // The lift is the whole card's, so moving onto the button does not drop it.
+  const card = el('div', 'group/cont relative w-36 ws-lift rounded-xl');
+  const node = el('a', 'block text-left rounded-xl ' + LINK_FOCUS);
+  node.href = '/books/' + encodeURIComponent(String(item.book_id));
+  node.setAttribute('data-continue-open', '');
+  node.setAttribute('aria-label', 'Open ' + title);
   const box = coverBox(item.cover_url, [item.format], signal);
   if (typeof item.percent === 'number') {
     // The bar is drawn from CSSOM (no style attribute in markup).
@@ -368,10 +379,35 @@ function continueCard(item, signal) {
     box.appendChild(track);
   }
   node.appendChild(box);
-  node.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]',
-    item.title || 'Untitled'));
-  node.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', item.progress_label || ''));
-  return node;
+  node.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title));
+  const progress = el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', item.progress_label || '');
+  if (item.progress_label) {
+    // The name says what the link does; the place is read after it.
+    progress.id = 'continueProgress' + (++continueIds);
+    node.setAttribute('aria-describedby', progress.id);
+  }
+  node.appendChild(progress);
+  card.appendChild(node);
+
+  // The cover's own box (the card's width, 2:3), so the button is at its centre.
+  const spot = el('span', 'pointer-events-none absolute inset-x-0 top-0 flex aspect-[2/3] items-center justify-center');
+  let play;
+  if (audio) {
+    play = el('button', RESUME_BTN);
+    play.type = 'button';
+    play.setAttribute('data-resume-audio', resume.plex_book_key || '');
+    play.setAttribute('aria-label', 'Resume ' + title);
+    play.addEventListener('click', function () { resumeAudio(resume.plex_book_key); }, { signal: signal });
+  } else {
+    play = el('a', RESUME_BTN);
+    play.href = resume.read_url || node.href;
+    play.setAttribute('data-resume-read', '');
+    play.setAttribute('aria-label', 'Continue reading ' + title);
+  }
+  play.appendChild(icon(audio ? 'play_arrow' : 'auto_stories', 'text-[28px]'));
+  spot.appendChild(play);
+  card.appendChild(spot);
+  return card;
 }
 
 /** A quiet line about a source that is not answering. */
@@ -1092,7 +1128,7 @@ export async function mount(ctx) {
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
       b.className = on ? CHIP_ON : CHIP_OFF;
     });
-    $('sortSelect').value = state.sort;
+    $('sortValue').textContent = SORT_LABELS[state.sort];
   }
 
   function setMore(cursor) {
@@ -1433,6 +1469,7 @@ export async function mount(ctx) {
    */
   function openPicker(kind, btn) {
     if (picker) picker.close();
+    if (sortMenu) sortMenu.close();
     const info = FILTERS[kind];
     const isWide = wide();
     const ends = new AbortController();
@@ -1691,6 +1728,186 @@ export async function mount(ctx) {
     }
   }
 
+  // ---- The sort: a list of the orders, a popover or a sheet as the pickers are ----
+
+  let sortMenu = null;
+
+  /**
+   * The sort's list (a listbox): the order in use is marked with a check and
+   * starts highlighted; the arrows, Home and End move the highlight, letters
+   * jump to an order, Enter or Space picks, Escape (WSUI.modal) and Tab close
+   * it, and the focus goes back to the button. From PICKER_WIDE up it is a
+   * small popover under the button; below, the filter pickers' bottom sheet.
+   */
+  function openSort(btn) {
+    if (sortMenu) { sortMenu.close(); return; }
+    if (picker) picker.close();
+    const isWide = wide();
+    const ends = new AbortController();
+    const listId = 'booksSortList';
+
+    let overlay, panel;
+    const list = el('ul', 'group/sort focus:outline-none ' + (isWide ? 'p-2' : 'pb-2'));
+    list.id = listId;
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-labelledby', 'sortLabel');
+    list.tabIndex = 0;
+    if (isWide) {
+      overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
+      panel = el('div', 'ws-dialog-box absolute w-56 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border border-frosted-blue/10 bg-background-dark shadow-2xl');
+      panel.appendChild(list);
+    } else {
+      overlay = el('div', 'ws-sheet z-[95]');
+      overlay.appendChild(el('div', 'ws-sheet-scrim'));
+      panel = el('div', 'ws-sheet-panel focus:outline-none');
+      const head = el('div', 'ws-sheet-head');
+      const grip = el('span', 'ws-sheet-grip');
+      grip.setAttribute('aria-hidden', 'true');
+      head.appendChild(grip);
+      const title = el('h2', 'ws-sheet-title', 'Sort by');
+      title.id = listId + '-title';
+      head.appendChild(title);
+      const close = el('button', 'ws-sheet-close');
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Close');
+      close.appendChild(icon('close', 'text-[24px]'));
+      close.addEventListener('click', function () { sortMenu.close(); }, { signal: ends.signal });
+      head.appendChild(close);
+      panel.appendChild(head);
+      panel.setAttribute('aria-labelledby', title.id);
+      panel.appendChild(list);
+    }
+    overlay.appendChild(panel);
+
+    const shown = SORTS.map(function (value, n) {
+      const picked = value === state.sort;
+      const li = el('li', OPTION + (picked ? ' font-semibold' : ''));
+      li.id = listId + '-' + n;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', picked ? 'true' : 'false');
+      li.setAttribute('data-sort', value);
+      li.appendChild(icon('check', 'shrink-0 text-[20px] ' + (picked ? 'text-frosted-blue' : 'invisible')));
+      li.appendChild(el('span', 'min-w-0 flex-1 truncate', SORT_LABELS[value]));
+      list.appendChild(li);
+      return { value: value, node: li };
+    });
+    let active = -1;
+    function setActive(i) {
+      active = clamp(i, 0, shown.length - 1);
+      shown.forEach(function (o, n) {
+        // The highlight, and a ring on it while the list has the keyboard's focus.
+        o.node.classList.toggle('bg-frosted-blue/10', n === active);
+        o.node.classList.toggle('group-focus-visible/sort:outline', n === active);
+        o.node.classList.toggle('group-focus-visible/sort:outline-2', n === active);
+        o.node.classList.toggle('group-focus-visible/sort:-outline-offset-2', n === active);
+        o.node.classList.toggle('group-focus-visible/sort:outline-frosted-blue', n === active);
+        o.node.classList.toggle('hover:bg-frosted-blue/[0.07]', n !== active);
+      });
+      list.setAttribute('aria-activedescendant', shown[active].node.id);
+    }
+    setActive(Math.max(0, SORTS.indexOf(state.sort)));
+
+    function pick(i) {
+      const o = shown[i];
+      if (!o) return;
+      // Chosen before the list goes, so the button already says it when the focus lands back on it.
+      if (o.value !== state.sort) choose(state.format, o.value);
+      sortMenu.close();
+    }
+
+    let typed = '';
+    let typedAt = 0;
+    list.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'Home' || e.key === 'PageUp') { e.preventDefault(); setActive(0); }
+      else if (e.key === 'End' || e.key === 'PageDown') { e.preventDefault(); setActive(shown.length - 1); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(active); }
+      else if (e.key === 'Tab' && isWide) { sortMenu.close(); }
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Type-ahead: the next order starting with what was typed; the same letter again moves on.
+        const now = Date.now();
+        typed = now - typedAt > TYPEAHEAD_MS ? e.key.toLowerCase() : typed + e.key.toLowerCase();
+        typedAt = now;
+        const same = typed.split('').every(function (c) { return c === typed[0]; });
+        const want = same ? typed[0] : typed;
+        for (let step = same ? 1 : 0; step <= shown.length; step++) {
+          const n = (active + step) % shown.length;
+          if (SORT_LABELS[shown[n].value].toLowerCase().indexOf(want) === 0) { setActive(n); break; }
+        }
+      }
+    }, { signal: ends.signal });
+    list.addEventListener('click', function (e) {
+      const li = e.target && e.target.closest ? e.target.closest('[role="option"]') : null;
+      if (li) pick(shown.map(function (o) { return o.node; }).indexOf(li));
+    }, { signal: ends.signal });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || (e.target.classList && e.target.classList.contains('ws-sheet-scrim'))) sortMenu.close();
+    }, { signal: ends.signal });
+
+    let handle = null;
+    let gone = false;
+    function teardown() {
+      if (gone) return;
+      gone = true;
+      ends.abort();
+      btn.setAttribute('aria-expanded', 'false');
+      btn.removeAttribute('aria-controls');
+      if (sortMenu && sortMenu.overlay === overlay) sortMenu = null;
+      const remove = function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+      if (reduced()) { remove(); return; }
+      overlay.inert = true;
+      if (!isWide) overlay.classList.remove('is-open');
+      overlay.classList.add('is-closing');
+      window.setTimeout(remove, isWide ? 160 : SHEET_CLOSE_MS);
+    }
+    sortMenu = {
+      overlay: overlay,
+      close: function () { if (handle) handle.close(); else teardown(); }
+    };
+
+    document.body.appendChild(overlay);
+    if (isWide) placeSort(panel, btn);
+    else {
+      void panel.offsetWidth;
+      overlay.classList.add('is-open');
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-controls', listId);
+    signal.addEventListener('abort', function () { if (sortMenu) sortMenu.close(); }, { once: true, signal: ends.signal });
+    if (window.WSUI && typeof window.WSUI.modal === 'function') {
+      handle = window.WSUI.modal(overlay, { box: panel, initial: list, onClose: teardown });
+      // The shared stack gives Escape, the focus kept inside and handed back, and
+      // the router's close before it leaves. A popover is the list itself, not a
+      // dialog around one; the phone's sheet is a dialog titled Sort by.
+      if (isWide) { panel.removeAttribute('role'); panel.removeAttribute('aria-modal'); }
+    } else {
+      list.focus();
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); sortMenu.close(); btn.focus(); }
+      }, { signal: ends.signal });
+    }
+  }
+
+  /** The sort's popover under its button, on the button's side of the window; above it when there is more room there. */
+  function placeSort(panel, btn) {
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(Math.max(224, r.width), window.innerWidth - 32);
+    const left = r.left + r.width / 2 > window.innerWidth / 2 ? r.right - w : r.left;
+    panel.style.left = clamp(left, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
+    panel.style.width = w + 'px';
+    const below = window.innerHeight - r.bottom - 24;
+    const above = r.top - 24;
+    if (below >= 160 || below >= above) {
+      panel.style.top = (r.bottom + 8) + 'px';
+      panel.style.maxHeight = below + 'px';
+    } else {
+      panel.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+      panel.style.maxHeight = above + 'px';
+    }
+  }
+
   // ---- Search ----
 
   const SEARCH_PARTS = ['searchSkeleton', 'searchGrid', 'searchEmpty', 'searchError'];
@@ -1800,9 +2017,10 @@ export async function mount(ctx) {
   root.querySelectorAll('#formatChips [data-format]').forEach(function (b) {
     b.addEventListener('click', function () { choose(b.getAttribute('data-format'), state.sort); }, { signal: signal });
   });
-  $('sortSelect').addEventListener('change', function () {
-    const v = $('sortSelect').value;
-    choose(state.format, SORTS.indexOf(v) !== -1 ? v : 'added');
+  $('sortBtn').addEventListener('click', function () { openSort($('sortBtn')); }, { signal: signal });
+  $('sortBtn').addEventListener('keydown', function (e) {
+    // The arrows open the list too, as they open a native one.
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openSort($('sortBtn')); }
   }, { signal: signal });
   $('moreBtn').addEventListener('click', loadMore, { signal: signal });
   $('retryBtn').addEventListener('click', function () { loadLibrary(false); loadContinue(); }, { signal: signal });

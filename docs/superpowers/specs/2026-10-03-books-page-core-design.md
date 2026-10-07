@@ -199,7 +199,9 @@ All pages are page modules in the soft-navigation shell. They follow the design 
 - **A book in progress in both formats** shows once, under the format with the newer activity.
 - **Each card** shows the cover, a format badge, and progress: "Ch. 12 · 43%" for ebooks, or
   "2h 10m left" for audiobooks.
-- **Tapping a card** resumes in that format.
+- **Tapping a card** (its cover or words) opens the book's own page. A round play button centred on
+  the cover (shown on hover or focus with a mouse, always on touch) resumes in that format: the
+  player for an audiobook, the reader for an ebook.
 - **Home** shows the same row in a compact form, as its first section. If the person has
   nothing in progress, the row is hidden; it is also hidden, and never asked for, while the Books
   page is off. A note about a source (Kavita down, not connected) shows under the row; the "not

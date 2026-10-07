@@ -273,6 +273,8 @@ function usual(over = {}) {
   };
 }
 
+const sortOptions = (t) => t.qa('#booksSortList [role="option"]');
+
 async function run(name, fn) {
   current = name;
   const made = [];
@@ -380,7 +382,7 @@ await run('the chips filter the library and are remembered', async (make) => {
   } });
   await u.mount();
   check('it asks for the remembered view at once', u.net.urls('/api/books?')[0] === '/api/books?format=audio&sort=title&limit=36', u.net.urls('/api/books?'));
-  check('and the controls show it', u.q('[data-format="audio"]').getAttribute('aria-pressed') === 'true' && u.q('#sortSelect').value === 'title');
+  check('and the controls show it', u.q('[data-format="audio"]').getAttribute('aria-pressed') === 'true' && u.text('#sortValue') === 'Title');
   // Rubbish in storage is ignored.
   const v = make({ storage: { 'webservarr_books_view:sam': '{"format":"pdf","sort":"nope"}' }, routes: usual() });
   await v.mount();
@@ -394,10 +396,13 @@ await run('the sort reloads the list and an older answer cannot overwrite a newe
     net.on('/api/books?format=all&sort=title', () => ({ body: { items: [ebook(2, 'Emma', 'Jane Austen')], next_cursor: null, notes: [] } }));
     net.on('/api/books?format=all&sort=author', () => first.promise);
   } });
+  pickerKit(t);
   await t.mount();
-  check('the sort offers Recently added, Title and Author', t.qa('#sortSelect option').map((o) => o.textContent).join('|') === 'Recently added|Title|Author');
-  t.change('#sortSelect', 'author');
-  t.change('#sortSelect', 'title');
+  t.click('#sortBtn');
+  check('the sort offers Recently added, Title and Author', sortOptions(t).map((o) => o.textContent.replace('check', '')).join('|') === 'Recently added|Title|Author');
+  sortOptions(t)[2].click();
+  t.click('#sortBtn');
+  sortOptions(t)[1].click();
   await t.clock.advance(50);
   check('Title shows', t.cards('libraryGrid').length === 1 && /Emma/.test(t.cards('libraryGrid')[0].textContent));
   first.resolve({ body: { items: [audio(9, 'Stale Answer', 'X')], next_cursor: null, notes: [] } });
@@ -618,10 +623,23 @@ await run('the Continue row: cover, format badge, progress, and a way back in', 
   await t.mount();
   const row = t.q('#continueHost [data-continue]');
   check('it is a section with a heading', row && row.getAttribute('aria-label') === 'Continue' && row.querySelector('h2').textContent === 'Continue');
-  const cards = t.qa('#continueHost li > a, #continueHost li > button');
+  const cards = t.qa('#continueHost li [data-continue-open]');
+  const plays = t.qa('#continueHost li [data-resume-audio], #continueHost li [data-resume-read]');
   check('one card per book, in order', cards.length === 3 && /Dune/.test(cards[0].textContent) && /Hobbit/.test(cards[1].textContent));
-  check('an ebook resumes in the reader through a real link', cards[0].tagName === 'A' && cards[0].getAttribute('href') === '/reader?seriesId=4&chapterId=9');
-  check('an audiobook is a button', cards[1].tagName === 'BUTTON' && cards[1].getAttribute('type') === 'button' && cards[1].getAttribute('data-resume-audio') === '14:1');
+  check('the card itself opens the book\'s page, whatever its format', cards.map((c) => c.tagName + ' ' + c.getAttribute('href')).join('|') === 'A /books/1|A /books/3|A /books/6',
+    cards.map((c) => c.getAttribute('href')));
+  check('named Open <title>, with the place read after it', cards[1].getAttribute('aria-label') === 'Open The Hobbit' &&
+    t.doc.getElementById(cards[1].getAttribute('aria-describedby')).textContent === '2h 10m left');
+  check('one play button per card, beside the link and never inside it', plays.length === 3 && cards.every((c) => !c.querySelector('a, button')) &&
+    plays.every((p, i) => p.closest('li') === cards[i].closest('li')));
+  check('an ebook\'s goes into the reader through a real link', plays[0].tagName === 'A' && plays[0].getAttribute('href') === '/reader?seriesId=4&chapterId=9' &&
+    plays[0].getAttribute('aria-label') === 'Continue reading Dune');
+  check('an audiobook\'s is a button for the player', plays[1].tagName === 'BUTTON' && plays[1].getAttribute('type') === 'button' &&
+    plays[1].getAttribute('data-resume-audio') === '14:1' && plays[1].getAttribute('aria-label') === 'Resume The Hobbit');
+  check('it sits over the cover\'s own box, so it moves nothing', /\babsolute\b/.test(plays[1].parentNode.className) && /aspect-\[2\/3\]/.test(plays[1].parentNode.className) &&
+    /pointer-events-none/.test(plays[1].parentNode.className) && /pointer-events-auto/.test(plays[1].className));
+  check('hidden until hover or focus only where there is a mouse', /\[@media\(hover:hover\)_and_\(pointer:fine\)\]:opacity-0/.test(plays[1].className) &&
+    /group-hover\/cont:opacity-100/.test(plays[1].className) && /group-focus-within\/cont:opacity-100/.test(plays[1].className) && !/(^| )opacity-0/.test(plays[1].className));
   check('each shows its progress', /Ch\. 12 · 43%/.test(cards[0].textContent) && /2h 10m left/.test(cards[1].textContent));
   check('and its format', cards[0].querySelector('[data-format="ebook"]') && cards[1].querySelector('[data-format="audio"]') && !cards[1].querySelector('[data-format="ebook"]'));
   const fill = (c) => c.querySelector('.bg-frosted-blue.h-full');
@@ -645,6 +663,10 @@ await run('tapping an audiobook in Continue resumes it in the player', async (ma
   u.ctl.abort();
   u.q('#continueHost [data-resume-audio="13:1"]').click();
   check('a page that was left no longer answers taps', u.toasts.length === 1);
+  const open = t.q('#continueHost [data-continue-open][href="/books/3"]');
+  open.addEventListener('click', (e) => e.preventDefault());   // the router's part; here it stays put
+  open.dispatchEvent(new t.win.MouseEvent('click', { bubbles: true, cancelable: true }));
+  check('the card around it does not start the player', t.win.WS.player.opened.length === 1);
 });
 
 await run('renderContinueRow: always a section; with nothing in progress, one quiet line', async (make) => {
@@ -658,7 +680,7 @@ await run('renderContinueRow: always a section; with nothing in progress, one qu
   check('a list that could not be read says so, not that there is nothing', failed.querySelector('[data-continue-empty]').textContent === 'Your books in progress didn’t load.');
   const row = books.renderContinueRow(CONT.slice(1), {});
   check('with books: the cards and no empty line', row.querySelectorAll('li').length === 2 && !row.querySelector('[data-continue-empty]'));
-  check('the cards are Books\' size', row.querySelector('li > button').className.indexOf('w-36') !== -1);
+  check('the cards are Books\' size', row.querySelector('li > div').className.indexOf('w-36') !== -1);
 });
 
 await run('Kavita down: Continue keeps the audiobooks, the page shows one quiet note and still loads', async (make) => {
@@ -1759,6 +1781,101 @@ await run('filters: leaving the page takes an open picker with it', async (make)
   check('and gone with the page', !t.q('[role="listbox"]') && !t.doc.body.querySelector('.ws-dialog'));
 });
 
+// ---- The sort menu ----
+
+function sortKey(t, key) {
+  const target = t.doc.activeElement || t.q('#booksSortList');
+  target.dispatchEvent(new t.win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+}
+
+await run('sort: a button that opens a listbox of the orders, with the one in use checked', async (make) => {
+  const t = make({ routes: usual() });
+  const kit = pickerKit(t);
+  await t.mount();
+  const btn = t.q('#sortBtn');
+  check('a button, not a native select', btn.tagName === 'BUTTON' && btn.getAttribute('type') === 'button' && !t.q('#toolbar select'));
+  check('it says it opens a listbox, and is closed', btn.getAttribute('aria-haspopup') === 'listbox' && btn.getAttribute('aria-expanded') === 'false');
+  check('named Sort by and the order in use', btn.getAttribute('aria-labelledby') === 'sortLabel sortValue' && t.text('#sortLabel') === 'Sort by' && t.text('#sortValue') === 'Recently added');
+  btn.click();
+  const list = t.q('#booksSortList');
+  check('open: the list, on the shared stack, takes the focus', !!list && list.getAttribute('role') === 'listbox' && kit.opened === 1 && t.doc.activeElement === list);
+  check('the button points at it', btn.getAttribute('aria-expanded') === 'true' && btn.getAttribute('aria-controls') === 'booksSortList');
+  check('the popover is the list itself, not a dialog around it', !list.parentNode.hasAttribute('role') && !list.parentNode.hasAttribute('aria-modal'));
+  const opts = sortOptions(t);
+  check('the order in use is selected and highlighted', opts[0].getAttribute('aria-selected') === 'true' && list.getAttribute('aria-activedescendant') === opts[0].id &&
+    !opts[0].querySelector('.invisible') && !!opts[1].querySelector('.invisible'));
+  sortKey(t, 'ArrowDown');
+  sortKey(t, 'ArrowDown');
+  sortKey(t, 'ArrowDown');
+  check('the arrows move the highlight and stop at the end', list.getAttribute('aria-activedescendant') === opts[2].id);
+  sortKey(t, 'Home');
+  check('Home goes to the first', list.getAttribute('aria-activedescendant') === opts[0].id);
+  sortKey(t, 't');
+  check('a letter jumps to the order it starts', list.getAttribute('aria-activedescendant') === opts[1].id);
+  sortKey(t, 'Enter');
+  await t.clock.advance(50);
+  check('Enter picks it and the list goes', !t.q('#booksSortList') && btn.getAttribute('aria-expanded') === 'false' && !btn.hasAttribute('aria-controls'));
+  check('the button says it', t.text('#sortValue') === 'Title');
+  check('the books are asked for in that order', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=title&limit=36');
+  check('and it is remembered', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"all","sort":"title"}');
+
+  btn.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  check('the arrow keys open it from the button too, on the order in use', !!t.q('#booksSortList') && t.q('#booksSortList').getAttribute('aria-activedescendant') === sortOptions(t)[1].id &&
+    sortOptions(t)[1].getAttribute('aria-selected') === 'true');
+  const asked = t.net.urls('/api/books?').length;
+  sortKey(t, ' ');
+  check('Space on the order in use closes it and asks for nothing', !t.q('#booksSortList') && t.net.urls('/api/books?').length === asked);
+  btn.click();
+  sortKey(t, 'Tab');
+  check('Tab closes it', !t.q('#booksSortList'));
+  btn.click();
+  t.doc.body.querySelector('.ws-dialog').click();
+  check('a click outside closes it', !t.q('#booksSortList'));
+});
+
+await run('sort: Escape closes it and the focus goes back to the button (no shared stack)', async (make) => {
+  const t = make({ routes: usual() });
+  t.win.matchMedia = (q) => ({ matches: true, addEventListener() {}, removeEventListener() {} });
+  await t.mount();
+  t.click('#sortBtn');
+  check('open', !!t.q('#booksSortList') && t.doc.activeElement === t.q('#booksSortList'));
+  sortKey(t, 'Escape');
+  check('Escape closes it', !t.q('#booksSortList'));
+  check('and the focus is back on the button', t.doc.activeElement === t.q('#sortBtn'));
+});
+
+await run('sort: on a phone the list is a bottom sheet titled Sort by; leaving the page takes it', async (make) => {
+  const t = make({ routes: usual() });
+  pickerKit(t, { wide: false });
+  await t.mount();
+  t.click('#sortBtn');
+  const sheet = t.doc.body.querySelector('.ws-sheet');
+  check('a sheet with the filter pickers\' pieces', !!sheet && sheet.classList.contains('is-open') && !!sheet.querySelector('.ws-sheet-grip') && !!sheet.querySelector('.ws-sheet-close'));
+  check('titled Sort by', sheet.querySelector('.ws-sheet-panel').getAttribute('aria-labelledby') === sheet.querySelector('h2').id && sheet.querySelector('h2').textContent === 'Sort by');
+  check('with the list in it, focused', !!sheet.querySelector('#booksSortList') && t.doc.activeElement === sheet.querySelector('#booksSortList'));
+  sortOptions(t)[2].click();
+  await t.clock.advance(50);
+  check('a tap picks an order and closes it', !t.doc.body.querySelector('.ws-sheet') && t.text('#sortValue') === 'Author' &&
+    t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=author&limit=36');
+  t.click('#sortBtn');
+  t.doc.body.querySelector('.ws-sheet-close').click();
+  check('Close closes it', !t.doc.body.querySelector('.ws-sheet'));
+  t.click('#sortBtn');
+  t.ctl.abort();
+  check('and it goes with the page', !t.doc.body.querySelector('.ws-sheet'));
+});
+
+await run('sort: opening a filter picker closes the sort, and the sort closes a picker', async (make) => {
+  const t = make({ routes: filterRoutes() });
+  pickerKit(t);
+  await t.mount();
+  t.click('#sortBtn');
+  t.click('[data-filter="author"]');
+  check('one at a time', !t.q('#booksSortList') && !!pickerBox(t));
+  t.click('#sortBtn');
+  check('and the other way round', !!t.q('#booksSortList') && !pickerBox(t));
+});
+
 // ---- Markup safety ----
 
 await run('titles, authors and series are text, never markup', async (make) => {
@@ -1782,7 +1899,8 @@ await run('leaving the page ends its listeners, polls and requests', async (make
   const before = t.net.calls.length;
   t.ctl.abort();
   t.click('[data-format="ebook"]');
-  t.change('#sortSelect', 'title');
+  t.click('#sortBtn');
+  check('the sort no longer opens', !t.q('#booksSortList'));
   t.type('dune');
   await t.clock.advance(500);
   check('nothing is asked for after leaving', t.net.calls.length === before, t.net.calls.length - before);
