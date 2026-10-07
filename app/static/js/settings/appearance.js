@@ -1,5 +1,5 @@
 /**
- * Settings > Appearance: colours (with a live preview), Home's gauge colours,
+ * Settings > Appearance: colours (with a live preview), the top bar's meter colours,
  * status colours, font, custom CSS.
  *
  * Contrast guard: as colours change, the pairs the site leans on (PAIRS) are
@@ -53,7 +53,7 @@
     ['theme.color_status_warn', 'Degraded', 'status-warn'],
     ['theme.color_status_err', 'Offline', 'status-err']
   ];
-  // Home's CPU, RAM and network gauges: the accent unless Colourful gauges is
+  // The top bar's CPU, RAM and network gauges: the accent unless Colourful meters is
   // on, then each its own colour. Rings, not words, so the contrast guard
   // (text, and the New! flag's lettering) doesn't measure them.
   var GAUGES_ON = 'theme.gauges_colourful';
@@ -445,9 +445,9 @@
       media.body.appendChild(fgrid);
       form.appendChild(media.root);
 
-      var gauges = WSSettings.card('Home gauges');
-      gauges.body.appendChild(api.toggle({ key: GAUGES_ON, label: 'Colourful gauges',
-        help: 'Give the CPU, RAM and network gauges their own colours instead of your theme colour.' }));
+      var gauges = WSSettings.card('Top bar usage meters');
+      gauges.body.appendChild(api.toggle({ key: GAUGES_ON, label: 'Colourful meters',
+        help: 'Give the CPU, RAM and network meters in the top bar their own colours instead of your theme colour.' }));
       var ggrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
       GAUGES.forEach(function (g) { ggrid.appendChild(api.color({ key: g[0], label: g[1], cssVar: g[2] })); });
       gauges.body.appendChild(ggrid);

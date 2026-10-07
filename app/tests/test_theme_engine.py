@@ -594,7 +594,7 @@ class SafeColours(unittest.TestCase):
         self.assertIn("[data-ws-theme-preview]", THEME)
 
 
-# Home's gauges (R189): the rings wear the accent unless Colourful gauges is
+# The top bar's gauges (R189): the rings wear the accent unless Colourful meters is
 # on, then their original colours (v1.10.11's Tailwind cyan, purple, orange).
 GAUGES = {"gauge_cpu": "#06B6D4", "gauge_ram": "#A855F7", "gauge_net": "#F97316"}
 INDEX = (STATIC / "index.html").read_text(encoding="utf-8")
@@ -704,8 +704,8 @@ class GaugeColours(unittest.TestCase):
         self.assertIn("var GAUGES_ON = 'theme.gauges_colourful';", APPEARANCE)
         for key, var in (("gauge_cpu", "gauge-cpu"), ("gauge_ram", "gauge-ram"), ("gauge_net", "gauge-net")):
             self.assertRegex(APPEARANCE, rf"\['theme\.color_{key}', '[^']+', '{var}'\]")
-        self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Home gauges'\)"))
-        self.assertTrue(live_matches(APPEARANCE, r"api\.toggle\(\{ key: GAUGES_ON, label: 'Colourful gauges',"))
+        self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Top bar usage meters'\)"))
+        self.assertTrue(live_matches(APPEARANCE, r"api\.toggle\(\{ key: GAUGES_ON, label: 'Colourful meters',"))
         self.assertTrue(live_matches(APPEARANCE, r"api\.color\(\{ key: g\[0\], label: g\[1\], cssVar: g\[2\] \}\)"))
         # The pickers show only while the switch is on (or hold a change).
         self.assertTrue(live_matches(APPEARANCE, r"var open = api\.get\(GAUGES_ON\) === 'true' \|\|"))
@@ -725,9 +725,9 @@ class GaugeColours(unittest.TestCase):
     def test_the_skeleton_has_both_states(self):
         panel = FRAME[FRAME.index('<section id="panel-appearance"'):]
         panel = panel[:panel.index("</section>")]
-        card = panel[panel.index('<span class="skel-text">Home gauges</span>'):panel.index(
+        card = panel[panel.index('<span class="skel-text">Top bar usage meters</span>'):panel.index(
             '<span class="skel-text">Status colours</span>')]
-        self.assertIn('<span class="skel-text">Colourful gauges</span>', card)
+        self.assertIn('<span class="skel-text">Colourful meters</span>', card)
         self.assertIn('<span class="skel block w-11 h-6 rounded-full shrink-0"></span>', card)
         pickers = card[card.index('<div data-skel-when="gauges-on" hidden>'):]
         self.assertEqual(re.findall(r'<span class="skel-text">([^<]+)</span>', pickers), ["CPU", "RAM", "Network"])

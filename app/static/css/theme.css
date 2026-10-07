@@ -37,7 +37,7 @@
      entry is a true yellow-gold, and the eBook amber turns orange under a glow. */
   --color-new-flag: 255 214 10;
 
-  /* Home's gauges (Settings > Appearance > Home gauges). Each ring paints
+  /* Home's gauges (Settings > Appearance > Top bar usage meters). Each ring paints
      --ws-gauge-*: the accent by default, or its own --color-gauge-* colour
      while colourful gauges are on (the server's #ws-theme picks which). */
   --color-gauge-cpu: 6 182 212;

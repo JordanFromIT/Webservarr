@@ -67,7 +67,7 @@ var WSSettingsFirstPaint = (function () {
       'all-off': !(f.show_simple_auth || (f.show_plex_auth && s.plex) || m.authentik),
       // appearance.js: Custom CSS in use is never tucked away.
       'css-open': !!b.custom_css,
-      // appearance.js: the gauge colours show while Colourful gauges is on.
+      // appearance.js: the gauge colours show while Colourful meters is on.
       'gauges-on': !!b.gauges_colourful,
       // notifications.js: the status line says what the server will
       // (setup.push_reason: GET /api/admin/notifications/status's own rule).

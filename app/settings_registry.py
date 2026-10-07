@@ -206,7 +206,7 @@ def _build() -> List[SettingDef]:
         # Home's CPU, RAM and network gauges. Off (the default), their rings
         # take the theme's accent; on, each takes its own colour below (the
         # rings' original cyan, purple and orange).
-        _bool("theme.gauges_colourful", "false", "Give the Home gauges their own colours", public=True),
+        _bool("theme.gauges_colourful", "false", "Give the top bar's usage meters their own colours", public=True),
         _color("theme.color_gauge_cpu", "#06B6D4", "Colour of the CPU gauge (with colourful gauges on)"),
         _color("theme.color_gauge_ram", "#A855F7", "Colour of the RAM gauge (with colourful gauges on)"),
         _color("theme.color_gauge_net", "#F97316", "Colour of the network gauge (with colourful gauges on)"),
