@@ -61,7 +61,12 @@ const SEARCH_WAIT_MS = 300;
 const SEARCH_LIMIT = 60;
 const SKELETON_CARDS = 12;
 const BUILDING_POLL_MS = 10000;
-const CONTINUE_WAIT_MS = 1500;
+// How long the first books wait for the rows above them (Continue, Up next,
+// My list, the shelves). A row drawn after the books would push them down, and
+// a remembered row can still come back different (emptied, or newly filled),
+// so every row is waited for on every visit; past this a slow source no longer
+// holds up the library. The toolbar's skeleton gives way at the same time.
+const ROWS_WAIT_MS = 4000;
 
 const VIEW_KEY = 'webservarr_books_view:';
 const CONTINUE_KEY = 'webservarr_books_continue:';
@@ -518,11 +523,15 @@ export async function mount(ctx) {
     // list are written in that one frame (commitFrame), so nothing already on
     // screen moves. pending: each row's answer ({ row }), held until then.
     committed: false, pending: {},
-    // A visit with no memory of one of those rows (a first ever visit) has the
-    // books wait for its answer (up to CONTINUE_WAIT_MS): a row that comes in
-    // after them would push them down. Rows it remembers have their room
-    // reserved, so they are not waited for. unsettled: the rows still waited for.
+    // The books wait for every row's first answer (up to ROWS_WAIT_MS): a row
+    // that comes in after them would push them down. A remembered row has its
+    // room held, but its answer may not match the memory (the last book
+    // finished, a shelf newly filled), so it is waited for too.
+    // unsettled: the rows still waited for.
     unsettled: {}, waiting: [],
+    // The toolbar shown in place of its skeleton (the same size): with the
+    // books, or on its own once ROWS_WAIT_MS has passed without them.
+    toolbarShown: false,
     // Up next: its books in the order on screen; moves sent one after another.
     queue: [], moving: 0, moveChain: null,
     // Counts every redraw of page 1, so a next page asked for before one is dropped.
@@ -566,7 +575,7 @@ export async function mount(ctx) {
   ROW_ORDER.forEach(function (name) {
     const hint = storageGet(rowKey(name));
     markRow(name, hint === '1');
-    if (hint === null) state.unsettled[name] = true;
+    state.unsettled[name] = true;
   });
 
   // ---- Showing one body at a time ----
@@ -668,10 +677,32 @@ export async function mount(ctx) {
   function commitFrame() {
     if (state.committed) return;
     state.committed = true;
-    $('toolbarSkel').classList.add('hidden');
-    $('toolbar').classList.remove('hidden');
+    showToolbar();
     renderNotes();
     applyRows();
+  }
+
+  /** The toolbar for its skeleton, which holds its exact size at every width
+      (the controls' own words, unseen, so the rows wrap where theirs do). On
+      its own (a library slower than ROWS_WAIT_MS) only the toolbar comes in:
+      the rows and notes above and between would move the grid's skeleton, so
+      they wait for the books (or their error) and land in that one write.
+      alone: and only if it is exactly the skeleton's height (several filters
+      in use can wrap to more rows than the skeleton's one); otherwise the
+      skeleton stays until the books, before anything is painted. */
+  function showToolbar(alone) {
+    if (state.toolbarShown) return;
+    const skel = $('toolbarSkel');
+    const bar = $('toolbar');
+    const held = alone ? skel.getBoundingClientRect().height : 0;
+    skel.classList.add('hidden');
+    bar.classList.remove('hidden');
+    if (alone && Math.abs(bar.getBoundingClientRect().height - held) > 0.5) {
+      bar.classList.add('hidden');
+      skel.classList.remove('hidden');
+      return;
+    }
+    state.toolbarShown = true;
   }
 
   function hostOf(name) {
@@ -2158,9 +2189,10 @@ export async function mount(ctx) {
 
   // Recently added records this visit on the server (its New marks are against the visit before).
   const first = Promise.all([loadContinue(), loadMine('upnext'), loadMine('mylist'), loadMine('recent'), loadMine('popular'), loadLibrary(false)]);
-  // A library that never answers does not keep the toolbar a skeleton for ever.
-  ctx.setTimeout(commitFrame, 4000);
-  if (Object.keys(state.unsettled).length) ctx.setTimeout(function () { settleRow(null); }, CONTINUE_WAIT_MS);
+  // A library that never answers does not keep the toolbar a skeleton for
+  // ever, and a row that never answers does not hold the books for ever.
+  ctx.setTimeout(function () { showToolbar(true); }, ROWS_WAIT_MS);
+  ctx.setTimeout(function () { settleRow(null); }, ROWS_WAIT_MS);
 
   // The sections are on screen (or their skeletons, which have their shape)
   // before mount resolves, so Back and Forward restore the scroll onto them. A

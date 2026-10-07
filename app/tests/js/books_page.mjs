@@ -337,22 +337,24 @@ await run('sections arrive top-down: the library waits for Continue', async (mak
   check('Continue goes first, then the library', t.WS.arrived.join(',') === 'continue,library', t.WS.arrived);
   check('and then the grid shows', !t.hidden('#libraryGrid'));
 
-  // One slow section does not hold the page for ever: after the short gate the library shows.
+  // One slow section does not hold the page for ever: after ROWS_WAIT_MS (4 s) the library shows.
   const never = deferred();
   const u = make({ routes: (net) => { usual()(net); net.on('/api/books/continue', () => never.promise); } });
   u.mount();
   await u.clock.advance(100);
   check('Continue still waiting: the grid waits', u.hidden('#libraryGrid'));
-  await u.clock.advance(300);
-  check('a first ever visit holds the books a little longer for it (a row coming in after them would push them down)', u.hidden('#libraryGrid'));
-  await u.clock.advance(1200);
+  await u.clock.advance(3800);
+  check('a first ever visit holds the books for it (a row coming in after them would push them down)', u.hidden('#libraryGrid'));
+  await u.clock.advance(200);
   check('but not for ever: the library shows without it', !u.hidden('#libraryGrid') && u.WS.arrived.join(',') === 'library', u.WS.arrived);
 
-  // A person who has been before is not held up: the row's room (or its absence) is already known.
+  // A repeat visit waits too: the memory says how much room to hold, not what the answer will be.
   const k = make({ storage: { 'webservarr_books_continue:sam': '0' }, routes: (net) => { usual()(net); net.on('/api/books/continue', () => never.promise); } });
   k.mount();
-  await k.clock.advance(400);
-  check('a repeat visit shows the books after the short gate', !k.hidden('#libraryGrid'));
+  await k.clock.advance(1600);
+  check('a repeat visit holds the books for a slow Continue too', k.hidden('#libraryGrid'));
+  await k.clock.advance(2500);
+  check('and shows them once the wait is over', !k.hidden('#libraryGrid'));
 });
 
 await run('the chips filter the library and are remembered', async (make) => {
@@ -982,7 +984,8 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   await u.clock.advance(3900);
   check('4 s: still waiting', !u.hidden('#toolbarSkel'));
   await u.clock.advance(200);
-  check('after 4 s the controls and Continue come in anyway', u.hidden('#toolbarSkel') && !u.hidden('#toolbar'));
+  check('after 4 s the controls come in anyway (the skeleton is their exact size)', u.hidden('#toolbarSkel') && !u.hidden('#toolbar'));
+  check('but Continue and the notes wait for the books: above the grid\'s skeleton they would move it', !!u.q('#continueHost .skel') && !u.q('#continueHost [data-continue]') && u.hidden('#notes') && !u.hidden('#gridSkeleton'));
   // The error path is a write of its own too.
   const v = make({ routes: usual({ library: () => ({ status: 503, body: {} }) }) });
   await v.mount();
@@ -1190,7 +1193,7 @@ await run('3b: CLS: on a first visit the books wait for Up next and My list too,
   await t.clock.advance(50);
   await m;
   check('then the row and the books come together', !t.hidden('#libraryGrid') && !!t.q('#upnextHost [data-upnext]') && t.hidden('#toolbarSkel'));
-  // Remembered: not waited for; its room is held, and it comes in with the books.
+  // Remembered: its room is held, and it comes in with the books.
   const hold2 = deferred();
   const lib = deferred();
   const u = make({ storage: { 'webservarr_books_continue:sam': '0', 'webservarr_books_upnext:sam': '1', 'webservarr_books_mylist:sam': '0' },
@@ -2174,6 +2177,157 @@ await run('T5H3: the guide is not offered, or marked seen, while a Kavita hand-o
   await going.clock.advance(2600);
   await g;
   check('a hand-off the page itself just started is the same: no guide, not seen', going.kav.reconnect.length === 1 && !tourOn(going) && going.win.localStorage.getItem(GUIDE_FLAG) === null);
+});
+
+// ---- Layout shift: the held room and the one write (2026-10-07) ----
+//
+// Measured live at 320, 375, 768 and 1440 px: every skeleton above the books
+// is exactly its drawn row's height, so the page can only shift when a row is
+// drawn after the books (its answer slower than theirs) or its memory is
+// wrong. These pin both halves: the sizes the skeletons copy, and the wait.
+
+// The classes that decide a box's height (and, for the toolbar, its width).
+const SIZE_RE = /^(?:aspect-|h-|min-h-|size-|leading-|text-\[\d|text-(?:xl|lg|sm)$|mt-|mb-|py-|line-clamp-)/;
+const sizeOf = (el) => (el.getAttribute('class') || '').split(/\s+/).filter((c) => SIZE_RE.test(c) && !/^line-clamp-/.test(c))
+  .map((c) => c.replace(/^size-/, 'h-')).sort().join(' ');
+// A line of a card: its own sizes, or (a wrapper or a row of buttons) its first sized child's.
+function lineSize(el) {
+  const own = sizeOf(el);
+  if (/(?:^| )(?:aspect-|h-|min-h-|leading-)/.test(own)) return own.split(' ').filter((c) => !/^text-/.test(c) || /leading-/.test(own)).join(' ');
+  const kid = Array.from(el.children).find((c) => /(?:^| )(?:aspect-|h-|min-h-|leading-)/.test(sizeOf(c)));
+  const spacing = own.split(' ').filter((c) => /^(?:mt-|mb-)/.test(c));
+  return spacing.concat(kid ? lineSize(kid).split(' ').filter((c) => !/^(?:mt-|mb-)/.test(c)) : []).filter(Boolean).sort().join(' ');
+}
+const lines = (els) => els.map(lineSize);
+
+await run('CLS: every skeleton copies the sizes of what it holds room for', async (make) => {
+  const srv = mine({ queue: QUEUE, list: QUEUE });
+  const t = make({ storage: { 'webservarr_books_view:sam': '{"format":"all","sort":"added","group":false}' },
+    routes: (net) => { withMine(srv, { continue: { items: CONT, notes: [] }, recent: () => ({ body: { items: RECENT } }), popular: () => ({ body: { items: POPULAR } }) })(net); } });
+  const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
+  await t.mount();
+  // Continue: the row's card, and the one line an empty Continue shows.
+  const contSkel = skel.querySelector('#continueHost [data-skel="row"] > div');
+  const contCard = t.q('#continueHost li > div');
+  check('Continue: the card\'s width', /\bw-36\b/.test(contSkel.className) && /\bw-36\b/.test(contCard.className));
+  check('Continue: cover, title and progress lines are the card\'s', lines(Array.from(contSkel.children)).join(' | ') === lines(Array.from(contCard.querySelector('a').children)).join(' | '),
+    [lines(Array.from(contSkel.children)), lines(Array.from(contCard.querySelector('a').children))]);
+  check('Continue: the row\'s own box (gap, padding) and heading', sizeOf(skel.querySelector('#continueHost [data-skel="row"]')) === sizeOf(t.q('#continueHost ul')) &&
+    sizeOf(skel.querySelector('#continueHost h2')) === sizeOf(t.q('#continueHost h2')));
+  const empty = books.renderContinueRow([], {});
+  check('Continue empty: its line is the held line', sizeOf(skel.querySelector('#continueHost [data-skel="empty"]')) === sizeOf(empty.querySelector('[data-continue-empty]')),
+    [sizeOf(skel.querySelector('#continueHost [data-skel="empty"]')), sizeOf(empty.querySelector('[data-continue-empty]'))]);
+  // Up next: the cover and two lines, then the Play/Read row and the move row.
+  const upSkel = skel.querySelector('#upnextHost .books-row > div');
+  const upCard = t.q('#upnextHost li[data-queued]');
+  const upReal = Array.from(upCard.querySelector('a').children).concat(Array.from(upCard.children).slice(1));
+  check('Up next: the card\'s width', /\bw-40\b/.test(upSkel.className) && /\bw-40\b/.test(upCard.className));
+  check('Up next: every line of the card', lines(Array.from(upSkel.children)).join(' | ') === lines(upReal).join(' | '), [lines(Array.from(upSkel.children)), lines(upReal)]);
+  // My list and the shelves: library cards in a row.
+  for (const id of ['mylistHost', 'recentHost', 'popularHost']) {
+    const s = skel.querySelector(`#${id} .books-row > div`);
+    const li = t.q(`#${id} li`);
+    check(`${id}: the card's width and lines`, /\bw-36\b/.test(s.className) && /\bw-36\b/.test(li.className) &&
+      lines(Array.from(s.children)).join(' | ') === lines(Array.from(li.querySelector('a').children)).join(' | '), [lines(Array.from(s.children)), lines(Array.from(li.querySelector('a').children))]);
+    check(`${id}: the row and heading`, sizeOf(skel.querySelector(`#${id} .books-row`)) === sizeOf(t.q(`#${id} ul, #${id} ol`)) && sizeOf(skel.querySelector(`#${id} h2`)) === sizeOf(t.q(`#${id} h2`)));
+  }
+  // The grid: a card with its series line (Group series off).
+  const gridSkel = skel.querySelector('#gridSkeleton > div');
+  const gridCard = t.q('#libraryGrid > li > a');
+  check('grid: every line of a card, the series line included', lines(Array.from(gridSkel.children)).join(' | ') === lines(Array.from(gridCard.children)).join(' | '),
+    [lines(Array.from(gridSkel.children)), lines(Array.from(gridCard.children))]);
+  check('grid: the same columns and gaps', skel.querySelector('#gridSkeleton').className.replace(/\s+/g, ' ') === skel.querySelector('#libraryGrid').className.replace(/\bhidden\s+/, '').replace(/\s+/g, ' '));
+});
+
+await run('CLS: the toolbar\'s skeleton is its controls, word for word and size for size', async (make) => {
+  const t = make({ routes: usual() });
+  const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
+  const WIDTH_RE = /^(?:h-|w-|min-w-|px-|pl-|pr-|gap-|text-\[\d|font-(?:semibold|medium|bold)$)/;
+  const widthOf = (el) => (el.getAttribute('class') || '').split(/\s+/).filter((c) => WIDTH_RE.test(c)).sort().join(' ');
+  const words = (el) => el.textContent.replace(/expand_more/g, '').replace(/\s+/g, ' ').trim();
+  const skelControls = Array.from(skel.querySelectorAll('#toolbarSkel .skel'));
+  const real = Array.from(skel.querySelectorAll('#formatChips [data-format], #filterButtons [data-filter], #groupSwitch, #sortBtn'));
+  check('one skeleton per control, in order', skelControls.length === real.length, [skelControls.length, real.length]);
+  real.forEach((b, i) => {
+    const s = skelControls[i];
+    if (!s) return;
+    if (b.id === 'sortBtn') {
+      // A fixed box whatever the order's words: its height and width.
+      const box = (el) => widthOf(el).split(' ').filter((c) => /^[hw]-/.test(c)).join(' ');
+      check('the sort: the same fixed box', box(s) === box(b) && /\bw-44\b/.test(b.className), [box(s), box(b)]);
+      return;
+    }
+    check(`"${words(b)}": the same words, unseen`, words(s) === words(b), [words(s), words(b)]);
+    check(`"${words(b)}": the same height, padding, type and width`, widthOf(s) === widthOf(b), [widthOf(s), widthOf(b)]);
+  });
+  check('the filter buttons\' arrows are 20px boxes, so the icon font arriving changes no width',
+    Array.from(skel.querySelectorAll('#filterButtons [data-filter] .material-symbols-outlined')).every((i) => /\bw-5\b/.test(i.className) && /\boverflow-hidden\b/.test(i.className)) &&
+    Array.from(skel.querySelectorAll('#toolbarSkel .invisible.size-5')).length === 3);
+  check('the groups wrap the same way', ['#toolbarSkel', '#toolbar'].every((sel) => /\bflex-wrap\b/.test(skel.querySelector(sel).className) && /\bgap-3\b/.test(skel.querySelector(sel).className) && /\bmb-6\b/.test(skel.querySelector(sel).className)));
+  // A pill and Clear all are h-9 (pages/books.js ACTIVE_CHIP, CLEAR_ALL): one row of them.
+  check('the row of filters in use: held at a pill\'s height, on a row of its own', /\bh-9\b/.test(skel.querySelector('#toolbarSkel [data-skel="filters"]').className) &&
+    /\bbasis-full\b/.test(skel.querySelector('#toolbarSkel [data-skel="filters"]').className) && /\bbasis-full\b/.test(skel.querySelector('#activeFilters').className));
+  const f = make({ url: 'https://ws.test/books?author=Jane%20Austen', routes: usual() });
+  await f.mount();
+  check('and a pill is that height', Array.from(f.qa('#activeFilters button')).every((b) => /\bh-9\b/.test(b.className)) && f.qa('#activeFilters button').length === 2);
+});
+
+await run('CLS: a remembered row is waited for too, so a wrong memory never moves the books', async (make) => {
+  // Remembered as having books in progress, but the last one was finished: the
+  // answer is the empty line, and it comes slower than the books.
+  const cont = deferred();
+  const t = make({ storage: { 'webservarr_books_continue:sam': '1', 'webservarr_books_recent:sam': '1', 'webservarr_books_popular:sam': '0' },
+    routes: (net) => { shelves(RECENT, POPULAR)(net); net.on('/api/books/continue', () => cont.promise.then(() => ({ body: { items: [], notes: [] } }))); } });
+  const m = t.mount();
+  check('the room of a row of cards is held from the first paint', t.doc.documentElement.hasAttribute('data-books-continue'));
+  await t.clock.advance(2500);
+  check('2.5 s: the books and the shelves have answered but wait for Continue', t.hidden('#libraryGrid') && !t.hidden('#gridSkeleton') && !t.hidden('#toolbarSkel') &&
+    !!t.q('#recentHost .skel') && !t.q('#popularHost [data-popular]'));
+  cont.resolve();
+  await t.clock.advance(50);
+  await m;
+  check('then the empty line, the shelves (Popular newly filled), the toolbar and the books in one write',
+    !!t.q('#continueHost [data-continue-empty]') && !t.doc.documentElement.hasAttribute('data-books-continue') && !!t.q('#recentHost [data-recent]') &&
+    !!t.q('#popularHost [data-popular]') && t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !t.hidden('#libraryGrid') && t.hidden('#gridSkeleton'));
+  check('and remembered for the next first paint', t.win.localStorage.getItem('webservarr_books_continue:sam') === '0' && t.win.localStorage.getItem('webservarr_books_popular:sam') === '1');
+});
+
+await run('CLS: a first visit with a slow Continue (2.5 s) draws the row and the books together', async (make) => {
+  // What dev showed at 375 px: a 2.5 s Continue on a first visit came in after
+  // the books and pushed Recently added and the toolbar down (CLS 0.19).
+  const cont = deferred();
+  const t = make({ routes: (net) => { shelves(RECENT, [])(net); net.on('/api/books/continue', () => cont.promise.then(() => ({ body: { items: CONT, notes: [] } }))); } });
+  const m = t.mount();
+  await t.clock.advance(2500);
+  check('the books wait past the old 1.5 s gate', t.hidden('#libraryGrid') && !t.q('#recentHost [data-recent]'));
+  cont.resolve();
+  await t.clock.advance(50);
+  await m;
+  check('the row, the shelf and the books land together', !!t.q('#continueHost [data-continue] ul') && !!t.q('#recentHost [data-recent]') && !t.hidden('#libraryGrid'));
+});
+
+await run('CLS: a library slower than the wait brings in the toolbar alone, only at its skeleton\'s exact height', async (make) => {
+  const lib = deferred();
+  const t = make({ url: 'https://ws.test/books?author=Jane%20Austen&series=Emma%20and%20Friends', routes: (net) => { usual({ continue: { items: CONT, notes: [] } })(net); net.on('/api/books?', () => lib.promise); } });
+  // Two filters in use can wrap to more rows than the skeleton's one: no layout
+  // here, so the sizes are given.
+  t.q('#toolbarSkel').getBoundingClientRect = () => ({ height: 192 });
+  t.q('#toolbar').getBoundingClientRect = () => ({ height: 240 });
+  const m = t.mount();
+  await t.clock.advance(4100);
+  check('taller than its skeleton: the skeleton stays until the books', !t.hidden('#toolbarSkel') && t.hidden('#toolbar'));
+  check('and Continue waits with it', !t.q('#continueHost [data-continue]'));
+  lib.resolve({ body: { items: SHELF, next_cursor: null, notes: [], building: false } });
+  await t.clock.advance(50);
+  await m;
+  check('the books bring everything in one write', t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !!t.q('#continueHost [data-continue]') && !t.hidden('#libraryGrid'));
+  const lib2 = deferred();
+  const u = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => lib2.promise); } });
+  u.q('#toolbarSkel').getBoundingClientRect = () => ({ height: 144 });
+  u.q('#toolbar').getBoundingClientRect = () => ({ height: 144 });
+  u.mount();
+  await u.clock.advance(4100);
+  check('the same height: the toolbar comes in on its own, the grid\'s skeleton stays where it is', u.hidden('#toolbarSkel') && !u.hidden('#toolbar') && !u.hidden('#gridSkeleton') && !!u.q('#continueHost .skel'));
 });
 
 // ---- Requests: ?q= runs the search on arrival ----
