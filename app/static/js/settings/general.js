@@ -18,8 +18,8 @@
   // The visit the tab was last mounted in: its signal, ctx.setTimeout and
   // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
   var signal = null, later = null, cancel = function () {};
-  var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url', 'branding.app_icon_url',
-    'security.cloudflare_web_analytics'];
+  var TAB_KEYS = ['branding.app_name', 'branding.show_name', 'branding.tagline', 'branding.logo_url',
+    'branding.app_icon_url', 'security.cloudflare_web_analytics'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
   var MAX_IMPORT_BYTES = 1024 * 1024;         // a real backup is a few kilobytes
@@ -98,6 +98,10 @@
     c.body.appendChild(api.text({
       key: 'branding.app_name', label: 'Site name',
       help: 'Shown in the sidebar, on the sign-in page and in browser tabs. Leave it empty to show only your logo.'
+    }));
+    c.body.appendChild(api.toggle({
+      key: 'branding.show_name', label: 'Show site name next to the logo',
+      help: 'The name still appears in browser tabs, the home-screen app and notifications.'
     }));
     c.body.appendChild(api.text({
       key: 'branding.tagline', label: 'Tagline',

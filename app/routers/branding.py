@@ -159,6 +159,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
 
     return {
         "app_name": get("branding.app_name"),
+        # The name beside the logo (sidebar, sign-in card): on unless exactly
+        # "false", like the default. The page renderer reads it.
+        "show_name": get("branding.show_name") != "false",
         "tagline": get("branding.tagline"),
         "logo_url": safe_logo_url(get("branding.logo_url")),
         # The home-screen icon (manifest and apple-touch-icon), the same rule

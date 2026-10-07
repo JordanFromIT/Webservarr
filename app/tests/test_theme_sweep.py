@@ -428,6 +428,7 @@ BRIGHT_ON_PRIMARY = {
     ("tour.js", 'id="tourBack"', "the tour bubble"),
     ("pages.py", 'subcls="text-bright/80" if active', "the active nav pill (_LINK_ACTIVE, bg-primary)"),
     ("pages.py", "text-bright font-bold text-3xl", "the logo-fallback tile (size-14 bg-primary)"),
+    ("pages.py", "text-bright font-bold text-hero", "the logo-fallback tile with the name off (size-20 bg-primary)"),
     ("pages.py", "text-bright text-xl", "the phone bar's logo-fallback tile (size-8 bg-primary)"),
     ("login.html", "text-label font-medium text-bright/80", "the Authentik sign-in button (#authentikLoginBtn, bg-primary)"),
 }

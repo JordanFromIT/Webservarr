@@ -169,6 +169,11 @@ def _build() -> List[SettingDef]:
         # apple-touch-icon). The default is the bundled pair (192 and 512).
         _url("branding.app_icon_url", "/static/webservarr-app-512.png",
              "Home-screen icon (a square PNG, ideally 512 by 512)", public=True, allow_relative=True),
+        # The site name under the logo in the sidebar and on the sign-in card.
+        # On by default. Off, the page renderer leaves the name out and shows
+        # the logo larger, with the name as its alt text; titles, the manifest,
+        # push and emails keep the name.
+        _bool("branding.show_name", "true", "Show the site name next to the logo", public=True),
         _icon("icon.sidebar_logo", "settings_input_component", "Icon shown in place of a logo when none is set",
               public=True),
         # Off by default, so the CSP allows no outside script. On, HTML
