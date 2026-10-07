@@ -94,17 +94,21 @@ def _percent(entry) -> float:
     return max(0.0, min(100.0, round(100 * (size - left) / size, 1)))
 
 
-def _author(book: dict) -> str:
-    author = book.get("author") if isinstance(book.get("author"), dict) else {}
-    name = author.get("authorName") or book.get("authorTitle") or ""
+def _author(book: dict, authors: dict) -> str:
+    """The author's name. Not authorTitle: that is a sort key with the title
+    run on ("twain, mark The Adventures of Tom Sawyer")."""
+    name = (authors or {}).get(book.get("authorId"))
+    if not name and isinstance(book.get("author"), dict):
+        name = book["author"].get("authorName")
     return name if isinstance(name, str) else ""
 
 
-def build_rows(books, queue, now: datetime = None):
+def build_rows(books, queue, now: datetime = None, authors: dict = None):
     """
     Turn Chaptarr's book list and queue into page rows and summary counts.
 
-    Pure, so the mapping is tested without a network. Returns
+    Pure, so the mapping is tested without a network. `authors` maps an
+    author id to a name (the book list carries only the id). Returns
     (rows, summary) where summary is {in_progress, unreleased, added_recently}
     counted the way the film figures are (Radarr's wanted list): a book
     still being chased, a book not out yet, a request made in the last month.
@@ -142,7 +146,7 @@ def build_rows(books, queue, now: datetime = None):
             "request_id": f"book-{book.get('id')}",
             "media_type": fmt,
             "title": book.get("title") or "",
-            "author": _author(book),
+            "author": _author(book, authors),
             "requested_at": book.get("added"),
             "reason_code": reason,
             "state_code": state,
@@ -168,7 +172,7 @@ async def build_snapshot() -> dict:
     if data is None:
         rows, summary, configured = [], {"in_progress": 0, "unreleased": 0, "added_recently": 0}, False
     else:
-        rows, summary = build_rows(data["books"], data["queue"])
+        rows, summary = build_rows(data["books"], data["queue"], authors=data.get("authors"))
         configured = True
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),

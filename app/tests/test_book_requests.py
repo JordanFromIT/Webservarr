@@ -31,8 +31,8 @@ def book(id, title, fmt="ebook", monitored=True, files=0, release="2015-01-01T00
         "id": id, "title": title, "mediaType": fmt, "monitored": monitored,
         "hasFiles": bool(files), "releaseDate": release, "added": added,
         "statistics": {"bookFileCount": files},
-        "author": {"authorName": "An Author", "id": 99, "path": "/books/An Author"},
-        "authorTitle": "author, an",
+        "authorId": 99,
+        "authorTitle": "author, an " + title,
     }
     b.update(extra)
     return b
@@ -49,7 +49,7 @@ def queued(book_id, **extra):
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
 class WhichBooksAreRequests(unittest.TestCase):
     def rows(self, books, queue=()):
-        return book_requests.build_rows(books, list(queue), NOW)
+        return book_requests.build_rows(books, list(queue), NOW, authors={99: "An Author"})
 
     def test_only_monitored_books_without_a_file(self):
         rows, _ = self.rows([
@@ -80,6 +80,13 @@ class WhichBooksAreRequests(unittest.TestCase):
             self.assertNotIn(leak, text, leak)
         self.assertEqual(set(rows[0]), {"request_id", "media_type", "title", "author", "requested_at",
                                         "reason_code", "state_code", "group", "percent"})
+
+    def test_the_author_is_a_name_never_the_sort_key(self):
+        rows, _ = book_requests.build_rows([book(1, "A")], [], NOW, authors={})
+        self.assertEqual(rows[0]["author"], "")
+        embedded = dict(book(2, "B"), author={"authorName": "Mark Twain"})
+        rows, _ = book_requests.build_rows([embedded], [], NOW, authors={})
+        self.assertEqual(rows[0]["author"], "Mark Twain")
 
     def test_an_unknown_format_reads_as_an_ebook(self):
         rows, _ = self.rows([book(1, "A", fmt="comic")])
@@ -240,18 +247,22 @@ class ReadingChaptarr(unittest.TestCase):
              mock.patch.object(chaptarr.httpx, "AsyncClient", lambda **kw: _Client(answers, calls)):
             return asyncio.run(chaptarr.wanted_books()), calls
 
-    def test_get_only_books_and_queue(self):
+    def test_get_only_books_queue_and_authors(self):
         out, calls = self.fetch({"book": _Resp(200, [book(1, "A")]),
-                                 "queue": _Resp(200, {"records": [queued(1)]})})
+                                 "queue": _Resp(200, {"records": [queued(1)]}),
+                                 "author": _Resp(200, [{"id": 99, "authorName": "An Author", "path": "/x"}])})
         self.assertEqual([b["id"] for b in out["books"]], [1])
         self.assertEqual(out["queue"][0]["bookId"], 1)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(out["authors"], {99: "An Author"})
+        self.assertEqual(len(calls), 3)
 
-    def test_a_failed_queue_only_loses_the_queue(self):
-        out, _ = self.fetch({"book": _Resp(200, [book(1, "A")]), "queue": _Resp(500, {})})
-        self.assertEqual(out["queue"], [])
-        out, _ = self.fetch({"book": _Resp(200, [book(1, "A")]), "queue": httpx.ConnectError("x")})
-        self.assertEqual(out["queue"], [])
+    def test_a_failed_queue_or_author_list_only_loses_that(self):
+        out, _ = self.fetch({"book": _Resp(200, [book(1, "A")]), "queue": _Resp(500, {}),
+                             "author": httpx.ConnectError("x")})
+        self.assertEqual((out["queue"], out["authors"]), ([], {}))
+        out, _ = self.fetch({"book": _Resp(200, [book(1, "A")]), "queue": httpx.ConnectError("x"),
+                             "author": _Resp(401, {})})
+        self.assertEqual((len(out["books"]), out["queue"], out["authors"]), (1, [], {}))
 
     def test_unreachable_or_refusing_is_unavailable(self):
         for answer in (httpx.ConnectError("no route"), _Resp(503, {}), _Resp(200, {"not": "a list"})):

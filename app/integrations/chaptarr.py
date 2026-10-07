@@ -617,7 +617,8 @@ async def wanted_books() -> Optional[Dict[str, Any]]:
     own book list is where a book request lives. Returns None when Chaptarr
     is not configured, {"books": [...], "queue": [...]} otherwise, and raises
     ChaptarrUnavailable when the book list cannot be read. The queue only
-    sharpens the status words, so a queue that fails comes back empty.
+    sharpens the status words and the authors only name the rows, so either
+    one failing comes back empty. Also returns "authors": {author id: name}.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
@@ -630,6 +631,8 @@ async def wanted_books() -> Optional[Dict[str, Any]]:
             if resp.status_code != 200:
                 raise ChaptarrUnavailable(f"book list returned HTTP {resp.status_code}")
             books = resp.json()
+            if not isinstance(books, list):
+                raise ChaptarrUnavailable("book list was not a list")
             queue: List[Dict[str, Any]] = []
             try:
                 q = await client.get(
@@ -643,14 +646,25 @@ async def wanted_books() -> Optional[Dict[str, Any]]:
                     queue = [r for r in records or [] if isinstance(r, dict)]
             except (httpx.RequestError, ValueError) as exc:
                 logger.info("Chaptarr queue unavailable, statuses from the book list only: %s", exc)
+            # The book list carries only authorId (and a sort key such as
+            # "twain, mark The Adventures..."), so names come from the
+            # authors. Missing names just leave the line under the title out.
+            authors: Dict[Any, str] = {}
+            try:
+                a = await client.get(f"{cfg['url']}/api/v1/author", headers=headers)
+                if a.status_code == 200:
+                    authors = {
+                        x.get("id"): x.get("authorName") or ""
+                        for x in a.json() if isinstance(x, dict)
+                    }
+            except (httpx.RequestError, ValueError, TypeError) as exc:
+                logger.info("Chaptarr authors unavailable, book rows without names: %s", exc)
     except httpx.RequestError as exc:
         raise ChaptarrUnavailable(f"could not reach Chaptarr: {type(exc).__name__}") from exc
     except ValueError as exc:
         raise ChaptarrUnavailable("book list was not JSON") from exc
 
-    if not isinstance(books, list):
-        raise ChaptarrUnavailable("book list was not a list")
-    return {"books": [b for b in books if isinstance(b, dict)], "queue": queue}
+    return {"books": [b for b in books if isinstance(b, dict)], "queue": queue, "authors": authors}
 
 
 async def _book_files() -> List[Dict[str, Any]]:
