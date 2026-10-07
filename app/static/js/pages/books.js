@@ -1254,7 +1254,8 @@ export async function mount(ctx) {
     if (!guide || state.guideOffered || signal.aborted) return;
     state.guideOffered = true;
     ctx.setTimeout(function () {
-      if (signal.aborted || state.searching || state.connectProblem) return;
+      // Not over a search or the open filters panel (the next visit offers it then).
+      if (signal.aborted || state.searching || state.connectProblem || panelOpen()) return;
       // Off to sign in to Kavita: the page comes back and the guide is then shown (not marked seen now).
       if (state.reconnectTried || (window.WSKavita && typeof window.WSKavita.isLeaving === 'function' && window.WSKavita.isLeaving())) return;
       const first = !guide.hasBeenSeen();
