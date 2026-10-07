@@ -772,7 +772,11 @@ class StatusSummary(unittest.TestCase):
         db.close()
 
     def summary(self, monitors):
-        with mock.patch("app.integrations.uptime_kuma.read_monitors", mock.AsyncMock(return_value=monitors)):
+        # The route reads the shared live copy (read_monitors_live): Uptime
+        # Kuma set up, and a Redis of its own so no copy outlives the call.
+        with mock.patch("app.integrations.uptime_kuma._get_config", return_value={"url": KUMA_URL, "slug": ""}), \
+                mock.patch("app.integrations.uptime_kuma._redis", mock.AsyncMock(return_value=FakeRedis())), \
+                mock.patch("app.integrations.uptime_kuma.read_monitors", mock.AsyncMock(return_value=monitors)):
             r = self.client.get("/api/integrations/status-summary")
         self.assertEqual(r.status_code, 200)
         return r

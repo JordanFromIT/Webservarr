@@ -627,8 +627,10 @@ class NeverAnOutage(unittest.TestCase):
         body = r.json()
         self.assertEqual((body["state"], body["open"]), ("off", []))
         self.assertEqual([i["source"] for i in body["items"]], ["library"] * 3)
-        with mock.patch("app.integrations.uptime_kuma.read_monitors",
-                        mock.AsyncMock(return_value=[{"id": 1, "name": "Plex", "status": "up"}])):
+        with mock.patch("app.integrations.uptime_kuma._get_config",
+                        return_value={"url": "http://kuma.test:3001", "slug": ""}), \
+                mock.patch("app.integrations.uptime_kuma.read_monitors",
+                           mock.AsyncMock(return_value=[{"id": 1, "name": "Plex", "status": "up"}])):
             summary = client.get("/api/integrations/status-summary").json()
         self.assertEqual(summary, {"status": "online", "down_service": None})
 

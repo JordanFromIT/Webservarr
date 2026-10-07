@@ -378,6 +378,35 @@ class PublicSummaryStaysAggregate(unittest.TestCase):
         self.assertEqual(self.client.get("/api/integrations/status-summary").json(),
                          {"status": "unknown", "down_service": None})
 
+    def test_many_anonymous_calls_read_uptime_kuma_once(self):
+        """The public line reads the shared live copy: concurrent callers
+        wait for the one read in flight, later ones reuse its copy."""
+        from app.main import app
+        real_client = httpx.AsyncClient
+        kuma = FakeKuma(heartbeat={3: beats(5), 4: beats(5, status=0)}, names={3: "Media", 4: "Requests"},
+                        delay=0.3)
+        kuma.patch(self)
+
+        async def calls():
+            async with real_client(transport=httpx.ASGITransport(app=app), base_url="https://test") as c:
+                first = await asyncio.gather(*(c.get("/api/integrations/status-summary") for _ in range(8)))
+                later = await c.get("/api/integrations/status-summary")
+                return list(first) + [later]
+
+        answers = run(calls())
+        self.assertEqual({r.status_code for r in answers}, {200})
+        self.assertEqual({json.dumps(r.json()) for r in answers},
+                         {json.dumps({"status": "issues", "down_service": "Requests"})})
+        self.assertEqual(sum("/heartbeat/" in c for c in kuma.calls), 1, kuma.calls)
+
+    def test_a_failed_read_is_shared_too(self):
+        kuma = FakeKuma(down=True)
+        kuma.patch(self)
+        for _ in range(3):
+            self.assertEqual(self.client.get("/api/integrations/status-summary").json(),
+                             {"status": "unknown", "down_service": None})
+        self.assertEqual(sum("/heartbeat/" in c for c in kuma.calls), 1, kuma.calls)
+
 
 if __name__ == "__main__":
     unittest.main()

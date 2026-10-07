@@ -210,8 +210,12 @@ async def get_status_summary(request: Request, db: Session = Depends(get_db)):
     no history, no monitor switched off in Settings. Uptime Kuma not
     answering is "unknown", never "online". Authenticated pages use the
     detailed /service-status endpoint (which requires a session) instead.
+
+    Reads the copy /service-status shares through Redis (read_monitors_live),
+    so anonymous traffic cannot multiply into Uptime Kuma requests: one read
+    per BEATS_TTL serves every caller and worker.
     """
-    monitors = [m for m in await uptime_kuma.get_monitors()
+    monitors = [m for m in await uptime_kuma.read_monitors_live() or []
                 if _get_monitor_preferences(db, m["id"])["enabled"]]
     statuses = [m.get("status") for m in monitors]
     down = [m for m in monitors if m.get("status") == "down"]
