@@ -96,33 +96,37 @@ if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
 // A .ws-pill like the header's: every colour is in theme.css, keyed on
 // data-state (ok / warn / err; "off" while loading or unavailable). The words
 // stay theme text while all is well and take the status-text colour otherwise.
+// The words are the header pill's and panel's (shell.js, status-panel.js) in
+// sentence case. The public summary names at most the one service that is
+// down; Uptime Kuma not answering is "unknown", which never reads as online.
 // The footer comes after this script, so it runs once the page is parsed.
+function statusLine(data) {
+    var overall = data && data.status;
+    if (overall === 'online') return { state: 'ok', text: 'All systems online' };
+    if (overall === 'issues') {
+        var name = data && typeof data.down_service === 'string' ? data.down_service.trim() : '';
+        return { state: 'err', text: name ? name + ' is down' : 'System issues detected' };
+    }
+    if (overall === 'degraded') return { state: 'warn', text: 'Degraded performance' };
+    return { state: 'off', text: 'Status unavailable' };
+}
+
 function loadSystemStatus() {
     var badge = document.getElementById('loginSystemStatus');
     if (!badge) return;
     var text = badge.querySelector('[data-status-text]');
-    function render(state, label) {
-        badge.setAttribute('data-state', state);
-        text.textContent = label;
-    }
-    function showUnavailable() {
-        render('off', 'Can\u2019t check the server right now');
+    function render(line) {
+        badge.setAttribute('data-state', line.state);
+        text.textContent = line.text;
     }
     // Public aggregate endpoint (no auth) — the login page has no session yet.
     fetch('/api/integrations/status-summary').then(function(r) {
         return r.ok ? r.json() : null;
     }).then(function(data) {
-        var overall = data && data.status;
-        if (overall === 'issues') {
-            render('err', 'Something\u2019s down');
-        } else if (overall === 'degraded') {
-            render('warn', 'Some things are slow');
-        } else if (overall === 'online') {
-            render('ok', 'Everything\u2019s running');
-        } else {
-            showUnavailable();
-        }
-    }).catch(showUnavailable);
+        render(statusLine(data));
+    }).catch(function() {
+        render(statusLine(null));
+    });
 }
 
 // --- Helper: show login error message ---
