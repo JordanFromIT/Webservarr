@@ -1070,8 +1070,9 @@ class RequestsPage(unittest.TestCase):
     def test_every_request_is_on_the_pages_signal(self):
         code = self.code()
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
-        self.assertEqual(len(fetches), 8, "discover, both searches, a request, request status, "
-                                          "the counts, the summary and the recent requests")
+        self.assertEqual(len(fetches), 9, "discover, both searches, a request, request status, "
+                                          "the counts, the summary, the recent requests and "
+                                          "a book detail's library line")
         # The two search reads are on the search's own signal, which the
         # page's aborts too (RequestsPage.test_an_older_search_never_paints).
         on_search = 0

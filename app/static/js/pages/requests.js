@@ -1871,7 +1871,7 @@ export async function mount(ctx) {
         if (signal.aborted || seq !== _detailSeq || !found || !found.book_id) return;
         var a = document.createElement('a');
         a.href = '/books/' + encodeURIComponent(String(found.book_id));
-        a.className = 'underline underline-offset-2 hover:text-bright';
+        a.className = 'underline underline-offset-2 hover:decoration-2';
         a.textContent = 'Already in the library';
         line.textContent = '';
         line.appendChild(a);
@@ -1892,8 +1892,7 @@ export async function mount(ctx) {
     poster.style.display = '';
     if (poster.nextElementSibling) {
       poster.nextElementSibling.style.display = 'none';
-      var glyph = poster.nextElementSibling.querySelector('.material-symbols-outlined');
-      if (glyph) glyph.textContent = mediaTypeIcon(mediaType);
+      $('modalPosterGlyph').textContent = mediaTypeIcon(mediaType);
     }
     poster.src = item.poster_url || '';
     poster.alt = item.title || '';
