@@ -140,7 +140,7 @@
           <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Series</span><span class="invisible size-5"></span></div>
           <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Narrator</span><span class="invisible size-5"></span></div>
         </div>
-        <div class="flex items-center gap-2 lg:ml-auto">
+        <div class="flex max-[359px]:flex-wrap items-center gap-2 lg:ml-auto">
           <div class="skel inline-flex h-10 shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-[15px] font-medium"><span class="invisible h-6 w-10"></span><span class="invisible">Group series</span></div>
           <div class="skel h-10 w-44 rounded-[10px]"></div>
         </div>
@@ -166,8 +166,10 @@
         <!-- Group series (a switch: on, a series is one card; off, every book is its own
              card with a "Dune #2" line) and the sort: a button that opens a list of the
              orders (pages/books.js openSort), a popover from 640px up and a bottom sheet
-             below, as the filter pickers are. -->
-        <div class="flex items-center gap-2 lg:ml-auto">
+             below, as the filter pickers are. Under 360px the two do not fit side by side
+             at the sort's full width, so the sort takes a line of its own (the skeleton's
+             pair wraps the same way, so the held height is still exact). -->
+        <div class="flex max-[359px]:flex-wrap items-center gap-2 lg:ml-auto">
           <button id="groupSwitch" type="button" role="switch" aria-checked="true"
                   class="group/sw inline-flex h-10 shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-[15px] font-medium text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
             <span class="relative h-6 w-10 shrink-0 rounded-full border border-frosted-blue/60 bg-frosted-blue/[0.15] transition-colors group-aria-checked/sw:border-frosted-blue group-aria-checked/sw:bg-primary" aria-hidden="true"><span class="absolute left-[3px] top-[3px] size-4 rounded-full bg-frosted-blue/70 transition-transform duration-150 motion-reduce:transition-none group-aria-checked/sw:translate-x-4 group-aria-checked/sw:bg-bright"></span></span><span>Group series</span>

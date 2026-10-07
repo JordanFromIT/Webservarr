@@ -2264,6 +2264,13 @@ await run('CLS: the toolbar\'s skeleton is its controls, word for word and size 
     Array.from(skel.querySelectorAll('#filterButtons [data-filter] .material-symbols-outlined')).every((i) => /\bw-5\b/.test(i.className) && /\boverflow-hidden\b/.test(i.className)) &&
     Array.from(skel.querySelectorAll('#toolbarSkel .invisible.size-5')).length === 3);
   check('the groups wrap the same way', ['#toolbarSkel', '#toolbar'].every((sel) => /\bflex-wrap\b/.test(skel.querySelector(sel).className) && /\bgap-3\b/.test(skel.querySelector(sel).className) && /\bmb-6\b/.test(skel.querySelector(sel).className)));
+  // Group series and the sort are wider than a 320px phone side by side: under 360px the
+  // sort takes its own line, in the skeleton too, so the held height stays exact.
+  const pairSkel = skel.querySelector('#toolbarSkel .w-44').parentElement;
+  const pairReal = skel.querySelector('#groupSwitch').parentElement;
+  check('Group series and the sort: one row that wraps under 360px, the skeleton\'s the same',
+    pairReal === skel.querySelector('#sortBtn').parentElement && /(?:^| )max-\[359px\]:flex-wrap(?: |$)/.test(pairReal.className) &&
+    pairSkel.className === pairReal.className, [pairSkel.className, pairReal.className]);
   // A pill and Clear all are h-9 (pages/books.js ACTIVE_CHIP, CLEAR_ALL): one row of them.
   check('the row of filters in use: held at a pill\'s height, on a row of its own', /\bh-9\b/.test(skel.querySelector('#toolbarSkel [data-skel="filters"]').className) &&
     /\bbasis-full\b/.test(skel.querySelector('#toolbarSkel [data-skel="filters"]').className) && /\bbasis-full\b/.test(skel.querySelector('#activeFilters').className));
