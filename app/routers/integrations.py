@@ -472,17 +472,24 @@ async def library_summary(request: Request, current_user: dict = Depends(get_cur
         _library_summary_cache["all"] = (time.monotonic(), shared)
         return shared
 
-    tv, film, books, waits, quality = await asyncio.gather(
+    from app.services import book_requests
+
+    tv, film, books, waits, quality, book_asks = await asyncio.gather(
         sonarr.library_summary(),
         radarr.library_summary(),
         chaptarr.library_summary(),
         seerr.request_insights(),
         plex.quality_breakdown(),
+        book_requests.get_snapshot(),
         return_exceptions=True,
     )
     tv = tv if isinstance(tv, dict) else {}
     film = film if isinstance(film, dict) else {}
     books = books if isinstance(books, dict) else {}
+    # Book requests in the queue figures, counted as films are (wanted and
+    # released, wanted and not out, asked for this month). The Ebooks and
+    # Audiobooks figures stay what is on the server, so nothing counts twice.
+    book_asks = (book_asks.get("summary") or {}) if isinstance(book_asks, dict) else {}
     waits = waits if isinstance(waits, dict) else {}
     quality = quality if isinstance(quality, dict) else {}
     requested = waits.get("requested") or {}
@@ -506,8 +513,8 @@ async def library_summary(request: Request, current_user: dict = Depends(get_cur
         # Titles actively being chased, and titles simply not out yet. Kept
         # apart because a film awaiting its cinema release is not a problem,
         # and counting it as one makes the queue look stuck.
-        "in_progress": film.get("in_progress", 0) + tv.get("in_progress", 0),
-        "unreleased": film.get("unreleased", 0),
+        "in_progress": film.get("in_progress", 0) + tv.get("in_progress", 0) + book_asks.get("in_progress", 0),
+        "unreleased": film.get("unreleased", 0) + book_asks.get("unreleased", 0),
         # Median rather than mean; see seerr.request_insights.
         "wait_minutes": waits.get("wait") or {},
         # What was asked for against what actually arrived.
@@ -523,7 +530,8 @@ async def library_summary(request: Request, current_user: dict = Depends(get_cur
         # lists have been walked. Books are a rounding error against video but
         # are included so "on disk" means the whole library, not most of it.
         "bytes": tv.get("bytes", 0) + film.get("bytes", 0) + books.get("bytes", 0),
-        "added_recently": tv.get("added_recently", 0) + film.get("added_recently", 0),
+        "added_recently": (tv.get("added_recently", 0) + film.get("added_recently", 0)
+                           + book_asks.get("added_recently", 0)),
         "recent_days": 30,
     }
     if any(summary.values()):

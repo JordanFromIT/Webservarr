@@ -51,7 +51,7 @@ async def start_warmer() -> None:
     global _running
     _running = True
 
-    from app.services import request_status
+    from app.services import book_requests, request_status
 
     try:
         await asyncio.sleep(STARTUP_DELAY)
@@ -61,6 +61,12 @@ async def start_warmer() -> None:
                     await request_status.refresh()
                 except Exception as exc:  # noqa: BLE001 - warming never takes the app down
                     logger.warning("Could not rebuild request status: %s", exc)
+                # Books on their own turn, so a Chaptarr outage leaves the
+                # film and show snapshot alone (and the reverse).
+                try:
+                    await book_requests.refresh()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Could not rebuild book requests: %s", exc)
             else:
                 logger.debug("Another worker is rebuilding request status this round")
             await asyncio.sleep(REFRESH_INTERVAL)

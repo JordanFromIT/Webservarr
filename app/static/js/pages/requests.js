@@ -109,6 +109,22 @@ const RS_COLUMNS = [
 // than one without and a hardcoded height would cut the fifth row in half.
 const RS_MAX_ROWS = 5;
 
+// Book requests come from Chaptarr (/api/request-status/books) as one row per
+// format, with the film reason codes, so they share every word below.
+const RS_TYPE_LABELS = { movie: 'Movie', tv: 'Show', ebook: 'Ebook', audiobook: 'Audiobook' };
+
+// The Kind filter's groups: a value matches the media types listed.
+const RS_KIND_FILTER = {
+  video: ['movie', 'tv'],
+  movie: ['movie'],
+  tv: ['tv'],
+  book: ['ebook', 'audiobook'],
+  ebook: ['ebook'],
+  audiobook: ['audiobook']
+};
+
+function rsIsBook(r) { return r.media_type === 'ebook' || r.media_type === 'audiobook'; }
+
 function rsStatusOf(r) {
   // A show being fetched is not "downloading" in any sense a viewer means it.
   // Sonarr has episodes queued, but the series can be less than half here and
@@ -116,9 +132,9 @@ function rsStatusOf(r) {
   if (r.media_type === 'tv' && (r.reason_code === 'DOWNLOADING' || r.reason_code === 'DOWNLOAD_STALLED')) {
     return RS_STATUS._TV_FETCHING;
   }
-  // A film Radarr has grabbed but not started is queued, not downloading.
+  // A film (or book) grabbed but not started is queued, not downloading.
   // Reporting 0% as "Downloading" is the same overstatement in miniature.
-  if (r.media_type === 'movie' && r.reason_code === 'DOWNLOADING' && !r.percent) {
+  if ((r.media_type === 'movie' || rsIsBook(r)) && r.reason_code === 'DOWNLOADING' && !r.percent) {
     return RS_STATUS._QUEUED;
   }
   return RS_STATUS[r.reason_code] || { key: 'checking', label: 'Checking', cls: 'rs-chip-wait' };
@@ -145,7 +161,7 @@ function rsReasonText(r) {
       return 'No episodes found online yet, still checking';
     }
   }
-  if (r.media_type === 'movie' && r.reason_code === 'DOWNLOADING') {
+  if ((r.media_type === 'movie' || rsIsBook(r)) && r.reason_code === 'DOWNLOADING') {
     return r.percent ? 'Downloading, ' + Math.round(r.percent) + '% done'
                      : 'Found a copy, waiting for the download to start';
   }
@@ -167,6 +183,9 @@ function rsWaitedText(d) {
                 : y + (y === 1 ? ' year' : ' years');
 }
 function rsScopeText(r) {
+  // A book's second line is its author: titles repeat across authors far more
+  // than films do, and a book row has no seasons or 4K to show.
+  if (rsIsBook(r)) return r.author || '';
   var p = [];
   if (r.is_4k) p.push('4K');
   if (r.seasons && r.seasons.length) {
@@ -185,7 +204,7 @@ function rsCellValue(r, key) {
     case 'status': return rsStatusOf(r).label;
     case 'why':    return rsReasonText(r);
     case 'waited': return rsDaysWaiting(r.requested_at);
-    case 'type':   return r.media_type === 'tv' ? 'Show' : 'Movie';
+    case 'type':   return RS_TYPE_LABELS[r.media_type] || 'Movie';
     default:       return '';
   }
 }
@@ -707,9 +726,10 @@ export async function mount(ctx) {
 
       var out = _rows.filter(function (r) {
         if (fs && rsStatusOf(r).key !== fs) return false;
-        if (ft && r.media_type !== ft) return false;
+        if (ft && (RS_KIND_FILTER[ft] || []).indexOf(r.media_type) === -1) return false;
         if (q) {
-          var hay = (rsCellValue(r, 'title') + ' ' + rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status')).toLowerCase();
+          var hay = (rsCellValue(r, 'title') + ' ' + rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status') +
+                     ' ' + (r.author || '')).toLowerCase();
           if (hay.indexOf(q) === -1) return false;
         }
         return true;
@@ -910,21 +930,44 @@ export async function mount(ctx) {
       wireResizers();
     }
 
+    // One snapshot, as { ok, data }. A failure is an answer here, not a throw,
+    // so the books being down never takes the film and show rows with them
+    // (or the reverse). Only leaving the page (an abort) throws.
+    function snapshotFrom(url) {
+      return fetch(url, { signal: signal }).then(function (resp) {
+        if (!resp.ok) return { ok: false, data: null };
+        return resp.json().then(function (data) { return { ok: true, data: data }; });
+      }, function (err) {
+        if (isAbort(err)) throw err;
+        return { ok: false, data: null };
+      });
+    }
+
     async function load() {
       try {
-        var resp = await fetch('/api/request-status/', { signal: signal });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        _snapshot = await resp.json();
+        var both = await Promise.all([
+          snapshotFrom('/api/request-status/'),
+          snapshotFrom('/api/request-status/books')
+        ]);
         if (signal.aborted) return;
-        if (_snapshot.error) { $('rsSection').classList.add('hidden'); return; }
-        _rows = _snapshot.items || [];
+        _snapshot = both[0].data;
+        var films = (_snapshot && !_snapshot.error && _snapshot.items) || [];
+        var books = (both[1].data && both[1].data.items) || [];
+        _rows = films.concat(books);
         if (!_rows.length) { $('rsSection').classList.add('hidden'); return; }
         // Rows since the page was rendered: the server's collapse no longer holds.
         document.documentElement.removeAttribute('data-rs-empty');
 
-        var mins = Math.floor((Date.now() - new Date(_snapshot.generated_at).getTime()) / 60000);
+        // Chaptarr down (503): the films and shows still list, and one line
+        // says why no book is among them.
+        var note = $('rsNote');
+        note.textContent = both[1].ok ? '' : 'Book requests can’t be checked right now, so only movies and shows are listed.';
+        note.classList.toggle('hidden', both[1].ok);
+
+        var stamp = (_snapshot && _snapshot.generated_at) || (both[1].data && both[1].data.generated_at);
+        var mins = Math.floor((Date.now() - new Date(stamp).getTime()) / 60000);
         $('rsFresh').textContent =
-          (isFinite(mins) && mins >= 30) ? 'Checked ' + getTimeAgo(_snapshot.generated_at) : '';
+          (isFinite(mins) && mins >= 30) ? 'Checked ' + getTimeAgo(stamp) : '';
 
         renderFilters();
         renderHead();
@@ -1349,6 +1392,30 @@ export async function mount(ctx) {
   }
 
   /**
+   * On a phone the bar's home is a row of its own above "Trending" (below md
+   * in requests.html). Once the bar has left for the results panel that row
+   * would stay behind as an empty band, so it folds away; it opens again
+   * before the bar ever goes back. The row is above the view by then, so
+   * the scroll is corrected by whatever the fold moved the bar, which keeps
+   * the field still under the user's finger whether or not the browser's own
+   * scroll anchoring already did it. Wider screens float the bar in a
+   * zero-height row, where this changes nothing.
+   */
+  function foldHomeRow(position) {
+    var home = $('searchHome');
+    if (!home) return;
+    var bar = $('searchBar');
+    var before = bar ? bar.getBoundingClientRect().top : 0;
+    home.classList.toggle('hidden', position === 'dock');
+    if (!bar) return;
+    var moved = bar.getBoundingClientRect().top - before;
+    if (Math.abs(moved) < 1) return;
+    var scroller = window.innerWidth >= 1024 ? home.parentElement : null;
+    if (scroller) scroller.scrollTop += moved;
+    else window.scrollTo(0, window.scrollY + moved);
+  }
+
+  /**
    * Move the search bar between the trending heading and the results panel.
    *
    * The two slots are roughly 1700px apart, so no animation can show that whole
@@ -1365,6 +1432,8 @@ export async function mount(ctx) {
     var bar = $('searchBar');
     var target = searchSlot(position);
     if (!bar || !target) return;
+    // The phone's home row opens before the bar flies back into it.
+    if (position === 'home' && $('searchHome')) $('searchHome').classList.remove('hidden');
 
     if (_searchMoveRaf !== null) {
       cancelAnimationFrame(_searchMoveRaf);
@@ -1387,6 +1456,7 @@ export async function mount(ctx) {
 
       target.appendChild(bar);
       bar.style.cssText = '';
+      foldHomeRow(position);
 
       // Reparenting blurs a focused descendant, so focus and caret go back.
       if (hadFocus) {

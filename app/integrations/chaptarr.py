@@ -604,6 +604,55 @@ async def library_summary() -> dict:
     }
 
 
+class ChaptarrUnavailable(Exception):
+    """Chaptarr is configured but could not be read."""
+
+
+async def wanted_books() -> Optional[Dict[str, Any]]:
+    """
+    The book list and the download queue, for "where requests stand".
+
+    GET only. A request made here adds the book to Chaptarr monitored and
+    searches for it (request_book); nothing else records it, so Chaptarr's
+    own book list is where a book request lives. Returns None when Chaptarr
+    is not configured, {"books": [...], "queue": [...]} otherwise, and raises
+    ChaptarrUnavailable when the book list cannot be read. The queue only
+    sharpens the status words, so a queue that fails comes back empty.
+    """
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"]:
+        return None
+
+    headers = {"X-Api-Key": cfg["api_key"]}
+    try:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            resp = await client.get(f"{cfg['url']}/api/v1/book", headers=headers)
+            if resp.status_code != 200:
+                raise ChaptarrUnavailable(f"book list returned HTTP {resp.status_code}")
+            books = resp.json()
+            queue: List[Dict[str, Any]] = []
+            try:
+                q = await client.get(
+                    f"{cfg['url']}/api/v1/queue",
+                    params={"page": 1, "pageSize": 500, "includeBook": "false"},
+                    headers=headers,
+                )
+                if q.status_code == 200:
+                    body = q.json()
+                    records = body.get("records") if isinstance(body, dict) else body
+                    queue = [r for r in records or [] if isinstance(r, dict)]
+            except (httpx.RequestError, ValueError) as exc:
+                logger.info("Chaptarr queue unavailable, statuses from the book list only: %s", exc)
+    except httpx.RequestError as exc:
+        raise ChaptarrUnavailable(f"could not reach Chaptarr: {type(exc).__name__}") from exc
+    except ValueError as exc:
+        raise ChaptarrUnavailable("book list was not JSON") from exc
+
+    if not isinstance(books, list):
+        raise ChaptarrUnavailable("book list was not a list")
+    return {"books": [b for b in books if isinstance(b, dict)], "queue": queue}
+
+
 async def _book_files() -> List[Dict[str, Any]]:
     """
     Every book file Chaptarr holds, with its book id, path and date.

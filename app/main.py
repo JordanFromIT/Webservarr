@@ -29,6 +29,7 @@ from app import home_event_log, home_news
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
+from app.services import book_requests as book_requests_service
 from app.services import status_feed as status_feed_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
 from app.services.request_status_warmer import (
@@ -524,9 +525,14 @@ async def requests_page(
         return RedirectResponse(url="/login", status_code=302)
     # Request Status starts collapsed when the cached snapshot (the one its API
     # will return) has nothing waiting, so hiding it never moves the page. A
-    # cold cache (None) leaves the section to the page script.
+    # cold cache (None) leaves the section to the page script. Book requests
+    # share the section, so it collapses only when their cached snapshot has
+    # nothing waiting either (a cold book cache again leaves it to the page).
     snapshot = await request_status_service.get_cached_snapshot()
     rs_empty = isinstance(snapshot, dict) and (bool(snapshot.get("error")) or not snapshot.get("items"))
+    if rs_empty:
+        books = await book_requests_service.get_cached_snapshot()
+        rs_empty = isinstance(books, dict) and not books.get("items")
     return render_page("requests", request, user, gate="requests", pick=_requests_page,
                        extra_flags={"rs_empty": rs_empty})
 

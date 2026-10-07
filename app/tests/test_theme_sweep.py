@@ -324,9 +324,11 @@ class RequestStatusNeverMovesThePage(PageRoutesBase):
     server now collapses it from the first paint when the cached snapshot,
     the same one the section's API returns, has nothing to show."""
 
-    def html_tag(self, snapshot):
+    def html_tag(self, snapshot, books={"items": []}):
         with mock.patch("app.services.request_status.get_cached_snapshot",
-                        mock.AsyncMock(return_value=snapshot)):
+                        mock.AsyncMock(return_value=snapshot)), \
+             mock.patch("app.services.book_requests.get_cached_snapshot",
+                        mock.AsyncMock(return_value=books)):
             r = self.get("/requests", ADMIN_SESSION)
         self.assertEqual(r.status_code, 200)
         return re.search(r"<html\b[^>]*>", r.text).group(0)
@@ -338,6 +340,13 @@ class RequestStatusNeverMovesThePage(PageRoutesBase):
     def test_left_to_the_page_when_rows_exist_or_the_cache_is_cold(self):
         self.assertNotIn("data-rs-empty", self.html_tag({"items": [{"id": 1}], "total": 1}))
         self.assertNotIn("data-rs-empty", self.html_tag(None))
+
+    def test_book_requests_keep_the_section_open(self):
+        # The section lists books too: no films waiting is not "empty" while a
+        # book is, and a cold book cache leaves it to the page as well.
+        empty = {"items": [], "total": 0}
+        self.assertNotIn("data-rs-empty", self.html_tag(empty, books={"items": [{"request_id": "book-1"}]}))
+        self.assertNotIn("data-rs-empty", self.html_tag(empty, books=None))
 
 
 class RequestStatusCollapseMarkup(unittest.TestCase):

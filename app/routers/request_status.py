@@ -8,10 +8,11 @@ by a background task; these endpoints serve the cached snapshot.
 import logging
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from app.dependencies import get_current_user, require_admin, require_same_origin
 from app.limiter import limiter
-from app.services import request_status
+from app.services import book_requests, request_status
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,32 @@ async def get_request_status(
             }
 
     return snapshot
+
+
+@router.get("/books")
+@limiter.limit("60/minute")
+async def get_book_request_status(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Book requests not on the server yet, from Chaptarr (read only).
+
+    Same audience and same privacy as the film rows above: any signed-in
+    viewer, and no requester identity in any row. Served from its own cache
+    (app/services/book_requests.py). 503 while Chaptarr cannot be read: the
+    page asks for this separately from the film rows, so those still show.
+    When Chaptarr is not set up at all the answer is an empty list.
+    """
+    try:
+        return await book_requests.get_snapshot()
+    except book_requests.Unavailable as exc:
+        logger.warning("Book request status unavailable: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Book requests can't be checked right now."},
+            headers={"Retry-After": "60"},
+        )
 
 
 @router.post("/refresh", dependencies=[Depends(require_same_origin)])

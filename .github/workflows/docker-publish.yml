@@ -118,6 +118,7 @@ jobs:
           node app/tests/js/phone_nav.mjs
           node app/tests/js/install.mjs
           node app/tests/js/home_push_banner.mjs
+          node app/tests/js/requests_page.mjs
 
   build-and-push:
     needs: [test, js-checks]

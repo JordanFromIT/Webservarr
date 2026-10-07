@@ -17,6 +17,11 @@
    right rather than looking cut off. Below lg the extra columns are dropped
    and a tapped row reveals them, so nothing is ever hidden off-screen on a
    phone. */
+/* The search field's height, and the row a phone holds open for it above
+   "Trending" (#searchHomeSlot), are one value, so the reserved row is exactly
+   as tall as the field that moves into it. */
+#wsPage { --search-bar-h: 2.875rem; }
+#searchInput { height: var(--search-bar-h); }
 .rs-scroll {
   overflow-x: auto;
   overflow-y: hidden;
@@ -209,13 +214,20 @@ html[data-rs-empty] #rsSection { display: none; }
      page is pixel-identical and the bar only holds still once scrolled.
      Sticky - unlike transform - does not become a containing block for the
      position:fixed the bar takes during its move, so pinning still resolves
-     against the viewport. -->
-<div id="searchHome" class="sticky top-0 h-0 z-20">
+     against the viewport.
+     Below md none of that holds: there is no empty space beside "Trending"
+     (the bar is as wide as the heading), and the phone's own top bar is
+     sticky at top 0 too, so a stuck search bar sat over the heading at rest
+     and slid under that bar once scrolled. There the bar gets a row of its
+     own, in the flow and not sticky: min-h reserves exactly its height
+     (#searchInput's fixed height, in the style block) from the first paint,
+     before the page script moves it in, so nothing shifts. -->
+<div id="searchHome" class="mb-6 md:mb-0 md:sticky md:top-0 md:h-0 md:z-20">
   <!-- Centred with auto margins, NOT a transform: a transformed ancestor makes
        position:fixed resolve against that element instead of the viewport,
        which breaks pinning the bar during its move. Nudged up so it centres on
        the heading band rather than hanging into the poster row. -->
-  <div id="searchHomeSlot" class="absolute inset-x-0 -top-1 w-full max-w-lg mx-auto"></div>
+  <div id="searchHomeSlot" class="relative min-h-[var(--search-bar-h)] md:min-h-0 md:absolute md:inset-x-0 md:-top-1 w-full max-w-lg mx-auto"></div>
 </div>
 
 <!-- Discover Section.
@@ -518,11 +530,16 @@ html[data-rs-empty] #rsSection { display: none; }
     </div>
     <select id="rsFilterStatus" class="rs-select" aria-label="Status"><option value="">All statuses</option></select>
     <select id="rsFilterType" class="rs-select" aria-label="Kind">
-      <option value="">Movies &amp; shows</option>
+      <option value="">All kinds</option>
+      <option value="video">Movies &amp; shows</option>
       <option value="movie">Movies</option>
       <option value="tv">Shows</option>
+      <option value="book">Books</option>
+      <option value="ebook">Ebooks</option>
+      <option value="audiobook">Audiobooks</option>
     </select>
   </div>
+  <p id="rsNote" class="hidden text-label text-frosted-blue/70 mb-3" role="status"></p>
 
   <!-- The grid. Scrolls inside itself; the page never scrolls sideways. -->
   <div id="rsScroll" class="rs-scroll rounded-card border border-frosted-blue/10">
