@@ -84,7 +84,6 @@ newspaper
 notifications
 notifications_active
 notifications_none
-open_with
 palette
 password
 pause
