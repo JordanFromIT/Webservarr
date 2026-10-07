@@ -559,22 +559,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
  * but never runs past the window's right edge (status-panel.js sets
  * --ws-sp-room, the width from the pill to that edge less a margin). Past
  * the window's height it scrolls, and only then.
- * The surface is the Requests search bar's frosted tint over a dim of the
- * page colour, as the Books filters panel has it: the page shows faintly
- * through and the words keep their contrast whatever is behind. */
+ * The surface is .ws-frost .ws-frost-read (status-panel.js adds them): the
+ * page shows through, and the words keep 4.5:1 even over a white poster. */
 .ws-sp-pop {
   position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: min(420px, var(--ws-sp-room, 420px));
   max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
-  scrollbar-width: thin; scrollbar-color: rgb(var(--color-accent) / .5) transparent;
-  border-radius: 16px; border: 1px solid rgb(var(--color-accent) / .4); color: rgb(var(--color-text));
-  box-shadow: 0 28px 56px -16px var(--ws-shade);
-}
-.ws-sp-pop, .ws-sp-sheet .ws-sheet-panel {
-  background:
-    linear-gradient(rgb(var(--color-secondary) / .25), rgb(var(--color-secondary) / .25)),
-    rgb(var(--color-background) / .84);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
-  backdrop-filter: blur(24px) saturate(1.2);
+  border-radius: 16px; border: 1px solid; color: rgb(var(--color-text));
 }
 /* A backdrop filter on an ancestor stops the panel's blur at that ancestor,
    so the header lets go of its own while the panel is open (nothing scrolls
@@ -607,8 +597,8 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 }
 .ws-sp-close[hidden] { display: none; }
 .ws-sp-close:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
-.ws-sp-sub { grid-column: 2 / -1; font-size: 14px; line-height: 1.5; color: rgb(var(--color-text) / .75); text-wrap: pretty; max-width: 52ch; }
-.ws-sp-checked { grid-column: 2 / -1; margin-top: 4px; font-size: 12px; color: rgb(var(--color-text) / .65); }
+.ws-sp-sub { grid-column: 2 / -1; font-size: 14px; line-height: 1.5; color: rgb(var(--color-text) / .85); text-wrap: pretty; max-width: 52ch; }
+.ws-sp-checked { grid-column: 2 / -1; margin-top: 4px; font-size: 12px; color: rgb(var(--color-text) / .8); }
 .ws-sp-retry {
   grid-column: 2 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 6px;
   min-height: 36px; margin-top: 12px; padding: 6px 14px; border-radius: 9999px;
@@ -624,13 +614,13 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
   margin: 0; padding: 0 12px 12px 20px; border: 0; min-width: 0;
 }
-.ws-sp-range-label { float: left; padding: 0; font-size: 13px; white-space: nowrap; color: rgb(var(--color-text) / .75); }
+.ws-sp-range-label { float: left; padding: 0; font-size: 13px; white-space: nowrap; color: rgb(var(--color-text) / .85); }
 .ws-sp-segs { display: flex; padding: 2px; border-radius: 9999px; background: rgb(var(--color-text) / .06); }
 .ws-sp-seg { position: relative; }
 .ws-sp-seg-input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .ws-sp-seg span {
   display: flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 9999px;
-  font-size: 13px; font-weight: 500; white-space: nowrap; color: rgb(var(--color-text) / .75);
+  font-size: 13px; font-weight: 500; white-space: nowrap; color: rgb(var(--color-text) / .85);
   transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 .ws-sp-seg:hover span { color: rgb(var(--color-text)); }
@@ -642,8 +632,14 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 10px;
   padding: 14px 20px; border-bottom: 1px solid rgb(var(--color-accent) / .2);
 }
-.ws-sp-row[data-k="down"] { background: rgb(var(--ws-status-err) / .10); }
-.ws-sp-row[data-k="slow"], .ws-sp-row[data-k="trouble"] { background: rgb(var(--ws-status-warn) / .10); }
+/* A problem row's tint lightens the frost, so it sits on a little more of
+   the page colour and its words keep 4.5:1 over a white poster. */
+.ws-sp-row[data-k="down"] {
+  background: linear-gradient(rgb(var(--ws-status-err) / .10), rgb(var(--ws-status-err) / .10)), rgb(var(--color-background) / .1);
+}
+.ws-sp-row[data-k="slow"], .ws-sp-row[data-k="trouble"] {
+  background: linear-gradient(rgb(var(--ws-status-warn) / .10), rgb(var(--ws-status-warn) / .10)), rgb(var(--color-background) / .1);
+}
 .ws-sp-list-unknown .ws-sp-row { opacity: .8; }
 .ws-sp-dot { width: 8px; height: 8px; margin-top: 8px; border-radius: 9999px; background: rgb(var(--ws-status-ok)); }
 .ws-sp-dot[data-k="slow"], .ws-sp-dot[data-k="trouble"] { background: rgb(var(--ws-status-warn)); }
@@ -652,13 +648,13 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-sp-dot[data-k="unknown"] { background: rgb(var(--color-text) / .45); }
 .ws-sp-who { min-width: 0; }
 .ws-sp-name { font-size: 15px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-.ws-sp-state { font-size: 13px; line-height: 1.4; color: rgb(var(--color-text) / .75); }
+.ws-sp-state { font-size: 13px; line-height: 1.4; color: rgb(var(--color-text) / .85); }
 .ws-sp-row[data-k="down"] .ws-sp-state { color: var(--ws-status-err-text); }
 .ws-sp-row[data-k="slow"] .ws-sp-state, .ws-sp-row[data-k="trouble"] .ws-sp-state { color: var(--ws-status-warn-text); }
 .ws-sp-up { text-align: right; line-height: 1.4; font-variant-numeric: tabular-nums; }
 .ws-sp-pct { display: block; font-size: 15px; font-weight: 700; }
-.ws-sp-na { display: block; font-size: 13px; color: rgb(var(--color-text) / .75); }
-.ws-sp-window { display: block; font-size: 12px; color: rgb(var(--color-text) / .65); }
+.ws-sp-na { display: block; font-size: 13px; color: rgb(var(--color-text) / .85); }
+.ws-sp-window { display: block; font-size: 12px; color: rgb(var(--color-text) / .8); }
 /* The graphs sit in a well of the page colour, so the reply line and the
    bars keep their contrast over whatever the frosted panel lets through. */
 .ws-sp-graphs {
@@ -678,14 +674,17 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   fill: none; stroke: rgb(var(--color-accent)); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
-.ws-sp-ms { font-size: 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: rgb(var(--color-text) / .75); }
+.ws-sp-ms { font-size: 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: rgb(var(--color-text) / .85); }
 .ws-sp-ms[data-k="slow"] { color: var(--ws-status-warn-text); }
 .ws-sp-ms[data-k="down"] { color: var(--ws-status-err-text); }
-.ws-sp-foot { padding: 12px 20px 14px; font-size: 12px; line-height: 1.5; color: rgb(var(--color-text) / .65); }
+.ws-sp-foot { padding: 12px 20px 14px; font-size: 12px; line-height: 1.5; color: rgb(var(--color-text) / .8); }
 
-/* The sheet is frosted like the popover (above); its sticky head frosts the
-   rows that scroll under it, so the title never sits on sharp graphs. */
-.ws-sp-sheet .ws-sheet-head { -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2); }
+/* The sheet is frosted like the popover (status-panel.js adds .ws-frost;
+   the floor and the head are the frosted sheet's, under Frosted surfaces).
+   Once rows scroll under the head (status-panel.js .is-stuck) it blurs
+   them, so the title never sits on sharp graphs; a blur nested in the frost
+   takes the tint twice, which marks the stuck head as a bar. */
+.ws-sp-sheet .ws-sheet-head.is-stuck { -webkit-backdrop-filter: var(--ws-frost-blur); backdrop-filter: var(--ws-frost-blur); }
 /* In the sheet the panel's own gutters follow the sheet's. */
 .ws-sp-sheet .ws-sp-summary { padding: 4px 4px 14px 12px; }
 .ws-sp-sheet .ws-sp-range { padding: 0 4px 12px 12px; }
@@ -1045,6 +1044,70 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
   .ws-sheet-panel, .ws-sheet.is-open .ws-sheet-panel { transform: none; opacity: 0; transition: opacity 120ms ease-out; }
   .ws-sheet.is-open .ws-sheet-panel { opacity: 1; }
 }
+
+/* ---- Frosted surfaces ----
+ *
+ * One recipe for the site's see-through surfaces, the Requests search bar's:
+ * the secondary colour at 25% over a 24px blur of what is behind, a faint
+ * edge in the text colour and a soft drop shadow. On the page colour it is a
+ * deep pane; over posters their colours come through.
+ * A surface that holds reading text adds .ws-frost-read: a floor, a dim of
+ * the page colour under the tint, the least that keeps its words (alphas of
+ * .85 and up) at 4.5:1 over a white poster, the brightest thing that can be
+ * behind it. A sheet's scrim has dimmed the page by .7 already, so a frosted
+ * sheet needs only .1 to come level. Over the page colour the floor changes
+ * nothing, so every frosted surface matches there. A frosted sheet's head
+ * paints nothing of its own, so it is one pane with the rest.
+ * After .ws-sheet-panel and .ws-sheet-head, so a frosted sheet takes the frost.
+ */
+:root {
+  --ws-frost-tint: rgb(var(--color-secondary) / .25);
+  --ws-frost-blur: blur(24px);
+  --ws-frost-edge: rgb(var(--color-text) / .10);
+  --ws-frost-shadow:
+    0 10px 15px -3px color-mix(in srgb, var(--ws-shade) 30%, transparent),
+    0 4px 6px -4px color-mix(in srgb, var(--ws-shade) 30%, transparent);
+}
+.ws-frost {
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor, 0));
+  -webkit-backdrop-filter: var(--ws-frost-blur);
+  backdrop-filter: var(--ws-frost-blur);
+  border-color: var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow);
+  /* Tailwind's focus ring draws itself with --tw-shadow after it, so a
+     focused field keeps the shadow under its ring. */
+  --tw-shadow: var(--ws-frost-shadow);
+}
+.ws-frost-read { --ws-frost-floor: .72; }
+/* A sheet keeps its own upward shadow. */
+.ws-sheet-panel.ws-frost { --ws-frost-floor: .1; box-shadow: 0 -16px 40px -20px var(--ws-shade); }
+.ws-sheet-panel.ws-frost > .ws-sheet-head { background: none; }
+
+/* ---- Scrollbars in popovers, menus, dialogs and sheets ----
+ * One thin bar in the accent over a clear track, brighter under the pointer,
+ * for everything that floats over the page: the browser's own bar is white
+ * on a dark theme. The standard properties first (Firefox, Chromium); WebKit
+ * reads the pseudo-elements. scrollbar-color inherits, so lists inside take
+ * it too; the width is set on each. */
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost),
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) * {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-accent) / .5) transparent;
+}
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost):hover,
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) *:hover {
+  scrollbar-color: rgb(var(--color-accent) / .8) transparent;
+}
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost)::-webkit-scrollbar,
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) *::-webkit-scrollbar { width: 8px; height: 8px; }
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost)::-webkit-scrollbar-track,
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) *::-webkit-scrollbar-track { background: transparent; }
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost)::-webkit-scrollbar-thumb,
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) *::-webkit-scrollbar-thumb {
+  border: 2px solid transparent; border-radius: 9999px; background: rgb(var(--color-accent) / .5) padding-box;
+}
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost)::-webkit-scrollbar-thumb:hover,
+:is(.ws-pop, .ws-dialog-box, [data-dialog-box], .ws-sheet-panel, .ws-frost) *::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--color-accent) / .8); }
 
 /* ---- Hover lift and press ----
  *

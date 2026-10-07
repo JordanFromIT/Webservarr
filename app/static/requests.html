@@ -565,10 +565,11 @@ html[data-rs-empty] #rsSection { display: none; }
      is floated up to the trending heading on load. -->
 <div id="searchBar" class="relative w-full">
 <label for="searchInput" class="sr-only">Search movies, TV shows and books</label>
-<!-- z-10: the field's backdrop blur makes it a layer of its own, painted over an icon without one. -->
+<!-- z-10: the field's backdrop blur makes it a layer of its own, painted over an icon without one.
+     Its surface is .ws-frost (theme.css), the one recipe the site's frosted surfaces share. -->
 <span class="material-symbols-outlined absolute z-10 left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-xl pointer-events-none" aria-hidden="true">search</span>
 <input id="searchInput" type="search" autocomplete="off" placeholder="Search movies, TV shows and books"
-  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body shadow-lg shadow-black/30"/>
+  class="ws-frost w-full pl-10 pr-4 py-2.5 border rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body"/>
 </div>
 </div>
 <p class="mb-5 text-label leading-relaxed text-frosted-blue/70">Requests are handled automatically and usually arrive within an hour, though not everything can be found.</p>

@@ -419,7 +419,7 @@
   function isOpen() { return popOpen || sheetIsOpen(); }
 
   function buildPop() {
-    pop = el('div', 'ws-pop ws-sp-pop hidden');
+    pop = el('div', 'ws-pop ws-sp-pop ws-frost ws-frost-read hidden');
     pop.id = 'wsStatusPop';
     pop.setAttribute('role', 'region');
     pop.setAttribute('aria-labelledby', 'wsStatusPopTitle');
@@ -515,7 +515,7 @@
     sheet.setAttribute('aria-labelledby', 'wsStatusSheetHead');
     sheet.appendChild(el('div', 'ws-sheet-scrim'));
     sheet.lastChild.setAttribute('data-sheet-close', '');
-    sheetPanel = el('div', 'ws-sheet-panel');
+    sheetPanel = el('div', 'ws-sheet-panel ws-frost');
     var head = el('div', 'ws-sheet-head');
     var grip = el('span', 'ws-sheet-grip');
     grip.setAttribute('aria-hidden', 'true');
@@ -545,6 +545,11 @@
     sheet.addEventListener('click', function (e) {
       if (e.target && e.target.closest && e.target.closest('[data-sheet-close]')) closeSheet(true);
     });
+    // The head frosts only once rows scroll under it (theme.css .is-stuck);
+    // at the top it is part of the one pane.
+    sheetPanel.addEventListener('scroll', function () {
+      head.classList.toggle('is-stuck', sheetPanel.scrollTop > 0);
+    }, { passive: true });
     wireSwipe();
   }
 

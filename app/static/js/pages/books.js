@@ -1535,8 +1535,9 @@ export async function mount(ctx) {
     let overlay, panel, head;
     if (isWide) {
       // ws-dialog / ws-dialog-box (theme.css): the box fades and lifts in, as a dialog's does.
+      // Frosted like the Requests search bar (theme.css .ws-frost), with the floor for reading text.
       overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
-      panel = el('div', 'ws-dialog-box absolute flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-frosted-blue/10 bg-background-dark shadow-2xl');
+      panel = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border');
       head = el('div', 'flex items-center gap-2 pb-2 pl-4 pr-2 pt-3');
       head.appendChild(el('h2', 'min-w-0 flex-1 text-[17px] font-semibold text-frosted-blue', info.label));
     } else {
@@ -1544,7 +1545,7 @@ export async function mount(ctx) {
       overlay = el('div', 'ws-sheet z-[95]');
       overlay.appendChild(el('div', 'ws-sheet-scrim'));
       // Focused itself on opening (the keyboard waits): a container, so no ring of its own.
-      panel = el('div', 'ws-sheet-panel focus:outline-none');
+      panel = el('div', 'ws-sheet-panel ws-frost focus:outline-none');
       // The list scrolls, not the panel: the title and the search stay put.
       panel.style.display = 'flex';
       panel.style.flexDirection = 'column';
@@ -1569,7 +1570,7 @@ export async function mount(ctx) {
 
     const find = el('div', isWide ? 'relative px-3 pb-2' : 'relative px-1 pb-2');
     find.appendChild(icon('search', 'pointer-events-none absolute top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70 ' + (isWide ? 'left-6' : 'left-4')));
-    const box = el('input', 'h-11 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue');
+    const box = el('input', 'h-11 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/85 focus:outline-none focus:ring-2 focus:ring-frosted-blue');
     box.type = 'search';
     box.autocomplete = 'off';
     box.maxLength = NAME_MAX;
@@ -1587,7 +1588,7 @@ export async function mount(ctx) {
     list.setAttribute('role', 'listbox');
     list.setAttribute('aria-label', info.label);
     panel.appendChild(list);
-    const foot = el('p', 'hidden px-4 pb-3 pt-1 text-[13px] text-frosted-blue/70');
+    const foot = el('p', 'hidden px-4 pb-3 pt-1 text-[13px] text-frosted-blue/85');
     panel.appendChild(foot);
     const heard = el('p', 'sr-only');
     heard.setAttribute('role', 'status');
@@ -1621,7 +1622,7 @@ export async function mount(ctx) {
       li.appendChild(icon('check', 'shrink-0 text-[20px] ' + (picked ? 'text-frosted-blue' : 'invisible')));
       li.appendChild(el('span', 'min-w-0 flex-1 truncate', name));
       if (typeof count === 'number') {
-        li.appendChild(el('span', 'shrink-0 tabular-nums text-[13px] text-frosted-blue/70', String(count)));
+        li.appendChild(el('span', 'shrink-0 tabular-nums text-[13px] text-frosted-blue/90', String(count)));
         li.setAttribute('aria-label', name + ', ' + count + (count === 1 ? ' book' : ' books'));
       }
       return li;
@@ -1673,7 +1674,7 @@ export async function mount(ctx) {
       shown = [];
       setActive(-1);
       const row = el('li', 'flex flex-wrap items-center gap-3 px-3 py-3');
-      row.appendChild(el('span', 'text-[15px] text-frosted-blue/70', 'The list didn’t load.'));
+      row.appendChild(el('span', 'text-[15px] text-frosted-blue/85', 'The list didn’t load.'));
       const again = el('button', 'inline-flex h-9 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 ' + LINK_FOCUS, 'Try again');
       again.type = 'button';
       again.addEventListener('click', function () { fill(); box.focus(); }, { signal: ends.signal });
@@ -1811,12 +1812,12 @@ export async function mount(ctx) {
     list.tabIndex = 0;
     if (isWide) {
       overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
-      panel = el('div', 'ws-dialog-box absolute w-56 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border border-frosted-blue/10 bg-background-dark shadow-2xl');
+      panel = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-56 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border');
       panel.appendChild(list);
     } else {
       overlay = el('div', 'ws-sheet z-[95]');
       overlay.appendChild(el('div', 'ws-sheet-scrim'));
-      panel = el('div', 'ws-sheet-panel focus:outline-none');
+      panel = el('div', 'ws-sheet-panel ws-frost focus:outline-none');
       const head = el('div', 'ws-sheet-head');
       const grip = el('span', 'ws-sheet-grip');
       grip.setAttribute('aria-hidden', 'true');

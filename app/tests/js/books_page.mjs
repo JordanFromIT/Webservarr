@@ -1725,6 +1725,7 @@ await run('filters: on a phone the picker is a bottom sheet; wider, a popover un
   check('a sheet with the More sheet\'s pieces', !!sheet && sheet.classList.contains('is-open') && !!sheet.querySelector('.ws-sheet-panel .ws-sheet-grip') && !!sheet.querySelector('.ws-sheet-close'));
   check('titled by its heading', sheet.querySelector('.ws-sheet-panel').getAttribute('aria-labelledby') === sheet.querySelector('h2').id && sheet.querySelector('h2').textContent === 'Author');
   check('the keyboard waits for a tap in the search', t.doc.activeElement === sheet.querySelector('.ws-sheet-panel'));
+  check('the sheet is on the shared frosted surface', sheet.querySelector('.ws-sheet-panel').classList.contains('ws-frost'));
   sheet.querySelector('.ws-sheet-scrim').click();
   check('a tap on the dim closes it', !t.doc.body.querySelector('.ws-sheet') && t.q('[data-filter="author"]').getAttribute('aria-expanded') === 'false');
 
@@ -1734,6 +1735,7 @@ await run('filters: on a phone the picker is a bottom sheet; wider, a popover un
   u.click('[data-filter="author"]');
   const pop = u.doc.body.querySelector('.ws-dialog .ws-dialog-box');
   check('a popover placed by the button', !!pop && /px$/.test(pop.style.top || pop.style.bottom) && /px$/.test(pop.style.left));
+  check('frosted like the Requests search bar, floored for reading', pop.classList.contains('ws-frost') && pop.classList.contains('ws-frost-read') && !pop.classList.contains('bg-background-dark'));
   u.doc.body.querySelector('[aria-label="Close"]').click();
   check('Close closes it', !u.doc.body.querySelector('.ws-dialog'));
 });
@@ -1843,6 +1845,7 @@ await run('sort: a button that opens a listbox of the orders, with the one in us
   check('open: the list, on the shared stack, takes the focus', !!list && list.getAttribute('role') === 'listbox' && kit.opened === 1 && t.doc.activeElement === list);
   check('the button points at it', btn.getAttribute('aria-expanded') === 'true' && btn.getAttribute('aria-controls') === 'booksSortList');
   check('the popover is the list itself, not a dialog around it', !list.parentNode.hasAttribute('role') && !list.parentNode.hasAttribute('aria-modal'));
+  check('on the shared frosted surface', list.parentNode.classList.contains('ws-frost'));
   const opts = sortOptions(t);
   check('the order in use is selected and highlighted', opts[0].getAttribute('aria-selected') === 'true' && list.getAttribute('aria-activedescendant') === opts[0].id &&
     !opts[0].querySelector('.invisible') && !!opts[1].querySelector('.invisible'));

@@ -291,6 +291,16 @@ const text = (n) => (n ? n.textContent : '');
   check('the chip opens the sheet', !!sheet && sheet.open && t.chip.getAttribute('aria-expanded') === 'true');
   check('as a dialog with a title', sheet.getAttribute('aria-labelledby') === 'wsStatusSheetHead');
   check('with the same rows', rows(sheet).length === 3);
+  check('on the shared frosted surface', sheet.querySelector('.ws-sheet-panel').classList.contains('ws-frost'));
+  {
+    const panel = sheet.querySelector('.ws-sheet-panel'), head = sheet.querySelector('.ws-sheet-head');
+    const scrollTo = (y) => { panel.scrollTop = y; panel.dispatchEvent(new t.w.Event('scroll')); };
+    check('the head is part of the pane at the top', !head.classList.contains('is-stuck'));
+    scrollTo(40);
+    check('and frosts once rows scroll under it', head.classList.contains('is-stuck'));
+    scrollTo(0);
+    check('and lets go back at the top', !head.classList.contains('is-stuck'));
+  }
   check('the popover stays closed', !open(t));
   sheet.dispatchEvent(new t.w.Event('cancel', { cancelable: true }));
   await wait(260);
@@ -315,6 +325,7 @@ const text = (n) => (n ? n.textContent : '');
   t.pill.click();
   await wait(10);
   check('opening measures the room from the pill to the edge, less a margin', room() === (cw() - 600 - 24) + 'px', { room: room(), cw: cw() });
+  check('the popover is on the shared frosted surface, floored for reading', t.pop().classList.contains('ws-frost') && t.pop().classList.contains('ws-frost-read'));
   at.left = cw() - 100;
   t.w.dispatchEvent(new t.w.Event('resize'));
   check('a resize while open measures again, never under 320px', room() === '320px', room());
@@ -332,10 +343,22 @@ const text = (n) => (n ? n.textContent : '');
     const at = css.indexOf('\n' + sel + ' {');
     return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
   };
-  const frost = rule('.ws-sp-pop, .ws-sp-sheet .ws-sheet-panel');
-  check('the popover and the sheet are frosted like the Books filters panel',
-    /rgb\(var\(--color-secondary\) \/ \.25\)/.test(frost) && /rgb\(var\(--color-background\) \/ \.84\)/.test(frost) &&
-    /\bbackdrop-filter: blur\(24px\) saturate\(1\.2\)/.test(frost) && /-webkit-backdrop-filter/.test(frost), frost);
+  const frost = rule('.ws-frost');
+  check('the shared frost is the Requests search bar recipe: 25% secondary over a 24px blur, a faint edge',
+    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.25\)/.test(css) && /--ws-frost-blur: blur\(24px\)/.test(css) &&
+    /--ws-frost-edge: rgb\(var\(--color-text\) \/ \.10\)/.test(css) &&
+    /-webkit-backdrop-filter: var\(--ws-frost-blur\)/.test(frost) && /\bbackdrop-filter: var\(--ws-frost-blur\)/.test(frost) &&
+    /rgb\(var\(--color-background\) \/ var\(--ws-frost-floor, 0\)\)/.test(frost), frost);
+  // The floors keep the panel's words at 4.5:1 over a white poster; the
+  // sheet's scrim has dimmed the page by .7 already.
+  check('reading text sits on a .72 floor', /--ws-frost-floor: \.72;/.test(rule('.ws-frost-read')), rule('.ws-frost-read'));
+  check('a frosted sheet on a .1 floor over its scrim', /--ws-frost-floor: \.1;/.test(rule('.ws-sheet-panel.ws-frost')));
+  check('popovers, menus, dialogs and sheets share one themed scrollbar',
+    /:is\(\.ws-pop, \.ws-dialog-box, \[data-dialog-box\], \.ws-sheet-panel, \.ws-frost\) \* \{\s*scrollbar-width: thin;\s*scrollbar-color: rgb\(var\(--color-accent\) \/ \.5\) transparent;/.test(css) &&
+    /\*::-webkit-scrollbar-thumb:hover \{ background-color: rgb\(var\(--color-accent\) \/ \.8\); \}/.test(css));
+  const words = ['.ws-sp-sub', '.ws-sp-checked', '.ws-sp-range-label', '.ws-sp-state', '.ws-sp-na', '.ws-sp-window', '.ws-sp-ms', '.ws-sp-foot']
+    .map((sel) => [sel, (rule(sel).match(/color: rgb\(var\(--color-text\) \/ (\.\d+)\)/) || [])[1]]);
+  check('no word in the panel is fainter than .8 of the text colour', words.every(([, a]) => a && +a >= 0.8), words);
   check('the header lets go of its own blur while the panel is open',
     /#appHeader:has\(\.ws-sp-pop\.is-open\) \{[^}]*backdrop-filter: none/.test(css));
   check('two services or more sit in two columns',
