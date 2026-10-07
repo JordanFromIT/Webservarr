@@ -9,7 +9,12 @@
 // a badge that could not be read says "Not available"; Uptime Kuma not
 // answering (503) is a grey "Status Unavailable" with the last names and
 // "Try again", never "running"; and on a phone the chip opens the sheet,
-// which closes on the browser's close request and gives focus back.
+// which closes on the browser's close request and gives focus back. Live
+// while open: asked again every 15 s only while open and the tab is shown,
+// new checks slide into the strips (or just show under reduced motion), the
+// rows are updated in place, the words tick, Uptime Kuma going away and
+// coming back while open swaps the state without closing, and a closed
+// panel asks nothing.
 // Run: node app/tests/js/status_panel.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -58,8 +63,37 @@ function svc(id, name, opts = {}) {
 }
 const ALL_UP = [svc(3, 'Media Server'), svc(4, 'Requests'), svc(5, 'Portal')];
 
-async function boot({ width = 1440, answer = ALL_UP, stored = null, cached = null } = {}) {
+async function boot({ width = 1440, answer = ALL_UP, stored = null, cached = null, reduce = false } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: 900 });
+  // The panel's two polls (15 s ask, 5 s words) are driven by hand; the
+  // monotonic and wall clocks can be moved on (the 5 s answer reuse, "N min ago").
+  const iv = new Map();
+  let ivId = 1e6;
+  const realSI = w.setInterval.bind(w), realCI = w.clearInterval.bind(w);
+  w.setInterval = (fn, ms, ...a) => {
+    if (ms !== 15000 && ms !== 5000) return realSI(fn, ms, ...a);
+    iv.set(++ivId, { fn, ms });
+    return ivId;
+  };
+  w.clearInterval = (id) => { if (iv.has(id)) iv.delete(id); else realCI(id); };
+  const clock = { mono: 0, wall: 0, hidden: false };
+  const realNow = w.performance.now.bind(w.performance);
+  w.performance.now = () => realNow() + clock.mono;
+  const realDateNow = w.Date.now;
+  w.Date.now = () => realDateNow() + clock.wall;
+  Object.defineProperty(w.document, 'hidden', { configurable: true, get: () => clock.hidden });
+  const realMM = w.matchMedia.bind(w);
+  w.matchMedia = (q) => (/reduce/.test(q) ? { matches: reduce, media: q, addEventListener() {}, addListener() {} } : realMM(q));
+  // Bars laid out 6px apart, 4px wide (happy-dom has no layout), so a slide has a pitch.
+  const realRect = w.HTMLElement.prototype.getBoundingClientRect;
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    const tr = this.parentNode;
+    if (this.tagName === 'I' && tr && tr.classList && tr.classList.contains('ws-sp-track')) {
+      const i = Array.prototype.indexOf.call(tr.children, this);
+      return { left: i * 6, right: i * 6 + 4, width: 4, top: 0, bottom: 20, height: 20, x: i * 6, y: 0 };
+    }
+    return realRect.call(this);
+  };
   w.document.body.innerHTML = '<aside id="desktopSidebar"></aside>' + fill(HEADER) + fill(SIDEBAR) +
     '<main><div id="wsPage"><button id="elsewhere">Elsewhere</button></div></main>';
   w.WS_DATA = { user: { username: 'sam', is_admin: false }, page: 'index' };
@@ -79,7 +113,14 @@ async function boot({ width = 1440, answer = ALL_UP, stored = null, cached = nul
   await wait(10);
   const d = w.document;
   return {
-    w, d, calls, state,
+    w, d, calls, state, clock,
+    polls: (ms) => Array.from(iv.values()).filter((x) => x.ms === ms).length,
+    // One tick of the panel's polls; the 15 s one after the 5 s reuse has passed.
+    async tick(ms) {
+      if (ms === 15000) clock.mono += 15000;
+      Array.from(iv.values()).filter((x) => x.ms === ms).forEach((x) => x.fn());
+      await wait(5);
+    },
     pill: d.getElementById('systemStatus'),
     chip: d.getElementById('wsStatusChip'),
     pop: () => d.getElementById('wsStatusPop'),
@@ -311,6 +352,169 @@ const text = (n) => (n ? n.textContent : '');
   sheet.querySelector('.ws-sheet-scrim').click();
   await wait(260);
   check('a tap on the dim closes it', !sheet.open);
+  await t.done();
+}
+
+// ---- Live while open ----
+// The next answer: every service two checks on (the oldest two drop off),
+// the newest of them as given.
+function onward(list, newest = {}) {
+  return list.map((s) => {
+    const b = s.beats.slice(2);
+    const last = Date.parse(s.beats[s.beats.length - 1].time);
+    b.push({ status: 'up', ping: 110, time: new Date(last + 20000).toISOString() });
+    b.push(Object.assign({ status: 'up', ping: 120, time: new Date(last + 40000).toISOString() }, newest[s.id] || {}));
+    return Object.assign({}, s, { beats: b });
+  });
+}
+{
+  current = 'live: asks only while open';
+  const t = await boot();
+  check('closed: no poll is running', t.polls(15000) === 0 && t.polls(5000) === 0);
+  const before = t.calls.length;
+  t.pill.click();
+  await wait(10);
+  check('open: asks every 15 s and keeps the words current every 5 s', t.polls(15000) === 1 && t.polls(5000) === 1);
+  await t.tick(15000);
+  check('a tick asks again', t.calls.length === before + 1, t.calls.length - before);
+  t.clock.hidden = true;
+  await t.tick(15000);
+  check('a background tab asks nothing', t.calls.length === before + 1, t.calls.length - before);
+  t.clock.hidden = false;
+  t.clock.mono += 15000;
+  t.d.dispatchEvent(new t.w.Event('visibilitychange'));
+  await wait(5);
+  check('and asks at once on coming back', t.calls.length === before + 2, t.calls.length - before);
+  t.pill.click();
+  check('closed again: the polls stop', t.polls(15000) === 0 && t.polls(5000) === 0);
+  t.clock.mono += 60000;
+  await wait(20);
+  check('and nothing more is asked', t.calls.length === before + 2, t.calls.length - before);
+  await t.done();
+}
+{
+  current = 'live: new checks slide in';
+  const t = await boot();
+  t.pill.click();
+  await wait(10);
+  const row0 = rows(t.pop())[0];
+  const track = row0.querySelector('.ws-sp-track');
+  const firstBar = track.children[2];
+  t.state.answer = onward(ALL_UP, { 3: { status: 'down', ping: null } });
+  await t.tick(15000);
+  const r = rows(t.pop());
+  check('the rows are the same elements, updated in place', r.includes(row0));
+  const down = r.find((x) => x.getAttribute('data-k') === 'down');
+  check('a service that went down moves to the top', down === r[0] && text(r[0].querySelector('.ws-sp-name')) === 'Media Server', r.map((x) => text(x.querySelector('.ws-sp-name'))));
+  check('the pill follows the same answer', t.pill.getAttribute('data-state') === 'err');
+  const tr = r[0].querySelector('.ws-sp-track');
+  check('while it slides the two new checks sit past the right edge', tr.children.length === 52 && tr.style.width === (52 * 6 - 2) + 'px', [tr.children.length, tr.style.width]);
+  await wait(60);
+  check('the strip is moving left', /^translateX\(-\d/.test(tr.style.transform) && tr.children.length === 52, tr.style.transform);
+  check('the reply line is clipped to its box while it moves', r[0].querySelector('.ws-sp-spark').style.clipPath === 'inset(-4px 0)');
+  await wait(420);
+  check('after the slide: 50 bars again, at rest', tr.children.length === 50 && tr.style.transform === '' && tr.style.width === '', [tr.children.length, tr.style.transform]);
+  check('the oldest two dropped off the left', tr.children[0] === firstBar);
+  check('the newest bar is the down check', tr.lastElementChild.getAttribute('data-k') === 'down');
+  check('the strip names the new check', /1 down/.test(r[0].querySelector('.ws-sp-strip').getAttribute('aria-label')));
+  check('the reply line is unclipped at rest', r[0].querySelector('.ws-sp-spark').style.clipPath === '');
+  check('the last reply says so', text(r[0].querySelector('.ws-sp-ms')) === 'No reply');
+  check('the summary says so', text(t.pop().querySelector('.ws-sp-title')) === 'Media Server is down');
+  check('checked just now', text(t.pop().querySelector('.ws-sp-checked')) === 'Checked just now');
+  t.clock.wall += 2 * 60000 + 1000;
+  await t.tick(5000);
+  check('the words tick on without asking', text(t.pop().querySelector('.ws-sp-checked')) === 'Checked 2 min ago', text(t.pop().querySelector('.ws-sp-checked')));
+  const n = t.calls.length;
+  await t.tick(5000);
+  check('a word tick never asks', t.calls.length === n);
+  await t.done();
+}
+{
+  current = 'live: no change, no movement';
+  const t = await boot();
+  t.pill.click();
+  await wait(10);
+  const tr = rows(t.pop())[0].querySelector('.ws-sp-track');
+  const bars = Array.from(tr.children);
+  await t.tick(15000);
+  check('the same answer leaves the bars alone', tr.children.length === 50 && Array.from(tr.children).every((b, i) => b === bars[i]) && tr.style.transform === '');
+  await t.done();
+}
+{
+  current = 'live: a long catch-up just shows';
+  const t = await boot();
+  t.pill.click();
+  await wait(10);
+  let next = ALL_UP;
+  for (let i = 0; i < 4; i++) next = onward(next);   // 8 new checks
+  t.state.answer = next;
+  await t.tick(15000);
+  const tr = rows(t.pop())[0].querySelector('.ws-sp-track');
+  check('more than six new checks do not slide', tr.children.length === 50 && tr.style.transform === '');
+  await t.done();
+}
+{
+  current = 'live: reduced motion';
+  const t = await boot({ reduce: true });
+  t.pill.click();
+  await wait(10);
+  t.state.answer = onward(ALL_UP, { 4: { status: 'down', ping: null } });
+  await t.tick(15000);
+  const r = rows(t.pop())[0];
+  const tr = r.querySelector('.ws-sp-track');
+  check('no slide: the new checks are simply there', tr.children.length === 50 && tr.style.transform === '' && tr.style.width === '' &&
+    tr.lastElementChild.getAttribute('data-k') === 'down', [tr.children.length, tr.style.transform]);
+  await t.done();
+}
+{
+  current = 'live: Uptime Kuma goes away and comes back while open';
+  const t = await boot();
+  t.pill.click();
+  await wait(10);
+  t.pop().querySelector('.ws-sp-seg-input').focus();
+  t.state.answer = 503;
+  await t.tick(15000);
+  check('still open', open(t));
+  check('says unavailable, with the last names', text(t.pop().querySelector('.ws-sp-title')) === 'Status unavailable right now' &&
+    rows(t.pop()).length === 3 && rows(t.pop()).every((x) => text(x.querySelector('.ws-sp-state')) === 'No answer'));
+  check('the pill is grey', t.pill.getAttribute('data-state') === 'off');
+  const retry = t.pop().querySelector('.ws-sp-retry');
+  retry.focus();
+  t.state.answer = onward(ALL_UP);
+  await t.tick(15000);
+  check('recovers by itself on the next ask', text(t.pop().querySelector('.ws-sp-title')) === 'Everything is running' &&
+    t.pill.getAttribute('data-state') === 'ok' && rows(t.pop()).every((x) => x.querySelectorAll('.ws-sp-strip i').length === 50));
+  check('focus moves from the gone Try again to Close', retry.hidden && t.d.activeElement === t.pop().querySelector('.ws-sp-close'));
+  await t.done();
+}
+{
+  current = 'live: Try again keeps focus while it checks';
+  const t = await boot({ answer: 503, cached: { state: 'ok', down: 0, list: ALL_UP, t: NOW - 60000 } });
+  t.pill.click();
+  await wait(10);
+  const retry = t.pop().querySelector('.ws-sp-retry');
+  retry.focus();
+  t.state.answer = 503;
+  retry.click();
+  check('busy, not disabled', retry.getAttribute('aria-disabled') === 'true' && !retry.disabled && t.d.activeElement === retry);
+  await wait(10);
+  check('and ready again', !retry.hasAttribute('aria-disabled') && text(retry) === 'refreshTry again', text(retry));
+  await t.done();
+}
+{
+  current = 'live: the phone sheet';
+  const t = await boot({ width: 375 });
+  t.chip.click();
+  await wait(10);
+  check('the sheet asks while open', t.polls(15000) === 1);
+  t.state.answer = onward(ALL_UP);
+  const before = t.calls.length;
+  await t.tick(15000);
+  check('and gets the new checks', t.calls.length === before + 1 &&
+    rows(t.sheet()).every((x) => x.querySelector('.ws-sp-track').children.length === 52));
+  t.sheet().dispatchEvent(new t.w.Event('cancel', { cancelable: true }));
+  await wait(260);
+  check('closed: the polls stop', t.polls(15000) === 0 && t.polls(5000) === 0);
   await t.done();
 }
 

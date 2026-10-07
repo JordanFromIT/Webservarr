@@ -62,12 +62,14 @@ class FakeKuma:
     """Uptime Kuma's public endpoints. badges: {(id, hours): svg text or an
     exception to raise}. down: every request fails to connect."""
 
-    def __init__(self, heartbeat=None, names=None, badges=None, down=False):
+    def __init__(self, heartbeat=None, names=None, badges=None, down=False, delay=0):
         self.heartbeat = heartbeat or {}
         self.names = names or {}
         self.badges = badges or {}
         self.down = down
+        self.delay = delay
         self.calls = []
+        self.headers = {}
 
     def client(self, **kw):
         kuma = self
@@ -79,8 +81,11 @@ class FakeKuma:
             async def __aexit__(self, *exc):
                 return False
 
-            async def get(self, url, **kw):
+            async def get(self, url, headers=None, **kw):
                 kuma.calls.append(url)
+                kuma.headers[url] = dict(headers or {})
+                if kuma.delay:
+                    await asyncio.sleep(kuma.delay)
                 if kuma.down:
                     raise httpx.ConnectError("refused")
                 if "/api/badge/" in url:
@@ -206,6 +211,83 @@ class UptimeWindows(unittest.TestCase):
             self.assertEqual(self.read()[3]["30d"], 99.72)
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class LiveChecks(unittest.TestCase):
+    """The panel's checks: read past Uptime Kuma's own cache, shared through
+    Redis so any number of open panels read Kuma once per BEATS_TTL."""
+
+    def setUp(self):
+        self.redis = FakeRedis()
+        self.kuma = FakeKuma(heartbeat={3: beats(60)}, names={3: "Media"})
+        self.kuma.patch(self, self.redis)
+
+    def heartbeat_calls(self):
+        return [c for c in self.kuma.calls if "/heartbeat/" in c]
+
+    def read(self):
+        return run(uptime_kuma.read_monitors_live())
+
+    def test_asks_past_kumas_own_cache(self):
+        self.assertEqual(self.read()[0]["name"], "Media")
+        url = self.heartbeat_calls()[0]
+        self.assertEqual(self.kuma.headers[url].get("x-apicache-bypass"), "1")
+
+    def test_the_poller_read_does_not(self):
+        run(uptime_kuma.read_monitors())
+        self.assertNotIn("x-apicache-bypass", self.kuma.headers[self.heartbeat_calls()[0]])
+
+    def test_a_ttl_just_under_the_panels_interval(self):
+        self.assertLess(uptime_kuma.BEATS_TTL, 15, "one viewer asking every 15 s must find it expired")
+        self.assertGreaterEqual(uptime_kuma.BEATS_TTL, 10)
+
+    def test_shared_for_the_ttl(self):
+        self.read()
+        self.redis.now += uptime_kuma.BEATS_TTL - 1
+        self.assertEqual(self.read()[0]["name"], "Media")
+        self.assertEqual(len(self.heartbeat_calls()), 1, "a second viewer or worker reads Redis")
+        self.redis.now += 1
+        self.read()
+        self.assertEqual(len(self.heartbeat_calls()), 2, "and the next ask after the TTL reads Kuma again")
+
+    def test_viewers_asking_at_once_read_kuma_once(self):
+        self.kuma.delay = 0.3
+
+        async def many():
+            return await asyncio.gather(*(uptime_kuma.read_monitors_live() for _ in range(4)))
+
+        answers = run(many())
+        self.assertTrue(all(a and a[0]["name"] == "Media" for a in answers), answers)
+        self.assertEqual(len(self.heartbeat_calls()), 1)
+        self.assertEqual([k for k in self.redis.store if k.endswith(":lock")], [], "the lock is let go")
+
+    def test_not_answering_is_kept_briefly_then_recovers(self):
+        self.kuma.down = True
+        self.assertIsNone(self.read())
+        self.assertIsNone(self.read())
+        self.assertEqual(len(self.heartbeat_calls()), 1, "a Kuma that is down is not asked per viewer")
+        self.kuma.down = False
+        self.redis.now += uptime_kuma.BEATS_MISS_TTL
+        self.assertEqual(self.read()[0]["name"], "Media")
+        self.assertEqual(len(self.heartbeat_calls()), 2)
+
+    def test_a_new_address_is_a_new_copy(self):
+        self.read()
+        with mock.patch.object(uptime_kuma, "_get_config", return_value={"url": "http://other.invalid", "slug": "home"}):
+            self.read()
+        self.assertEqual(len(self.heartbeat_calls()), 2)
+
+    def test_without_redis_it_reads_kuma(self):
+        with mock.patch.object(uptime_kuma, "_redis", mock.AsyncMock(side_effect=OSError("no redis"))):
+            self.assertEqual(self.read()[0]["name"], "Media")
+            self.read()
+        self.assertEqual(len(self.heartbeat_calls()), 2)
+
+    def test_not_set_up_asks_nothing(self):
+        with mock.patch.object(uptime_kuma, "_get_config", return_value={"url": "", "slug": ""}):
+            self.assertIsNone(self.read())
+        self.assertEqual(self.kuma.calls, [])
+
+
 def signed_up(case):
     p = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
     p.start()
@@ -242,6 +324,13 @@ class ServiceStatusRoute(unittest.TestCase):
         self.assertEqual(len(mon["beats"]), 50)
         self.assertEqual(mon["uptime"], {"24h": 99.39, "30d": 99.72, "all": 98.09})
         self.assertEqual(mon["uptime_30d"], 99.72)
+
+    def test_two_viewers_share_one_read_of_the_checks(self):
+        kuma = FakeKuma(heartbeat={3: beats(60)}, names={3: "Media"})
+        self.get(kuma)
+        r = self.client.get("/api/integrations/service-status")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(sum("/heartbeat/" in c for c in kuma.calls), 1)
 
     def test_uptime_kuma_not_answering_is_503(self):
         r = self.get(FakeKuma(down=True))

@@ -605,7 +605,7 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   border: 1px solid rgb(var(--color-accent) / .4); font-size: 14px; font-weight: 500;
 }
 .ws-sp-retry:hover { background: rgb(var(--color-accent) / .12); }
-.ws-sp-retry:disabled { opacity: .6; cursor: progress; }
+.ws-sp-retry[aria-disabled="true"] { opacity: .6; cursor: progress; }
 .ws-sp-retry .material-symbols-outlined { font-size: 18px; color: rgb(var(--color-accent)); }
 .ws-sp-summary [hidden], .ws-sp-pop [hidden], .ws-sp-sheet [hidden] { display: none; }
 
@@ -662,13 +662,17 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px; align-items: center; gap: 12px;
   margin-top: -2px; padding: 6px 8px; border-radius: 8px; background: rgb(var(--color-background) / .6);
 }
-.ws-sp-strip { display: flex; align-items: stretch; gap: 2px; height: 20px; min-width: 0; }
+/* The bars sit on a track inside the strip: new checks come in past the
+   strip's right edge and slide into place (status-panel.js sets the track's
+   width and transform only while one slides), so the strip keeps its size. */
+.ws-sp-strip { height: 20px; min-width: 0; overflow: hidden; }
+.ws-sp-track { display: flex; align-items: stretch; gap: 2px; width: 100%; height: 100%; }
 .ws-sp-strip i { flex: 1 1 0; min-width: 0; border-radius: 2px; background: rgb(var(--ws-status-ok)); }
 .ws-sp-strip i[data-k="slow"], .ws-sp-strip i[data-k="trouble"] { background: rgb(var(--ws-status-warn)); }
 .ws-sp-strip i[data-k="down"] { background: rgb(var(--ws-status-err)); }
 .ws-sp-strip i[data-k="maint"] { background: rgb(var(--color-accent)); }
 /* A narrow list (a phone) keeps all 50 bars by tightening the gaps. */
-@container (max-width: 340px) { .ws-sp-strip { gap: 1px; } .ws-sp-strip i { border-radius: 1px; } }
+@container (max-width: 340px) { .ws-sp-track { gap: 1px; } .ws-sp-strip i { border-radius: 1px; } }
 .ws-sp-spark { display: block; width: 64px; height: 20px; overflow: visible; }
 .ws-sp-spark polyline {
   fill: none; stroke: rgb(var(--color-accent)); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round;

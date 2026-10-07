@@ -9,6 +9,7 @@ source of uptime over longer windows. Nothing is ever written to Uptime Kuma.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -124,10 +125,16 @@ async def get_monitors() -> list:
     return await read_monitors() or []
 
 
-async def read_monitors() -> Optional[list]:
+async def read_monitors(fresh: bool = False) -> Optional[list]:
     """Like get_monitors, but None when Uptime Kuma is not set up or could not
     be read, so a caller can tell "no monitors" from "no answer" (the status
-    feed must never say everything is running when it simply doesn't know)."""
+    feed must never say everything is running when it simply doesn't know).
+
+    fresh: ask past Uptime Kuma's own one-minute cache of the heartbeat
+    answer (its apicache honours the x-apicache-bypass request header), so
+    the checks are the ones Uptime Kuma holds now. Only read_monitors_live
+    asks for this, and it shares one answer per BEATS_TTL across every
+    viewer and worker."""
     config = _get_config()
     if not config["url"]:
         return None
@@ -137,7 +144,8 @@ async def read_monitors() -> Optional[list]:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             # Fetch the public status page heartbeat data
-            resp = await client.get(f"{config['url']}/api/status-page/heartbeat/{slug}")
+            resp = await client.get(f"{config['url']}/api/status-page/heartbeat/{slug}",
+                                    headers={"x-apicache-bypass": "1"} if fresh else None)
             if resp.status_code != 200:
                 logger.warning("Uptime Kuma heartbeat returned HTTP %d", resp.status_code)
                 return None
@@ -230,6 +238,77 @@ def _percent(value) -> Optional[float]:
 async def _redis():
     from app.auth import session_manager
     return await session_manager.get_redis()
+
+
+# The status panel's checks, live while it is open. The panel asks every 15 s
+# (Uptime Kuma checks most monitors every 20 s); one read of Uptime Kuma per
+# BEATS_TTL serves every viewer and worker (Redis, never module memory:
+# uvicorn runs several). The TTL sits a little under the panel's interval so
+# one viewer's next ask always finds the copy expired and gets new checks.
+# An answer that failed is kept for BEATS_MISS_TTL, so a Kuma that is down is
+# not asked once per viewer, and recovery shows within seconds.
+BEATS_TTL = 13
+BEATS_MISS_TTL = 5
+# While one worker reads Uptime Kuma, the others wait for its answer (polling
+# Redis) instead of asking too. Longer than a normal read, shorter than the
+# worst case, after which a waiter reads Kuma itself.
+BEATS_LOCK_TTL = 8
+BEATS_WAIT_STEP = 0.1
+_BEATS_PREFIX = "webservarr:cache:kuma-checks:"
+
+
+def _beats_key(config: dict) -> str:
+    # The address and page in the key: a change in Settings is a new copy.
+    digest = hashlib.sha256(f"{config['url']}|{config['slug']}".encode()).hexdigest()[:16]
+    return _BEATS_PREFIX + digest
+
+
+async def _read_shared(redis, key: str):
+    """(True, monitors or None) when a copy is in Redis, else (False, None)."""
+    raw = await redis.get(key)
+    if not raw:
+        return False, None
+    return True, json.loads(raw).get("m")
+
+
+async def read_monitors_live() -> Optional[list]:
+    """read_monitors(fresh=True), shared through Redis for BEATS_TTL seconds
+    so any number of open status panels read Uptime Kuma at most once per
+    TTL. Same answers as read_monitors: None when not set up or not
+    answering. Without Redis it reads Uptime Kuma directly."""
+    config = _get_config()
+    if not config["url"]:
+        return None
+    key = _beats_key(config)
+    try:
+        redis = await _redis()
+        found, monitors = await _read_shared(redis, key)
+        if found:
+            return monitors
+        if not await redis.set(key + ":lock", "1", nx=True, ex=BEATS_LOCK_TTL):
+            # Another worker is reading Kuma now: wait for its answer.
+            for _ in range(int(BEATS_LOCK_TTL / BEATS_WAIT_STEP)):
+                await asyncio.sleep(BEATS_WAIT_STEP)
+                found, monitors = await _read_shared(redis, key)
+                if found:
+                    return monitors
+            return await read_monitors(fresh=True)
+    except Exception as exc:  # noqa: BLE001 - no Redis: read Kuma directly
+        logger.debug("Status checks not shared through Redis: %s", exc)
+        return await read_monitors(fresh=True)
+    try:
+        monitors = await read_monitors(fresh=True)
+        try:
+            await redis.set(key, json.dumps({"m": monitors}),
+                            ex=BEATS_TTL if monitors is not None else BEATS_MISS_TTL)
+        except Exception:  # noqa: BLE001
+            pass
+        return monitors
+    finally:
+        try:
+            await redis.delete(key + ":lock")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def _badge(client: httpx.AsyncClient, url: str, monitor_id: int, hours: int) -> Optional[float]:

@@ -17,6 +17,9 @@
  * where a check got no reply). The data is WS.serviceStatus, the pill's own
  * request; shell.js owns the pill, the chip and the words for the overall
  * state, and this module reads its model (WS.statusModel, WS.statusSummary).
+ * While open it is live: asked again every REFRESH_MS (so the pill and chip
+ * follow too), new checks slide into the strips, and the "Checked" and "for
+ * N min" words stay current. Closed, or in a background tab, it asks nothing.
  *
  * Document-lifetime: the header and the top bar are the shell's and stay
  * across soft navigation, so this runs once and its listeners stay.
@@ -32,7 +35,10 @@
 
   var OPEN_DELAY = 220;        // hover this long before the popover opens
   var CLOSE_DELAY = 320;       // and away this long before it closes
-  var REFRESH_MS = 30000;      // while open, asked again this often
+  var REFRESH_MS = 15000;      // while open, asked again this often (Kuma checks most monitors every 20 s)
+  var TICK_MS = 5000;          // and its "Checked ..." and "Down for ..." words kept current
+  var SLIDE_MS = 300;          // new checks slide in this long
+  var SLIDE_MAX = 6;           // more new checks than this at once just show
   var SHEET_CLOSE_MS = 200;    // the sheet's slide away (theme.css .ws-sheet.is-closing)
   var SWIPE_CLOSE_PX = 80;
   var SWIPE_FLING = 0.5;
@@ -170,52 +176,97 @@
     return d;
   }
 
-  // The last checks, one bar each, newest on the right.
-  function strip(m) {
-    var box = el('div', 'ws-sp-strip');
-    var counts = { up: 0, slow: 0, trouble: 0, down: 0, maint: 0 };
-    m.kinds.forEach(function (k) {
-      var i = el('i');
-      i.setAttribute('data-k', k);
-      box.appendChild(i);
-      counts[k] = (counts[k] || 0) + 1;
+  function setText(n, s) { if (n.textContent !== s) n.textContent = s; }
+  function setAttr(n, a, v) { if (n.getAttribute(a) !== v) n.setAttribute(a, v); }
+
+  // ---- New checks arriving ----
+  //
+  // While the panel is open it asks again every REFRESH_MS. Checks that are
+  // new since the last answer slide in from the right of the strip and the
+  // oldest slide off the left; the reply line moves with them and eases to
+  // its new scale. One frame loop drives every row so they move together.
+  // Reduced motion, a catch-up of more than SLIDE_MAX checks, or a strip
+  // still filling up just shows the new state.
+  var anims = [], raf = 0;
+  function ease(p) { return 1 - Math.pow(1 - p, 3); }
+  function frame(ts) {
+    raf = 0;
+    anims = anims.filter(function (a) {
+      if (a.start === null) a.start = ts;
+      var p = Math.min(1, (ts - a.start) / SLIDE_MS);
+      a.step(ease(p));
+      if (p < 1) return true;
+      a.end();
+      return false;
     });
+    if (anims.length) raf = requestAnimationFrame(frame);
+  }
+  function play(a) {
+    a.start = null;
+    anims.push(a);
+    if (!raf) raf = requestAnimationFrame(frame);
+  }
+  function finish(a) {
+    var i = anims.indexOf(a);
+    if (i === -1) return;
+    anims.splice(i, 1);
+    a.step(1);
+    a.end();
+  }
+
+  // The checks as a strip of bars, one per check, newest on the right. The
+  // bars sit on a track inside the strip, so new ones can come in past its
+  // right edge and slide into place.
+  function setBars(track, kinds) {
+    while (track.children.length > kinds.length) track.removeChild(track.lastChild);
+    while (track.children.length < kinds.length) track.appendChild(el('i'));
+    kinds.forEach(function (k, i) { setAttr(track.children[i], 'data-k', k); });
+  }
+  function stripLabel(kinds) {
+    var counts = { up: 0, slow: 0, trouble: 0, down: 0, maint: 0 };
+    kinds.forEach(function (k) { counts[k] = (counts[k] || 0) + 1; });
     var bad = counts.down + counts.trouble + counts.slow;
     var parts = [counts.up + ' fine'];
     if (counts.down) parts.push(counts.down + ' down');
     if (counts.slow + counts.trouble) parts.push((counts.slow + counts.trouble) + ' slow');
     if (counts.maint) parts.push(counts.maint + ' planned work');
-    box.setAttribute('role', 'img');
-    box.setAttribute('aria-label', 'Last ' + m.kinds.length + ' checks: ' + (bad || counts.maint ? parts.join(', ') : 'all fine'));
-    return box;
+    return 'Last ' + kinds.length + ' checks: ' + (bad || counts.maint ? parts.join(', ') : 'all fine');
   }
 
-  // Reply times as a line; a check with no reply breaks it.
-  function spark(m) {
-    var w = 64, h = 20;
-    var beats = m.service.beats || [];
+  // Reply times as a line; a check with no reply breaks it. scale is the
+  // range the line spans; slots the checks the width holds; shift how many
+  // slots it has moved left (part way through a slide).
+  var SW = 64, SH = 20;
+  function sparkScale(beats) {
     var vals = beats.map(function (b) { return b.ping; }).filter(function (v) { return typeof v === 'number'; });
-    var svg = sv('svg', { 'class': 'ws-sp-spark', viewBox: '0 0 ' + w + ' ' + h, preserveAspectRatio: 'none',
-      'aria-hidden': 'true', focusable: 'false', width: String(w), height: String(h) });
-    if (!vals.length) return svg;
+    if (!vals.length) return null;
     var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
     if (hi - lo < 1) hi = lo + 1;
     var pad = 0.12 * (hi - lo);
-    lo -= pad; hi += pad;
+    return { lo: lo - pad, hi: hi + pad };
+  }
+  function drawSpark(svg, beats, scale, slots, shift) {
     var runs = [], cur = [];
-    beats.forEach(function (b, i) {
-      if (typeof b.ping !== 'number') { if (cur.length) runs.push(cur); cur = []; return; }
-      var x = beats.length === 1 ? w : (i / (beats.length - 1)) * w;
-      var y = h - ((b.ping - lo) / (hi - lo)) * h;
-      cur.push(x.toFixed(2) + ',' + y.toFixed(2));
-    });
-    if (cur.length) runs.push(cur);
-    runs.forEach(function (run) {
+    if (scale) {
+      beats.forEach(function (b, i) {
+        if (typeof b.ping !== 'number') { if (cur.length) runs.push(cur); cur = []; return; }
+        var x = slots === 1 ? SW : ((i - shift) / (slots - 1)) * SW;
+        var y = SH - ((b.ping - scale.lo) / (scale.hi - scale.lo)) * SH;
+        cur.push([x, y]);
+      });
+      if (cur.length) runs.push(cur);
+    }
+    while (svg.childNodes.length > runs.length) svg.removeChild(svg.lastChild);
+    while (svg.childNodes.length < runs.length) svg.appendChild(sv('polyline', {}));
+    runs.forEach(function (run, i) {
       // A lone reply between gaps still shows: a dot-length line.
-      if (run.length === 1) { var p = run[0].split(','); run = [(+p[0] - 0.5) + ',' + p[1], (+p[0] + 0.5) + ',' + p[1]]; }
-      svg.appendChild(sv('polyline', { points: run.join(' ') }));
+      if (run.length === 1) run = [[run[0][0] - 0.5, run[0][1]], [run[0][0] + 0.5, run[0][1]]];
+      svg.childNodes[i].setAttribute('points', run.map(function (p) { return p[0].toFixed(2) + ',' + p[1].toFixed(2); }).join(' '));
     });
-    return svg;
+  }
+  function mix(a, b, t) {
+    if (!a) return b;
+    return { lo: a.lo + (b.lo - a.lo) * t, hi: a.hi + (b.hi - a.hi) * t };
   }
 
   function lastReply(m) {
@@ -232,43 +283,131 @@
     return '';
   }
 
-  function row(m, now) {
-    var li = el('li', 'ws-sp-row');
-    li.setAttribute('data-k', m.k);
-    li.appendChild(dot(m.k));
+  // How many checks at the end of next are new since prev: -1 when prev is
+  // empty or next no longer holds prev's newest (too far behind to tell).
+  function newChecks(prev, next) {
+    if (!prev.length) return -1;
+    var t = prev[prev.length - 1].time;
+    for (var i = next.length - 1; i >= 0; i--) if (next[i].time === t) return next.length - 1 - i;
+    return -1;
+  }
+  function beatSig(beats) {
+    if (!beats.length) return '';
+    var a = beats[0], z = beats[beats.length - 1];
+    return beats.length + '|' + a.time + '|' + z.time + '|' + z.status + '|' + z.ping;
+  }
+
+  // One service's row, kept across answers and updated in place.
+  function Row() {
+    var r = { beats: [], sig: '', scale: null, anim: null };
+    r.li = el('li', 'ws-sp-row');
+    r.dot = dot('up');
+    r.li.appendChild(r.dot);
     var mid = el('div', 'ws-sp-who');
-    mid.appendChild(el('p', 'ws-sp-name', name(m)));
-    mid.appendChild(el('p', 'ws-sp-state', stateWords(m, now)));
-    li.appendChild(mid);
+    r.name = el('p', 'ws-sp-name');
+    r.state = el('p', 'ws-sp-state');
+    mid.appendChild(r.name);
+    mid.appendChild(r.state);
+    r.li.appendChild(mid);
+    var up = el('p', 'ws-sp-up');
+    r.pct = el('span', 'ws-sp-pct');
+    r.win = el('span', 'ws-sp-window');
+    up.appendChild(r.pct);
+    up.appendChild(r.win);
+    r.li.appendChild(up);
+    r.graphs = el('div', 'ws-sp-graphs');
+    r.strip = el('div', 'ws-sp-strip');
+    r.strip.setAttribute('role', 'img');
+    r.track = el('div', 'ws-sp-track');
+    r.strip.appendChild(r.track);
+    r.spark = sv('svg', { 'class': 'ws-sp-spark', viewBox: '0 0 ' + SW + ' ' + SH, preserveAspectRatio: 'none',
+      'aria-hidden': 'true', focusable: 'false', width: String(SW), height: String(SH) });
+    r.ms = el('span', 'ws-sp-ms');
+    r.ms.setAttribute('title', 'Reply time of the last check');
+    r.graphs.appendChild(r.strip);
+    r.graphs.appendChild(r.spark);
+    r.graphs.appendChild(r.ms);
+    return r;
+  }
+
+  function updateRow(r, m, now, motion) {
+    setAttr(r.li, 'data-k', m.k);
+    setAttr(r.dot, 'data-k', m.k);
+    setText(r.name, name(m));
+    setText(r.state, stateWords(m, now));
     var pct = (m.service.uptime || {})[range];
     if (range === '24h' && typeof pct !== 'number') pct = m.service.uptime_24h;
-    var up = el('p', 'ws-sp-up');
-    if (typeof pct === 'number') {
-      up.appendChild(el('span', 'ws-sp-pct', fmtUp(pct)));
-    } else {
-      up.appendChild(el('span', 'ws-sp-na', 'Not available'));
+    var has = typeof pct === 'number';
+    setAttr(r.pct, 'class', has ? 'ws-sp-pct' : 'ws-sp-na');
+    setText(r.pct, has ? fmtUp(pct) : 'Not available');
+    setText(r.win, rangeNote());
+
+    var beats = Array.isArray(m.service.beats) ? m.service.beats : [];
+    if (!m.kinds.length) {
+      if (r.graphs.parentNode) r.li.removeChild(r.graphs);
+      r.beats = []; r.sig = ''; r.scale = null;
+      return;
     }
-    up.appendChild(el('span', 'ws-sp-window', rangeNote()));
-    li.appendChild(up);
-    if (m.kinds.length) {
-      var g = el('div', 'ws-sp-graphs');
-      g.appendChild(strip(m));
-      g.appendChild(spark(m));
-      var lr = lastReply(m);
-      var ms = el('span', 'ws-sp-ms', lr.text);
-      ms.setAttribute('data-k', lr.k);
-      ms.setAttribute('title', 'Reply time of the last check');
-      g.appendChild(ms);
-      li.appendChild(g);
+    if (!r.graphs.parentNode) r.li.appendChild(r.graphs);
+    var sig = beatSig(beats);
+    if (sig === r.sig) return;              // nothing new: leave the graphs (and any slide) be
+    if (r.anim) finish(r.anim);
+    var lr = lastReply(m);
+    setText(r.ms, lr.text);
+    setAttr(r.ms, 'data-k', lr.k);
+    setAttr(r.strip, 'aria-label', stripLabel(m.kinds));
+
+    var prev = r.beats, prevScale = r.scale;
+    var n = newChecks(prev, beats);
+    var L = beats.length;
+    var scale = sparkScale(beats);
+    r.beats = beats; r.sig = sig; r.scale = scale;
+
+    var bars = r.track.children;
+    var pitch = bars.length > 1 ? bars[1].getBoundingClientRect().left - bars[0].getBoundingClientRect().left : 0;
+    if (!motion || n < 1 || n > SLIDE_MAX || prev.length !== L || L < 2 || !(pitch > 0)) {
+      setBars(r.track, m.kinds);
+      drawSpark(r.spark, beats, scale, L, 0);
+      return;
     }
-    return li;
+    // The bars that stay take their (possibly re-judged) kinds; the new
+    // ones go on past the right edge at the same width.
+    var gap = pitch - bars[0].getBoundingClientRect().width;
+    var i;
+    for (i = 0; i < L - n; i++) setAttr(bars[i + n], 'data-k', m.kinds[i]);
+    for (i = L - n; i < L; i++) {
+      var b = el('i');
+      b.setAttribute('data-k', m.kinds[i]);
+      r.track.appendChild(b);
+    }
+    r.track.style.width = ((L + n) * pitch - gap) + 'px';
+    var both = prev.concat(beats.slice(L - n));
+    r.spark.style.clipPath = 'inset(-4px 0)';
+    r.anim = {
+      step: function (t) {
+        r.track.style.transform = 'translateX(' + (-t * n * pitch).toFixed(2) + 'px)';
+        drawSpark(r.spark, both, mix(prevScale, scale, t), L, t * n);
+      },
+      end: function () {
+        for (var j = 0; j < n; j++) r.track.removeChild(r.track.firstChild);
+        r.track.style.transform = '';
+        r.track.style.width = '';
+        r.spark.style.clipPath = '';
+        drawSpark(r.spark, beats, scale, L, 0);
+        r.anim = null;
+      }
+    };
+    play(r.anim);
   }
 
   // ---- One panel body (the popover's and the sheet's) ----
   //
-  // Built once; render() rewrites the words and the rows in place, so a
-  // refresh never moves focus off the window switch or Close.
-  function Body(idPrefix, closable) {
+  // Built once; render() updates the words and the rows in place (rows are
+  // kept per service), so a refresh never moves focus off the window switch
+  // or Close, and the panel keeps its size while checks come in.
+  // onRetryGone: where focus goes when "Try again" had it and is no longer
+  // needed (the answer came back).
+  function Body(idPrefix, closable, onRetryGone) {
     var root = document.createDocumentFragment();
     var head = el('div', 'ws-sp-summary');
     head.appendChild(el('span', 'ws-sp-summary-dot'));
@@ -320,46 +459,86 @@
     var foot = el('p', 'ws-sp-foot');
     root.appendChild(foot);
 
-    function render(last) {
+    var rowsById = {};
+    var unknownSig = null;   // the names last listed while not answering
+
+    function renderUnknown(services) {
+      rowsById = {};
+      var sig = services.map(function (s) { return s.name || ''; }).join('\n');
+      if (unknownSig === sig && list.classList.contains('ws-sp-list-unknown')) return;
+      unknownSig = sig;
+      list.textContent = '';
+      list.classList.add('ws-sp-list-unknown');
+      list.setAttribute('aria-label', 'Services, last known names');
+      services.forEach(function (s) {
+        var li = el('li', 'ws-sp-row');
+        li.setAttribute('data-k', 'unknown');
+        li.appendChild(dot('unknown'));
+        var mid = el('div', 'ws-sp-who');
+        mid.appendChild(el('p', 'ws-sp-name', s.name || 'A service'));
+        mid.appendChild(el('p', 'ws-sp-state', 'No answer'));
+        li.appendChild(mid);
+        list.appendChild(li);
+      });
+    }
+
+    function renderRows(models, now, motion) {
+      if (list.classList.contains('ws-sp-list-unknown')) {
+        list.textContent = '';
+        list.classList.remove('ws-sp-list-unknown');
+        list.removeAttribute('aria-label');
+        unknownSig = null;
+      }
+      var seen = {};
+      var order = models.slice().sort(function (a, b) { return RANK[a.k] - RANK[b.k]; }).map(function (m, i) {
+        var id = m.service.id !== undefined && m.service.id !== null ? 'id:' + m.service.id : 'n:' + name(m) + ':' + i;
+        seen[id] = true;
+        var r = rowsById[id] || (rowsById[id] = Row());
+        updateRow(r, m, now, motion);
+        return r.li;
+      });
+      Object.keys(rowsById).forEach(function (id) {
+        if (seen[id]) return;
+        var r = rowsById[id];
+        if (r.anim) finish(r.anim);
+        if (r.li.parentNode) list.removeChild(r.li);
+        delete rowsById[id];
+      });
+      // Move rows only when the order changed (a service turned worse or better).
+      var same = list.children.length === order.length;
+      for (var i = 0; same && i < order.length; i++) same = list.children[i] === order[i];
+      if (!same) order.forEach(function (li) { list.appendChild(li); });
+    }
+
+    // last: the status answer (current()); motion: new checks may slide in.
+    function render(last, motion) {
       var now = Date.now();
       var services = (last && last.list) || [];
       var models = services.map(function (s) { return WS.statusModel(s); });
       var unavailable = !!(last && last.unavailable);
       var sum = summary(models, { unavailable: unavailable, lastGood: unavailable ? last.lastGood : 0 }, now);
-      head.setAttribute('data-tone', sum.tone);
-      title.textContent = sum.title;
-      sub.textContent = sum.sub;
-      checked.textContent = unavailable || !last || !last.at ? ''
-        : (last.cached ? 'Checking now' : (now - last.at < MIN ? 'Checked just now' : 'Checked ' + dur(now - last.at) + ' ago'));
+      setAttr(head, 'data-tone', sum.tone);
+      setText(title, sum.title);
+      setText(sub, sum.sub);
+      setText(checked, unavailable || !last || !last.at ? ''
+        : (last.cached ? 'Checking now' : (now - last.at < MIN ? 'Checked just now' : 'Checked ' + dur(now - last.at) + ' ago')));
       checked.hidden = !checked.textContent;
+      var retryHadFocus = document.activeElement === retry;
       retry.hidden = !unavailable;
       pick.hidden = unavailable || !models.length;
       segs.querySelectorAll('input').forEach(function (i) { i.checked = i.value === range; });
 
-      list.textContent = '';
-      list.classList.toggle('ws-sp-list-unknown', unavailable);
       if (unavailable) {
-        list.setAttribute('aria-label', 'Services, last known names');
-        services.forEach(function (s) {
-          var li = el('li', 'ws-sp-row');
-          li.setAttribute('data-k', 'unknown');
-          li.appendChild(dot('unknown'));
-          var mid = el('div', 'ws-sp-who');
-          mid.appendChild(el('p', 'ws-sp-name', s.name || 'A service'));
-          mid.appendChild(el('p', 'ws-sp-state', 'No answer'));
-          li.appendChild(mid);
-          list.appendChild(li);
-        });
-        foot.textContent = services.length ? 'Names are from the last good check.' : '';
+        renderUnknown(services);
+        setText(foot, services.length ? 'Names are from the last good check.' : '');
       } else {
-        list.removeAttribute('aria-label');
-        models.slice().sort(function (a, b) { return RANK[a.k] - RANK[b.k]; })
-          .forEach(function (m) { list.appendChild(row(m, now)); });
+        renderRows(models, now, motion);
         var n = models.reduce(function (most, m) { return Math.max(most, m.kinds.length); }, 0);
-        foot.textContent = n ? 'Bars show the last ' + n + ' checks, newest on the right.' : '';
+        setText(foot, n ? 'Bars show the last ' + n + ' checks, newest on the right.' : '');
       }
       list.hidden = !list.firstChild;
       foot.hidden = !foot.textContent;
+      if (retryHadFocus && retry.hidden && onRetryGone) onRetryGone();
     }
 
     return { fragment: root, render: render, close: close, retry: retry, retryText: retryText, segs: segs };
@@ -375,11 +554,13 @@
   }
 
   var bodies = [];
-  function renderAll() {
+  // motion: an answer just landed, so the open panel's new checks slide in.
+  function renderAll(motion) {
     var last = current();
-    bodies.forEach(function (b) { b.render(last); });
+    var slide = !!motion && !reduced();
+    bodies.forEach(function (b) { b.render(last, slide && b.shown()); });
   }
-  document.addEventListener('ws:status', function () { if (isOpen()) renderAll(); });
+  document.addEventListener('ws:status', function () { if (isOpen()) renderAll(true); });
 
   function wireBody(b) {
     b.segs.addEventListener('change', function (e) {
@@ -389,11 +570,13 @@
       saveRange(range);
       renderAll();
     });
+    // Busy is aria-disabled, not disabled: a disabled button drops focus.
     b.retry.addEventListener('click', function () {
-      b.retry.disabled = true;
+      if (b.retry.getAttribute('aria-disabled') === 'true') return;
+      b.retry.setAttribute('aria-disabled', 'true');
       b.retryText.textContent = 'Checking';
       WS.serviceStatus({ fresh: true }).then(function () {
-        b.retry.disabled = false;
+        b.retry.removeAttribute('aria-disabled');
         b.retryText.textContent = 'Try again';
         renderAll();
       });
@@ -401,16 +584,18 @@
     bodies.push(b);
   }
 
-  var refreshTimer = 0;
+  // While open: asked again every REFRESH_MS and the words kept current,
+  // both through WS.poll, so nothing runs in a background tab (it asks at
+  // once on coming back) and nothing outlives the panel's close.
+  var live = null;
   function startRefresh() {
     stopRefresh();
+    live = new AbortController();
     WS.serviceStatus();
-    refreshTimer = setInterval(function () {
-      if (document.visibilityState === 'visible') WS.serviceStatus();
-      else renderAll();
-    }, REFRESH_MS);
+    WS.poll(function () { WS.serviceStatus(); }, REFRESH_MS, live.signal);
+    WS.poll(function () { renderAll(); }, TICK_MS, live.signal);
   }
-  function stopRefresh() { clearInterval(refreshTimer); refreshTimer = 0; }
+  function stopRefresh() { if (live) { live.abort(); live = null; } }
 
   // ---- Desktop popover ----
   var pop = null, popBody = null;
@@ -423,7 +608,10 @@
     pop.id = 'wsStatusPop';
     pop.setAttribute('role', 'region');
     pop.setAttribute('aria-labelledby', 'wsStatusPopTitle');
-    popBody = Body('wsStatusPop', true);
+    popBody = Body('wsStatusPop', true, function () {
+      (popBody.close.hidden ? pill : popBody.close).focus({ preventScroll: true });
+    });
+    popBody.shown = function () { return popOpen; };
     pop.appendChild(popBody.fragment);
     wireBody(popBody);
     pill.parentNode.insertBefore(pop, pill.nextSibling);
@@ -530,7 +718,8 @@
     x.appendChild(icon('close'));
     head.appendChild(x);
     sheetPanel.appendChild(head);
-    sheetBody = Body('wsStatusSheet', false);
+    sheetBody = Body('wsStatusSheet', false, function () { x.focus({ preventScroll: true }); });
+    sheetBody.shown = sheetIsOpen;
     sheetPanel.appendChild(sheetBody.fragment);
     wireBody(sheetBody);
     sheet.appendChild(sheetPanel);

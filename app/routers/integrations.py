@@ -174,8 +174,13 @@ async def get_service_status(
     [] when Uptime Kuma is not set up. 503 when it is set up but did not
     answer: the pill then says the status is unavailable, never what it last
     saw. Monitors switched off in Settings are never sent.
+
+    The checks are live: read past Uptime Kuma's own minute-long cache and
+    shared for a few seconds across every viewer (read_monitors_live), since
+    the panel asks again every 15 s while it is open. The uptime badges keep
+    their own ten-minute cache.
     """
-    monitors = await uptime_kuma.read_monitors()
+    monitors = await uptime_kuma.read_monitors_live()
     if monitors is None:
         if uptime_kuma.configured():
             raise HTTPException(status_code=503, detail="Uptime Kuma is not answering right now")
