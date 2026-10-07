@@ -17,12 +17,15 @@
   // Where this site takes Sonarr's, Radarr's and Chaptarr's webhook calls
   // (app/routers/chaptarr_webhook.py): this base plus the card's id.
   var WEBHOOK_BASE = '/api/webhooks/';
+  // Kometa's address once its token is saved (and can't be shown again).
+  var TOKEN_HINT = '<your token>';
   var GROUPS = [
     ['Media server', ['plex']],
     ['Requests', ['seerr']],
     ['Books', ['chaptarr', 'kavita', 'nyt']],
     ['Calendar', ['sonarr', 'radarr']],
-    ['Monitoring', ['uptime_kuma', 'netdata']]
+    ['Monitoring', ['uptime_kuma', 'netdata']],
+    ['Event log', ['n8n', 'kometa']]
   ];
   var CARDS = {
     plex: { name: 'Plex', icon: 'play_circle', purpose: 'Shows what’s playing, and lets people sign in with Plex.',
@@ -60,7 +63,17 @@
       note: 'Choose which services appear on the home page in Pages → Home.' },
     netdata: { name: 'Netdata', icon: 'speed', purpose: 'CPU, memory and network gauges on the home page.',
       url: 'integration.netdata.url', placeholder: 'http://192.168.1.10:19999',
-      secret: ['integration.netdata.api_key', 'API token', 'Only needed if your Netdata asks for one.'], netdata: true }
+      secret: ['integration.netdata.api_key', 'API token', 'Only needed if your Netdata asks for one.'], netdata: true },
+    // Inbound only (app/routers/activity_webhooks.py): nothing here to test,
+    // so the card says whether its secret is saved, and has no Test.
+    n8n: { name: 'n8n', icon: 'hub', purpose: 'Adds a “Fixed” line to the event log when a workflow sorts out a reported problem.',
+      inbound: { key: 'integration.n8n.webhook_secret', label: 'Webhook secret', path: 'n8n',
+        help: 'n8n sends it in the X-Webhook-Secret header. Make one here, copy it, then save.',
+        steps: 'In n8n: an HTTP Request node, method POST, this address, a header X-Webhook-Secret = the secret, and a JSON body: {"kind": "issue_fixed", "title": …, "code": "S02E03" or null, "year": … or null, "problem": "subtitles", "audio", "video", "playback", "wrong_file" or "other", "ref": the issue id}.' } },
+    kometa: { name: 'Kometa', icon: 'photo_library', purpose: 'Adds a “posters updated” line to the event log after Kometa runs.',
+      inbound: { key: 'integration.kometa.webhook_token', label: 'Webhook token', path: 'kometa/', token: true,
+        help: 'Kometa can’t send a password, so the token is the end of the address. It shows only while it’s new: copy the address or the snippet before you save.',
+        steps: 'Paste the snippet into Kometa’s config.yml (replacing an empty webhooks: block). Only the end of each run is used.' } }
   };
   var CHAPTARR_KEYS = [
     ['integration.chaptarr.root_folder', 'eBook folder', 'folder'],
@@ -89,7 +102,9 @@
     choicesLoading: 'Loading choices from Chaptarr…',
     choicesLoaded: 'Choices come from your Chaptarr.',
     choicesFailed: 'Couldn’t load choices from Chaptarr. Type the values instead.',
-    typeInstead: 'Type the values instead.'
+    typeInstead: 'Type the values instead.',
+    inboundOn: 'Set up',
+    inboundOff: 'Not set up'
   };
 
   function keysOf(id) {
@@ -100,6 +115,7 @@
     if (c.chaptarr) CHAPTARR_KEYS.forEach(function (x) { keys.push(x[0]); });
     if (c.webhook) keys.push(c.webhook[0]);
     if (c.netdata) keys = keys.concat(NETDATA_KEYS);
+    if (c.inbound) keys.push(c.inbound.key);
     return keys;
   }
 
@@ -193,6 +209,7 @@
     mount: function (panel, api, ctx) {
       var signal = ctx.signal;
       var cards = {};
+      var inbound = {};
       var health = {};
       // Answers can land out of order (a slow first check, then a card's
       // re-check). Each request is numbered. A card takes the entry for
@@ -386,6 +403,66 @@
         body.appendChild(box);
       }
 
+      // A read-only field with a Copy button: an address or a snippet to paste elsewhere.
+      function copyField(fieldId, labelText, value, multiline) {
+        var wrap = el('div', 'min-w-0 ' + cls.fieldWidth);
+        var label = el('label', cls.label, labelText);
+        var row = el('div', 'flex flex-wrap items-start gap-2');
+        var field = el(multiline ? 'textarea' : 'input', cls.input + ' flex-1 min-w-0 basis-52' +
+          (multiline ? ' font-mono text-[13px] resize-none' : ''));
+        field.id = fieldId;
+        if (multiline) field.rows = 2; else field.type = 'text';
+        field.readOnly = true;
+        field.spellcheck = false;
+        field.value = value;
+        label.htmlFor = field.id;
+        var copy = el('button', cls.btnGhost);
+        copy.type = 'button';
+        copy.appendChild(icon('content_copy', 'text-base'));
+        copy.appendChild(document.createTextNode('Copy'));
+        copy.addEventListener('click', function () {
+          var done = function () { WSSettings.toast('Copied', 'ok'); };
+          var fallback = function () {
+            field.focus();
+            field.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            if (ok) done(); else WSSettings.toast('Couldn’t copy. Select it and copy by hand.', 'err');
+          };
+          if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+            window.navigator.clipboard.writeText(field.value).then(done, fallback);
+          } else {
+            fallback();
+          }
+        }, { signal: signal });
+        row.appendChild(field);
+        row.appendChild(copy);
+        wrap.appendChild(label);
+        wrap.appendChild(row);
+        return { root: wrap, field: field };
+      }
+
+      // An inbound card's address and secret. Kometa's token is part of its
+      // address: while a new one shows, the address and the config.yml
+      // snippet carry it; once saved they say where it goes instead.
+      function inboundFields(body, id, c) {
+        var w = c.inbound;
+        var base = window.location.origin + WEBHOOK_BASE + w.path;
+        var addr = copyField(id + 'WebhookUrl', 'Webhook address', w.token ? base + TOKEN_HINT : base);
+        var snippet = w.token ? copyField(id + 'Snippet', 'For config.yml', '', true) : null;
+        function show(token) {
+          if (!w.token) return;
+          var url = base + (token || TOKEN_HINT);
+          addr.field.value = url;
+          snippet.field.value = 'webhooks:\n  run_end: ' + url;
+        }
+        show('');
+        body.appendChild(addr.root);
+        body.appendChild(api.secret({ key: w.key, label: w.label, generate: 32, help: w.help, onReveal: show }));
+        if (snippet) body.appendChild(snippet.root);
+        body.appendChild(el('p', cls.help + ' ' + cls.fieldWidth, w.steps));
+      }
+
       function netdataFields(body) {
         var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         grid.appendChild(api.text({ key: 'netdata.cpu_label', label: 'CPU gauge label', placeholder: 'For example 8 cores' }));
@@ -444,7 +521,8 @@
         (c.extra || []).forEach(function (x) {
           grid.appendChild(api.text({ key: x[0], label: x[1], help: x[2], placeholder: x[3] }));
         });
-        body.appendChild(grid);
+        if (grid.childNodes.length) body.appendChild(grid);
+        if (c.inbound) inboundFields(body, id, c);
         if (c.chaptarr) chaptarrFields(body);
         if (c.webhook) webhookFields(body, id, c);
         if (c.netdata) netdataFields(body);
@@ -462,7 +540,7 @@
         // On a phone the result has its own line, reserved, so it lands without moving anything.
         var result = el('p', 'basis-full sm:basis-auto min-w-0 min-h-5 flex items-center gap-2 text-[13px] text-frosted-blue/70');
         result.setAttribute('aria-live', 'polite');
-        actions.appendChild(testBtn);
+        if (!c.inbound) actions.appendChild(testBtn);
         actions.appendChild(clearBtn);
         actions.appendChild(result);
         body.appendChild(actions);
@@ -535,6 +613,16 @@
           });
         }, { signal: signal });
 
+        if (c.inbound) {
+          // Not checked by the server: set up is a saved secret.
+          inbound[id] = function () {
+            var on = api.saved(c.inbound.key) === WSSettings.MASK;
+            light.className = 'ws-light ' + (on ? LIGHT.ok : LIGHT.unconfigured);
+            setText(reason, on ? MSG.inboundOn : MSG.inboundOff);
+          };
+          inbound[id]();
+          return root;
+        }
         cards[id] = { light: light, reason: reason, when: when, clearResult: clearResult };
         return root;
       }
@@ -556,6 +644,7 @@
       document.addEventListener('ws-settings:saved', function (e) {
         var keys = e.detail && Array.isArray(e.detail.keys) ? e.detail.keys : [];
         Object.keys(CARDS).forEach(function (id) {
+          if (inbound[id]) { if (touches(keys, keysOf(id))) inbound[id](); return; }
           if (touches(keys, keysOf(id))) { cards[id].clearResult(); refresh(id); }
         });
         if (chaptarr && touches(keys, CHAPTARR_CONN)) loadChoices();

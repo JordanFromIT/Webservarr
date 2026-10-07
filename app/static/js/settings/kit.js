@@ -543,7 +543,8 @@
 
       // o.generate (a length): the secret can be made here instead of typed, for
       // a key this site hands out (a webhook's password). It is shown, once, so
-      // it can be copied; after the save only "Saved" remains.
+      // it can be copied; after the save only "Saved" remains. o.onReveal(value)
+      // hears it while it shows, and '' once it is hidden again.
       var genBtn = null, copyBtn = null, generated = false;
       if (o.generate) {
         genBtn = el('button', cls.btnQuiet, 'Generate new secret');
@@ -609,6 +610,7 @@
         generated = false;
         input.type = 'password';
         if (copyBtn) copyBtn.classList.add('hidden');
+        if (o.onReveal) o.onReveal('');
       }
       function paint(v) {
         if (v === S.mask) { hide(); input.value = ''; mode('saved'); }
@@ -627,6 +629,7 @@
         stage(o.key, out, true);
         mode('input');
         if (copyBtn) copyBtn.classList.remove('hidden');
+        if (o.onReveal) o.onReveal(out);
         input.focus();
         input.select();
         UI.toast('Secret made. Copy it now: after you save it, it can’t be shown again.', 'info');
