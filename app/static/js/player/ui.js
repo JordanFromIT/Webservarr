@@ -159,8 +159,8 @@ export const DROP_GAP = 8;
 export const DROP_TOP = 10;            // under the top bar: room for the pointer
 export const DROP_BOTTOM = 14;         // so top + bottom keep 24 px clear
 export const DROP_CARET = 24;          // the pointer stays this far in from its corners
-export const WIN_IN_MS = 200;          // its open (opacity only with reduced motion)
-export const WIN_OUT_MS = 160;         // ...and its close
+export const WIN_IN_MS = 220;          // its open, every popover's (theme.css .ws-pop; opacity only with reduced motion)
+export const WIN_OUT_MS = 140;         // ...and its close
 export const SIZE_MS = 220;            // growing for a panel, and back
 // Places kept by the earlier movable window and bar: dropped on load.
 const OLD_KEYS = ['ws-player-window', 'ws-player-dock'];

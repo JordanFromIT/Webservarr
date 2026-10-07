@@ -565,8 +565,8 @@ html:not([data-netdata]) [data-ws-gauges] { display: none; }
  * but never runs past the window's right edge (status-panel.js sets
  * --ws-sp-room, the width from the pill to that edge less a margin). Past
  * the window's height it scrolls, and only then.
- * The surface is .ws-frost .ws-frost-read (status-panel.js adds them): the
- * page shows through, and the words keep 4.5:1 even over a white poster. */
+ * The surface is .ws-frost (status-panel.js adds it): the page shows
+ * through, and the words keep 4.5:1 even over a white poster. */
 .ws-sp-pop {
   position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: min(420px, var(--ws-sp-room, 420px));
   max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
@@ -819,6 +819,11 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
 
 /* ---- Soft open and close ----
  *
+ * One open and one close for every popover on the site: the service status
+ * panel's, which the bell panel, the account menu, Books' filter pickers,
+ * sort and Continue menus and the calendar's day panel all share (the
+ * player's drop-down runs the same motion as keyframes, its .is-window
+ * rules). Sheets slide up instead, on the same timing (.ws-sheet).
  * The account menu and the bell panel both show and hide
  * through display (Tailwind's .hidden), which cannot transition on its own.
  * Each carries two states: the closed one on the element itself (faded, and
@@ -855,9 +860,10 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
 
 /* The WSUI dialog (ui.js): the dim fades in and the box rises 6px with it;
    on close ui.js marks the overlay .is-closing (and inert, so nothing in it
-   can be clicked or focused meanwhile) and removes it after the fade. */
-.ws-dialog { transition: opacity 160ms ease-out; }
-.ws-dialog > .ws-dialog-box { animation: ws-dialog-in 180ms ease-out both; }
+   can be clicked or focused meanwhile) and removes it after the fade. The
+   timing is the popovers': 220ms in, 140ms out. */
+.ws-dialog { transition: opacity 220ms ease-out; }
+.ws-dialog > .ws-dialog-box { animation: ws-dialog-in 220ms ease-out both; }
 @keyframes ws-dialog-in {
   from { opacity: 0; transform: translateY(6px) scale(.985); }
   to   { opacity: 1; transform: none; }
@@ -865,8 +871,8 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
 @starting-style {
   .ws-dialog { opacity: 0; }
 }
-.ws-dialog.is-closing { opacity: 0; pointer-events: none; transition-duration: 130ms; }
-.ws-dialog.is-closing > .ws-dialog-box { transform: translateY(4px); transition: transform 130ms ease-out; }
+.ws-dialog.is-closing { opacity: 0; pointer-events: none; transition-duration: 140ms; }
+.ws-dialog.is-closing > .ws-dialog-box { transform: translateY(4px); transition: transform 140ms ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
   .ws-pop, .ws-dialog, .ws-dialog.is-closing > .ws-dialog-box { transition: none; }
@@ -970,8 +976,9 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
 
 /* More: a modal <dialog> the full size of the screen, holding a dim and a
    panel at the bottom. The panel slides up while the dim fades in; on close
-   both go, a little faster (shell.js SHEET_CLOSE_MS). While it is open the
-   page behind holds still. */
+   both go, a little faster (shell.js SHEET_CLOSE_MS waits it out). The
+   timing is the popovers' (.ws-pop): 220ms in, 140ms out. While it is open
+   the page behind holds still. */
 .ws-sheet {
   position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
   margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent;
@@ -981,7 +988,7 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
 html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
 .ws-sheet-scrim {
   position: absolute; inset: 0; background: rgb(var(--color-background) / .7);
-  opacity: 0; transition: opacity 160ms ease-out;
+  opacity: 0; transition: opacity 140ms ease-out;
 }
 .ws-sheet-panel {
   position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto; max-width: 36rem;
@@ -990,10 +997,10 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
   border-radius: 16px 16px 0 0; border-top: 1px solid rgb(var(--color-text) / .10);
   background: linear-gradient(rgb(var(--color-text) / .06), rgb(var(--color-text) / .06)), rgb(var(--color-background));
   box-shadow: 0 -16px 40px -20px var(--ws-shade);
-  transform: translateY(100%); transition: transform 160ms ease-in;
+  transform: translateY(100%); transition: transform 140ms ease-in;
 }
-.ws-sheet.is-open .ws-sheet-scrim { opacity: 1; transition-duration: 200ms; }
-.ws-sheet.is-open .ws-sheet-panel { transform: none; transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
+.ws-sheet.is-open .ws-sheet-scrim { opacity: 1; transition-duration: 220ms; }
+.ws-sheet.is-open .ws-sheet-panel { transform: none; transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
 .ws-sheet.is-closing { pointer-events: none; }
 .ws-sheet-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
@@ -1057,29 +1064,36 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
 
 /* ---- Frosted surfaces ----
  *
- * One recipe for the site's see-through surfaces, the Requests search bar's:
- * the secondary colour at 25% over a 24px blur of what is behind, a faint
- * edge in the text colour and a soft drop shadow. On the page colour it is a
- * deep pane; over posters their colours come through.
- * A surface that holds reading text adds .ws-frost-read: a floor, a dim of
- * the page colour under the tint, the least that keeps its words (alphas of
- * .85 and up) at 4.5:1 over a white poster, the brightest thing that can be
- * behind it. A sheet's scrim has dimmed the page by .7 already, so a frosted
- * sheet needs only .1 to come level. Over the page colour the floor changes
- * nothing, so every frosted surface matches there. A frosted sheet's head
- * paints nothing of its own, so it is one pane with the rest.
- * After .ws-sheet-panel and .ws-sheet-head, so a frosted sheet takes the frost.
+ * One recipe for everything that floats over the page (menus, popovers,
+ * panels, sheets, dialogs, toasts, the Requests search bar), and it is the
+ * sign-in card's glass (login.html .login-glass-card): the secondary colour
+ * at 10% over a 4px blur of what is behind, an edge in the accent at 20%
+ * and the card's deep shadow (Tailwind's shadow-2xl).
+ *
+ * The floor. The sign-in card sits on that page's dark overlay (the page
+ * colour at .4 to .9), so the art behind it is always dimmed first; menus
+ * float straight over posters, and the bare glass over a white poster is
+ * 1.1:1 for the text. So every frosted surface has a floor, a dim of the page
+ * colour under the tint: .73 is the least that keeps text at 70% of the text
+ * colour (the dimmest any of them uses) at 4.5:1 over white, the brightest
+ * thing that can be behind it. Over the page colour the floor changes
+ * nothing, so there every surface is exactly the sign-in card's glass.
+ * A sheet or a dialog sits on a scrim that has dimmed the page by .7
+ * already, so it needs only .1 more to come level: the same depth, not a
+ * second recipe. A frosted sheet's head paints nothing of its own, so it is
+ * one pane with the rest. After .ws-sheet-panel and .ws-sheet-head, so a
+ * frosted sheet takes the frost.
  */
 :root {
-  --ws-frost-tint: rgb(var(--color-secondary) / .25);
-  --ws-frost-blur: blur(24px);
-  --ws-frost-edge: rgb(var(--color-text) / .10);
-  --ws-frost-shadow:
-    0 10px 15px -3px color-mix(in srgb, var(--ws-shade) 30%, transparent),
-    0 4px 6px -4px color-mix(in srgb, var(--ws-shade) 30%, transparent);
+  --ws-frost-tint: rgb(var(--color-secondary) / .10);
+  --ws-frost-blur: blur(4px);
+  --ws-frost-edge: rgb(var(--color-accent) / .2);
+  --ws-frost-shadow: 0 25px 50px -12px rgb(0 0 0 / .25);
+  --ws-frost-floor: .73;
+  --ws-frost-floor-on-scrim: .1;
 }
 .ws-frost {
-  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor, 0));
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
   -webkit-backdrop-filter: var(--ws-frost-blur);
   backdrop-filter: var(--ws-frost-blur);
   border-color: var(--ws-frost-edge);
@@ -1088,9 +1102,9 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
      focused field keeps the shadow under its ring. */
   --tw-shadow: var(--ws-frost-shadow);
 }
-.ws-frost-read { --ws-frost-floor: .72; }
+:is(.ws-sheet-panel, .ws-dialog-box, [data-dialog-box]).ws-frost { --ws-frost-floor: var(--ws-frost-floor-on-scrim); }
 /* A sheet keeps its own upward shadow. */
-.ws-sheet-panel.ws-frost { --ws-frost-floor: .1; box-shadow: 0 -16px 40px -20px var(--ws-shade); }
+.ws-sheet-panel.ws-frost { box-shadow: 0 -16px 40px -20px var(--ws-shade); }
 .ws-sheet-panel.ws-frost > .ws-sheet-head { background: none; }
 
 /* ---- Scrollbars in popovers, menus, dialogs and sheets ----
@@ -2161,18 +2175,29 @@ html[data-player-full] #scrollDownHint { display: none; }
    pointer's --wsp-caret, a max-height down to 24px above the viewport's
    bottom); it fits its content up to that (a height only while it grows
    or shrinks). The sheet inside clips to its corners, so the pointer can
-   stand above. */
+   stand above. On the site's one frosted surface (the .ws-frost tokens),
+   and it opens and closes as every popover does (.ws-pop): faded, 6px up
+   and folded to its top edge, 220ms in and 140ms out (ui.js WIN_IN_MS,
+   WIN_OUT_MS), as keyframes since it is shown with [hidden]. The fold runs
+   24px wide of the box, so the pointer and the shadow are never cut. */
 .wsp-full.is-window {
   inset: auto; left: 0; top: 0; width: 400px; display: flex; flex-direction: column; overflow: visible;
-  color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid rgb(var(--color-text) / .14);
-  background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
-  box-shadow: 0 24px 56px -12px var(--ws-shade), 0 2px 8px var(--ws-shade);
-  transform-origin: var(--wsp-caret, 100%) 0;
+  color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid var(--ws-frost-edge);
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur);
+  backdrop-filter: var(--ws-frost-blur);
+  box-shadow: var(--ws-frost-shadow);
 }
-.wsp-full.is-window.is-opening { animation: wsp-win-in 200ms cubic-bezier(.2, .8, .2, 1) both; }
-.wsp-full.is-window.is-closing { animation: wsp-win-out 160ms ease-in both; pointer-events: none; }
-@keyframes wsp-win-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } }
-@keyframes wsp-win-out { to { opacity: 0; transform: translateY(-8px) scale(.96); } }
+.wsp-full.is-window.is-opening { animation: wsp-win-in 220ms ease-out both; }
+.wsp-full.is-window.is-closing { animation: wsp-win-out 140ms ease-out both; pointer-events: none; }
+@keyframes wsp-win-in {
+  from { opacity: 0; transform: translateY(-6px); clip-path: inset(-24px -24px 100% -24px); }
+  to { opacity: 1; transform: none; clip-path: inset(-24px -24px -24px -24px); }
+}
+@keyframes wsp-win-out {
+  from { opacity: 1; transform: none; clip-path: inset(-24px -24px -24px -24px); }
+  to { opacity: 0; transform: translateY(-6px); clip-path: inset(-24px -24px 100% -24px); }
+}
 /* Growing for a panel and back (ui.js sets the heights it runs between). */
 .wsp-full.is-window.is-sizing { transition: height 220ms cubic-bezier(.2, .8, .2, 1); }
 .wsp-full.is-window .wsp-sheet {
@@ -2180,17 +2205,15 @@ html[data-player-full] #scrollDownHint { display: none; }
   background: transparent; transform: none; transition: none;
 }
 .wsp-full.is-window .wsp-ambient, .wsp-full.is-window .wsp-grab, .wsp-full.is-window .wsp-panel-back { display: none; }
-/* Its pointer up to the pill: the top bar's own surface, its two outer
-   edges in the border; the sheet covers the inner half. */
+/* Its pointer up to the pill: the window's frost, its two outer edges in
+   the border, and only the half above the window's edge (clip-path), so the
+   see-through surface is never laid twice. */
 .wsp-drop-caret { display: none; }
 .wsp-full.is-window:not(.is-pip) .wsp-drop-caret {
   display: block; position: absolute; top: -7px; left: var(--wsp-caret, 50%); width: 12px; height: 12px; margin-left: -6px;
-  transform: rotate(45deg); border-radius: 2px 0 0 0;
-  border-top: 1px solid rgb(var(--color-text) / .14); border-left: 1px solid rgb(var(--color-text) / .14);
-  background:
-    linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)),
-    linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)),
-    rgb(var(--color-background));
+  transform: rotate(45deg); border-radius: 2px 0 0 0; clip-path: polygon(0 0, 100% 0, 0 100%);
+  border-top: 1px solid var(--ws-frost-edge); border-left: 1px solid var(--ws-frost-edge);
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
 }
 
 /* Its top bar: "Now playing", Playback settings, Pop out, then Collapse
@@ -2310,8 +2333,8 @@ html[data-player-full] #scrollDownHint { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .wsp-pill, .wsp-pill-open, .wsr-btn { transition: none; }
   .wsp-pill[data-state="playing"] .wsp-eq span { animation: none; }
-  .wsp-full.is-window.is-opening { animation: wsp-fade-in 160ms ease-out both; }
-  .wsp-full.is-window.is-closing { animation: wsp-fade-out 120ms ease-in both; }
+  .wsp-full.is-window.is-opening { animation: wsp-fade-in 220ms ease-out both; }
+  .wsp-full.is-window.is-closing { animation: wsp-fade-out 140ms ease-out both; }
   .wsp-full.is-window.is-sizing { transition: none; }
 }
 @keyframes wsp-fade-in { from { opacity: 0; } }

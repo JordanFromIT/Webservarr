@@ -39,7 +39,7 @@
   var TICK_MS = 5000;          // and its "Checked ..." and "Down for ..." words kept current
   var SLIDE_MS = 300;          // new checks slide in this long
   var SLIDE_MAX = 6;           // more new checks than this at once just show
-  var SHEET_CLOSE_MS = 200;    // the sheet's slide away (theme.css .ws-sheet.is-closing)
+  var SHEET_CLOSE_MS = 160;    // the sheet's 140ms slide away (theme.css .ws-sheet.is-closing), and a frame
   var SWIPE_CLOSE_PX = 80;
   var SWIPE_FLING = 0.5;
   var MIN = 60000;
@@ -604,7 +604,7 @@
   function isOpen() { return popOpen || sheetIsOpen(); }
 
   function buildPop() {
-    pop = el('div', 'ws-pop ws-sp-pop ws-frost ws-frost-read hidden');
+    pop = el('div', 'ws-pop ws-sp-pop ws-frost hidden');
     pop.id = 'wsStatusPop';
     pop.setAttribute('role', 'region');
     pop.setAttribute('aria-labelledby', 'wsStatusPopTitle');

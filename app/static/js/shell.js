@@ -575,7 +575,7 @@
   // Focus goes to its first row on open and back to More when it closes,
   // except for a row chosen: the new page takes focus. It slides up over a
   // dim (theme.css .ws-sheet); with reduced motion it appears and goes.
-  var SHEET_CLOSE_MS = 200;        // the slide away (theme.css .ws-sheet.is-closing)
+  var SHEET_CLOSE_MS = 160;        // the 140ms slide away (theme.css .ws-sheet.is-closing), and a frame
   var SWIPE_CLOSE_PX = 80;         // a swipe down this far closes it...
   var SWIPE_FLING = 0.5;           // ...or one this fast at the release (px per ms)
   var FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';

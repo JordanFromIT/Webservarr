@@ -138,7 +138,8 @@ const FILTERS = {
 const NAME_MAX = 200;              // the longest name the server takes
 const PICKER_SHOWN = 200;          // names drawn at once; typing narrows the rest
 const PICKER_WIDE = '(min-width: 640px)';   // a popover from here up, a bottom sheet below
-const SHEET_CLOSE_MS = 200;
+const SHEET_CLOSE_MS = 160;
+const POP_CLOSE_MS = 160;          // theme.css .ws-pop's 140ms close, and a frame
 const FORMAT_INFO = {
   ebook: { icon: 'menu_book', label: 'Ebook' },
   audio: { icon: 'headphones', label: 'Audiobook' }
@@ -558,6 +559,13 @@ function motionOff() {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** A popover (theme.css .ws-pop) just put in the page opens from its closed
+    state: drawn closed first, then .is-open, so the transition runs. */
+function popIn(node) {
+  void node.offsetWidth;
+  node.classList.add('is-open');
+}
+
 /** Run an animation, then `done` (at once where there is none). */
 function animate(node, frames, ms, done) {
   if (typeof node.animate !== 'function') { done(); return; }
@@ -601,9 +609,11 @@ function openContinueMenu(btn, run, signal) {
     if (same) return;
   }
   const ends = new AbortController();
-  const overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
+  // ws-pop / ws-frost (theme.css): every popover's open and close, the
+  // service status panel's, on the site's one frosted surface.
+  const overlay = el('div', 'fixed inset-0 z-[95]');
   overlay.setAttribute('data-continue-menu-layer', '');
-  const menu = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-max min-w-48 max-w-[calc(100vw-2rem)] rounded-2xl border p-1.5');
+  const menu = el('div', 'ws-pop ws-frost absolute w-max min-w-48 max-w-[calc(100vw-2rem)] rounded-2xl border p-1.5');
   menu.id = 'continueMenu';
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-labelledby', btn.id);
@@ -629,8 +639,8 @@ function openContinueMenu(btn, run, signal) {
     if (back && btn.isConnected) btn.focus({ preventScroll: true });
     if (motionOff()) { overlay.remove(); return; }
     overlay.inert = true;
-    overlay.classList.add('is-closing');
-    animate(overlay, [{ opacity: 1 }, { opacity: 0 }], 130, function () { overlay.remove(); });
+    menu.classList.remove('is-open');
+    window.setTimeout(function () { overlay.remove(); }, POP_CLOSE_MS);
   }
   continueMenu = { btn: btn, close: close };
 
@@ -655,6 +665,7 @@ function openContinueMenu(btn, run, signal) {
   menu.style.left = clamp(r.right - w, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
   if (window.innerHeight - r.bottom < 96 && r.top > 96) menu.style.bottom = (window.innerHeight - r.top + 6) + 'px';
   else menu.style.top = (r.bottom + 6) + 'px';
+  popIn(menu);
   btn.setAttribute('aria-expanded', 'true');
   btn.setAttribute('aria-controls', menu.id);
   item.focus({ preventScroll: true });
@@ -1920,10 +1931,11 @@ export async function mount(ctx) {
 
     let overlay, panel, head;
     if (isWide) {
-      // ws-dialog / ws-dialog-box (theme.css): the box fades and lifts in, as a dialog's does.
-      // Frosted like the Requests search bar (theme.css .ws-frost), with the floor for reading text.
-      overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
-      panel = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border');
+      // ws-pop / ws-frost (theme.css): every popover's open and close, the
+      // service status panel's, on the site's one frosted surface.
+      overlay = el('div', 'fixed inset-0 z-[95]');
+      overlay.setAttribute('data-pop-layer', '');
+      panel = el('div', 'ws-pop ws-frost absolute flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border');
       head = el('div', 'flex items-center gap-2 pb-2 pl-4 pr-2 pt-3');
       head.appendChild(el('h2', 'min-w-0 flex-1 text-[17px] font-semibold text-frosted-blue', info.label));
     } else {
@@ -2118,12 +2130,12 @@ export async function mount(ctx) {
       if (reduced()) { remove(); return; }
       overlay.inert = true;
       if (isWide) {
-        overlay.classList.add('is-closing');
+        panel.classList.remove('is-open');
       } else {
         overlay.classList.remove('is-open');
         overlay.classList.add('is-closing');
       }
-      window.setTimeout(remove, isWide ? 160 : SHEET_CLOSE_MS);
+      window.setTimeout(remove, isWide ? POP_CLOSE_MS : SHEET_CLOSE_MS);
     }
     picker = {
       overlay: overlay,
@@ -2132,7 +2144,7 @@ export async function mount(ctx) {
     };
 
     document.body.appendChild(overlay);
-    if (isWide) place(panel, btn);
+    if (isWide) { place(panel, btn); popIn(panel); }
     else {
       // From its closed place, then open: the panel slides up as the More sheet's does.
       void panel.offsetWidth;
@@ -2197,8 +2209,9 @@ export async function mount(ctx) {
     list.setAttribute('aria-labelledby', 'sortLabel');
     list.tabIndex = 0;
     if (isWide) {
-      overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
-      panel = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-56 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border');
+      overlay = el('div', 'fixed inset-0 z-[95]');
+      overlay.setAttribute('data-pop-layer', '');
+      panel = el('div', 'ws-pop ws-frost absolute w-56 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border');
       panel.appendChild(list);
     } else {
       overlay = el('div', 'ws-sheet z-[95]');
@@ -2302,9 +2315,12 @@ export async function mount(ctx) {
       const remove = function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
       if (reduced()) { remove(); return; }
       overlay.inert = true;
-      if (!isWide) overlay.classList.remove('is-open');
-      overlay.classList.add('is-closing');
-      window.setTimeout(remove, isWide ? 160 : SHEET_CLOSE_MS);
+      if (isWide) panel.classList.remove('is-open');
+      else {
+        overlay.classList.remove('is-open');
+        overlay.classList.add('is-closing');
+      }
+      window.setTimeout(remove, isWide ? POP_CLOSE_MS : SHEET_CLOSE_MS);
     }
     sortMenu = {
       overlay: overlay,
@@ -2312,7 +2328,7 @@ export async function mount(ctx) {
     };
 
     document.body.appendChild(overlay);
-    if (isWide) placeSort(panel, btn);
+    if (isWide) { placeSort(panel, btn); popIn(panel); }
     else {
       void panel.offsetWidth;
       overlay.classList.add('is-open');

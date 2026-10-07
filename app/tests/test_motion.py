@@ -237,7 +237,7 @@ class SoftOpenClose(unittest.TestCase):
         self.assertLess(inert[0].start(), back[0].start(), "the overlay must be inert before focus moves")
         self.assertIn("pointer-events: none", css_rule(THEME, ".ws-dialog.is-closing"))
         self.assertIn("'ws-dialog fixed inset-0", UI_JS)
-        self.assertIn("'ws-dialog-box w-full", UI_JS)
+        self.assertIn("'ws-dialog-box ws-frost w-full", UI_JS)
         self.assertEqual(keyframe_properties(THEME, "ws-dialog-in"), {"transform", "opacity"})
 
     def test_reduced_motion_makes_every_open_and_close_instant(self):

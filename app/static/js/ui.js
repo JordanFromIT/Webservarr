@@ -87,9 +87,9 @@
       toastBox.setAttribute('aria-live', 'polite');
       document.body.appendChild(toastBox);
     }
+    // On the site's one frosted surface (theme.css .ws-frost).
     var t = el('div', 'pointer-events-auto flex items-center gap-3 max-w-md px-4 py-3 rounded-2xl border ' +
-      'border-frosted-blue/10 bg-background-dark/90 backdrop-blur-md shadow-2xl text-sm font-semibold ' +
-      'ws-panel-in ' + TONE_TEXT[tone]);
+      'ws-frost text-sm font-semibold ws-panel-in ' + TONE_TEXT[tone]);
     if (tone === 'err') t.setAttribute('role', 'alert');
     t.appendChild(el('span', 'ws-light ' + TONE_LIGHT[tone]));
     t.appendChild(el('span', 'min-w-0', message));
@@ -170,11 +170,11 @@
     return new Promise(function (resolve) {
       var previous = document.activeElement;
       // ws-dialog / ws-dialog-box: theme.css fades the dim in and lifts the
-      // box 6px with it, and fades both out again on close.
+      // box 6px with it, and fades both out again on close. The box is the
+      // site's one frosted surface (ws-frost), floored for its scrim.
       var overlay = el('div', 'ws-dialog fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-4 ' +
         'ws-scrim backdrop-blur-sm');
-      var box = el('div', 'ws-dialog-box w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border ' +
-        'border-frosted-blue/10 bg-background-dark shadow-2xl p-6');
+      var box = el('div', 'ws-dialog-box ws-frost w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border p-6');
       box.setAttribute('role', opts.danger || opts.alert ? 'alertdialog' : 'dialog');
       box.setAttribute('aria-modal', 'true');
       dialogCount += 1;

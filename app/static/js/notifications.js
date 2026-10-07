@@ -213,16 +213,18 @@
     if (_dropdown) return;
 
     // ws-pop: theme.css fades it open (.is-open) and closed (.hidden); WS.popOpen
-    // and WS.popClose in shell.js switch the classes in the right order.
+    // and WS.popClose in shell.js switch the classes in the right order. The
+    // service status panel's open and close, on the site's one frosted
+    // surface (ws-frost).
     _dropdown = createEl('div',
-      'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
+      'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] ws-frost border rounded-xl z-50 flex flex-col'
     );
 
     // Header
     var header = createEl('div', 'flex items-center justify-between px-4 py-3 border-b border-steel-blue/20');
     var title = createEl('span', 'text-sm font-bold text-frosted-blue', 'Notifications');
     var headerActions = createEl('div', 'flex items-center gap-3');
-    var markAllBtn = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer', 'Mark all read');
+    var markAllBtn = createEl('button', 'text-label text-frosted-blue/80 hover:text-frosted-blue transition-colors cursor-pointer', 'Mark all read');
     markAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       markAllRead().then(function() {
@@ -230,7 +232,7 @@
         loadDropdownItems();
       });
     });
-    var clearAllBtn = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer', 'Clear all');
+    var clearAllBtn = createEl('button', 'text-label text-frosted-blue/80 hover:text-frosted-blue transition-colors cursor-pointer', 'Clear all');
     clearAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       fetch('/api/notifications', { method: 'DELETE' })
@@ -252,7 +254,7 @@
 
     // Footer
     var footer = createEl('div', 'px-4 py-3 border-t border-steel-blue/20');
-    var prefsLink = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer w-full text-center', 'Notification settings');
+    var prefsLink = createEl('button', 'text-label text-frosted-blue/80 hover:text-frosted-blue transition-colors cursor-pointer w-full text-center', 'Notification settings');
     prefsLink.addEventListener('click', function(e) {
       e.stopPropagation();
       closeDropdown();
@@ -275,28 +277,47 @@
     wrapper.appendChild(_dropdown);
   }
 
+  // The last list read, kept so the panel opens already full: it unfolds at
+  // its real height every time, as the status panel does, rather than
+  // opening short and growing when the list arrives. What the list says
+  // (not its "5m ago" words) decides whether a fresh read redraws it.
+  var _items = null;
+  var _itemsSig = '';
+
+  function itemsSig(notifications) {
+    return JSON.stringify(notifications.map(function(n) {
+      return [n.id, n.read, n.title, n.body, n.category, n.created_at];
+    }));
+  }
+
+  function renderItems(notifications) {
+    _itemsSig = itemsSig(notifications);
+    while (_notifList.firstChild) _notifList.removeChild(_notifList.firstChild);
+
+    if (notifications.length === 0) {
+      var empty = createEl('div', 'flex flex-col items-center justify-center py-8 text-frosted-blue/80');
+      var emptyIcon = createIcon('material-symbols-outlined text-3xl mb-2 opacity-50', 'notifications_none');
+      var emptyText = createEl('p', 'text-xs', 'No notifications');
+      empty.appendChild(emptyIcon);
+      empty.appendChild(emptyText);
+      _notifList.appendChild(empty);
+      return;
+    }
+
+    notifications.forEach(function(n) {
+      _notifList.appendChild(buildNotificationItem(n));
+    });
+  }
+
   function loadDropdownItems() {
     if (!_notifList) return;
 
     fetchNotifications().then(function(notifications) {
       if (notifications === null) return;   // leaving for /login
-      // Clear list
-      while (_notifList.firstChild) _notifList.removeChild(_notifList.firstChild);
-
-      if (notifications.length === 0) {
-        var empty = createEl('div', 'flex flex-col items-center justify-center py-8 text-steel-blue');
-        var emptyIcon = createIcon('material-symbols-outlined text-3xl mb-2 opacity-50', 'notifications_none');
-        var emptyText = createEl('p', 'text-xs', 'No notifications');
-        empty.appendChild(emptyIcon);
-        empty.appendChild(emptyText);
-        _notifList.appendChild(empty);
-        return;
-      }
-
-      notifications.forEach(function(n) {
-        var item = buildNotificationItem(n);
-        _notifList.appendChild(item);
-      });
+      _items = notifications;
+      // Unchanged: leave the list drawn, so an open panel never jumps.
+      if (_notifList.firstChild && itemsSig(notifications) === _itemsSig) return;
+      renderItems(notifications);
     });
   }
 
@@ -316,14 +337,14 @@
     // Title row
     var titleRow = createEl('div', 'flex items-center gap-2');
     var titleEl = createEl('span', 'text-xs font-bold text-frosted-blue truncate', n.title || 'Notification');
-    var timeEl = createEl('span', 'text-label text-frosted-blue/70 shrink-0 ml-auto', getTimeAgo(n.created_at, true));
+    var timeEl = createEl('span', 'text-label text-frosted-blue/80 shrink-0 ml-auto', getTimeAgo(n.created_at, true));
     titleRow.appendChild(titleEl);
     titleRow.appendChild(timeEl);
     content.appendChild(titleRow);
 
     // Body (truncated)
     if (n.body) {
-      var bodyEl = createEl('p', 'text-label text-frosted-blue/70 mt-0.5 line-clamp-2');
+      var bodyEl = createEl('p', 'text-label text-frosted-blue/80 mt-0.5 line-clamp-2');
       bodyEl.textContent = n.body.length > 100 ? n.body.substring(0, 100) + '...' : n.body;
       content.appendChild(bodyEl);
     }
@@ -370,6 +391,8 @@
   function openDropdown(bell) {
     buildDropdown();
     anchorDropdown(bell);
+    // The list read before is drawn now (its times fresh), then read again.
+    if (_items) renderItems(_items);
     loadDropdownItems();
     // Two steps with a reflow between (see WS.popOpen), so every open fades in.
     if (_dropdown) WS.popOpen(_dropdown);
@@ -393,6 +416,8 @@
 
   function openPreferencesModal() {
     if (_modal) {
+      clearTimeout(_modalHideTimer);
+      _modal.classList.remove('is-closing');
       _modal.style.display = '';
       _modalOpen = true;
       loadPreferences();
@@ -404,8 +429,9 @@
       return;
     }
 
-    // Build overlay
-    _modal = createEl('div', 'fixed inset-0 z-[60] flex items-center justify-center ws-scrim');
+    // Build overlay. ws-dialog / ws-dialog-box (theme.css): the box rises in
+    // as every dialog's does, each time it is shown, on the frosted surface.
+    _modal = createEl('div', 'ws-dialog fixed inset-0 z-[60] flex items-center justify-center ws-scrim');
     _modal.style.backdropFilter = 'blur(4px)';
 
     // Close on backdrop click
@@ -414,12 +440,12 @@
     });
 
     // Modal card
-    var card = createEl('div', 'bg-background-dark/95 border border-steel-blue/30 rounded-2xl shadow-2xl w-full max-w-md mx-4');
+    var card = createEl('div', 'ws-dialog-box ws-frost border rounded-2xl w-full max-w-md mx-4');
 
     // Header
     var header = createEl('div', 'flex items-center justify-between px-6 py-4 border-b border-steel-blue/20');
     var headerTitle = createEl('h3', 'text-lg font-bold text-frosted-blue', 'Notification Preferences');
-    var closeBtn = createEl('button', 'text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer');
+    var closeBtn = createEl('button', 'text-frosted-blue/80 hover:text-frosted-blue transition-colors cursor-pointer');
     closeBtn.setAttribute('aria-label', 'Close');
     var closeIcon = createIcon('material-symbols-outlined', 'close');
     closeBtn.appendChild(closeIcon);
@@ -470,7 +496,7 @@
     // Push notification toggle (conditional)
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       var divider = createEl('div', 'border-t border-steel-blue/20 pt-4 mt-2');
-      var pushLabel = createEl('p', 'text-label text-frosted-blue/70 font-semibold mb-3', 'Push notifications');
+      var pushLabel = createEl('p', 'text-label text-frosted-blue/80 font-semibold mb-3', 'Push notifications');
       divider.appendChild(pushLabel);
 
       var pushRow = createEl('div', 'flex items-center justify-between py-2');
@@ -537,9 +563,20 @@
     }
   }
 
+  // It fades out as a dialog does (theme.css .ws-dialog.is-closing), then
+  // hides; reduced motion hides it at once.
+  var _modalHideTimer = 0;
   function closePreferencesModal() {
-    if (_modal) _modal.style.display = 'none';
     _modalOpen = false;
+    if (!_modal || _modal.style.display === 'none') return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) { _modal.style.display = 'none'; return; }
+    _modal.classList.add('is-closing');
+    clearTimeout(_modalHideTimer);
+    _modalHideTimer = setTimeout(function() {
+      _modal.style.display = 'none';
+      _modal.classList.remove('is-closing');
+    }, 160);
   }
 
   function loadPreferences() {
@@ -1112,10 +1149,13 @@
     registerServiceWorker();
     syncPushSubscription();
 
-    // Fetch initial count
+    // Fetch initial count, then the list itself, so the first open of the
+    // panel is already full (see _items).
     fetchUnreadCount().then(function(count) {
       _lastCount = -1; // Ensure first update doesn't pulse
       updateBadge(count);
+      buildDropdown();
+      loadDropdownItems();
     });
 
     // Poll every 30 seconds

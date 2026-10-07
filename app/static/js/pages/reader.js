@@ -747,13 +747,24 @@ export async function mount(ctx) {
     panel.classList.toggle('closed', !open);
   }
 
-  function openSettings() { el('settingsPanel').classList.remove('hidden'); }
-  function closeSettings() { el('settingsPanel').classList.add('hidden'); }
+  // Opens and closes as every popover does (theme.css .ws-pop, shell.js
+  // WS.popOpen / WS.popClose); shown at once if the shell is not there.
+  var shellPop = window.WS && typeof window.WS.popOpen === 'function' ? window.WS : null;
+  function settingsOpen() { return !el('settingsPanel').classList.contains('hidden'); }
+  function openSettings() {
+    if (shellPop) shellPop.popOpen(el('settingsPanel'));
+    else el('settingsPanel').classList.remove('hidden');
+  }
+  function closeSettings() {
+    if (shellPop) shellPop.popClose(el('settingsPanel'));
+    else el('settingsPanel').classList.add('hidden');
+  }
 
   el('tocBtn').addEventListener('click', function () { toggleTOC(); }, { signal: signal });
   el('errorRetry').addEventListener('click', runRetry, { signal: signal });
   el('settingsBtn').addEventListener('click', function () {
-    el('settingsPanel').classList.toggle('hidden');
+    if (settingsOpen()) closeSettings();
+    else openSettings();
   }, { signal: signal });
 
   el('navPrev').addEventListener('click', function () { goToPage(current.page - 1); }, { signal: signal });

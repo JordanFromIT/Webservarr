@@ -344,8 +344,10 @@ export async function mount(ctx) {
     if (!hasContent) grid.appendChild(emptyNote('py-12', 'Nothing is coming this month.'));
   }
 
+  // The panel opens and closes as every popover does (theme.css .ws-pop,
+  // WS.popOpen / WS.popClose), filled before it opens so it unfolds at its
+  // full height.
   function showDetailPanel(dateStr, releases) {
-    panel.classList.remove('hidden');
     const parts = dateStr.split('-');
     const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
     detailLabel.textContent = DAY_NAMES[d.getDay()] + ', ' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
@@ -353,9 +355,11 @@ export async function mount(ctx) {
     clearChildren(detailList);
     if (releases.length === 0) {
       detailList.appendChild(emptyNote('py-4', 'Nothing is coming on this day.'));
+      WS.popOpen(panel);
       return;
     }
     releases.forEach(function (release) { detailList.appendChild(buildDetailCard(release)); });
+    WS.popOpen(panel);
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -378,7 +382,7 @@ export async function mount(ctx) {
   function closeDetailPanel() {
     const was = selectedDate;
     selectedDate = null;
-    panel.classList.add('hidden');
+    WS.popClose(panel);
     const byDate = grouped[monthKey()];
     if (byDate) buildGrid(byDate);   // clears the selection highlight
     if (panelOpener && was) {
@@ -452,7 +456,7 @@ export async function mount(ctx) {
     if (month < 0) { month = 11; year -= 1; }
     else if (month > 11) { month = 0; year += 1; }
     selectedDate = null;
-    panel.classList.add('hidden');
+    WS.popClose(panel);
     renderMonth();
   }
 
@@ -461,7 +465,7 @@ export async function mount(ctx) {
     year = today.getFullYear();
     month = today.getMonth();
     selectedDate = null;
-    panel.classList.add('hidden');
+    WS.popClose(panel);
     renderMonth();
   }
 

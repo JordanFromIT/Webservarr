@@ -677,9 +677,9 @@
   function buildBar() {
     bar = document.getElementById('settingsSaveBar');
     // Its bottom offset is theme.css's (.ws-savebar): above the player, if one shows.
+    // It floats over the page, so it is on the site's one frosted surface (.ws-frost).
     bar.className = 'ws-savebar is-hidden fixed z-[60] inset-x-0 lg:inset-x-auto lg:right-8 ' +
-      'flex items-center gap-3 px-4 py-3 lg:pl-5 border-t lg:border border-frosted-blue/10 lg:rounded-2xl ' +
-      'bg-background-dark/85 backdrop-blur-md shadow-2xl';
+      'flex items-center gap-3 px-4 py-3 lg:pl-5 border-t lg:border lg:rounded-2xl ws-frost';
     bar.setAttribute('role', 'region');
     bar.setAttribute('aria-label', 'Unsaved changes');
     bar.inert = true;

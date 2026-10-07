@@ -1922,11 +1922,13 @@ await run('filters: on a phone the picker is a bottom sheet; wider, a popover un
   pickerKit(u, { wide: true });
   await u.mount();
   u.click('[data-filter="author"]');
-  const pop = u.doc.body.querySelector('.ws-dialog .ws-dialog-box');
+  const pop = u.doc.body.querySelector('[data-pop-layer] > .ws-pop');
   check('a popover placed by the button', !!pop && /px$/.test(pop.style.top || pop.style.bottom) && /px$/.test(pop.style.left));
-  check('frosted like the Requests search bar, floored for reading', pop.classList.contains('ws-frost') && pop.classList.contains('ws-frost-read') && !pop.classList.contains('bg-background-dark'));
+  check('it opens as every popover does (.ws-pop drawn closed, then .is-open)', pop.classList.contains('is-open') && !pop.classList.contains('ws-dialog-box'));
+  check('on the shared frosted surface, no variant', pop.classList.contains('ws-frost') && !pop.classList.contains('ws-frost-read') && !pop.classList.contains('bg-background-dark'));
   u.doc.body.querySelector('[aria-label="Close"]').click();
-  check('Close closes it', !u.doc.body.querySelector('.ws-dialog'));
+  await u.clock.advance(200);
+  check('Close closes it', !u.doc.body.querySelector('[data-pop-layer]'));
 });
 
 await run('filters: the picker while its list loads, when it fails, and Try again', async (make) => {
@@ -1971,7 +1973,7 @@ await run('filters: leaving the page takes an open picker with it', async (make)
   await t.clock.advance(50);
   check('it is open', !!t.q('[role="listbox"]'));
   t.ctl.abort();
-  check('and gone with the page', !t.q('[role="listbox"]') && !t.doc.body.querySelector('.ws-dialog'));
+  check('and gone with the page', !t.q('[role="listbox"]') && !t.doc.body.querySelector('[data-pop-layer]'));
 });
 
 await run('Group series: a switch beside the sort; off lists every book with its series and number, and is remembered', async (make) => {
@@ -2034,7 +2036,8 @@ await run('sort: a button that opens a listbox of the orders, with the one in us
   check('open: the list, on the shared stack, takes the focus', !!list && list.getAttribute('role') === 'listbox' && kit.opened === 1 && t.doc.activeElement === list);
   check('the button points at it', btn.getAttribute('aria-expanded') === 'true' && btn.getAttribute('aria-controls') === 'booksSortList');
   check('the popover is the list itself, not a dialog around it', !list.parentNode.hasAttribute('role') && !list.parentNode.hasAttribute('aria-modal'));
-  check('on the shared frosted surface', list.parentNode.classList.contains('ws-frost'));
+  check('on the shared frosted surface, opening as every popover does', list.parentNode.classList.contains('ws-frost') &&
+    list.parentNode.classList.contains('ws-pop') && list.parentNode.classList.contains('is-open'));
   const opts = sortOptions(t);
   check('the order in use is selected and highlighted', opts[0].getAttribute('aria-selected') === 'true' && list.getAttribute('aria-activedescendant') === opts[0].id &&
     !opts[0].querySelector('.invisible') && !!opts[1].querySelector('.invisible'));
@@ -2063,7 +2066,7 @@ await run('sort: a button that opens a listbox of the orders, with the one in us
   sortKey(t, 'Tab');
   check('Tab closes it', !t.q('#booksSortList'));
   btn.click();
-  t.doc.body.querySelector('.ws-dialog').click();
+  t.doc.body.querySelector('[data-pop-layer]').click();
   check('a click outside closes it', !t.q('#booksSortList'));
 });
 

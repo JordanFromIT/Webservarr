@@ -174,9 +174,11 @@ class NoGlassOnFlatContent(unittest.TestCase):
         for rel in ("issues.html", "js/pages/issues.js", "tickets.html", "js/pages/tickets.js",
                     "requests.html", "js/pages/requests.js", "js/pages/news.js"):
             self.assertNotIn("glass-card", read(rel), rel)
+        # The calendar's day panel floats over the grid: the site's one
+        # frosted surface (ws-frost, app/tests/test_frost.py), not the old glass.
         cal = read("calendar.html")
-        self.assertEqual(cal.count("glass-card"), 1)
-        self.assertRegex(cal, r'<section id="dayDetailPanel"[^>]*glass-card')
+        self.assertEqual(cal.count("glass-card"), 0)
+        self.assertRegex(cal, r'<section id="dayDetailPanel"[^>]*\bws-frost\b')
 
 
 class EveryCardIsAControl(unittest.TestCase):
