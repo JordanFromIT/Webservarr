@@ -185,8 +185,9 @@ class MovedRoutes(PageRoutesBase):
             r = self.get(path, MEMBER_SESSION, values)
             found = re.findall(r'data-ws-dep="([^"]+)"', r.text)
             self.assertEqual(found, deps, path)
+            # Each file has its own stamp (/books/7's page module is books.js itself).
             module = re.findall(r'data-ws-module="([^"]+)"', r.text)[0]
-            self.assertNotEqual(module.split("?v=")[1], want.split("?v=")[1], "each file has its own stamp")
+            self.assertEqual(module.split("?v=")[1], pages.asset_stamp(module.split("?v=")[0]))
             self.assertNotEqual(book.split("?v=")[1], want.split("?v=")[1], "each file has its own stamp")
 
     def test_home_loads_no_books_module(self):
