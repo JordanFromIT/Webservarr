@@ -61,6 +61,11 @@ class RedisIsolation(unittest.TestCase):
                              cwd=ROOT, check=True, capture_output=True, text=True, timeout=60)
         self.assertEqual(out.stdout.strip(), settings.redis_url)
 
+    def test_the_guard_other_tests_use(self):
+        from app.tests import is_test_redis
+        self.assertTrue(is_test_redis(settings.redis_url))
+        self.assertFalse(is_test_redis("redis://localhost:6379/0"))
+
     def test_the_url_rewrite(self):
         from app.tests import isolated_redis_url
         self.assertEqual(isolated_redis_url("redis://localhost:6379/0"), "redis://localhost:6379/15")

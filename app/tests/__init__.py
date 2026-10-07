@@ -37,6 +37,12 @@ def isolated_redis_url(url: str) -> str:
     return base + sep + query
 
 
+def is_test_redis(url: str) -> bool:
+    """True when ``url`` is this run's own Redis, never the instance's."""
+    own = os.environ.get(OWN_REDIS_ENV)
+    return url == own if own else url == isolated_redis_url(url)
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

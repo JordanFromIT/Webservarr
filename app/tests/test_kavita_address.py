@@ -28,7 +28,7 @@ try:
     from app.auth import KAVITA_SESSION_FIELDS, session_manager
     from app.config import settings
     from app.routers import kavita_proxy
-    from app.tests import helpers
+    from app.tests import helpers, is_test_redis
     HAVE_APP = True
 except Exception:  # pragma: no cover
     HAVE_APP = False
@@ -59,7 +59,7 @@ def run(coro_fn, *args):
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class KavitaAddressBase(unittest.TestCase):
     def setUp(self):
-        self.assertTrue(settings.redis_url.endswith("/15"), settings.redis_url)   # never the live db
+        self.assertTrue(is_test_redis(settings.redis_url), settings.redis_url)   # never the live db
         self.Session = helpers.make_sessionmaker()
         self.db = self.Session()
         helpers.put(self.db, "integration.kavita.url", KAVITA_A)
