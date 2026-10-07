@@ -219,7 +219,7 @@
     box.setAttribute('aria-describedby', help.id);
     box.appendChild(legend);
     box.appendChild(help);
-    var row = el('div', 'grid grid-cols-3 gap-2 mt-3 max-w-sm');
+    var spots = el('div', 'grid grid-cols-3 gap-2 mt-3 max-w-sm');
     var inputs = [];
     choices.forEach(function (c) {
       var label = el('label', 'block cursor-pointer');
@@ -243,9 +243,9 @@
       label.appendChild(face);
       input.addEventListener('change', function () { if (input.checked) api.set(CARD_KEY, c); }, { signal: signal });
       inputs.push(input);
-      row.appendChild(label);
+      spots.appendChild(label);
     });
-    box.appendChild(row);
+    box.appendChild(spots);
     var err = el('p', cls.error + ' hidden');
     err.setAttribute('role', 'alert');
     box.appendChild(err);

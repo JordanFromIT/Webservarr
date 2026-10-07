@@ -1312,8 +1312,10 @@ class PagesTab(unittest.TestCase):
         self.assertEqual(len(re.findall(r"\bfunction commit\(", code)), 1)
         commit = pages_mount_part(r"\n      function commit\(")
         start = code.index(commit)
-        for m in re.finditer(r"\bapi\.set\(", code):
+        # The one other write is the login card position picker's, by its own key.
+        for m in re.finditer(r"\bapi\.set\((?!CARD_KEY, )", code):
             self.assertTrue(start < m.start() < start + len(commit), "pages.order is staged outside commit()")
+        self.assertEqual(len(re.findall(r"\bapi\.set\(CARD_KEY, ", code)), 1)
         self.assertIn("api.set(ORDER_KEY, ", commit)
         self.assertTrue(live_matches(src, r"var ORDER_KEY = 'pages\.order';"))
         self.assertNotIn("stageDefaults", code)

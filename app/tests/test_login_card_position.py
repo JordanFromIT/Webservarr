@@ -33,7 +33,8 @@ def login(**settings):
 def login_style():
     m = re.search(r"<style>(.*?)</style>", static_text("login.html"), re.S)
     assert m, "no style block"
-    return re.sub(r"\s+", " ", m.group(1))
+    css = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)   # rules only, not the comments about them
+    return re.sub(r"\s+", " ", css)
 
 
 def wide_block(css):
