@@ -122,7 +122,8 @@
  * reach the page, a click outside leaves it open, and so do scrolling and
  * soft navigation. Its panels (Chapters, Speed, Sleep, History, Playback
  * settings) open below the player and close again from the same button; one
- * open, the panel grows to the viewport's height under the top bar so the
+ * open, the panel grows to the viewport's height under the top bar and the
+ * player above it folds to its cover, title and actions (theme.css) so the
  * list has room, and shrinks back when it closes (smoothly; at once with
  * reduced motion). The pill again, the panel's collapse button or Escape
  * (a panel first, then the player) collapse it to the pill, focus with it;

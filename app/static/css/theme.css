@@ -2130,9 +2130,14 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window .wsp-action[aria-expanded="true"] { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .35); }
 
 /* A panel opens below the player and closes again. The drop-down is then
-   as tall as the viewport allows and the panel takes what the player
-   leaves (at least 200px, else the whole column scrolls); only its list
-   scrolls. */
+   as tall as the viewport allows, the player above it folds to its cover,
+   title and row of actions (Play stays on the pill, the current chapter is
+   marked in Chapters), and the panel takes the rest (at least 200px, else the
+   whole column scrolls); only its list scrolls. */
+.wsp-full.is-window[data-view] .wsp-scrub,
+.wsp-full.is-window[data-view] .wsp-left,
+.wsp-full.is-window[data-view] .wsp-controls { display: none; }
+.wsp-full.is-window[data-view] .wsp-actions { margin-top: 12px; }
 .wsp-full.is-window .wsp-side { display: none; }
 .wsp-full.is-window[data-view] .wsp-side {
   display: flex; flex: 1 1 auto; min-height: 200px; flex-direction: column;
