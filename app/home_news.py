@@ -40,7 +40,7 @@ BODY_CLASSES = "text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none 
 
 # pages/home.js: NEWS_EMPTY_HTML.
 NEWS_EMPTY_HTML = ('<div class="text-center text-steel-blue py-8">'
-                   '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>'
+                   '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">newspaper</span>'
                    '<p>No news posts yet.</p></div>')
 
 
@@ -146,12 +146,12 @@ def render_news_card(post: dict, now_ms: int, expanded: bool = False) -> str:
         '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold '
         'text-steel-blue hover:text-frosted-blue transition-colors">'
         '<span data-news-toggle-text>Read more</span>'
-        '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>'
+        '<span class="material-symbols-outlined text-sm transition-transform" aria-hidden="true" data-news-chevron>expand_more</span>'
         '</button>')
 
     return ('<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent
             + ('' if is_open else ' opacity-80') + '">'
-            + '<span class="material-symbols-outlined ' + icon_color + ' mt-0.5 shrink-0">' + icon + '</span>'
+            + '<span class="material-symbols-outlined ' + icon_color + ' mt-0.5 shrink-0" aria-hidden="true">' + icon + '</span>'
             + '<div class="flex-1 min-w-0">'
             + '<div class="flex items-start justify-between gap-3">'
             + '<div class="flex items-start gap-2 min-w-0">'

@@ -57,13 +57,13 @@ function buildSearchResultItem(item, index) {
     fallback.className = 'w-10 h-[60px] rounded-md bg-frosted-blue/5 items-center justify-center shrink-0';
     fallback.style.display = 'none';
     fallback.setAttribute('data-poster-fallback', '');
-    fallback.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
+    fallback.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span>';
     row.appendChild(img);
     row.appendChild(fallback);
   } else {
     var placeholder = document.createElement('div');
     placeholder.className = 'w-10 h-[60px] rounded-md bg-frosted-blue/5 flex items-center justify-center shrink-0';
-    placeholder.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
+    placeholder.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span>';
     row.appendChild(placeholder);
   }
 

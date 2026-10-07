@@ -57,6 +57,7 @@ function el(tag, cls, text) {
 
 function icon(name, cls) {
   var s = el('span', 'material-symbols-outlined ' + (cls || ''));
+  s.setAttribute('aria-hidden', 'true');
   s.textContent = name;
   return s;
 }

@@ -79,7 +79,7 @@ function renderCard(post, isAdmin) {
         : '') +
       '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors">' +
         '<span data-news-toggle-text>Read more</span>' +
-        '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
+        '<span class="material-symbols-outlined text-sm transition-transform" aria-hidden="true" data-news-chevron>expand_more</span>' +
       '</button>' +
     '</div>' +
   '</div>';
@@ -87,14 +87,14 @@ function renderCard(post, isAdmin) {
 
 function emptyState() {
   return '<div class="text-center text-steel-blue py-12">' +
-    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">newspaper</span>' +
     '<p>No news posts yet.</p>' +
   '</div>';
 }
 
 function errorState() {
   return '<div class="text-center text-steel-blue py-12">' +
-    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">cloud_off</span>' +
     '<p>Could not load news right now.</p>' +
     '<p class="text-label opacity-60 mt-1">Try refreshing the page.</p>' +
   '</div>';

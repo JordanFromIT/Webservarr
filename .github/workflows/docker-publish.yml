@@ -121,6 +121,7 @@ jobs:
           node app/tests/js/home_push_banner.mjs
           node app/tests/js/requests_page.mjs
           node app/tests/js/login_status.mjs
+          node app/tests/js/script_icons.mjs
 
   build-and-push:
     needs: [test, js-checks]

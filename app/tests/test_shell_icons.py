@@ -10,8 +10,10 @@ keeps a name of its own (aria-label), so hiding the icon never leaves it
 nameless.
 """
 import os
+import re
 import unittest
 from html.parser import HTMLParser
+from pathlib import Path
 
 from app import pages
 from app.tests.test_pages import ADMIN, MEMBER, branding, render, static_text
@@ -116,6 +118,60 @@ class ShellIcons(unittest.TestCase):
         out = render(name="settings", page=static_text("settings.html"))
         s = scan(out, roots={"settingsTabs", "settingsTabHintLeft", "settingsTabHintRight"})
         self.assert_icons_silent(s, "Settings tab strip")
+
+
+JS_DIR = Path(__file__).resolve().parent.parent / "static" / "js"
+# An icon written as markup in a script: its start tag, which may be built by
+# concatenation ('<span class="material-symbols-outlined ' + c + '">') and may
+# run on to the next line (then the attribute is on this one).
+_ICON_TAG = re.compile(r"<span\b[^>]*" + ICON_CLASS + r"[^>]*(?:>|$)")
+_HIDES = re.compile(r"""setAttribute\(\s*['"]aria-hidden['"]\s*,\s*['"]true['"]\s*\)|['"]aria-hidden['"]\s*:\s*['"]true['"]""")
+_HELPER = re.compile(r"function\s+(\w+)\s*\(")
+# Class swaps on an icon a hiding helper already made (the attribute stays).
+_RESTYLES = {
+    ("pages/book.js", "glyph.className ="),          # the rating stars, made by icon()
+    ("settings/books.js", "rebuildIcon.className ="),  # made by WSUI.icon
+}
+
+
+class ScriptBuiltIcons(unittest.TestCase):
+    """The icons the scripts build (the bell's panel and settings, the status
+    panel, the router's error state, the pages' empty and error states, the
+    setup wizard, the wiki) are aria-hidden too, so a screen reader does not
+    read "notifications_active" before the words beside them.
+
+    A source scan, so it covers every renderer, including ones no runtime
+    test reaches: each icon a script writes as markup carries
+    aria-hidden="true" in its tag, and each one it creates as an element gets
+    the attribute within the next lines or comes from a helper in the same
+    file that sets it. The runtime checks (app/tests/js/script_icons.mjs,
+    status_panel.mjs, router_runtime.mjs) hold the rendered DOM to the same."""
+
+    def test_every_script_built_icon_is_hidden(self):
+        spoken = []
+        files = sorted(JS_DIR.rglob("*.js"))
+        self.assertGreater(len(files), 20, "the scan is not looking at the scripts")
+        for path in files:
+            rel = path.relative_to(JS_DIR).as_posix()
+            lines = path.read_text(encoding="utf-8").splitlines()
+            # Helpers that set the attribute on what they make: function f(...)
+            # with a hiding setAttribute in its first lines.
+            hiders = {m.group(1) for i, line in enumerate(lines) for m in [_HELPER.search(line)]
+                      if m and any(_HIDES.search(x) for x in lines[i:i + 5])}
+            for i, line in enumerate(lines):
+                code = line.strip()
+                if ICON_CLASS not in code or code.startswith(("//", "*", "/*")):
+                    continue
+                tags = _ICON_TAG.findall(code)
+                if tags:
+                    spoken += [f"{rel}:{i + 1}" for t in tags if 'aria-hidden="true"' not in t]
+                    continue
+                if (_HIDES.search(" ".join(lines[i:i + 4]))
+                        or any(re.search(r"\b" + h + r"\(", code) for h in hiders)
+                        or any(rel == f and code.startswith(w) for f, w in _RESTYLES)):
+                    continue
+                spoken.append(f"{rel}:{i + 1}")
+        self.assertEqual(spoken, [], "script-built icons a screen reader would read out")
 
 
 if __name__ == "__main__":

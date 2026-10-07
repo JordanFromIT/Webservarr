@@ -299,7 +299,7 @@ function discoverStatusLabel(status) {
 // carries data-fallback: the page's capturing error listener hides one that
 // fails and shows the placeholder beside it.
 function posterMarkup(posterUrl, alt, imgClass, iconClass, mediaType) {
-  var glyph = '<span class="material-symbols-outlined ' + iconClass + ' text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span>';
+  var glyph = '<span class="material-symbols-outlined ' + iconClass + ' text-steel-blue/40" aria-hidden="true">' + mediaTypeIcon(mediaType) + '</span>';
   if (!posterUrl) {
     return '<div class="absolute inset-0 flex items-center justify-center poster-placeholder">' + glyph + '</div>';
   }

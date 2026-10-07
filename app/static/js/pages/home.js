@@ -34,7 +34,7 @@ const NEWS_FRESH_MS = 72 * 60 * 60 * 1000; // under 3 days reads as "new"
 
 // With no posts. The server writes the same (app/home_news.py).
 const NEWS_EMPTY_HTML = '<div class="text-center text-steel-blue py-8">' +
-    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">newspaper</span>' +
     '<p>No news posts yet.</p></div>';
 
 function newsSettings(branding) {
@@ -96,7 +96,7 @@ function renderNewsCard(post, expanded) {
         ? ''
         : '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-frosted-blue transition-colors">' +
             '<span data-news-toggle-text>Read more</span>' +
-            '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
+            '<span class="material-symbols-outlined text-sm transition-transform" aria-hidden="true" data-news-chevron>expand_more</span>' +
           '</button>';
 
     // min-w-0 is load-bearing: the card is a grid item, and grid items default
@@ -109,7 +109,7 @@ function renderNewsCard(post, expanded) {
     // post is the height of its skeleton card instead of shrinking under it;
     // an open card is as tall as its words, with no gap under the title.
     return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + (open ? '' : ' opacity-80') + '">' +
-        '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
+        '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0" aria-hidden="true">' + icon + '</span>' +
         '<div class="flex-1 min-w-0">' +
             '<div class="flex items-start justify-between gap-3">' +
                 '<div class="flex items-start gap-2 min-w-0">' +
@@ -187,7 +187,7 @@ function streamsStateRow(label) {
                 STREAM_CARD_SHAPE +
             '</div>' +
             '<div class="absolute inset-0 flex flex-col items-center justify-center text-center text-steel-blue">' +
-                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>' +
+                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">play_circle</span>' +
                 '<p>' + label + '</p>' +
             '</div>' +
         '</div>';
@@ -282,7 +282,7 @@ function requestsStateRow(label) {
             '<div class="size-8 shrink-0"></div>' +
             '<div class="min-w-0 flex-1"><p class="truncate">&nbsp;</p>' +
                 '<div class="@md:hidden mt-1"><span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold leading-none">' +
-                    '<span class="material-symbols-outlined text-[13px] leading-none">movie</span><span>Movie</span></span></div>' +
+                    '<span class="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">movie</span><span>Movie</span></span></div>' +
             '</div>' +
         '</div>';
     let rows = shape(false);
@@ -290,7 +290,7 @@ function requestsStateRow(label) {
     return '<tr><td colspan="3" class="p-0"><div class="grid">' +
             '<div class="col-start-1 row-start-1 invisible" aria-hidden="true">' + rows + '</div>' +
             '<div class="col-start-1 row-start-1 flex flex-col items-center justify-center px-6 text-center text-steel-blue">' +
-                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>' +
+                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">shopping_cart</span>' +
                 '<p>' + label + '</p>' +
             '</div>' +
         '</div></td></tr>';
@@ -333,7 +333,7 @@ function renderRequestRow(req) {
     const type = WS.mediaType(req.media_type || 'movie');
     const thumbInner = posterUrl
         ? ''
-        : `<span class="material-symbols-outlined text-steel-blue/50 text-base leading-none">${type.icon}</span>`;
+        : `<span class="material-symbols-outlined text-steel-blue/50 text-base leading-none" aria-hidden="true">${type.icon}</span>`;
 
     // eBook and Audiobook share the book colour (there are three media
     // hues, not four); the label and icon tell them apart.
@@ -425,7 +425,7 @@ function renderServiceTile(service) {
     var iconUrl = getServiceIconUrl(service.display_name);
     var iconHtml = iconUrl
         ? '<img src="' + iconUrl + '" alt="" width="24" height="24" class="service-icon w-6 h-6 shrink-0 object-contain">'
-        : '<span class="material-symbols-outlined text-2xl leading-6 text-steel-blue">' + escapeHtml(service.icon) + '</span>';
+        : '<span class="material-symbols-outlined text-2xl leading-6 text-steel-blue" aria-hidden="true">' + escapeHtml(service.icon) + '</span>';
 
     // Compact: the 24px icon and the name on one line over the status bar.
     // Every tile is the same height whatever its name: the top row is a
@@ -646,6 +646,7 @@ function releasesError(container) {
     errDiv.className = 'text-center text-steel-blue py-8';
     var errIcon = document.createElement('span');
     errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+    errIcon.setAttribute('aria-hidden', 'true');
     errIcon.textContent = 'calendar_month';
     var errText = document.createElement('p');
     errText.textContent = 'The release calendar isn’t available right now';
@@ -1372,7 +1373,7 @@ export async function mount(ctx) {
                 WS.arrive('news', function () {
                     WS.setHTML(byId('newsContainer'), `
                         <div class="text-center text-frosted-blue/70 py-8">
-                            <span class="material-symbols-outlined text-4xl mb-2 block text-status-err-text">error</span>
+                            <span class="material-symbols-outlined text-4xl mb-2 block text-status-err-text" aria-hidden="true">error</span>
                             <p>Error loading news</p>
                         </div>
                     `);
@@ -1542,7 +1543,7 @@ export async function mount(ctx) {
 
         WS.arrive('services', function () {
             if (services.length === 0) {
-                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full w-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services to show right now.</p></div>');
+                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full w-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50" aria-hidden="true">dns</span><p>No services to show right now.</p></div>');
                 return;
             }
 

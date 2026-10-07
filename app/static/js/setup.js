@@ -67,6 +67,7 @@
                 circle.className += ' completed';
                 var check = document.createElement('span');
                 check.className = 'material-symbols-outlined text-[18px]';
+                check.setAttribute('aria-hidden', 'true');
                 check.textContent = 'check';
                 circle.appendChild(check);
             } else if (i === currentStep) {
@@ -112,6 +113,7 @@
 
         var icon = document.createElement('span');
         icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-frosted-blue text-[20px]';
+        icon.setAttribute('aria-hidden', 'true');
         icon.textContent = iconName;
         inputGroup.appendChild(icon);
 
@@ -219,6 +221,7 @@
 
         var icon = document.createElement('span');
         icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-frosted-blue text-[20px]';
+        icon.setAttribute('aria-hidden', 'true');
         icon.textContent = 'key';
         inputGroup.appendChild(icon);
 
@@ -236,15 +239,19 @@
         toggleBtn.className = 'absolute right-10 top-1/2 -translate-y-1/2 text-frosted-blue/70 hover:text-frosted-blue transition-colors';
         var toggleIcon = document.createElement('span');
         toggleIcon.className = 'material-symbols-outlined text-[20px]';
+        toggleIcon.setAttribute('aria-hidden', 'true');
         toggleIcon.textContent = 'visibility';
+        toggleBtn.setAttribute('aria-label', 'Show the key');
         toggleBtn.appendChild(toggleIcon);
         toggleBtn.addEventListener('click', function() {
             if (input.type === 'password') {
                 input.type = 'text';
                 toggleIcon.textContent = 'visibility_off';
+                toggleBtn.setAttribute('aria-label', 'Hide the key');
             } else {
                 input.type = 'password';
                 toggleIcon.textContent = 'visibility';
+                toggleBtn.setAttribute('aria-label', 'Show the key');
             }
         });
         inputGroup.appendChild(toggleBtn);
@@ -255,7 +262,9 @@
         regenBtn.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 hover:text-frosted-blue transition-colors';
         var regenIcon = document.createElement('span');
         regenIcon.className = 'material-symbols-outlined text-[20px]';
+        regenIcon.setAttribute('aria-hidden', 'true');
         regenIcon.textContent = 'refresh';
+        regenBtn.setAttribute('aria-label', 'Make a new key');
         regenBtn.appendChild(regenIcon);
         regenBtn.addEventListener('click', function() {
             secretKey = generateSecretKey();

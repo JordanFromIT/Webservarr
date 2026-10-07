@@ -622,6 +622,8 @@ await scenario('M4 and I2: a module that throws in the reader', async () => {
   console.error = quiet;
   const doc = env.win.document;
   check('the error state shows', !!doc.querySelector('#wsPage [role="alert"] button'));
+  const icon = doc.querySelector('#wsPage [role="alert"] .material-symbols-outlined');
+  check('its icon is not read out', !!icon && icon.getAttribute('aria-hidden') === 'true');
   check('the shell is back: a way out', !doc.documentElement.hasAttribute('data-shell'),
     doc.documentElement.getAttribute('data-shell'));
   doc.querySelector('#wsPage [role="alert"] button').click();

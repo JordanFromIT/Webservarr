@@ -56,7 +56,7 @@ export async function mount(ctx) {
     container.appendChild(iframe);
   } else {
     container.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">' +
-      '<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>' +
+      '<span class="material-symbols-outlined text-6xl mb-4 opacity-50" aria-hidden="true">download</span>' +
       '<p class="text-lg mb-2">The embedded requests page is not set up yet</p>' +
       '<p class="text-sm">Set the Seerr URL in Settings &gt; Integrations.</p></div>';
   }

@@ -168,6 +168,9 @@ const text = (n) => (n ? n.textContent : '');
   check('summary names the down service', text(t.pop().querySelector('.ws-sp-title')) === 'Remote is down');
   check('and the slow one', /Requests is slow too\./.test(text(t.pop().querySelector('.ws-sp-sub'))));
   check('checked just now', text(t.pop().querySelector('.ws-sp-checked')) === 'Checked just now');
+  const spoken = Array.from(t.pop().querySelectorAll('.material-symbols-outlined'))
+    .filter((i) => !i.closest('[aria-hidden="true"]')).map((i) => text(i));
+  check('no icon in the panel is read out', spoken.length === 0, spoken);
   await t.done();
 }
 

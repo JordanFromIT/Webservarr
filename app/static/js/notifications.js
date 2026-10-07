@@ -59,6 +59,16 @@
   }
 
   /**
+   * A Material Symbols icon, hidden from screen readers: its text is the
+   * icon's name (a font ligature), which would otherwise be read aloud.
+   */
+  function createIcon(classes, name) {
+    var icon = createEl('span', classes, name);
+    icon.setAttribute('aria-hidden', 'true');
+    return icon;
+  }
+
+  /**
    * Convert VAPID base64 URL-safe string to Uint8Array for PushManager.subscribe().
    */
   function urlBase64ToUint8Array(base64String) {
@@ -104,7 +114,8 @@
       if (flexParent) {
         var btn = createEl('button', 'relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group');
         btn.title = 'Notifications';
-        var icon = createEl('span', 'material-symbols-outlined', 'notifications');
+        btn.setAttribute('aria-label', 'Notifications');
+        var icon = createIcon('material-symbols-outlined', 'notifications');
         btn.appendChild(icon);
         flexParent.insertBefore(btn, userMenuContainer);
         _bellButtons.push(btn);
@@ -274,7 +285,7 @@
 
       if (notifications.length === 0) {
         var empty = createEl('div', 'flex flex-col items-center justify-center py-8 text-steel-blue');
-        var emptyIcon = createEl('span', 'material-symbols-outlined text-3xl mb-2 opacity-50', 'notifications_none');
+        var emptyIcon = createIcon('material-symbols-outlined text-3xl mb-2 opacity-50', 'notifications_none');
         var emptyText = createEl('p', 'text-xs', 'No notifications');
         empty.appendChild(emptyIcon);
         empty.appendChild(emptyText);
@@ -296,7 +307,7 @@
 
     // Category icon
     var iconName = CATEGORY_ICONS[n.category] || 'notifications';
-    var iconEl = createEl('span', 'material-symbols-outlined text-steel-blue text-lg mt-0.5 shrink-0', iconName);
+    var iconEl = createIcon('material-symbols-outlined text-steel-blue text-lg mt-0.5 shrink-0', iconName);
     item.appendChild(iconEl);
 
     // Content area
@@ -409,7 +420,8 @@
     var header = createEl('div', 'flex items-center justify-between px-6 py-4 border-b border-steel-blue/20');
     var headerTitle = createEl('h3', 'text-lg font-bold text-frosted-blue', 'Notification Preferences');
     var closeBtn = createEl('button', 'text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer');
-    var closeIcon = createEl('span', 'material-symbols-outlined', 'close');
+    closeBtn.setAttribute('aria-label', 'Close');
+    var closeIcon = createIcon('material-symbols-outlined', 'close');
     closeBtn.appendChild(closeIcon);
     closeBtn.addEventListener('click', closePreferencesModal);
     header.appendChild(headerTitle);
@@ -429,7 +441,7 @@
       var row = createEl('div', 'flex items-center justify-between py-2');
 
       var labelArea = createEl('div', 'flex items-center gap-3');
-      var catIcon = createEl('span', 'material-symbols-outlined text-steel-blue text-lg', CATEGORY_ICONS[cat] || 'notifications');
+      var catIcon = createIcon('material-symbols-outlined text-steel-blue text-lg', CATEGORY_ICONS[cat] || 'notifications');
       var catLabel = createEl('span', 'text-sm text-frosted-blue', CATEGORY_LABELS[cat] || cat);
       labelArea.appendChild(catIcon);
       labelArea.appendChild(catLabel);
@@ -463,7 +475,7 @@
 
       var pushRow = createEl('div', 'flex items-center justify-between py-2');
       var pushLabelArea = createEl('div', 'flex items-center gap-3');
-      var pushIcon = createEl('span', 'material-symbols-outlined text-steel-blue text-lg', 'devices');
+      var pushIcon = createIcon('material-symbols-outlined text-steel-blue text-lg', 'devices');
       var pushText = createEl('span', 'text-sm text-frosted-blue', 'Browser push notifications');
       pushLabelArea.appendChild(pushIcon);
       pushLabelArea.appendChild(pushText);

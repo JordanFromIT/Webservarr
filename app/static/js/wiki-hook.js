@@ -39,6 +39,7 @@ var WikiHook = (function () {
 
     var icon = document.createElement('span');
     icon.className = 'material-symbols-outlined text-steel-blue shrink-0';
+    icon.setAttribute('aria-hidden', 'true');
     icon.textContent = 'library_books';
     a.appendChild(icon);
 

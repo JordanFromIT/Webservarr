@@ -67,7 +67,7 @@
         '<div id="tourArrow" class="tour-arrow" data-side="top"></div>' +
         '<div class="p-4">' +
           '<div class="flex items-start gap-2">' +
-            '<span id="tourIcon" class="material-symbols-outlined text-[20px] text-bright shrink-0">auto_stories</span>' +
+            '<span id="tourIcon" class="material-symbols-outlined text-[20px] text-bright shrink-0" aria-hidden="true">auto_stories</span>' +
             '<h3 id="tourTitle" class="flex-1 font-bold text-bright text-sm leading-snug"></h3>' +
             '<button id="tourSkip" type="button" class="text-label text-bright/80 hover:text-bright shrink-0">Skip</button>' +
           '</div>' +
