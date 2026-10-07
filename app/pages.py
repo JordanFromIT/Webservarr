@@ -952,9 +952,10 @@ def _stamp_asset_versions(content: str) -> str:
 # first paint may already have shown it.
 _LOGIN_NAME_RE = re.compile(r'(<h1 id="loginAppName" class=")([^"]*)(">)[^<]*(</h1>)')
 # The card's logo (login.js sets its src from the branding before the first
-# paint). With the name switched off (branding.show_name) it carries the name
-# as its alt text and takes a taller box from sm up, and the heading stays for
-# screen readers only, so the page keeps its one h1.
+# paint). With the name switched off (branding.show_name) it takes a taller box
+# from sm up and the heading stays for screen readers only, so the page keeps
+# its one h1. That heading already says the name, so the logo is then
+# decorative (alt="") rather than a second reading of it.
 _LOGIN_LOGO_RE = re.compile(r'(<img id="loginLogo" alt=")[^"]*(" class=")([^"]*)(")')
 LOGIN_LOGO_ALONE_CLS = "sm:h-56"
 
@@ -976,7 +977,7 @@ def _fill_login_name(out: str, branding: dict) -> str:
         alt = "Logo"
         if not named:
             classes.append(LOGIN_LOGO_ALONE_CLS)
-            alt = site_name or "Logo"
+            alt = "" if site_name else "Logo"
         return f"{m.group(1)}{html.escape(alt, quote=True)}{m.group(2)}{' '.join(classes)}{m.group(4)}"
 
     out = _LOGIN_NAME_RE.sub(_sub, out, count=1)

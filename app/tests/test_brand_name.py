@@ -2,9 +2,10 @@
 The site name beside the logo (branding.show_name): a setting that ships on.
 
 Off, the page renderer leaves the name out of the sidebar's brand block and
-the sign-in card, shows the logo in a taller fixed box, and gives the logo the
-name as its alt text; the sign-in page keeps the name in its one h1, for
-screen readers only. All of it is in the served HTML, so the first paint is
+the sign-in card, shows the logo in a taller fixed box, and gives the sidebar
+logo the name as its alt text; the sign-in page keeps the name in its one h1,
+for screen readers only, and its logo is decorative (alt="") so the name is
+read once. All of it is in the served HTML, so the first paint is
 already right; a soft navigation copies the sidebar's brand block from the
 fetched page and a save in Settings patches it through the shell fragment
 (the branding. prefix is a shell key). The tab title, the manifest, the
@@ -147,7 +148,7 @@ class Login(unittest.TestCase):
         self.assertNotIn(pages.LOGIN_LOGO_ALONE_CLS, img_cls.split())
         self.assertIn("h-48", img_cls.split())
 
-    def test_off_one_h1_for_screen_readers_and_the_logo_carries_the_name(self):
+    def test_off_one_h1_for_screen_readers_and_the_logo_is_decorative(self):
         out = login(branding(**{"branding.app_name": "A & B <x>", **OFF}))
         self.assertEqual(len(re.findall(r"<h1\b", out)), 1)
         cls, text = login_h1(out)
@@ -155,7 +156,9 @@ class Login(unittest.TestCase):
         self.assertIn("sr-only", cls.split())
         self.assertNotIn("hidden", cls.split())
         alt, img_cls = login_logo(out)
-        self.assertEqual(alt, "A &amp; B &lt;x&gt;")
+        # The sr-only h1 already says the name: the logo is not read a second time.
+        self.assertEqual(alt, "")
+        self.assertEqual(out.count("A &amp; B &lt;x&gt;", out.index("<body")), 1)
         self.assertIn(pages.LOGIN_LOGO_ALONE_CLS, img_cls.split())
         self.assertIn("h-48", img_cls.split())
         self.assertNotIn("<x>", out.split("<body")[1])
