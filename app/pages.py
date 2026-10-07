@@ -958,6 +958,9 @@ _LOGIN_NAME_RE = re.compile(r'(<h1 id="loginAppName" class=")([^"]*)(">)[^<]*(</
 # decorative (alt="") rather than a second reading of it.
 _LOGIN_LOGO_RE = re.compile(r'(<img id="loginLogo" alt=")[^"]*(" class=")([^"]*)(")')
 LOGIN_LOGO_ALONE_CLS = "sm:h-56"
+# The sign-in card's places other than the default (the registry's choices
+# after the first), each a data-login-card value login.html styles.
+LOGIN_CARD_MOVED = _REGISTRY["login.card_position"].choices[1:]
 
 
 def _fill_login_name(out: str, branding: dict) -> str:
@@ -1102,8 +1105,13 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         # on screen) but its sidebar, header and phone bar are hidden
         # (theme.css). The router brings the flag in step on every swap.
         attrs += ' data-shell="hidden"'
+    if name == "login" and branding.get("login_card") in LOGIN_CARD_MOVED:
+        # The sign-in card to one side on a wide screen (login.card_position),
+        # placed by login.html's CSS from this mark, so it is there from the
+        # first paint. Centre, the default, carries no mark.
+        attrs += f' data-login-card="{branding["login_card"]}"'
     if name == "index":
-        off = [sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
+        off =[sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
         if off:
             attrs += f' data-home-hide="{html.escape(" ".join(off), quote=True)}"'
     if branding.get("section_icons") is True:

@@ -198,10 +198,67 @@
     return { body: body };
   }
 
+  // The sign-in box's place on wide screens: one radio per choice, each a
+  // tiny screen with the box drawn where it will sit. The choices are the
+  // setting's own, from meta; these are only their words and drawings.
+  var CARD_KEY = 'login.card_position';
+  var CARD_SPOTS = {
+    centre: ['Centre', 'left-1/2 -translate-x-1/2'],
+    left: ['Left', 'left-[12%]'],
+    right: ['Right', 'right-[12%]']
+  };
+
+  function cardPosition(api) {
+    var m = WSSettings.metaFor(CARD_KEY);
+    var choices = (m && Array.isArray(m.choices) ? m.choices : []).filter(function (c) { return hasOwn(CARD_SPOTS, c); });
+    var box = el('fieldset', 'min-w-0 ' + cls.fieldWidth);
+    var legend = el('legend', 'block text-[15px] font-semibold text-frosted-blue', 'Sign-in box position');
+    var help = el('p', 'text-[13px] text-frosted-blue/60 mt-0.5',
+      'Moves the box aside on wide screens so the middle of the artwork shows. Phones keep it in the middle.');
+    help.id = 'ws-f-login-card-position-help';
+    box.setAttribute('aria-describedby', help.id);
+    box.appendChild(legend);
+    box.appendChild(help);
+    var row = el('div', 'grid grid-cols-3 gap-2 mt-3 max-w-sm');
+    var inputs = [];
+    choices.forEach(function (c) {
+      var label = el('label', 'block cursor-pointer');
+      var input = el('input', 'peer sr-only');
+      input.type = 'radio';
+      input.name = 'ws-login-card-position';
+      input.value = c;
+      var face = el('span', 'flex flex-col items-center gap-2 rounded-[10px] border border-frosted-blue/10 ' +
+        'bg-frosted-blue/[0.04] p-2 text-frosted-blue/70 transition-colors hover:bg-frosted-blue/[0.08] ' +
+        'peer-checked:border-primary peer-checked:ring-1 peer-checked:ring-inset peer-checked:ring-primary ' +
+        'peer-checked:bg-primary/15 peer-checked:text-frosted-blue peer-focus-visible:outline ' +
+        'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary');
+      var screen = el('span', 'relative block w-full aspect-[16/10] overflow-hidden rounded-md ' +
+        'border border-frosted-blue/20 bg-frosted-blue/[0.06]');
+      screen.setAttribute('aria-hidden', 'true');
+      screen.appendChild(el('span', 'absolute top-1/2 -translate-y-1/2 h-3/5 w-1/4 rounded-sm bg-current opacity-70 ' +
+        CARD_SPOTS[c][1]));
+      face.appendChild(screen);
+      face.appendChild(el('span', 'text-[13px] font-semibold', CARD_SPOTS[c][0]));
+      label.appendChild(input);
+      label.appendChild(face);
+      input.addEventListener('change', function () { if (input.checked) api.set(CARD_KEY, c); }, { signal: signal });
+      inputs.push(input);
+      row.appendChild(label);
+    });
+    box.appendChild(row);
+    var err = el('p', cls.error + ' hidden');
+    err.setAttribute('role', 'alert');
+    box.appendChild(err);
+    function paint(v) { inputs.forEach(function (i) { i.checked = i.value === v; }); }
+    api.track(CARD_KEY, { get: function () { return api.get(CARD_KEY); }, set: paint, el: inputs[0] || box, errorEl: err });
+    return box;
+  }
+
   function loginExpander(api) {
     var body = el('div', 'space-y-5');
     body.appendChild(api.toggle({ key: 'features.login_backgrounds', label: 'Rotating artwork behind the sign-in form',
       help: 'Uses trending titles from Seerr.' }));
+    body.appendChild(cardPosition(api));
     return { body: body };
   }
 

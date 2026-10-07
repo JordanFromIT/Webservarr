@@ -51,6 +51,8 @@ HOME_SECTION_IDS = ("services", "news", "streams", "releases", "requests")
 # Home sections shipped switched off (Settings > Pages > Home turns them on).
 HOME_SECTIONS_OFF_BY_DEFAULT = ("services",)
 TYPES = ("text", "url", "bool", "int", "color", "icon", "enum", "json")
+# The sign-in card's places on a wide screen; the first is the shipped default.
+LOGIN_CARD_POSITIONS = ("centre", "left", "right")
 
 # page id -> (label, sublabel, icon). Label names the destination; the
 # sublabel says what you do there. Every page carries one, always a verb
@@ -270,6 +272,13 @@ def _build() -> List[SettingDef]:
         _int("news.homepage_max_age_days", "30", "Hide home page news older than this many days (0 = never)",
              0, 3650, public=True),
         _bool("features.login_backgrounds", "true", "Rotating artwork behind the login page", public=True),
+        # Where the sign-in card sits on a wide screen, so artwork framed on
+        # its middle can show. Centre is the shipped look; the page renderer
+        # marks <html data-login-card> for the others and login.html places
+        # the card from that mark (phones keep it centred).
+        SettingDef("login.card_position", LOGIN_CARD_POSITIONS[0], "enum",
+                   "Where the sign-in box sits on wide screens", public=True, choices=LOGIN_CARD_POSITIONS,
+                   allow_empty=False),
         _text("wiki.hook_tickets", "", "Wiki page shown as help on Tickets", public=True, max_length=220,
               pattern=_SLUG, pattern_hint=_SLUG_HINT),
         _text("wiki.hook_issues", "", "Wiki page shown as help on Issues", public=True, max_length=220,

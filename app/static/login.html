@@ -103,6 +103,38 @@
     @media (prefers-reduced-motion: reduce) {
       .backdrop-slide.is-moving, .backdrop-slide.is-solo { animation: none; }
     }
+    /* The card's place on a wide screen (Settings > Pages > Login page). The
+       page renderer marks <html data-login-card="left"> or "right"; with no
+       mark the card stays in the middle, as shipped. Only from 64rem:
+       narrower than that a 440px card near one edge still covers the middle
+       of the picture, so phones and tablets keep it centred. The status pill
+       goes with the card, centred under it, so the middle of the picture is
+       clear from top to bottom. Still vertically centred, and position only:
+       the card's glass and colours are untouched. */
+    @media (min-width: 64rem) {
+      html[data-login-card] { --login-card-edge: clamp(3rem, 6vw, 8rem); }
+      html[data-login-card] footer {
+        display: grid;
+        grid-template-columns: minmax(0, 440px);
+        justify-items: center;
+      }
+      html[data-login-card="left"] main {
+        align-items: flex-start;
+        padding-inline-start: var(--login-card-edge);
+      }
+      html[data-login-card="left"] footer {
+        justify-content: start;
+        padding-inline-start: var(--login-card-edge);
+      }
+      html[data-login-card="right"] main {
+        align-items: flex-end;
+        padding-inline-end: var(--login-card-edge);
+      }
+      html[data-login-card="right"] footer {
+        justify-content: end;
+        padding-inline-end: var(--login-card-edge);
+      }
+    }
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
        configured auth methods, then reveal via .auth-ready. */

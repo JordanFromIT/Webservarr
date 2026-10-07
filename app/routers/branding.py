@@ -14,7 +14,7 @@ from app.icons import icon_or
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    COLOR_KEYS, HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color,
+    COLOR_KEYS, HOME_SECTION_IDS, LOGIN_CARD_POSITIONS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color,
     safe_font, switch_is_off,
 )
 from app.utils import safe_http_url, same_origin_path
@@ -146,6 +146,7 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
 
     pages = SIDEBAR_PAGE_IDS
     source = get("requests.source")
+    card = get("login.card_position")
 
     def icon(key: str) -> str:
         # A typed-in name the trimmed icon font cannot draw would paint as
@@ -192,6 +193,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
             "books_configured": bool(get("integration.kavita.url").strip() or get("integration.plex.audiobook_library").strip()),
         },
         "requests_source": source if source in ("native", "seerr_embed") else "native",
+        # The sign-in card's place on a wide screen: the page renderer marks
+        # <html data-login-card> by it. Anything unknown is the default.
+        "login_card": card if card in LOGIN_CARD_POSITIONS else LOGIN_CARD_POSITIONS[0],
         "pages_order": normalize_page_order(get("pages.order")),
         "home_sections": {sid: get("home.section_" + sid) != "false" for sid in HOME_SECTION_IDS},
         # Icons before section headings: the page renderer marks <html
