@@ -8,8 +8,8 @@ still receives a POST with. Without the check, a page on any sibling subdomain
 
 The sweep reads the routes from the app's own OpenAPI document, so a write
 route added later without the check fails here. The exemptions are routes no
-browser on the site calls with a session: the arr webhooks (server to server,
-Basic auth), the auth flows that run before a session exists, and the
+browser on the site calls with a session: the arr, n8n and Kometa webhooks
+(server to server, each with its own secret), the auth flows that run before a session exists, and the
 first-run setup wizard.
 """
 import re
@@ -32,6 +32,8 @@ REFUSED = "Cross-origin request refused"
 WRITES = {"post", "put", "patch", "delete"}
 EXEMPT = {
     ("post", "/api/webhooks/{app}"),
+    ("post", "/api/webhooks/n8n"),
+    ("post", "/api/webhooks/kometa/{token}"),
     ("post", "/auth/plex-start"),
     ("post", "/auth/plex-callback"),
     ("post", "/auth/simple-login"),

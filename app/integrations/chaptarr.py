@@ -468,7 +468,8 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     pair the request lands in - Chaptarr keeps the two apart, so requesting an
     audiobook into the ebook folder would download the wrong edition.
 
-    Returns {"ok": bool, "message": str}.
+    Returns {"ok": bool, "message": str}, and the book's "title" when it
+    was added.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
@@ -535,7 +536,8 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         return {"ok": False, "message": "Could not reach Chaptarr"}
 
     if resp.status_code in (200, 201):
-        return {"ok": True, "message": "Book requested"}
+        # The title is for the event log's "Requested:" line (the router takes it out).
+        return {"ok": True, "message": "Book requested", "title": book.get("title") or ""}
 
     # Chaptarr returns a list of validation errors on rejection.
     detail = ""

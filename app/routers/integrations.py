@@ -3,6 +3,7 @@ Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -12,6 +13,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth import session_manager
@@ -21,6 +23,7 @@ from app.dependencies import get_current_user, require_admin, require_same_origi
 from app.icons import drawable
 from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary, nyt
 from app.limiter import limiter
+from app.services import activity_lines, status_feed
 
 logger = logging.getLogger(__name__)
 
@@ -647,8 +650,10 @@ async def create_chaptarr_request(
     request: Request,
     body: BookRequestCreate,
     current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Add a book to Chaptarr and kick off a search for it."""
+    """Add a book to Chaptarr and kick off a search for it. A book Chaptarr
+    added (not one already there) makes the event log's "Requested:" line."""
     if not body.bookId.strip():
         raise HTTPException(status_code=400, detail="bookId is required")
     fmt = "audiobook" if body.format == "audiobook" else "ebook"
@@ -670,7 +675,25 @@ async def create_chaptarr_request(
         # so the real reason (e.g. "Could not find that book in Chaptarr")
         # never reaches the browser. 400 matches the Seerr request path below.
         raise HTTPException(status_code=400, detail=result["message"])
+    title = result.pop("title", "")
+    if title:
+        _book_request_line(db, body.bookId.strip(), fmt, title)
     return result
+
+
+def _book_request_line(db: Session, book_id: str, fmt: str, title: str) -> None:
+    """The event log's line for a new book request (spec section 11.1),
+    once per book and format. Never fails the request; never names who asked."""
+    text = activity_lines.request_line(title, fmt=fmt)
+    if text is None:
+        return
+    if not re.fullmatch(r"[A-Za-z0-9_.:\-]{1,100}", book_id):
+        book_id = "#" + hashlib.sha256(book_id.encode("utf-8")).hexdigest()[:32]
+    try:
+        status_feed.record_request(db, f"book-request:{book_id}:{fmt}", text, status_feed.now_utc())
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("A book request's event log line could not be written: %s", type(exc).__name__)
 
 
 async def _get_plex_token(session_id: str) -> str | None:

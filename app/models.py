@@ -73,7 +73,8 @@ class Service(Base):
 class StatusUpdate(Base):
     """One item of the status feed (app/services/status_feed.py): an outage
     Uptime Kuma reported (source "auto"), an admin's note ("admin") or a
-    library event from a Sonarr, Radarr or Chaptarr webhook ("library").
+    library event ("library"): a Sonarr, Radarr or Chaptarr webhook, a
+    request, an issue n8n fixed or a Kometa run.
 
     `message` holds the line people read; `title` is its first 200
     characters. An outage is one row: opened as "<Service> is down", closed
@@ -115,13 +116,29 @@ class StatusUpdate(Base):
     started_at = Column(DateTime, nullable=True)  # when the outage began
     ended_at = Column(DateTime, nullable=True)  # when it was seen back up
     pushed_at = Column(DateTime, nullable=True)  # set once, when its push is claimed
-    app = Column(String(10), nullable=True)  # a library event's app: sonarr, radarr, chaptarr
+    app = Column(String(10), nullable=True)  # a library event's app: sonarr, radarr, chaptarr, requests, n8n, kometa
     event_key = Column(String(160), nullable=True)  # a library event's id (library_lines.LibraryEvent.key)
     # A Sonarr per-file import held back for its Import Complete: not shown.
     pending = Column(Boolean, nullable=False, default=False, server_default=text("0"))
 
     def __repr__(self):
         return f"<StatusUpdate(id={self.id}, type='{self.update_type}')>"
+
+
+class StatusEventRef(Base):
+    """A request the event log has dealt with (status_feed.record_request),
+    keyed "seerr-request:<id>" or "book-request:<book>:<format>": inserted
+    first, so it is written once whichever worker or poller sees it.
+    `line_id` is the line it counts toward (a burst folds several into
+    one). Deleted with the lines, after 30 days."""
+    __tablename__ = "status_event_refs"
+
+    key = Column(String(160), primary_key=True)
+    line_id = Column(Integer, nullable=True, index=True)
+    seen_at = Column(DateTime, nullable=False)                      # naive UTC
+
+    def __repr__(self):
+        return f"<StatusEventRef(key='{self.key}', line_id={self.line_id})>"
 
 
 class User(Base):

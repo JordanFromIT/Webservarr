@@ -401,6 +401,11 @@ async def _poll_seerr_requests(r: aioredis.Redis) -> None:
                 return
 
             results = resp.json().get("results", [])
+            try:
+                await record_new_requests(results)
+            except Exception as exc:  # noqa: BLE001 - the notifications below still go out
+                logger.warning("Poller: new requests could not be written to the event log: %s",
+                               type(exc).__name__)
 
             for req in results:
                 request_id = req.get("id", 0)
@@ -471,6 +476,72 @@ async def _poll_seerr_requests(r: aioredis.Redis) -> None:
 
     except Exception as exc:
         logger.warning("Poller: Seerr requests error: %s", exc)
+
+
+# The highest Seerr request id the event log has dealt with (spec section
+# 11.1). Seerr's ids only grow, so a request above it is new; kept in the
+# database, so a restart (which empties Redis) announces nothing again.
+SEERR_REQUESTS_SEEN_KEY = "status_feed.seerr_requests_seen"
+SEERR_DECLINED = 3
+
+
+def _request_id(req) -> int:
+    rid = req.get("id") if isinstance(req, dict) else None
+    return rid if isinstance(rid, int) and not isinstance(rid, bool) and rid > 0 else 0
+
+
+async def record_new_requests(results: list) -> int:
+    """Write "Requested: <title>" for each request in Seerr's newest
+    `results` that the event log hasn't seen, oldest first; how many were
+    written. The first read ever only stores the highest id: the requests
+    already there are never announced. A declined request, or one whose
+    title Seerr can't name, makes no line; when Seerr names none of them,
+    nothing moves on and the next cycle tries again. Never names who asked."""
+    from app.integrations import seerr
+    from app.services import activity_lines
+
+    requests = sorted((r for r in results if _request_id(r)), key=_request_id)
+    db = SessionLocal()
+    try:
+        row = db.query(Setting).filter(Setting.key == SEERR_REQUESTS_SEEN_KEY).first()
+        try:
+            seen = int(row.value) if row is not None else None
+        except (TypeError, ValueError):
+            seen = None
+        highest = max((_request_id(r) for r in requests), default=0)
+        if seen is None:
+            if row is None:
+                db.add(Setting(key=SEERR_REQUESTS_SEEN_KEY, value=str(highest),
+                               description="Seerr requests the event log has dealt with (internal)"))
+            else:
+                row.value = str(highest)
+            db.commit()
+            logger.info("Event log: %d existing Seerr request(s) counted as seen", len(requests))
+            return 0
+        new = [r for r in requests if _request_id(r) > seen
+               and r.get("status") != SEERR_DECLINED and (r.get("media") or {}).get("tmdbId")]
+        written = 0
+        if new:
+            titles = await seerr.lookup_titles([{"tmdb_id": r["media"]["tmdbId"], "media_type": r.get("type")}
+                                                for r in new])
+            if not titles:
+                return 0                # Seerr named none of them: try again next cycle
+            for r in new:
+                found = titles.get(r["media"]["tmdbId"]) or {}
+                text = activity_lines.request_line(found.get("title"),
+                                                   found.get("year") if r.get("type") == "movie" else None)
+                if text is None:
+                    logger.info("Event log: Seerr request %d has no title to show", _request_id(r))
+                    continue
+                if status_feed.record_request(db, f"seerr-request:{_request_id(r)}", text, status_feed.now_utc()):
+                    written += 1
+        if highest > seen:
+            (db.query(Setting).filter(Setting.key == SEERR_REQUESTS_SEEN_KEY, Setting.value == str(seen))
+             .update({Setting.value: str(highest)}, synchronize_session=False))
+            db.commit()
+        return written
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +843,7 @@ def tidy_library_lines() -> None:
     try:
         status_feed.publish_held_library_lines(db, now)
         status_feed.prune_library_lines(db, now)
+        status_feed.prune_event_refs(db, now)
     finally:
         db.close()
 

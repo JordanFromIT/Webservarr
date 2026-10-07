@@ -1,6 +1,7 @@
 """
 The status feed: outages Uptime Kuma reports, admins' notes and library
-events from Sonarr, Radarr and Chaptarr, newest first (spec
+events (Sonarr, Radarr and Chaptarr webhooks, requests, issues n8n fixed,
+Kometa runs), newest first (spec
 docs/superpowers/specs/2026-10-04-home-redesign-and-status-feed-design.md,
 section 3, and 2026-10-05-event-log-library-events-design.md).
 
@@ -14,7 +15,8 @@ by the database in one statement, never by a check in one process: an outage
 opens only while the partial unique index ux_status_updates_open_monitor
 allows it, closes in an UPDATE that matches only while it is open, and its
 push is claimed in an UPDATE that matches only while pushed_at is empty.
-A library event is written once by the unique index on its event_key.
+A library event is written once by the unique index on its event_key, a
+request by the primary key of its StatusEventRef.
 
 Library lines are never pinned, never pushed and never an outage: they only
 show in the history, and are kept LIBRARY_DAYS.
@@ -30,7 +32,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.integrations import config as integration_config
-from app.models import Setting, StatusUpdate
+from app.models import Setting, StatusEventRef, StatusUpdate
+from app.services.activity_lines import burst_line
 from app.services.library_lines import GRAB_NOTE, LibraryEvent
 from app.utils import utc_iso
 
@@ -56,6 +59,13 @@ FEED_ITEMS_MAX = 200
 # is published on its own; library lines are deleted after LIBRARY_DAYS.
 LIBRARY_HOLD = timedelta(minutes=10)
 LIBRARY_DAYS = 30
+
+# Requests (spec section 11.1): requests whose line began less than
+# REQUEST_BURST ago are one burst; from its REQUEST_FOLD_AT-th request the
+# burst is one line, "Requested: <n> titles".
+REQUESTS = "requests"
+REQUEST_BURST = timedelta(minutes=15)
+REQUEST_FOLD_AT = 3
 
 # The poller sets this each time Uptime Kuma answers, to expire after a few
 # poll intervals, and deletes it when Kuma doesn't answer. No key means the
@@ -395,3 +405,85 @@ def prune_library_lines(db: Session, now: datetime) -> int:
             .delete(synchronize_session=False))
     db.commit()
     return gone
+
+
+def prune_event_refs(db: Session, now: datetime) -> int:
+    """Delete the request records older than LIBRARY_DAYS, with their lines."""
+    gone = (db.query(StatusEventRef)
+            .filter(StatusEventRef.seen_at < now - timedelta(days=LIBRARY_DAYS))
+            .delete(synchronize_session=False))
+    db.commit()
+    return gone
+
+
+# --- Requests, issues fixed and Kometa runs (spec section 11) ------------------------
+
+def _activity_row(app: str, key: Optional[str], text: str, kind_word: str, now: datetime) -> StatusUpdate:
+    return StatusUpdate(source=LIBRARY, app=app, event_key=key, title=text[:200], message=text,
+                        update_type=kind_word, severity="info", author_id="", author_name="",
+                        active=False, important=False, pending=False, started_at=now, created_at=now)
+
+
+def record_request(db: Session, ref: str, text: str, now: datetime) -> bool:
+    """Write a new request (activity_lines.request_line) to the feed, once
+    per `ref`. The first two requests of a burst get a line each; the third
+    folds the burst into one line, "Requested: 3 titles", which counts on
+    and moves to its newest request's time. False when `ref` was already
+    written.
+
+    The ref is inserted first: a write, so SQLite's write lock is held
+    before the burst is read, and two workers can't fold the same burst
+    differently. Database errors propagate (the caller decides)."""
+    mark = StatusEventRef(key=ref, line_id=None, seen_at=now)
+    db.add(mark)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return False
+    burst = (db.query(StatusUpdate)
+             .filter(StatusUpdate.source == LIBRARY, StatusUpdate.app == REQUESTS,
+                     StatusUpdate.started_at > now - REQUEST_BURST)
+             .order_by(StatusUpdate.id).all())
+    counts = dict(db.query(StatusEventRef.line_id, func.count())
+                  .filter(StatusEventRef.line_id.in_([r.id for r in burst]))
+                  .group_by(StatusEventRef.line_id).all()) if burst else {}
+    total = sum(counts.get(r.id, 0) for r in burst) + 1
+    if total < REQUEST_FOLD_AT:
+        line = _activity_row(REQUESTS, None, text, "request", now)
+        db.add(line)
+        db.flush()
+    else:
+        line, others = burst[-1], [r.id for r in burst[:-1]]
+        if others:
+            (db.query(StatusEventRef).filter(StatusEventRef.line_id.in_(others))
+             .update({StatusEventRef.line_id: line.id}, synchronize_session=False))
+            db.query(StatusUpdate).filter(StatusUpdate.id.in_(others)).delete(synchronize_session=False)
+        folded = burst_line(total)
+        line.message, line.title = folded, folded[:200]
+        line.started_at = min(r.started_at for r in burst)
+        line.created_at = now
+    mark.line_id = line.id
+    db.commit()
+    return True
+
+
+def has_line(db: Session, key: str) -> bool:
+    return db.query(StatusUpdate.id).filter(StatusUpdate.event_key == key).first() is not None
+
+
+def lines_since(db: Session, app: str, since: datetime, key_prefix: str = "") -> int:
+    """How many of `app`'s lines (with a key starting `key_prefix`) were
+    written after `since`: the per-source caps."""
+    q = db.query(func.count(StatusUpdate.id)).filter(StatusUpdate.source == LIBRARY, StatusUpdate.app == app,
+                                                     StatusUpdate.created_at > since)
+    if key_prefix:
+        q = q.filter(StatusUpdate.event_key.startswith(key_prefix, autoescape=True))
+    return q.scalar() or 0
+
+
+def record_line(db: Session, app: str, key: str, text: str, kind_word: str, now: datetime) -> bool:
+    """Write one line, once per `key` (the unique index). False when the
+    key was already written."""
+    db.add(_activity_row(app, key, text, kind_word, now))
+    return _commit_once(db)

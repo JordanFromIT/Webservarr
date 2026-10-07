@@ -315,6 +315,11 @@ def _build() -> List[SettingDef]:
         _url("integration.radarr.url", "", "Radarr address", ssrf_check=True, seed=False),
         _secret("integration.radarr.api_key", "Radarr API key", seed=False),
         _secret("integration.radarr.webhook_secret", "Radarr webhook secret (for the event log)"),
+        # n8n sends this in its X-Webhook-Secret header (POST /api/webhooks/n8n).
+        _secret("integration.n8n.webhook_secret", "n8n webhook secret (for the event log)"),
+        # Kometa can't send headers: the token is the last part of its webhook address.
+        _secret("integration.kometa.webhook_token", "Kometa webhook token (for the event log)",
+                max_length=200, pattern=_TOKEN, pattern_hint=_TOKEN_HINT),
         _url("integration.uptime_kuma.url", "", "Uptime Kuma address", ssrf_check=True, seed=False),
         # Not empty: Clear on the Integrations card then restores "default", the
         # page the client and the status light fall back to for an empty row.

@@ -72,6 +72,25 @@ async def _get_best_media_quality(
         return "SD", 0
 
 
+async def library_types() -> dict:
+    """{library title: type} for the server's libraries (Plex's types:
+    movie, show, artist, photo); {} when Plex isn't set up or doesn't answer."""
+    config = _get_config()
+    if not config["url"] or not config["token"]:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
+            resp = await client.get(f"{config['url']}/library/sections", headers={"X-Plex-Token": config["token"]})
+        if resp.status_code != 200:
+            logger.info("Plex libraries returned HTTP %d", resp.status_code)
+            return {}
+        root = ET.fromstring(resp.text)
+    except (httpx.HTTPError, ET.ParseError) as exc:
+        logger.info("Plex libraries could not be read: %s", type(exc).__name__)
+        return {}
+    return {d.get("title"): d.get("type") for d in root.findall("Directory") if d.get("title") and d.get("type")}
+
+
 async def get_active_streams() -> list:
     """
     Fetch active Plex sessions.

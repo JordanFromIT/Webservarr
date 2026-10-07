@@ -43,7 +43,7 @@ NOT_ICONS = frozenset("""
 album api approval badge block cached cancel class clear colors cookie deselect details dock docs domain done
 downloading feed files filter fullscreen function height host http https iframe input ios light list login
 menu message monitor mouse move news note notes overview pages pattern pending people percent pin place polyline post
-preview priority queue radio resize resume script sd select sleep sort source stars start stream style
+preview priority problem queue radio resize resume script sd select sleep sort source stars start stream style
 switch tab table target timer today toolbar transform upgrade verified web webhook width window work
 """.split())
 
