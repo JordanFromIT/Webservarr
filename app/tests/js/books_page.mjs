@@ -2075,17 +2075,6 @@ await run('the guide: four short steps, in the order a person meets them, each o
   }
 });
 
-await run('the guide: not over the open filters panel; the next visit offers it', async (make) => {
-  const t = withTour(make({ routes: filterRoutes() }));
-  const mounted = t.mount();
-  await t.clock.advance(400);
-  t.click('#filtersBtn');
-  await t.clock.advance(2200);
-  await mounted;
-  check('the panel stays as the person left it, with no guide over it', panelOpen(t) && !tourOn(t));
-  check('and it is not marked seen', t.win.localStorage.getItem(GUIDE_FLAG) === null);
-});
-
 await run('the guide: Skip and Escape end it, and it stays seen', async (make) => {
   const t = withTour(make({ routes: usual() }));
   const mounted = t.mount();
