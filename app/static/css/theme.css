@@ -553,14 +553,42 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   #mobileTopBar .ws-gauge-net > [data-gauge-unit] { grid-area: 1 / 3 / 3 / 4; }
 }
 
-/* The popover hangs from the header's left group (positioned), under the pill. */
+/* The popover hangs from the header's left group (positioned), under the pill.
+ * Two or more services sit in two columns, so a typical server (four to
+ * eight) fits a 768px-tall window with no scrollbar: the panel is 760px wide
+ * but never runs past the window's right edge (status-panel.js sets
+ * --ws-sp-room, the width from the pill to that edge less a margin). Past
+ * the window's height it scrolls, and only then.
+ * The surface is the Requests search bar's frosted tint over a dim of the
+ * page colour, as the Books filters panel has it: the page shows faintly
+ * through and the words keep their contrast whatever is behind. */
 .ws-sp-pop {
-  position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: 420px;
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 60; width: min(420px, var(--ws-sp-room, 420px));
   max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgb(var(--color-accent) / .5) transparent;
   border-radius: 16px; border: 1px solid rgb(var(--color-accent) / .4); color: rgb(var(--color-text));
-  background: linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)), rgb(var(--color-background));
   box-shadow: 0 28px 56px -16px var(--ws-shade);
 }
+.ws-sp-pop, .ws-sp-sheet .ws-sheet-panel {
+  background:
+    linear-gradient(rgb(var(--color-secondary) / .25), rgb(var(--color-secondary) / .25)),
+    rgb(var(--color-background) / .84);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+/* A backdrop filter on an ancestor stops the panel's blur at that ancestor,
+   so the header lets go of its own while the panel is open (nothing scrolls
+   under the header on a wide screen, so it shows no change). */
+#appHeader:has(.ws-sp-pop.is-open) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.ws-sp-pop:has(.ws-sp-row + .ws-sp-row) { width: min(760px, var(--ws-sp-room, 760px)); }
+.ws-sp-pop .ws-sp-list:has(.ws-sp-row + .ws-sp-row) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Reading order runs across then down, so the problems (sorted first) take
+   the top band, right under the summary that names them. */
+.ws-sp-pop .ws-sp-list:has(.ws-sp-row + .ws-sp-row) > .ws-sp-row:nth-child(odd) { border-inline-end: 1px solid rgb(var(--color-accent) / .2); }
+/* Side by side, each row's words and graphs share two tracks with its
+   neighbour (subgrid), so a name that wraps on one side never leaves the
+   other side's graphs at a different height. */
+.ws-sp-pop .ws-sp-list:not(.ws-sp-list-unknown):has(.ws-sp-row + .ws-sp-row) > .ws-sp-row { grid-row: span 2; grid-template-rows: subgrid; }
 
 .ws-sp-summary {
   --ws-pill: var(--ws-status-off);
@@ -631,9 +659,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-sp-pct { display: block; font-size: 15px; font-weight: 700; }
 .ws-sp-na { display: block; font-size: 13px; color: rgb(var(--color-text) / .75); }
 .ws-sp-window { display: block; font-size: 12px; color: rgb(var(--color-text) / .65); }
+/* The graphs sit in a well of the page colour, so the reply line and the
+   bars keep their contrast over whatever the frosted panel lets through. */
 .ws-sp-graphs {
   container-type: inline-size; grid-column: 2 / -1;
   display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px; align-items: center; gap: 12px;
+  margin-top: -2px; padding: 6px 8px; border-radius: 8px; background: rgb(var(--color-background) / .6);
 }
 .ws-sp-strip { display: flex; align-items: stretch; gap: 2px; height: 20px; min-width: 0; }
 .ws-sp-strip i { flex: 1 1 0; min-width: 0; border-radius: 2px; background: rgb(var(--ws-status-ok)); }
@@ -652,6 +683,9 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-sp-ms[data-k="down"] { color: var(--ws-status-err-text); }
 .ws-sp-foot { padding: 12px 20px 14px; font-size: 12px; line-height: 1.5; color: rgb(var(--color-text) / .65); }
 
+/* The sheet is frosted like the popover (above); its sticky head frosts the
+   rows that scroll under it, so the title never sits on sharp graphs. */
+.ws-sp-sheet .ws-sheet-head { -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2); }
 /* In the sheet the panel's own gutters follow the sheet's. */
 .ws-sp-sheet .ws-sp-summary { padding: 4px 4px 14px 12px; }
 .ws-sp-sheet .ws-sp-range { padding: 0 4px 12px 12px; }

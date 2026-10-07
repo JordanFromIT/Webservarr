@@ -304,5 +304,46 @@ const text = (n) => (n ? n.textContent : '');
   await t.done();
 }
 
+// ---- Two columns, frosted, inside the window ----
+{
+  current = 'room to the right edge';
+  const t = await boot();
+  const at = { left: 600 };
+  t.pill.getBoundingClientRect = () => ({ left: at.left, right: at.left + 200, top: 14, bottom: 50, width: 200, height: 36 });
+  const cw = () => t.d.documentElement.clientWidth || t.w.innerWidth;
+  const room = () => t.pop().style.getPropertyValue('--ws-sp-room');
+  t.pill.click();
+  await wait(10);
+  check('opening measures the room from the pill to the edge, less a margin', room() === (cw() - 600 - 24) + 'px', { room: room(), cw: cw() });
+  at.left = cw() - 100;
+  t.w.dispatchEvent(new t.w.Event('resize'));
+  check('a resize while open measures again, never under 320px', room() === '320px', room());
+  t.pill.click();
+  at.left = 300;
+  t.w.dispatchEvent(new t.w.Event('resize'));
+  check('a closed panel is left alone', room() === '320px', room());
+  await t.done();
+}
+
+{
+  current = 'panel styles';
+  const css = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
+  const rule = (sel) => {
+    const at = css.indexOf('\n' + sel + ' {');
+    return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
+  };
+  const frost = rule('.ws-sp-pop, .ws-sp-sheet .ws-sheet-panel');
+  check('the popover and the sheet are frosted like the Books filters panel',
+    /rgb\(var\(--color-secondary\) \/ \.25\)/.test(frost) && /rgb\(var\(--color-background\) \/ \.84\)/.test(frost) &&
+    /\bbackdrop-filter: blur\(24px\) saturate\(1\.2\)/.test(frost) && /-webkit-backdrop-filter/.test(frost), frost);
+  check('the header lets go of its own blur while the panel is open',
+    /#appHeader:has\(\.ws-sp-pop\.is-open\) \{[^}]*backdrop-filter: none/.test(css));
+  check('two services or more sit in two columns',
+    /\.ws-sp-pop \.ws-sp-list:has\(\.ws-sp-row \+ \.ws-sp-row\) \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css));
+  check('at most 760px wide and never past the room', /\.ws-sp-pop:has\(\.ws-sp-row \+ \.ws-sp-row\) \{ width: min\(760px, var\(--ws-sp-room/.test(css));
+  check('the graphs sit in a well of the page colour', /background: rgb\(var\(--color-background\) \/ \.6\)/.test(rule('.ws-sp-graphs')), rule('.ws-sp-graphs'));
+  check('the popover scrolls only past the window height', /max-height: calc\(100dvh - 96px\); overflow-y: auto/.test(rule('.ws-sp-pop')));
+}
+
 console.log(`${total - failed}/${total} status-panel cases pass`);
 if (failed) process.exit(1);

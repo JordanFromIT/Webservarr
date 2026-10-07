@@ -8,9 +8,11 @@
  * close it. Below lg the top bar's status chip (#wsStatusChip) opens the
  * same panel as a bottom sheet (a modal <dialog>, like More).
  *
- * The panel lists every service the pill counts, problems first: its state
- * in plain words, its uptime over the window the viewer picked (24 hours,
- * 30 days or all time; remembered in this browser per user, see RANGE_KEY),
+ * The panel lists every service the pill counts, problems first (the
+ * popover sets them in two columns, read across then down, so the problems
+ * take the top band): its state in plain words, its uptime over the window
+ * the viewer picked (24 hours, 30 days or all time; remembered in this
+ * browser per user, see RANGE_KEY),
  * a strip of its last 50 checks and a line of their reply times (a gap
  * where a check got no reply). The data is WS.serviceStatus, the pill's own
  * request; shell.js owns the pill, the chip and the words for the overall
@@ -432,12 +434,22 @@
     pinned = p;
     if (popBody) popBody.close.hidden = !p;
   }
+  // The room from the pill to the window's right edge, less a margin: the
+  // two-column panel's widest (theme.css .ws-sp-pop reads --ws-sp-room).
+  var EDGE = 24;
+  function fitPop() {
+    var room = (document.documentElement.clientWidth || window.innerWidth) - pill.getBoundingClientRect().left - EDGE;
+    pop.style.setProperty('--ws-sp-room', Math.max(320, Math.floor(room)) + 'px');
+  }
+  window.addEventListener('resize', function () { if (popOpen) fitPop(); });
+
   function openPop(pin) {
     clearTimeout(closeTimer); clearTimeout(openTimer);
     if (pill.getAttribute('data-state') === 'unknown') return;   // nothing to say yet
     setPinned(pin || pinned);
     if (popOpen) return;
     popOpen = true;
+    fitPop();
     renderAll();
     WS.popOpen(pop);
     pill.setAttribute('aria-expanded', 'true');
