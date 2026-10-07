@@ -96,6 +96,7 @@ FROSTED = {
     "new ticket": ("tickets.html", r'<form id="createForm" data-dialog-box [^>]*class="([^"]*)"'),
     "ticket detail": ("tickets.html", r'<div data-dialog-box aria-labelledby="ticketDetailTitle" class="([^"]*)"'),
     "media detail": ("requests.html", r'<div data-dialog-box aria-labelledby="modalTitle" class="([^"]*)"'),
+    "book pop-up": ("partials/book-dialog.html", r'<div data-dialog-box role="dialog" [^>]*class="([^"]*)"'),
     "Requests search bar": ("requests.html", r'id="searchInput"[^>]*class="([^"]*)"|class="([^"]*)"[^>]*id="searchInput"'),
     "calendar day panel": ("calendar.html", r'<section id="dayDetailPanel" [^>]*class="([^"]*)"'),
     "reader settings": ("reader.html", r'<div id="settingsPanel" [^>]*class="([^"]*)"'),
