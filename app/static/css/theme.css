@@ -1930,13 +1930,40 @@ html[data-player-full] #scrollDownHint { display: none; }
  * the window opens and closes with a short scale and fade (opacity only
  * with reduced motion); the pill's three bars move only while it plays.
  */
+
+/* The bar from 640px on a page with the shell (a tablet): it floats over the
+   tab bar, 16px in from each side and 12px above it (ui.js keeps that gap,
+   --wsp-bar-gap, free under the page), 720px at most from 900px, with Stop
+   right of Play as on the pill. A phone keeps its edge-to-edge bar with no
+   Stop; from lg the pill takes its place. */
+.wsp-bar-stop { display: none; width: 40px; height: 40px; }
+.wsp-bar-stop .material-symbols-outlined { font-size: 20px; font-variation-settings: 'FILL' 1; }
+.wsp-bar-stop[aria-disabled="true"] { opacity: .45; cursor: default; background: none; color: rgb(var(--color-text) / .7); }
+@media (min-width: 640px) {
+  html:not([data-shell="hidden"]) .wsp-bar-stop { display: inline-flex; }
+  html:not([data-shell="hidden"]) .wsp-bar {
+    --wsp-bar-gap: 12px;
+    width: calc(100% - 32px); margin: 0 auto var(--wsp-bar-gap); overflow: hidden;
+    border: 1px solid rgb(var(--color-text) / .14); border-radius: 16px;
+    background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    box-shadow: 0 16px 40px -12px var(--ws-shade), 0 2px 6px var(--ws-shade);
+  }
+  html:not([data-shell="hidden"]) .wsp-bar .wsp-line { top: 0; }
+}
+@media (min-width: 900px) {
+  html:not([data-shell="hidden"]) .wsp-bar { width: min(720px, calc(100% - 32px)); }
+}
 @media (min-width: 1024px) {
   html:not([data-shell="hidden"]) .wsp-bar.wsp-bar-pilled { display: none; }
 }
 #wsPlayerPill[hidden], #wsPlayerPill [hidden] { display: none !important; }
 /* The slot narrows into the top bar's free width (300px at most); under
-   200px the pill is its cover and its play button, the title in its label. */
-#wsPlayerPill { flex: 0 1 auto; width: 300px; min-width: 80px; container-type: inline-size; }
+   200px the pill is its cover, Play and Stop, the title in its label; under
+   114px all a size down. It never gets narrower than that smallest pill, so
+   the pill never runs under the bell: in the tightest top bar (Home's gauges
+   at 1024px) the cover still opens the window. */
+#wsPlayerPill { flex: 0 1 auto; width: 300px; min-width: 88px; container-type: inline-size; }
 /* Only the pill gives way: the bell and the account menu keep their size. */
 #wsPlayerPill ~ * { flex-shrink: 0; }
 
@@ -1999,11 +2026,17 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-pill-play { width: 32px; height: 32px; }
   .wsp-pill-line { left: 12px; right: 12px; }
 }
-/* Too narrow for the cover, Play and Stop together (about 1024 to 1050px
-   wide): the cover gives way, Play and Stop stay. */
-@container (max-width: 111px) {
-  .wsp-pill-open { display: none; }
-  .wsp-pill-play { margin-inline-start: 6px; }
+/* The tightest top bar (about 1024 to 1070px wide on Home): everything a
+   size down, so the cover still opens the window and Stop never clips. */
+@container (max-width: 113px) {
+  .wsp-pill { gap: 0; padding-right: 2px; }
+  .wsp-pill-open { padding: 0 2px 0 6px; }
+  .wsp-pill-art { width: 24px; height: 24px; border-radius: 4px; }
+  .wsp-pill-art .wsp-art-mark { font-size: 16px; }
+  .wsp-pill-play { width: 28px; height: 28px; }
+  .wsp-pill-play .material-symbols-outlined { font-size: 20px; }
+  .wsp-pill-stop { width: 24px; margin-inline-start: 0; }
+  .wsp-pill-line { left: 14px; right: 14px; }
 }
 @media (hover: hover) and (pointer: fine) {
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }

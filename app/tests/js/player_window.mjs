@@ -116,6 +116,8 @@ function memoryStorage() {
   const m = new Map();
   return {
     m,
+    get length() { return m.size; },
+    key: (i) => Array.from(m.keys())[i] ?? null,
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => { m.set(k, String(v)); },
     removeItem: (k) => { m.delete(k); }
@@ -157,6 +159,12 @@ function setup(o = {}) {
     topLimit: () => 72
   };
   if (o.noPill) opts.pillSlot = null;
+  if (o.storageKeys) for (const k of o.storageKeys) storage.setItem(k, '{"at":"bottom"}');
+  // The tablet bar's gap above the tab bar (theme.css --wsp-bar-gap).
+  if (o.gap !== undefined) {
+    const real = win.getComputedStyle.bind(win);
+    win.getComputedStyle = (el) => (el.classList.contains('wsp-bar') ? { getPropertyValue: (p) => (p === '--wsp-bar-gap' ? o.gap : '') } : real(el));
+  }
   const ui = U.createUI(opts);
   const q = (sel) => doc.querySelector(sel);
   const qa = (sel) => Array.from(doc.querySelectorAll(sel));
@@ -543,6 +551,56 @@ await run('the pill\'s Stop: right of Play, playing or paused; the book closes, 
   check('held: no claim of a save in its name', h.q('.wsp-pill-stop').getAttribute('aria-label') === 'Stop listening');
   h.q('.wsp-pill-stop').click();
   check('held: no claim that anything was saved', h.q('.wsp-notice').textContent.indexOf('Your place is as it was.') !== -1);
+});
+
+const roomOf = (t) => t.doc.documentElement.style.getPropertyValue('--ws-player-h');
+
+await run('desktop: the pill only, no bar, no handle, no room kept at the bottom', () => {
+  const t = setup({ state: BOOK, gap: '12px' });
+  check('the pill shows, left of the bell', !t.q('#wsPlayerPill').hidden && t.q('#wsPlayerPill').nextElementSibling === t.q('#bell'));
+  check('cover, Play, then Stop', JSON.stringify(Array.from(t.q('.wsp-pill').children).slice(0, 3).map((e) => e.className.split(' ').pop())) ===
+    JSON.stringify(['wsp-pill-open', 'wsp-pill-play', 'wsp-pill-stop']));
+  check('no handle and no place menu', !t.q('.wsp-grip') && !t.q('#wspDockMenu') && !t.q('.wsp-dock-target') && !t.q('.wsp-dock-ghost'));
+  check('the bar is the pilled one, no room kept, no gap', t.q('.wsp-bar').classList.contains('wsp-bar-pilled') && roomOf(t) === '0px', roomOf(t));
+});
+
+await run('tablets: the bar with Stop right of Play, room for it and its gap; phones as before', async () => {
+  const t = setup({ state: BOOK, wide: false, gap: '12px' });
+  const stop = t.q('.wsp-bar-stop');
+  check('Stop right of Play in the bar', stop && t.q('.wsp-bar-row .wsp-play').nextElementSibling === stop && stop.textContent === 'stop');
+  check('named for what it does', stop.getAttribute('aria-label') === 'Stop listening, your place is saved' && !stop.hasAttribute('aria-disabled'));
+  check('room for the bar and the gap above the tab bar', roomOf(t) === '84px', roomOf(t));
+  t.engine.set({ loading: true }, 'loading');
+  check('loading: inert', stop.getAttribute('aria-disabled') === 'true');
+  stop.click();
+  check('an inert Stop does nothing', !t.engine.calls.some((c) => c[0] === 'close'));
+  t.engine.set({ loading: false }, 'loading');
+  t.q('.wsp-bar-open').click();
+  check('the bar opens the full player, as ever', t.ui.isOpen() && !t.ui.isWindow());
+  t.ui.close();
+  await t.clock.advance(400);
+  stop.click();
+  check('Stop closes the book, the place is saved', t.engine.calls.some((c) => c[0] === 'close') &&
+    t.q('.wsp-notice').textContent.indexOf('Stopped at 11:40. Your place is saved.') !== -1);
+  check('focus on Resume', t.doc.activeElement === Array.from(t.q('.wsp-notice').querySelectorAll('button')).find((b) => b.textContent === 'Resume'));
+  const p = setup({ state: BOOK, wide: false });
+  check('a phone (no gap): the bar\'s height only', roomOf(p) === '72px', roomOf(p));
+  p.env.setWide(true);
+  check('widened: the pill shows (the room follows the bar\'s ResizeObserver)', !p.q('#wsPlayerPill').hidden);
+});
+
+await run('a place kept by the earlier movable bar is dropped on load', () => {
+  const keys = ['ws-player-dock:abc0123456789def', 'ws-player-dock:fff0123456789aaa', 'ws-player-dock', 'ws-player-window:abc0123456789def', 'ws-player-docked'];
+  const t = setup({ state: BOOK, storageKeys: keys });
+  check('dock places gone', ['ws-player-dock:abc0123456789def', 'ws-player-dock:fff0123456789aaa', 'ws-player-dock'].every((k) => t.storage.getItem(k) === null));
+  check('everything else kept', t.storage.getItem('ws-player-window:abc0123456789def') !== null && t.storage.getItem('ws-player-docked') !== null);
+  check('the pill shows as ever', !t.q('#wsPlayerPill').hidden);
+  const s = memoryStorage();
+  s.key = () => { throw new Error('blocked'); };
+  s.setItem('ws-player-dock:abc0123456789def', '{}');
+  let threw = false;
+  try { setup({ state: BOOK, storage: s }); } catch (e) { threw = true; }
+  check('a storage that throws is no problem', !threw);
 });
 
 // ---------------------------------------------------------------------------

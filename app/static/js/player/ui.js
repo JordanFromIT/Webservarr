@@ -123,10 +123,11 @@
  * place and size are kept per listener on this device. Its panels open
  * below the player and close again from the same button (Playback settings
  * gives way to Chapters). Escape or its X (Close player window) sends it back
- * to the pill and focus with it; the book plays on. Only the pill stops a
- * book: its Stop, right of Play, closes the book playing or paused ("Your
- * place is saved", Resume). A full-screen view (the reader) keeps the bar
- * and the sheet.
+ * to the pill and focus with it; the book plays on. Only the pill (and a
+ * tablet's bar) stops a book: its Stop, right of Play, closes the book
+ * playing or paused ("Your place is saved", Resume). A full-screen view (the
+ * reader) keeps the bar and the sheet. Below lg a tablet's bar floats over
+ * the tab bar with Stop; a phone's is edge to edge without it.
  *
  * Pop out (popout.js) moves the window into a window of its own: dock()
  * puts this same window in a Document Picture-in-Picture document, and
@@ -457,12 +458,14 @@ export function createUI(env) {
     h('span', { class: 'wsp-bar-text' }, [barTitle, barMeta])
   ]);
   const barPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-sm', 'aria-label': 'Play' }, [icon('play_arrow')]);
+  // Stop, right of Play, from tablet width up (theme.css), as on the pill.
+  const barStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-bar-stop', title: 'Stop listening' }, [icon('stop')]);
   // With the top bar's pill (a desktop page), the bar shows only below lg and
   // on a full-screen view (theme.css): its measured height is 0 elsewhere.
   const bar = h('section', { class: 'wsp-bar' + (pillSlot ? ' wsp-bar-pilled' : ''), 'aria-label': 'Audiobook player', hidden: true }, [
     h('div', { class: 'wsp-line', 'aria-hidden': 'true' }, [barLine]),
     barWarn,
-    h('div', { class: 'wsp-bar-row' }, [openBtn, barPlay])
+    h('div', { class: 'wsp-bar-row' }, [openBtn, barPlay, barStop])
   ]);
 
   // ---- The full player ----
@@ -938,11 +941,25 @@ export function createUI(env) {
 
   // ---- The bar's place on the page ----
 
+  // The room the page keeps at the bottom: the bar and, on a tablet, the gap
+  // under it above the tab bar (theme.css --wsp-bar-gap). Where the pill
+  // shows instead the bar measures 0 and keeps no gap either.
   function measureBar() {
-    const px = barShown ? Math.max(0, Math.round(num(measure(bar)))) : 0;
+    const m = barShown ? num(measure(bar)) : 0;
+    const px = m > 0 ? Math.max(0, Math.round(m + barGap())) : 0;
     if (px === lastPx) return;
     lastPx = px;
     root.style.setProperty('--ws-player-h', px + 'px');
+  }
+
+  function barGap() {
+    try {
+      const w = env.win || doc.defaultView;
+      const v = parseFloat(w.getComputedStyle(bar).getPropertyValue('--wsp-bar-gap'));
+      return isFinite(v) ? v : 0;
+    } catch (e) {
+      return 0;
+    }
   }
 
   function syncHost() {
@@ -1106,12 +1123,6 @@ export function createUI(env) {
     if (pillFill.style.transform !== tf) pillFill.style.transform = tf;
     setArt(pillArt, s.cover || '');
     drawPlay(pillPlay, s);
-    // Stop acts on a loaded book, playing or paused, but not while it opens,
-    // loads a part or reads its saved places (a newer place may be coming).
-    const canStop = !loadingOnly && !s.loading && !s.checking;
-    const held = !!(s.filesChanged || s.safetyNet);
-    setAttr(pillStop, 'aria-disabled', canStop ? null : 'true');
-    setAttr(pillStop, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
     const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
     setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
     setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
@@ -1139,7 +1150,20 @@ export function createUI(env) {
     drawTime(s);
     if (!s.saveError) setWarn('');
     if (!s.error) dropNotice('error');
+    drawStop(s);
     drawPill(s);
+  }
+
+  // Stop (the pill's, and the tablet bar's) acts on a loaded book, playing
+  // or paused, but not while it opens, loads a part or reads its saved
+  // places (a newer place may be coming).
+  function drawStop(s) {
+    const canStop = !!s.book && !s.loading && !s.checking;
+    const held = !!(s.filesChanged || s.safetyNet);
+    [pillStop, barStop].forEach(function (b) {
+      setAttr(b, 'aria-disabled', canStop ? null : 'true');
+      setAttr(b, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
+    });
   }
 
   // ---- The scrubber ----
@@ -1442,6 +1466,18 @@ export function createUI(env) {
     } catch (e) { /* not remembered */ }
   }
 
+  // A place kept by the earlier movable desktop bar ('ws-player-dock', per
+  // listener) means nothing now: the pill is always in the top bar.
+  try {
+    const st = env.storage;
+    const old = [];
+    for (let i = 0; st && i < st.length; i++) {
+      const k = st.key(i);
+      if (k === 'ws-player-dock' || (k && k.indexOf('ws-player-dock:') === 0)) old.push(k);
+    }
+    old.forEach(function (k) { st.removeItem(k); });
+  } catch (e) { /* nothing kept, or storage is off */ }
+
   function viewport() {
     if (env.viewport) return env.viewport();
     return { w: root.clientWidth || 0, h: root.clientHeight || 0 };
@@ -1607,9 +1643,9 @@ export function createUI(env) {
     if (popOutFn) safely(popOutFn)();
   });
 
-  // The pill's Stop: the book closes, playing or paused (its last save goes
-  // as it does), with a way back to the same place.
-  pillStop.addEventListener('click', function () {
+  // Stop (the pill's, and the tablet bar's): the book closes, playing or
+  // paused (its last save goes as it does), with a way back to the same place.
+  function stopBook() {
     const s = player.state();
     if (!s || !s.book || s.loading || s.checking) return;
     const key = s.book;
@@ -1622,10 +1658,12 @@ export function createUI(env) {
     const stopped = notices.get('stopped');
     player.close();
     if (isOpen) close();
-    // The pill has gone with the book: focus to Resume.
+    // The pill (or the bar) has gone with the book: focus to Resume.
     const resume = stopped && stopped.el.querySelector('.wsp-notice-btn');
     if (resume && resume.isConnected) resume.focus({ preventScroll: true });
-  });
+  }
+  pillStop.addEventListener('click', stopBook);
+  barStop.addEventListener('click', stopBook);
 
   // ---- Its own window (popout.js) ----
 
@@ -1850,7 +1888,7 @@ export function createUI(env) {
       lastFocus = null;
       if (lastState) drawPill(lastState);
       if (focusIn) {
-        // The narrowest top bar has no cover to open the window: Play then.
+        // Back to the pill's cover (Play only if the cover is not showing).
         const back = pillOnScreen() ? (isVisible(pillOpen) ? pillOpen : pillPlay) : fallbackFocus();
         if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
       }
