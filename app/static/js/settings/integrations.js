@@ -411,7 +411,7 @@
         var field = el(multiline ? 'textarea' : 'input', cls.input + ' flex-1 min-w-0 basis-52' +
           (multiline ? ' font-mono text-[13px] resize-none' : ''));
         field.id = fieldId;
-        if (multiline) field.rows = 2; else field.type = 'text';
+        if (multiline) field.rows = 3; else field.type = 'text';
         field.readOnly = true;
         field.spellcheck = false;
         field.value = value;
