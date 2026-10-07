@@ -25,6 +25,10 @@
  *      asked;
  *      any callback in it still runs as the page's (see SELF_OWNED_FILES);
  *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
+ *      a page file the mounted page loads as a helper (named in a
+ *      data-ws-dep in #wsPage: Books loads pages/book.js for its book
+ *      pop-up) is the mounted page's, and inside a callback of the page
+ *      that loaded it, that page's;
  *   2. else, inside a callback a page registered (a listener, a timer or
  *      interval callback, a requestAnimationFrame callback, a .then / .catch
  *      / .finally, which also covers Promise.all / allSettled / race / any),
@@ -56,7 +60,8 @@
  * on* properties.
  *
  * Pure parts (importable by Node, no DOM at import time): pageNameOf,
- * ownerOf, createTracker (given a global-like object), runSoak (given deps).
+ * ownerOf, createTracker (given a global-like object), runSoak (given deps),
+ * helperPages (given a document).
  */
 
 // Files are matched by name, wherever they are: 'ui.js' is both js/ui.js and
@@ -211,11 +216,21 @@ export function createTracker(g, opts) {
      selfOwned: true } for ui.js's own item made while a page is the owner
      (not tracked; its callbacks run as that page's), or { owner:
      UNATTRIBUTED, stack, unattributed: true } when no page can be named. */
+  /* The owner for a frame in pages/<name>.js: the mounted page when it is
+     that file or loads it as a helper (session.helpers), the page instance
+     whose callback is running when that one loads it, else the page of that
+     name (not mounted). */
+  function pageOwner(name) {
+    if (session && (session.name === name || session.helpers.indexOf(name) !== -1)) return { name: session.name, session: session };
+    if (ambient && ambient.session && ambient.session.helpers.indexOf(name) !== -1) return ambient;
+    return { name: name, session: null };
+  }
+
   function attribute() {
     const stack = stackNow();
     const o = ownerOf(stack, shellFiles, origin);
     let owner = null;
-    if (o.page) owner = session && session.name === o.page ? { name: o.page, session: session } : { name: o.page, session: null };
+    if (o.page) owner = pageOwner(o.page);
     else if (ambient) owner = ambient;
     if (madeBySelfOwned(stack, selfOwnedFiles, origin, shellFiles)) {
       return owner ? { owner: owner, stack: stack, selfOwned: true } : null;
@@ -556,11 +571,13 @@ export function createTracker(g, opts) {
     reports: reports,
     get requestsAfterLeave() { return afterLeave; },
     get page() { return session ? session.name : null; },
-    start: function (name) {
+    /* name: the page now mounted; helpers: the names of the pages/*.js files
+       it loads as helpers (data-ws-dep), whose frames are its own. */
+    start: function (name, helpers) {
       if (session) close(session);
       name = String(name);
       left.delete(name);
-      session = { name: name, items: new Set(), closed: false };
+      session = { name: name, helpers: (helpers || []).map(String), items: new Set(), closed: false };
       everStarted = true;
     },
     stop: function () {
@@ -716,6 +733,21 @@ export async function runSoak(deps, urls, rounds, opts) {
 // Browser
 // ---------------------------------------------------------------------------
 
+/* The names of the pages/*.js files the page in #wsPage loads as helpers:
+   every data-ws-dep on #wsPage and inside it ("book" for Books' pop-up). */
+export function helperPages(doc) {
+  const root = doc.getElementById('wsPage');
+  if (!root) return [];
+  const els = [root].concat(Array.prototype.slice.call(root.querySelectorAll('[data-ws-dep]')));
+  const out = [];
+  els.forEach(function (el) {
+    const path = String(el.getAttribute('data-ws-dep') || '').split(/[?#]/)[0];
+    const m = PAGE_RE.exec(path);
+    if (m && out.indexOf(m[1]) === -1) out.push(m[1]);
+  });
+  return out;
+}
+
 /* The 440 Hz test tone, looping in #wsPlayer. A static file, not a data: URI:
    the site's CSP has no media-src, so default-src 'self' blocks data: audio.
    Counts pause, emptied and abort once it has started playing. */
@@ -812,7 +844,7 @@ export function install(win, opts) {
     tracker = createTracker(win, { origin: win.location.origin });
     const origFetch = tracker.orig.fetch;
     debug.leaks = {
-      start: function (page) { tracker.start(page); },
+      start: function (page, helpers) { tracker.start(page, helpers); },
       stop: function () { return tracker.stop(); },
       get reports() { return tracker.reports; },
       get requestsAfterLeave() { return tracker.requestsAfterLeave; },
@@ -862,7 +894,7 @@ export function install(win, opts) {
   return {
     pageStart: function (moduleUrl) {
       mountedPage = pageNameOf(moduleUrl);
-      if (tracker) tracker.start(mountedPage);
+      if (tracker) tracker.start(mountedPage, helperPages(doc));
     },
     pageLeft: function () {
       if (!tracker) return;

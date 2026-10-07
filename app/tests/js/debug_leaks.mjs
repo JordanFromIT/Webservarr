@@ -189,6 +189,62 @@ tr.stop();                                           // drop anything the checks
   check('clean page: nothing alive after leave', out.length === 0 && fast === 1 && done === undefined, out);
 }
 
+// A page file loaded as a helper (data-ws-dep): Books loads pages/book.js for
+// its pop-up. Its work is the mounted page's and is checked when that page
+// leaves; inside the page's callbacks after it left, it is that page's late
+// work. Without the helper named it is a page that never mounted.
+{
+  const BOOK = 'https://host.example/static/js/pages/book.js?v=abc';
+  const BOOKS = 'https://host.example/static/js/pages/books.js?v=abc';
+  fetchResolve = [];
+  const before = tr.requestsAfterLeave;
+  nowStack = stack(SELF, BOOK, BOOKS);
+  tr.start('books', ['book']);
+  const ctl = new AbortController();
+  new Target().addEventListener('click', () => {}, { signal: ctl.signal });
+  const kept = new Target();
+  const h = () => {};
+  kept.addEventListener('keydown', h);
+  let fired = null;
+  const fires = new Promise((r) => { fired = r; });
+  g.setTimeout(() => {
+    nowStack = stack(SELF, BOOK);
+    g.fetch('/api/books/2').catch(() => {});
+    fired();
+  }, 0);
+  ctl.abort();
+  const out = tr.stop();
+  check('helper: the mounted page\'s, and what it left alive is reported at leave',
+    out.length === 2 && out.every((i) => i.page === 'books' && !i.late) &&
+    out.some((i) => /^keydown on /.test(i.detail)) && out.some((i) => i.kind === 'timer'), out);
+  await fires;
+  const late = tr.stop();
+  check('helper: its work in the page\'s callback after leave is that page\'s, late, and a request after leave',
+    late.length === 1 && late[0].page === 'books' && late[0].late && late[0].kind === 'fetch' &&
+    tr.requestsAfterLeave === before + 1, [late, tr.requestsAfterLeave - before]);
+  kept.removeEventListener('keydown', h);
+
+  nowStack = stack(SELF, BOOK, BOOKS);
+  tr.start('books');
+  const id = g.setTimeout(() => {}, 60000);
+  const unnamed = tr.stop();
+  check('helper: not named, it is a page that never mounted',
+    unnamed.length === 1 && unnamed[0].page === 'book' && unnamed[0].late, unnamed);
+  g.clearTimeout(id);
+  fetchResolve = [];
+}
+
+// helperPages: the pages/*.js files named by data-ws-dep on #wsPage and inside it.
+{
+  const node = (dep) => ({ getAttribute: (n) => (n === 'data-ws-dep' ? dep : null) });
+  const root = Object.assign(node('/static/js/pages/books.js?v=1'), {
+    querySelectorAll: () => [node('/static/js/pages/book.js?v=2'), node('/static/js/player/engine.js?v=1'), node('/static/js/pages/books.js?v=1')]
+  });
+  check('helperPages: page files only, once each',
+    eq(dbg.helperPages({ getElementById: (id) => (id === 'wsPage' ? root : null) }), ['books', 'book']));
+  check('helperPages: no #wsPage, none', eq(dbg.helperPages({ getElementById: () => null }), []));
+}
+
 // A leaky page: one of each kind survives its signal.
 {
   nowStack = stack(SELF, SHELL, PAGE);

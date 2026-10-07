@@ -1758,5 +1758,84 @@ await popupRun('the pop-up: not found says so, and its button closes', { answer:
   check('it closes as Close does', t.hist.backs === 1 && t.stack.length === 0, t.hist);
 });
 
+// The leak checker (debug-leaks.js) watching the pop-up as the soak does: the
+// Books page with book.js as its helper, its one-off timers the router's
+// (visitTimers: cleared when the page is left). Opened and closed 20 times by
+// every way out, then the page is left with it open: nothing it made is alive.
+const leaksModule = await import(dataUrl(readFileSync(join(STATIC, 'js/debug-leaks.js'), 'utf8')));
+const { visitTimers } = await import(dataUrl(readFileSync(join(STATIC, 'js/router.js'), 'utf8')));
+
+await popupRun('the pop-up: opened and closed 20 times, then the page left, leaves nothing alive', {}, async (t) => {
+  // Every item is made by the pop-up's code (pages/book.js) on the Books page.
+  const STACK = 'Error\n    at f (https://ws.test/static/js/pages/book.js:1:1)\n    at g (https://ws.test/static/js/pages/books.js:1:1)';
+  // happy-dom's nodes and signals share one EventTarget, the window's class's
+  // parent. Its own Promise subclass: the tracker's .then wrapper stays off the global one.
+  const realFetch = t.net.fetch;
+  const g = {
+    EventTarget: Object.getPrototypeOf(t.win.EventTarget.prototype).constructor,
+    AbortSignal: t.win.AbortSignal, Promise: class extends Promise {},
+    setTimeout: (fn, ms) => t.clock.setTimeout(fn, ms), clearTimeout: (id) => t.clock.clearTimeout(id),
+    setInterval: () => 0, clearInterval: () => {},
+    fetch: (u, init) => realFetch.call(t.net, u, init)
+  };
+  const timers = visitTimers(t.ctl.signal, (fn, ms) => g.setTimeout(fn, ms), (id) => g.clearTimeout(id));
+  t.ctx.setTimeout = timers.setTimeout;
+  t.ctx.clearTimeout = timers.clearTimeout;
+  // The router's one abort listener for the page's timers, armed by the Books page's own mount.
+  t.ctx.clearTimeout(t.ctx.setTimeout(() => {}, 0));
+  const tr = leaksModule.createTracker(g, { stack: () => STACK, origin: 'https://ws.test' });
+  try {
+    t.net.fetch = g.fetch;
+    tr.start('books', ['book']);
+    booksModule.withBookDialog(t.ctx, null, null);
+    await flush();
+    const base = tr.liveListeners();
+    const page = 'https://ws.test/books?author=J.K.%20Rowling';
+    const ways = ['escape', 'close', 'dim', 'back'];
+    const after = [];
+    let closed = 0;
+    for (let n = 0; n < 20; n++) {
+      const card = n % 2 ? t.q('#other') : t.q('#card');
+      card.click();
+      const p = t.claim(new URL('https://ws.test' + card.getAttribute('href')), { pop: false });
+      t.UI.closeDialogs();
+      t.entry(4);
+      await p;
+      await t.clock.advance(1600);
+      const way = ways[n % ways.length];
+      if (way === 'escape') t.UI.escape();
+      else if (way === 'close') t.q('#bookDialog button[aria-label="Close"]').click();
+      else if (way === 'dim') t.q('#bookDialog .ws-scrim').click();
+      await flush();
+      // The step back lands on the page's entry, which the router hands to the page.
+      t.entry(3);
+      t.claim(new URL(page), { pop: true });
+      await t.clock.advance(200);
+      if (!t.open() && t.stack.length === 0) closed += 1;
+      after.push(tr.liveListeners());
+    }
+    check('it closed every time', closed === 20, closed);
+    check('each close leaves the page\'s listeners as they were before it opened', after.every((c) => c === base), { base, after });
+    // Open once more, then the router's swap: dialogs closed, the page left.
+    t.q('#card').click();
+    const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+    t.UI.closeDialogs();
+    await p;
+    await t.clock.advance(100);
+    t.UI.closeDialogs();
+    t.ctl.abort();
+    const left = tr.stop();
+    await t.clock.advance(5000);
+    const later = tr.stop();
+    check('nothing alive when the page is left', left.length === 0, left);
+    check('nothing made after it was left', later.length === 0, later);
+    check('no listener left anywhere', tr.liveListeners() === 0, tr.liveListeners());
+    check('no request after leaving', tr.requestsAfterLeave === 0, tr.requestsAfterLeave);
+    check('no timer left', t.clock.pending() === 0, t.clock.pending());
+  } finally {
+    tr.uninstall();
+  }
+});
+
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));
 process.exit(failed ? 1 : 0);
