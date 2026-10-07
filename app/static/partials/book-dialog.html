@@ -3,14 +3,16 @@
   books-series.html carry the ws:book-dialog marker, and app/pages.py writes
   this in its place). pages/book.js bookDialog runs it: a click on a book opens it
   at /books/<id> (Back closes it), and a full load of /books/<id> is the Books
-  page with <html data-book-open>, so the pop-up is on screen from the first
+  page with the data-book-open flag on html, so the pop-up is on screen from the first
   paint. pages/book.js mount draws the book into #bookBody over this skeleton,
   which has the drawn page's shape; the heading stays and what follows it is
-  replaced. A centred dialog from sm up, a full-height sheet on a phone (clear
-  of the notch and the home indicator).
+  replaced. From sm up a dialog, centred across and hung from near the top, so
+  a book that arrives taller than its skeleton grows downward and nothing on
+  screen moves; on a phone a full-height sheet (clear of the notch and the
+  home indicator).
   #bookBody names the card helpers (books.js) the way #wsPage does.
 -->
-<div id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=1" class="fixed inset-0 z-[60] hidden [html[data-book-open]_&]:flex items-stretch sm:items-center justify-center pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:p-6 lg:p-10">
+<div id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=1" class="fixed inset-0 z-[60] hidden [html[data-book-open]_&]:flex items-stretch sm:items-start justify-center pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:p-6 sm:pt-[max(1.5rem,6svh)] lg:p-10 lg:pt-[max(2.5rem,8svh)]">
   <div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-book-close></div>
   <div data-dialog-box role="dialog" aria-modal="true" aria-labelledby="bookTitle" class="ws-frost relative flex w-full min-h-0 flex-col overflow-hidden sm:max-w-[900px] sm:max-h-full sm:rounded-2xl sm:border">
     <button type="button" data-book-close aria-label="Close" class="absolute right-2 top-2 sm:right-3 sm:top-3 z-10 grid size-11 place-items-center rounded-full bg-background-dark/60 text-frosted-blue/80 hover:bg-frosted-blue/10 hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">

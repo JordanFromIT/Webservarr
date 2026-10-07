@@ -3,6 +3,7 @@ Off means off: a page switched off redirects members home and shows admins a
 banner; /library and /ebooks moved to /books; /requests shows the Seerr embed when that
 is the chosen source.
 """
+import re
 import unittest
 from unittest import mock
 
@@ -126,7 +127,9 @@ class MovedRoutes(PageRoutesBase):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
         r = self.get("/books/7", MEMBER_SESSION, values)
         self.assertEqual(r.status_code, 200)
-        self.assertRegex(r.text, r'<html\b[^>]*data-page="books"[^>]*data-book-open')
+        html_tag = re.search(r"<html\b[^>]*>", r.text).group(0)
+        self.assertIn('data-page="books"', html_tag)
+        self.assertIn("data-book-open", html_tag)
         self.assertIn('data-ws-module="/static/js/pages/books.js?v=', r.text)
         # The pop-up is written in (partials/book-dialog.html), its scripts stamped.
         self.assertIn('id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=', r.text)
@@ -136,7 +139,7 @@ class MovedRoutes(PageRoutesBase):
         # Books itself has the pop-up too, closed.
         plain = self.get("/books", MEMBER_SESSION, values)
         self.assertIn('id="bookDialog"', plain.text)
-        self.assertNotRegex(plain.text, r'<html\b[^>]*data-book-open')
+        self.assertNotIn("data-book-open", re.search(r"<html\b[^>]*>", plain.text).group(0))
 
     def test_your_stats_is_its_own_page_under_books_in_the_nav(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
@@ -175,12 +178,16 @@ class MovedRoutes(PageRoutesBase):
         import re
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
         want = "/static/js/pages/books.js?v=" + pages.asset_stamp("/static/js/pages/books.js")
-        for path in ("/books/7", "/books/person?role=author&name=X", "/books/series?name=X"):
+        # The book pop-up names book.js (on #bookDialog) and books.js (on #bookBody) the same way.
+        book = "/static/js/pages/book.js?v=" + pages.asset_stamp("/static/js/pages/book.js")
+        for path, deps in (("/books/7", [book, want]), ("/books/person?role=author&name=X", [want, book, want]),
+                           ("/books/series?name=X", [want, book, want])):
             r = self.get(path, MEMBER_SESSION, values)
             found = re.findall(r'data-ws-dep="([^"]+)"', r.text)
-            self.assertEqual(found, [want], path)
+            self.assertEqual(found, deps, path)
             module = re.findall(r'data-ws-module="([^"]+)"', r.text)[0]
-            self.assertNotEqual(module.split("?v=")[1], found[0].split("?v=")[1], "each file has its own stamp")
+            self.assertNotEqual(module.split("?v=")[1], want.split("?v=")[1], "each file has its own stamp")
+            self.assertNotEqual(book.split("?v=")[1], want.split("?v=")[1], "each file has its own stamp")
 
     def test_home_loads_no_books_module(self):
         # Continue is Books' alone: Home names no books.js dependency.
