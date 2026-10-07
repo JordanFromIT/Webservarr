@@ -247,7 +247,6 @@
   // The discovery shelves (books 3c) too: webservarr_books_recent:<name> and webservarr_books_popular:<name>.
   var rows = [['continue', 'data-books-continue'], ['upnext', 'data-books-upnext'], ['mylist', 'data-books-mylist'],
     ['recent', 'data-books-recent'], ['popular', 'data-books-popular']];
-  var view = null;
   try {
     var name = (data.user || {}).username || '';
     for (var i = 0; i < rows.length; i++) {
@@ -255,19 +254,11 @@
         document.documentElement.setAttribute(rows[i][1], '');
       }
     }
-    // The person's remembered view: a format other than all is a filter in use,
-    // and Group series off gives every card a third line.
-    view = JSON.parse(localStorage.getItem('webservarr_books_view:' + name) || 'null');
   } catch (e) { /* private mode: no slot reserved, the row arrives when it arrives */ }
-  var format = view && (view.format === 'ebook' || view.format === 'audio');
-  // The filters: an address that carries one, or a remembered format, gets the
-  // room of the row of filters in use (pages/books.js keeps this in step on soft visits).
-  if (/[?&](author|series|narrator)=[^&]/.test(window.location.search) || format) {
+  // The toolbar's filters: an address that carries one gets the room of the
+  // row of filters in use (pages/books.js keeps this in step on soft visits).
+  if (/[?&](author|series|narrator)=[^&]/.test(window.location.search)) {
     document.documentElement.setAttribute('data-books-filtered', '');
-  }
-  // Every book its own card (Group series off, or a series filter): the grid's skeleton holds a third line.
-  if ((view && view.group === false) || /[?&]series=[^&]/.test(window.location.search)) {
-    document.documentElement.setAttribute('data-books-flat', '');
   }
 })();
 
