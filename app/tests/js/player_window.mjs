@@ -142,9 +142,16 @@ function setup(o = {}) {
       get matches() { return q.indexOf('reduce') !== -1 ? env.reduce : q.indexOf('min-width') !== -1 ? env.wide : false; },
       addEventListener(type, fn) { if (type === 'change' && q.indexOf('min-width') !== -1) env.wideFns.push(fn); }
     }),
-    // The bar is gone on a desktop page (0 px); the drop-down, with no
-    // panel, is 400 px tall, else the height it was given.
-    measure: (el) => (el.classList.contains('wsp-full') ? (el.style.height ? parseInt(el.style.height, 10) : 400) : env.wide ? 0 : 72),
+    // The bar is gone on a desktop page (0 px); the drop-down is the height
+    // it was given, else its content's (400 px for the player, 900 with a
+    // panel, or the settings panel's 560), at most its max-height.
+    measure: (el) => {
+      if (!el.classList.contains('wsp-full')) return env.wide ? 0 : 72;
+      if (el.style.height) return parseInt(el.style.height, 10);
+      const view = el.getAttribute('data-view');
+      const content = view === 'settings' ? 560 : view ? 900 : 400;
+      return Math.min(content, el.style.maxHeight ? parseInt(el.style.maxHeight, 10) : Infinity);
+    },
     isVisible: (el) => !el.closest('[hidden]'),
     now: () => clock.now,
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
@@ -468,31 +475,36 @@ await run('panels open below and close again, each from its own button', () => {
   })());
 });
 
-await run('a panel grows the drop-down to the room under the top bar, smoothly, and it shrinks back', async () => {
+await run('a panel grows the drop-down to hold it, up to the room under the top bar, smoothly, and it shrinks back', async () => {
   const t = setup({ state: BOOK });
-  const { speedBtn, chapters } = withPanels(t);
+  const { tune, speedBtn, chapters } = withPanels(t);
   t.ui.open();
   check('the player alone: its content\'s height', t.rect().h === null);
   chapters().click();
-  check('Chapters: from its own height...', t.full.classList.contains('is-sizing') && t.rect().h === 812, [t.full.className, t.rect()]);
+  check('Chapters: from its own height to all the room...', t.full.classList.contains('is-sizing') && t.rect().h === 812, [t.full.className, t.rect()]);
   await t.clock.advance(300);
-  check('...to the room under the top bar, and stays', !t.full.classList.contains('is-sizing') && t.rect().h === 812, t.rect());
+  check('...then its content\'s height again, capped by the room', !t.full.classList.contains('is-sizing') && t.rect().h === null &&
+    t.full.style.maxHeight === '812px', [t.rect(), t.full.style.maxHeight]);
   speedBtn.click();
-  check('another panel: the same height, nothing runs', !t.full.classList.contains('is-sizing') && t.rect().h === 812);
+  check('another long panel: the same height, nothing runs', !t.full.classList.contains('is-sizing') && t.rect().h === null);
   speedBtn.click();
   check('closed: back down to the player', t.full.classList.contains('is-sizing') && t.rect().h === 400, t.rect());
   await t.clock.advance(300);
   check('then its content\'s height again', !t.full.classList.contains('is-sizing') && t.rect().h === null, t.rect());
+  tune.click();
+  check('a short panel (Playback settings): only as tall as it needs', t.full.classList.contains('is-sizing') && t.rect().h === 560, t.rect());
+  await t.clock.advance(300);
+  tune.click();
+  await t.clock.advance(300);
   t.env.vp = { w: 1440, h: 700 };
   chapters().click();
-  await t.clock.advance(300);
-  check('a shorter screen: less room', t.rect().h === 700 - 74 - 14, t.rect());
+  check('a shorter screen: less room', t.rect().h === 700 - 74 - 14 && t.full.style.maxHeight === (700 - 74 - 14) + 'px', t.rect());
 
   const r = setup({ state: BOOK, reduce: true });
   withPanels(r);
   r.ui.open();
   r.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
-  check('reduced motion: at once', !r.full.classList.contains('is-sizing') && r.rect().h === 812, r.rect());
+  check('reduced motion: at once', !r.full.classList.contains('is-sizing') && r.rect().h === null, r.rect());
 });
 
 await run('prompts and notices: inside the drop-down while expanded, on the page while collapsed', () => {

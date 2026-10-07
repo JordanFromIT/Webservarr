@@ -2046,8 +2046,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 
 /* The drop-down. Placed by ui.js under the pill (left, top, width, its
    pointer's --wsp-caret, a max-height down to 24px above the viewport's
-   bottom); a height only while a panel is open, else it fits its content.
-   The sheet inside clips to its corners, so the pointer can stand above. */
+   bottom); it fits its content up to that (a height only while it grows
+   or shrinks). The sheet inside clips to its corners, so the pointer can
+   stand above. */
 .wsp-full.is-window {
   inset: auto; left: 0; top: 0; width: 400px; display: flex; flex-direction: column; overflow: visible;
   color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid rgb(var(--color-text) / .14);
@@ -2129,11 +2130,11 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window .wsp-action { min-width: 72px; padding: 6px 8px; border-radius: 12px; }
 .wsp-full.is-window .wsp-action[aria-expanded="true"] { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .35); }
 
-/* A panel opens below the player and closes again. The drop-down is then
-   as tall as the viewport allows, the player above it folds to its cover,
-   title and row of actions (Play stays on the pill, the current chapter is
-   marked in Chapters), and the panel takes the rest (at least 200px, else the
-   whole column scrolls); only its list scrolls. */
+/* A panel opens below the player and closes again. The player above it
+   folds to its cover, title and row of actions (Play stays on the pill, the
+   current chapter is marked in Chapters) and the drop-down grows to hold
+   the panel, up to its max-height; a longer list scrolls inside the panel
+   (which keeps at least 200px, else the whole column scrolls). */
 .wsp-full.is-window[data-view] .wsp-scrub,
 .wsp-full.is-window[data-view] .wsp-left,
 .wsp-full.is-window[data-view] .wsp-controls { display: none; }

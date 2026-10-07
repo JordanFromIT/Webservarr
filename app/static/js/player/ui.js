@@ -122,9 +122,10 @@
  * reach the page, a click outside leaves it open, and so do scrolling and
  * soft navigation. Its panels (Chapters, Speed, Sleep, History, Playback
  * settings) open below the player and close again from the same button; one
- * open, the panel grows to the viewport's height under the top bar and the
- * player above it folds to its cover, title and actions (theme.css) so the
- * list has room, and shrinks back when it closes (smoothly; at once with
+ * open, the player above it folds to its cover, title and actions
+ * (theme.css) and the drop-down grows to hold the panel, up to the
+ * viewport's height under the top bar, where a long list (Chapters) scrolls
+ * inside it; it shrinks back when the panel closes (smoothly; at once with
  * reduced motion). The pill again, the panel's collapse button or Escape
  * (a panel first, then the player) collapse it to the pill, focus with it;
  * the book plays on. Only the pill (and a tablet's bar) stops a book: its
@@ -662,7 +663,7 @@ export function createUI(env) {
     // Over the player (a phone): a layer of its own, closed first.
     if (isOpen && !windowed && !panelWatcher && !watcherTap && !matches(WIDE)) panelTapped = watchPanel(false);
     drawPanels();
-    // The drop-down grows to the viewport's height to hold it.
+      // The drop-down grows to hold it, up to the room under the top bar.
     resizeDrop(before);
     fitDocked();
     if (name === 'chapters') centreCurrent();
@@ -1411,14 +1412,14 @@ export function createUI(env) {
     syncHost();
   }
 
-  // The panel's height change (resizeDrop) is over: with no panel open its
-  // height is its content's again.
+  // The panel's height change (resizeDrop) is over: its height is its
+  // content's again.
   function endSizing() {
     if (sizing === null) return;
     clearT(sizing);
     sizing = null;
     full.classList.remove('is-sizing');
-    if (view === null) full.style.height = '';
+    full.style.height = '';
   }
 
   function tickClock() {
@@ -1497,9 +1498,10 @@ export function createUI(env) {
     return r.width ? { left: r.left, right: r.right } : null;
   }
 
-  // Hangs it under the pill: its place and width, its pointer, and its
-  // height (the room under the top bar while a panel is open, else its
-  // content's, at most that room).
+  // Hangs it under the pill: its place and width, its pointer, and the
+  // most it may grow (the room under the top bar). Its height is its
+  // content's: with a long panel open (Chapters) that is all the room, and
+  // the panel's list scrolls inside it.
   function placeWindow() {
     if (!isOpen || !windowed || docked) return null;
     const vp = viewport();
@@ -1510,7 +1512,7 @@ export function createUI(env) {
     full.style.width = r.w + 'px';
     full.style.maxHeight = r.room + 'px';
     full.style.setProperty('--wsp-caret', r.caret + 'px');
-    if (sizing === null) full.style.height = view === null ? '' : r.room + 'px';
+    if (sizing === null) full.style.height = '';
     return r;
   }
 
