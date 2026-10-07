@@ -17,15 +17,16 @@ from app.services.library_lines import _line, _words
 REQUESTED = "Requested"
 FIXED = "Fixed"
 
-# What n8n may send (section 11.2). Each problem's words before the title.
+# What n8n may send (section 11.2). Each problem's word, shown in brackets
+# after the title ("other" shows none).
 KINDS = ("issue_fixed",)
 PROBLEMS = {
-    "subtitles": "subtitles on",
-    "audio": "audio on",
-    "video": "video on",
-    "playback": "playback of",
-    "wrong_file": "the wrong file for",
-    "other": "an issue with",
+    "subtitles": "subtitles",
+    "audio": "audio",
+    "video": "video",
+    "playback": "playback",
+    "wrong_file": "wrong file",
+    "other": "",
 }
 TITLE_MAX = 120
 REF_MAX = 64
@@ -116,8 +117,8 @@ def _ref(value) -> str:
 
 
 def fixed_line(body) -> Tuple[str, str]:
-    """(line, ref) for an n8n body, e.g. ("Fixed: subtitles on Severance
-    S02E03", "123"). Raises Refused for anything that must not be shown or
+    """(line, ref) for an n8n body, e.g. ("Fixed: Severance S02E03
+    (subtitles)", "123"). Raises Refused for anything that must not be shown or
     is not in the allowed set."""
     if not isinstance(body, dict):
         raise Refused("the body must be a JSON object")
@@ -132,7 +133,9 @@ def fixed_line(body) -> Tuple[str, str]:
         raise Refused("title refused")
     code, year, ref = _code(body.get("code")), _year(body.get("year")), _ref(body.get("ref"))
     tail = f" {code}" if code else (f" ({year})" if year else "")
-    return _line(FIXED, f"{PROBLEMS[problem]} {title}", tail), ref
+    if PROBLEMS[problem]:
+        tail += f" ({PROBLEMS[problem]})"
+    return _line(FIXED, title, tail), ref
 
 
 # --- Kometa ------------------------------------------------------------------------------

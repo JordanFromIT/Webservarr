@@ -258,14 +258,17 @@ title cut, kept 30 days. Their `app` is `requests`, `n8n` or `kometa`. None of t
 
   | `problem` | Line |
   |---|---|
-  | `subtitles` | `Fixed: subtitles on Severance S02E03` |
-  | `audio` | `Fixed: audio on Severance S02E03` |
-  | `video` | `Fixed: video on Dune (2021)` |
-  | `playback` | `Fixed: playback of Dune (2021)` |
-  | `wrong_file` | `Fixed: the wrong file for Dune (2021)` |
-  | `other` | `Fixed: an issue with Dune (2021)` |
+  | `subtitles` | `Fixed: Severance S02E03 (subtitles)` |
+  | `audio` | `Fixed: Severance S02E03 (audio)` |
+  | `video` | `Fixed: Dune (2021) (video)` |
+  | `playback` | `Fixed: Dune (2021) (playback)` |
+  | `wrong_file` | `Fixed: Dune (2021) (wrong file)` |
+  | `other` | `Fixed: Dune (2021)` |
 
-  The title is followed by the episode code when there is one, else by the year when there is one.
+  The title is followed by the episode code when there is one, else by the year when there is one,
+  then by the problem in brackets (none for `other`). Only the title is ever cut; the problem is
+  always shown. Changed 2026-10-07 from the earlier `Fixed: subtitles on Severance S02E03` form;
+  lines already stored keep their old wording.
 - **Screening:** the title and code are refused (422, nothing stored) when they hold a URL or a domain
   name, an IP address, an email address or an `@handle`, a file path (a backslash, a leading `/` or `~`,
   a drive letter, or two slashes in one word; a single slash as in `Face/Off` is fine), a long token

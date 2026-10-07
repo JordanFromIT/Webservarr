@@ -74,19 +74,29 @@ class FixedWords(unittest.TestCase):
 
     def test_one_sentence_per_problem(self):
         cases = [
-            ({}, "Fixed: subtitles on Severance S02E03"),
-            ({"problem": "audio"}, "Fixed: audio on Severance S02E03"),
-            ({"problem": "video", "title": "Dune", "code": None, "year": 2021}, "Fixed: video on Dune (2021)"),
-            ({"problem": "playback", "title": "Dune", "code": None, "year": 2021}, "Fixed: playback of Dune (2021)"),
+            ({}, "Fixed: Severance S02E03 (subtitles)"),
+            ({"problem": "audio"}, "Fixed: Severance S02E03 (audio)"),
+            ({"problem": "video", "title": "Dune", "code": None, "year": 2021}, "Fixed: Dune (2021) (video)"),
+            ({"problem": "playback", "title": "Dune", "code": None, "year": 2021}, "Fixed: Dune (2021) (playback)"),
             ({"problem": "wrong_file", "title": "Dune", "code": None, "year": "2021"},
-             "Fixed: the wrong file for Dune (2021)"),
-            ({"problem": "other", "title": "Dune", "code": "", "year": ""}, "Fixed: an issue with Dune"),
-            ({"code": "S02E03", "year": 2022}, "Fixed: subtitles on Severance S02E03"),
+             "Fixed: Dune (2021) (wrong file)"),
+            ({"problem": "other", "title": "Dune", "code": "", "year": ""}, "Fixed: Dune"),
+            ({"code": "S02E03", "year": 2022}, "Fixed: Severance S02E03 (subtitles)"),
+            ({"problem": "other", "title": "Dune", "code": None, "year": 2021}, "Fixed: Dune (2021)"),
         ]
         for fields, want in cases:
             with self.subTest(fields=fields):
                 self.assertEqual(activity_lines.fixed_line(self.body(**fields)), (want, "123"))
         self.assertEqual(activity_lines.fixed_line(self.body(ref=77))[1], "77")
+
+    def test_only_the_title_is_cut_never_the_problem(self):
+        # A 120-character title always fits in 200, so shrink the limit to see the cut.
+        from app.services import library_lines
+        with mock.patch.object(library_lines, "LINE_MAX", 40):
+            line = activity_lines.fixed_line(self.body(title="The Long Title Words " * 5, problem="wrong_file"))[0]
+        self.assertEqual(len(line), 40)
+        self.assertTrue(line.startswith("Fixed: The Long"))
+        self.assertTrue(line.endswith("… S02E03 (wrong file)"))
 
     def test_titles_that_could_show_a_person_an_address_or_a_token_are_refused(self):
         bad = ["Dune https://example.org/x", "see www.example.org", "plex.example.com", "Dune 192.168.1.10",
@@ -459,7 +469,7 @@ class Webhooks(unittest.TestCase):
         self.assertEqual((r.status_code, r.content), (204, b""))
         self.assertEqual(self.n8n().status_code, 204)
         self.assertEqual(self.n8n(problem="playback", title="Dune", code=None, year=2021, ref=124).status_code, 204)
-        self.assertEqual(self.lines(), ["Fixed: playback of Dune (2021)", "Fixed: subtitles on Severance S02E03"])
+        self.assertEqual(self.lines(), ["Fixed: Dune (2021) (playback)", "Fixed: Severance S02E03 (subtitles)"])
 
     def test_n8n_needs_its_secret(self):
         for secret in (None, "", "wrong", N8N_SECRET + "x"):
