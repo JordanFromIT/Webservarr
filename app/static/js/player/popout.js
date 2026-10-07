@@ -2,7 +2,7 @@
  * WebServarr: Pop out, the desktop player in a window of its own
  * (ES module, document-lifetime)
  *
- * The desktop player window (ui.js, WS.playerUI) has a Pop out button. What
+ * The desktop player's drop-down (ui.js, WS.playerUI) has a Pop out button. What
  * it does is decided when it is pressed, from what the browser offers, so a
  * browser that gains always-on-top windows later gets them unchanged:
  *
@@ -21,7 +21,7 @@
  *   background tab, so a quiet tab is not taken for a closed one. When this
  *   tab goes it says so ('bye'); when the remote goes, the pill comes back.
  *
- * No Pop out on phones: the window, and so its button, is desktop only.
+ * No Pop out on phones: the drop-down, and so its button, is desktop only.
  * Theme variables only (theme.css "Pop out"); nothing here writes HTML.
  *
  * Pure (importable by Node, no DOM at import time):

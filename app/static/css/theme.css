@@ -1921,14 +1921,16 @@ html[data-player-full] #scrollDownHint { display: none; }
 
 /* ---- The desktop player (js/player/ui.js, popout.js, remote.js) ----
  * From lg, on a page whose top bar shows: a pill in the top bar instead of
- * the bar, and the player as a floating window instead of the full-screen
- * sheet (the same element, .wsp-full.is-window). The bar still shows on a
- * full-screen view (the reader), where the top bar is hidden. The window
- * sits over the page under the top bar (#wsPlayer's z 45, the header's 50),
- * so the bell panel and the account menu open over it. Its surface is the
- * background with a primary tint; text as the rest of the player. Motion:
- * the window opens and closes with a short scale and fade (opacity only
- * with reduced motion); the pill's three bars move only while it plays.
+ * the bar, and the pill expands into the player as a panel that drops down
+ * from it instead of the full-screen sheet (the same element,
+ * .wsp-full.is-window). The bar still shows on a full-screen view (the
+ * reader), where the top bar is hidden. The drop-down sits over the page
+ * under the top bar (#wsPlayer's z 45, the header's 50), so the bell panel
+ * and the account menu open over it. Its surface is the background with a
+ * primary tint; text as the rest of the player. Motion: it drops from the
+ * pill and folds back with a short scale and fade, and grows and shrinks for
+ * a panel (opacity only, and no height change, with reduced motion); the
+ * pill's three bars move only while it plays.
  */
 
 /* The bar from 640px on a page with the shell (a tablet): it floats over the
@@ -2042,33 +2044,47 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }
 }
 
-/* The window. Placed and sized by ui.js (left, top, width; a height only
-   while a panel is open, else it fits its content). */
+/* The drop-down. Placed by ui.js under the pill (left, top, width, its
+   pointer's --wsp-caret, a max-height down to 24px above the viewport's
+   bottom); a height only while a panel is open, else it fits its content.
+   The sheet inside clips to its corners, so the pointer can stand above. */
 .wsp-full.is-window {
-  inset: auto; left: 0; top: 0; width: 380px; display: flex; flex-direction: column; overflow: hidden;
+  inset: auto; left: 0; top: 0; width: 400px; display: flex; flex-direction: column; overflow: visible;
   color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid rgb(var(--color-text) / .14);
   background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
   box-shadow: 0 24px 56px -12px var(--ws-shade), 0 2px 8px var(--ws-shade);
-  transform-origin: 100% 0;
+  transform-origin: var(--wsp-caret, 100%) 0;
 }
 .wsp-full.is-window.is-opening { animation: wsp-win-in 200ms cubic-bezier(.2, .8, .2, 1) both; }
 .wsp-full.is-window.is-closing { animation: wsp-win-out 160ms ease-in both; pointer-events: none; }
-@keyframes wsp-win-in { from { opacity: 0; transform: translateY(-12px) scale(.96); } }
-@keyframes wsp-win-out { to { opacity: 0; transform: translateY(-12px) scale(.96); } }
-.wsp-full.is-window.is-moving { box-shadow: 0 32px 72px -12px var(--ws-shade), 0 2px 8px var(--ws-shade); }
-.wsp-full.is-window.is-moving, .wsp-full.is-window.is-moving * { cursor: grabbing !important; user-select: none; }
+@keyframes wsp-win-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } }
+@keyframes wsp-win-out { to { opacity: 0; transform: translateY(-8px) scale(.96); } }
+/* Growing for a panel and back (ui.js sets the heights it runs between). */
+.wsp-full.is-window.is-sizing { transition: height 220ms cubic-bezier(.2, .8, .2, 1); }
 .wsp-full.is-window .wsp-sheet {
-  position: relative; inset: auto; flex: 1 1 auto; min-height: 0; padding: 0;
+  position: relative; inset: auto; flex: 1 1 auto; min-height: 0; padding: 0; border-radius: inherit;
   background: transparent; transform: none; transition: none;
 }
 .wsp-full.is-window .wsp-ambient, .wsp-full.is-window .wsp-grab, .wsp-full.is-window .wsp-panel-back { display: none; }
+/* Its pointer up to the pill: the top bar's own surface, its two outer
+   edges in the border; the sheet covers the inner half. */
+.wsp-drop-caret { display: none; }
+.wsp-full.is-window:not(.is-pip) .wsp-drop-caret {
+  display: block; position: absolute; top: -7px; left: var(--wsp-caret, 50%); width: 12px; height: 12px; margin-left: -6px;
+  transform: rotate(45deg); border-radius: 2px 0 0 0;
+  border-top: 1px solid rgb(var(--color-text) / .14); border-left: 1px solid rgb(var(--color-text) / .14);
+  background:
+    linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)),
+    linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)),
+    rgb(var(--color-background));
+}
 
-/* Its top bar: the grip, "Now playing", Playback settings, Pop out, then
-   Close player window (back to the pill). The bar itself moves the window too. */
+/* Its top bar: "Now playing", Playback settings, Pop out, then Collapse
+   (back to the pill). */
 .wsp-full.is-window .wsp-top {
-  display: flex; align-items: center; gap: 2px; height: 48px; padding: 0 6px 0 4px;
+  display: flex; align-items: center; gap: 2px; height: 48px; padding: 0 6px 0 16px;
   background: rgb(var(--color-text) / .04); border-bottom: 1px solid rgb(var(--color-text) / .08);
-  cursor: grab; touch-action: none; user-select: none;
+  touch-action: auto;
 }
 .wsp-full.is-window .wsp-top-label {
   flex: 1; min-width: 0; text-align: left; font-size: 13px; font-weight: 600;
@@ -2076,7 +2092,6 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-full.is-window .wsp-top .wsp-icon-btn { width: 36px; height: 36px; }
 .wsp-full.is-window .wsp-top .wsp-icon-btn .material-symbols-outlined { font-size: 20px; }
-.wsp-win-grip { cursor: grab; }
 .wsp-win-sep { flex-shrink: 0; width: 1px; height: 20px; margin: 0 4px; background: rgb(var(--color-text) / .14); }
 
 /* The player: the cover beside the title, then the scrubber, the time left,
@@ -2114,36 +2129,26 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window .wsp-action { min-width: 72px; padding: 6px 8px; border-radius: 12px; }
 .wsp-full.is-window .wsp-action[aria-expanded="true"] { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .35); }
 
-/* A panel opens below the player and closes again. */
+/* A panel opens below the player and closes again. The drop-down is then
+   as tall as the viewport allows and the panel takes what the player
+   leaves (at least 200px, else the whole column scrolls); only its list
+   scrolls. */
 .wsp-full.is-window .wsp-side { display: none; }
 .wsp-full.is-window[data-view] .wsp-side {
-  display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
+  display: flex; flex: 1 1 auto; min-height: 200px; flex-direction: column;
   border-top: 1px solid rgb(var(--color-text) / .08);
 }
 .wsp-full.is-window .wsp-panel { border-radius: 0; background: none; padding-top: 0; }
 .wsp-full.is-window .wsp-panel-head { height: 44px; padding: 0 20px; }
 .wsp-full.is-window .wsp-panel-title { font-size: 16px; }
 
-/* Its size, from the corner (only its width while no panel is open). */
-.wsp-win-resize { position: absolute; right: 0; bottom: 0; z-index: 2; width: 24px; height: 24px; border-radius: 0 0 16px 0; cursor: nwse-resize; }
-.wsp-full.is-window:not([data-view]) .wsp-win-resize { cursor: ew-resize; }
-.wsp-win-resize::before, .wsp-win-resize::after {
-  content: ""; position: absolute; right: 5px; bottom: 5px; height: 2px; border-radius: 2px;
-  background: rgb(var(--color-text) / .45); transform: rotate(-45deg); transform-origin: 100% 50%;
-}
-.wsp-win-resize::before { width: 14px; }
-.wsp-win-resize::after { width: 7px; bottom: 9px; }
-.wsp-win-resize:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
-
-/* In a Picture-in-Picture window of its own: the whole of it, nothing to
-   move or size. */
+/* In a Picture-in-Picture window of its own: the whole of it, no pointer. */
 .wsp-pip-body { margin: 0; padding: 0; overflow: hidden; background: rgb(var(--color-background)); }
 #wsPlayer.wsp-pip-host { position: static; }
 .wsp-full.is-window.is-pip {
-  position: relative; left: auto; top: auto; width: 100%; height: 100vh; max-height: none;
+  position: relative; left: auto; top: auto; width: 100%; height: 100vh; max-height: none; overflow: hidden;
   border: 0; border-radius: 0; box-shadow: none; animation: none;
 }
-.wsp-full.is-pip .wsp-top { cursor: default; }
 
 /* The remote window (/player/remote): a small remote control, then Play
    here once the tab it worked is gone. */
@@ -2188,6 +2193,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-pill[data-state="playing"] .wsp-eq span { animation: none; }
   .wsp-full.is-window.is-opening { animation: wsp-fade-in 160ms ease-out both; }
   .wsp-full.is-window.is-closing { animation: wsp-fade-out 120ms ease-in both; }
+  .wsp-full.is-window.is-sizing { transition: none; }
 }
 @keyframes wsp-fade-in { from { opacity: 0; } }
 @keyframes wsp-fade-out { to { opacity: 0; } }

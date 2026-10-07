@@ -1,13 +1,13 @@
 // The desktop player (app/static/js/player/ui.js and popout.js, and the
 // remote window's app/static/js/player-remote.js) in
-// happy-dom: the top bar's pill and its states, the floating window (open,
-// its X and Escape back to the pill, the pill's Stop (right of Play) with
-// Resume, panels opening below and
-// closing again, Playback settings back to Chapters), moving and sizing it
-// by pointer and keyboard inside the viewport, its remembered place per
-// listener, soft navigation leaving it open, the phone keeping the sheet,
-// and Pop out through fakes: Document Picture-in-Picture (a second happy-dom
-// document) and the remote window over a fake BroadcastChannel, both ends.
+// happy-dom: the top bar's pill and its states, the pill expanding into the
+// player as a drop-down under it (the pill again, its Collapse and Escape
+// back to the pill, the pill's Stop (right of Play) with Resume, panels
+// opening below and closing again, the drop-down growing for them and
+// shrinking back), nothing to move or size, soft navigation, scrolling and
+// outside clicks leaving it open, the phone keeping the sheet, and Pop out
+// through fakes: Document Picture-in-Picture (a second happy-dom document)
+// and the remote window over a fake BroadcastChannel, both ends.
 //
 // Imports the modules as they are, through data: URLs, which also proves
 // they touch no DOM at import time.
@@ -125,7 +125,7 @@ function memoryStorage() {
 }
 
 // A desktop page: the top bar with the pill's slot, a 1440x900 viewport
-// whose top bar ends at 64 px (the window stays from 72 px down).
+// whose top bar ends at 64 px, the pill 300 px wide ending at 1240 px.
 function setup(o = {}) {
   const win = new Window({ url: 'https://ws.test/' });
   const doc = win.document;
@@ -134,7 +134,7 @@ function setup(o = {}) {
   if (o.shellHidden) doc.documentElement.setAttribute('data-shell', 'hidden');
   const clock = fakeClock();
   const engine = fakeEngine(o.state);
-  const env = { wide: o.wide !== false, reduce: false, vp: { w: 1440, h: 900 }, wideFns: [], id: o.identity || 'abc0123456789def' };
+  const env = { wide: o.wide !== false, reduce: !!o.reduce, vp: { w: 1440, h: 900 }, pill: { left: 940, right: 1240 }, wideFns: [] };
   const storage = o.storage || memoryStorage();
   const opts = {
     doc, host: doc.getElementById('wsPlayer'), player: engine,
@@ -142,9 +142,9 @@ function setup(o = {}) {
       get matches() { return q.indexOf('reduce') !== -1 ? env.reduce : q.indexOf('min-width') !== -1 ? env.wide : false; },
       addEventListener(type, fn) { if (type === 'change' && q.indexOf('min-width') !== -1) env.wideFns.push(fn); }
     }),
-    // The bar is gone on a desktop page (0 px); the window, with no panel,
-    // is 400 px tall.
-    measure: (el) => (el.classList.contains('wsp-full') ? 400 : env.wide ? 0 : 72),
+    // The bar is gone on a desktop page (0 px); the drop-down, with no
+    // panel, is 400 px tall, else the height it was given.
+    measure: (el) => (el.classList.contains('wsp-full') ? (el.style.height ? parseInt(el.style.height, 10) : 400) : env.wide ? 0 : 72),
     isVisible: (el) => !el.closest('[hidden]'),
     now: () => clock.now,
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
@@ -154,9 +154,9 @@ function setup(o = {}) {
     CloseWatcher: null,
     hasActivation: () => true,
     storage,
-    identity: () => env.id,
     viewport: () => ({ w: env.vp.w, h: env.vp.h }),
-    topLimit: () => 72
+    topLimit: () => 64,
+    pillBox: () => env.pill
   };
   if (o.noPill) opts.pillSlot = null;
   if (o.storageKeys) for (const k of o.storageKeys) storage.setItem(k, '{"at":"bottom"}');
@@ -211,7 +211,8 @@ await run('the pill: hidden without a book, then each of its states', () => {
 
   t.ui.open();
   check('player open', pill.hasAttribute('data-open') && t.q('.wsp-pill-open').getAttribute('aria-expanded') === 'true' &&
-    t.q('.wsp-pill-open').getAttribute('aria-label') === 'Hide the player: Three Parts');
+    t.q('.wsp-pill-open').getAttribute('aria-label') === 'Collapse the player: Three Parts');
+  check('the pill controls the player', t.q('.wsp-pill-open').getAttribute('aria-controls') === t.full.id && t.full.id === 'wspFull');
   t.ui.close();
   check('closed again', !pill.hasAttribute('data-open'));
 
@@ -224,75 +225,95 @@ await run('the pill: hidden without a book, then each of its states', () => {
   t.engine.set({ saveError: true }, 'save');
   t.engine.emit('warning', { kind: 'not-saved', active: true, message: "Your place isn't being saved. Last saved 9:41 PM." });
   check('the warning on the pill', pill.hasAttribute('data-warn') && t.q('.wsp-pill-words').textContent.indexOf("isn't being saved") !== -1);
-  check('said once, here, while the window is closed', t.q('.wsp-pill [role="status"]').textContent.indexOf("isn't being saved") !== -1);
+  check('said once, here, while it is collapsed', t.q('.wsp-pill [role="status"]').textContent.indexOf("isn't being saved") !== -1);
   t.ui.open();
-  check('the window says it while open', t.q('.wsp-pill [role="status"]').textContent === '');
+  check('the drop-down says it while expanded', t.q('.wsp-pill [role="status"]').textContent === '');
   t.ui.close();
 
   t.engine.set(EMPTY, 'close');
   check('the book closed: hidden', slot.hidden === true);
 });
 
-await run('the pill: play pauses without opening; a held book opens the window', () => {
+await run('the pill: play pauses without opening; a held book expands it', () => {
   const t = setup({ state: BOOK });
   t.q('.wsp-pill-play').click();
   check('toggled', t.engine.calls.some((c) => c[0] === 'toggle'));
   check('nothing opened', !t.ui.isOpen());
   t.engine.set({ playing: false, filesChanged: { old: {}, spot: 0 } }, 'pause');
   t.q('.wsp-pill-play').click();
-  check('held: the window opens for Find your place', t.ui.isOpen() && t.ui.isWindow());
+  check('held: it expands for Find your place', t.ui.isOpen() && t.ui.isWindow());
 });
 
 // ---------------------------------------------------------------------------
-// The window
+// The drop-down
 // ---------------------------------------------------------------------------
 
-await run('the window: part of the page, not a dialog', async () => {
+await run('the pill expands into the player: part of the page, not a dialog', async () => {
   const t = setup({ state: BOOK });
   const captures = [];
   const add = t.doc.addEventListener.bind(t.doc);
   t.doc.addEventListener = (type, fn, opt) => { if (opt === true) captures.push(type); return add(type, fn, opt); };
   t.q('.wsp-pill-open').focus();
   t.q('.wsp-pill-open').click();
-  check('opens as the window', t.ui.isOpen() && t.ui.isWindow() && t.full.classList.contains('is-window'));
+  check('expands as the drop-down', t.ui.isOpen() && t.ui.isWindow() && t.full.classList.contains('is-window'));
+  check('aria-expanded on the pill', t.q('.wsp-pill-open').getAttribute('aria-expanded') === 'true');
   check('a region, not a modal dialog', t.full.getAttribute('role') === 'region' && !t.full.hasAttribute('aria-modal') &&
     t.full.getAttribute('aria-label') === 'Audiobook player');
   check('the page is not marked or blocked', !t.doc.documentElement.hasAttribute('data-player-full') && captures.length === 0, captures);
   check('focus on the title', t.doc.activeElement === t.q('#wspTitle'));
-  check('the sheet\'s close button gives way to the window\'s', t.q('.wsp-full [aria-label="Close the player"]').hidden &&
-    !label(t, 'Close player window').hidden && !label(t, 'Move the player. Arrow keys move it, Home puts it back.').hidden);
-  check('one close, no Minimise or Stop in the window', !label(t, 'Minimise to the top bar') && !label(t, 'Stop and close the book') &&
-    !t.full.querySelector('[aria-label^="Stop"]'));
+  check('the sheet\'s close button gives way to Collapse', t.q('.wsp-full [aria-label="Close the player"]').hidden &&
+    !label(t, 'Collapse the player').hidden && label(t, 'Collapse the player').textContent === 'expand_less');
+  check('nothing to move or size: no grip, no corner, no Stop in it', !t.full.querySelector('.wsp-win-grip, .wsp-win-resize') &&
+    !t.full.querySelector('[aria-label^="Move"], [aria-label^="Resize"], [aria-label^="Stop"]'));
   check('no Pop out until popout.js offers it', label(t, 'Pop out into its own window').hidden);
   const tab = t.key(t.q('#wspTitle'), 'Tab');
   check('Tab is never trapped', !tab.defaultPrevented);
   t.q('#pageBtn').focus();
   check('focus may leave', t.doc.activeElement === t.q('#pageBtn') && t.ui.isOpen());
-  check('placed at the top right, below the top bar', JSON.stringify(t.rect()) === JSON.stringify({ x: 1440 - 380 - 24, y: 76, w: 380, h: null }), t.rect());
-  check('opens with its scale and fade', t.full.classList.contains('is-opening'));
+  check('hangs under the pill, right edges together, 400 wide', JSON.stringify(t.rect()) === JSON.stringify({ x: 840, y: 74, w: 400, h: null }), t.rect());
+  check('as tall as the room under the top bar at most', t.full.style.maxHeight === (900 - 74 - 14) + 'px', t.full.style.maxHeight);
+  check('its pointer under the pill\'s middle', t.full.style.getPropertyValue('--wsp-caret') === '250px', t.full.style.getPropertyValue('--wsp-caret'));
+  check('opens with its drop and fade', t.full.classList.contains('is-opening'));
   await t.clock.advance(300);
   check('which ends', !t.full.classList.contains('is-opening'));
 });
 
-await run('Escape and the X send it to the pill and it plays on; the pill hides it; focus follows', async () => {
+await run('no dragging and nothing kept: pointer moves on its top bar do nothing', () => {
+  const t = setup({ state: BOOK });
+  t.ui.open();
+  const before = JSON.stringify(t.rect());
+  const top = t.q('.wsp-top-label');
+  t.pointer(top, 'pointerdown', 1200, 90);
+  t.pointer(top, 'pointermove', 600, 400);
+  t.pointer(top, 'pointerup', 600, 400);
+  check('it stays under the pill', JSON.stringify(t.rect()) === before, t.rect());
+  check('nothing kept on this device', t.storage.m.size === 0, Array.from(t.storage.m.keys()));
+});
+
+await run('collapse: the pill again, Collapse and Escape; it plays on; focus to the pill', async () => {
   const t = setup({ state: BOOK });
   t.ui.open();
   t.q('.wsp-pill-open').click();
-  check('the pill hides it', !t.ui.isOpen());
+  check('the pill collapses it', !t.ui.isOpen() && t.q('.wsp-pill-open').getAttribute('aria-expanded') === 'false');
   await t.clock.advance(200);
   check('then it is gone', t.full.hidden === true && !t.full.classList.contains('is-window'));
   t.ui.open();
   const ev = t.key(t.q('#wspTitle'), 'Escape');
-  check('Escape minimises', !t.ui.isOpen() && ev.defaultPrevented);
+  check('Escape collapses', !t.ui.isOpen() && ev.defaultPrevented);
   check('focus to the pill', t.doc.activeElement === t.q('.wsp-pill-open'));
   await t.clock.advance(200);
   t.ui.open();
-  const x = label(t, 'Close player window');
-  check('the X is the close icon', x.textContent === 'close');
-  x.click();
-  check('the X minimises', !t.ui.isOpen() && t.doc.activeElement === t.q('.wsp-pill-open'));
+  label(t, 'Collapse the player').click();
+  check('Collapse collapses', !t.ui.isOpen() && t.doc.activeElement === t.q('.wsp-pill-open'));
   check('and the book plays on', t.engine.calls.length === 0 && t.engine.state().playing === true && !t.q('#wsPlayerPill').hidden &&
     t.q('.wsp-pill').getAttribute('data-state') === 'playing', t.engine.calls);
+  await t.clock.advance(200);
+  t.ui.open();
+  t.q('.wsp-pill-open').focus();
+  const pe = t.key(t.q('.wsp-pill-open'), 'Escape');
+  check('Escape on the pill collapses it too', !t.ui.isOpen() && pe.defaultPrevented && t.doc.activeElement === t.q('.wsp-pill-open'));
+  const idle = t.key(t.q('.wsp-pill-open'), 'Escape');
+  check('collapsed, the pill leaves Escape alone', !idle.defaultPrevented);
   await t.clock.advance(200);
   t.ui.open();
   t.q('#pageBtn').focus();
@@ -300,11 +321,28 @@ await run('Escape and the X send it to the pill and it plays on; the pill hides 
   check('focus on the page stays there', t.doc.activeElement === t.q('#pageBtn'));
 });
 
-await run('soft navigation leaves it open; a full-screen view closes it', () => {
+await run('the pill\'s Play and Stop work while it is expanded', () => {
   const t = setup({ state: BOOK });
   t.ui.open();
+  t.q('.wsp-pill-play').click();
+  check('Play toggles, and it stays expanded', t.engine.calls.some((c) => c[0] === 'toggle') && t.ui.isOpen());
+  t.q('.wsp-pill-stop').click();
+  check('Stop closes the book and the drop-down', t.engine.calls.some((c) => c[0] === 'close') && !t.ui.isOpen());
+});
+
+await run('soft navigation, scrolling and outside clicks leave it open; a full-screen view closes it', () => {
+  const t = setup({ state: BOOK });
+  t.ui.open();
+  t.q('#pageBtn').click();
+  t.doc.body.dispatchEvent(new t.win.PointerEvent('pointerdown', { bubbles: true }));
+  t.doc.body.click();
+  check('a click on the page: still open', t.ui.isOpen());
+  t.win.dispatchEvent(new t.win.Event('scroll'));
+  check('the page scrolled: still open', t.ui.isOpen());
+  t.env.pill = { left: 1000, right: 1240 };
   t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: { url: 'https://ws.test/books' } }));
   check('Home to Books: still open', t.ui.isOpen() && t.ui.isWindow());
+  check('and under the pill where the new top bar put it', t.full.style.getPropertyValue('--wsp-caret') === '280px', t.full.style.getPropertyValue('--wsp-caret'));
   t.win.dispatchEvent(new t.win.CustomEvent('ws:page-claimed', { detail: { url: 'https://ws.test/wiki' } }));
   check('a page\'s own view: still open', t.ui.isOpen());
   t.doc.documentElement.setAttribute('data-shell', 'hidden');
@@ -322,6 +360,7 @@ await run('a full-screen view and a phone keep the sheet', () => {
   p.ui.open();
   check('a phone: the sheet, modal as ever', p.ui.isOpen() && !p.ui.isWindow() && p.full.getAttribute('aria-modal') === 'true' &&
     !p.full.classList.contains('is-window') && p.doc.activeElement.getAttribute('aria-label') === 'Close the player');
+  check('a phone: no place or pointer set', !p.full.style.left && !p.full.style.getPropertyValue('--wsp-caret'));
   check('a phone: the bar takes its room', p.doc.documentElement.style.getPropertyValue('--ws-player-h') === '72px');
   p.ui.close();
   const n = setup({ state: BOOK, noPill: true });
@@ -333,122 +372,47 @@ await run('across lg the open one closes', () => {
   const t = setup({ state: BOOK });
   t.ui.open();
   t.env.setWide(false);
-  check('narrowed: the window closes', !t.ui.isOpen());
+  check('narrowed: the drop-down closes', !t.ui.isOpen());
   t.ui.open();
   check('then the sheet', t.ui.isOpen() && !t.ui.isWindow());
   t.env.setWide(true);
   check('widened: the sheet closes', !t.ui.isOpen());
 });
 
-// ---------------------------------------------------------------------------
-// Moving and sizing
-// ---------------------------------------------------------------------------
-
-await run('dragged by its top bar, kept inside the viewport, remembered', () => {
-  const t = setup({ state: BOOK });
-  t.ui.open();
-  const top = t.q('.wsp-top-label');
-  t.pointer(top, 'pointerdown', 1200, 90);
-  check('moving', t.full.classList.contains('is-moving'));
-  t.pointer(top, 'pointermove', 1000, 290);
-  check('it follows', t.rect().x === 1036 - 200 && t.rect().y === 276, t.rect());
-  t.pointer(top, 'pointermove', -500, -500);
-  check('never past the left or under the top bar', t.rect().x === 8 && t.rect().y === 72, t.rect());
-  t.pointer(top, 'pointermove', 5000, 5000);
-  check('never past the right or the bottom', t.rect().x === 1440 - 380 - 8 && t.rect().y === 900 - 400 - 8, t.rect());
-  t.pointer(top, 'pointerup', 5000, 5000);
-  check('done', !t.full.classList.contains('is-moving'));
-  const kept = JSON.parse(t.storage.getItem('ws-player-window:abc0123456789def'));
-  check('kept for this listener', kept.x === 1052 && kept.y === 492, kept);
-  const b = t.q('.wsp-top [aria-label="Close player window"]');
-  t.pointer(b, 'pointerdown', 1300, 500);
-  check('its buttons do not start a move', !t.full.classList.contains('is-moving'));
-
-  const again = setup({ state: BOOK, storage: t.storage });
-  again.ui.open();
-  check('the same place next time', again.rect().x === 1052 && again.rect().y === 492, again.rect());
-  const other = setup({ state: BOOK, storage: t.storage, identity: 'fff0123456789aaa' });
-  other.ui.open();
-  check('another listener has their own', other.rect().x === 1036 && other.rect().y === 76, other.rect());
-});
-
 await run('a smaller browser window keeps it inside', () => {
   const t = setup({ state: BOOK });
   t.ui.open();
-  const top = t.q('.wsp-top-label');
-  t.pointer(top, 'pointerdown', 1200, 90);
-  t.pointer(top, 'pointermove', 1400, 500);
-  t.pointer(top, 'pointerup', 1400, 500);
   t.env.vp = { w: 1100, h: 700 };
+  t.env.pill = { left: 800, right: 900 };
   t.win.dispatchEvent(new t.win.Event('resize'));
-  check('back inside', t.rect().x === 1100 - 380 - 8 && t.rect().y === 700 - 400 - 8, t.rect());
+  check('follows the pill, room to the new bottom', t.rect().x === 500 && t.rect().w === 400 && t.full.style.maxHeight === (700 - 74 - 14) + 'px', [t.rect(), t.full.style.maxHeight]);
   t.ui.close();
   t.env.vp = { w: 1440, h: 900 };
   t.win.dispatchEvent(new t.win.Event('resize'));
-  t.ui.open();
-  check('closed, it no longer listens; reopened, the kept place again', t.rect().x === 1052, t.rect());
+  check('collapsed, it no longer listens', t.full.style.maxHeight === '' || t.full.style.maxHeight === (700 - 74 - 14) + 'px');
 });
 
-await run('the keyboard: the grip moves it, Home puts it back, the corner sizes it', () => {
-  const t = setup({ state: BOOK });
-  t.ui.open();
-  const grip = label(t, 'Move the player. Arrow keys move it, Home puts it back.');
-  const corner = label(t, 'Resize the player. Arrow keys change its size.');
-  grip.focus();
-  let ev = t.key(grip, 'ArrowLeft');
-  check('left 16', t.rect().x === 1036 - 16 && ev.defaultPrevented, t.rect());
-  t.key(grip, 'ArrowDown', { shiftKey: true });
-  check('Shift: down 64', t.rect().y === 76 + 64, t.rect());
-  check('remembered', JSON.parse(t.storage.getItem('ws-player-window:abc0123456789def')).y === 140);
-  check('the arrows never reach the player\'s shortcuts', t.engine.calls.every((c) => c[0] !== 'skip'));
-  t.key(grip, 'Home');
-  check('Home: back to the top right', t.rect().x === 1036 && t.rect().y === 76, t.rect());
-  t.key(corner, 'ArrowRight');
-  check('wider by 16', t.rect().w === 396, t.rect());
-  for (let i = 0; i < 20; i++) t.key(corner, 'ArrowRight', { shiftKey: true });
-  check('no wider than its limit', t.rect().w === 520, t.rect());
-  for (let i = 0; i < 20; i++) t.key(corner, 'ArrowLeft', { shiftKey: true });
-  check('no narrower than its limit', t.rect().w === 340, t.rect());
-  t.key(corner, 'ArrowDown');
-  check('no panel open: its height is its content', t.rect().h === null);
-  t.q('.wsp-actions .wsp-action').click();
-  check('a panel: a height', t.rect().h === 600, t.rect());
-  t.key(corner, 'ArrowDown', { shiftKey: true });
-  check('taller by 64', t.rect().h === 664, t.rect());
-  ev = t.key(t.q('#wspTitle'), 'ArrowRight');
-  check('elsewhere in it the arrows are the player\'s (features.js listens there)', !ev.defaultPrevented);
-});
-
-await run('the corner drags its size', () => {
-  const t = setup({ state: BOOK });
-  t.ui.open();
-  t.q('.wsp-actions .wsp-action').click();
-  const corner = t.q('.wsp-win-resize');
-  t.pointer(corner, 'pointerdown', 1416, 676);
-  t.pointer(corner, 'pointermove', 1456, 726);
-  check('wider and taller (inside the viewport)', t.rect().w === 380 + 40 - 0 && t.rect().h === 650, t.rect());
-  t.pointer(corner, 'pointerup', 1456, 726);
-  const kept = JSON.parse(t.storage.getItem('ws-player-window:abc0123456789def'));
-  check('kept', kept.w === 420 && kept.h === 650, kept);
-});
-
-await run('fitWindow: limits and defaults', () => {
-  const vp = { w: 1440, h: 900, top: 72 };
-  check('defaults', JSON.stringify(U.fitWindow({}, vp, null)) === JSON.stringify({ x: 1036, y: 76, w: 380, h: 600, room: 820 }), U.fitWindow({}, vp, null));
-  const small = U.fitWindow({ h: 900 }, { w: 1024, h: 600, top: 72 }, null);
-  check('a short screen: no taller than there is room', small.h === 520 && small.y === 72, small);
-  const tiny = U.fitWindow({ h: 300 }, vp, null);
-  check('never under its minimum', tiny.h === 480, tiny);
-  const c = U.fitWindow({ y: 800 }, vp, 400);
-  check('collapsed: its own height, kept on screen', c.h === 400 && c.y === 492, c);
+await run('fitDrop: under the pill, at least 400 wide, never off screen', () => {
+  const vp = { w: 1440, h: 900, top: 64 };
+  check('right-aligned with the pill', JSON.stringify(U.fitDrop({ left: 940, right: 1240 }, vp)) === JSON.stringify({ x: 840, y: 74, w: 400, room: 812, caret: 250 }), U.fitDrop({ left: 940, right: 1240 }, vp));
+  const wide = U.fitDrop({ left: 700, right: 1240 }, vp);
+  check('a wider pill: its width', wide.w === 540 && wide.x === 700 && wide.caret === 270, wide);
+  const tight = U.fitDrop({ left: 300, right: 388 }, { w: 1024, h: 768, top: 64 });
+  check('a pill near the left: slid right to stay inside', tight.x === 8 && tight.w === 400 && tight.caret === 336, tight);
+  const tiny = U.fitDrop({ left: 1000, right: 1088 }, { w: 1024, h: 768, top: 64 });
+  check('a pill past the right edge: kept 8 px in', tiny.x === 1024 - 8 - 400, tiny);
+  const tinyCaret = U.fitDrop({ left: 1300, right: 1440 }, vp);
+  check('the pointer never leaves its corner\'s curve', tinyCaret.caret <= tinyCaret.w - U.DROP_CARET, tinyCaret);
+  const none = U.fitDrop(null, vp);
+  check('no pill box: top right', none.x === 1440 - 24 - 400 && none.y === 74, none);
+  check('a short screen: room is what is left', U.fitDrop({ left: 940, right: 1240 }, { w: 1440, h: 300, top: 64 }).room === 212);
 });
 
 // ---------------------------------------------------------------------------
 // Panels
 // ---------------------------------------------------------------------------
 
-await run('panels open below and close again; Playback settings goes back to Chapters', () => {
-  const t = setup({ state: BOOK });
+function withPanels(t) {
   // As features.js fills them: a settings toggle in the top bar, Speed below.
   const settings = t.ui.panel('settings', { title: 'Playback settings' });
   const tune = t.doc.createElement('button');
@@ -460,9 +424,16 @@ await run('panels open below and close again; Playback settings goes back to Cha
   const speedBtn = t.ui.actionButton({ text: '1×', label: 'Speed' });
   speedBtn.addEventListener('click', () => speed.show(speedBtn));
   t.ui.fill('speed', speedBtn);
+  const chapters = () => t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1);
+  return { tune, speedBtn, chapters };
+}
+
+await run('panels open below and close again, each from its own button', () => {
+  const t = setup({ state: BOOK });
+  const { tune, speedBtn, chapters: ch } = withPanels(t);
   t.ui.open();
+  const chapters = ch();
   check('no panel at first', !t.full.hasAttribute('data-view') && t.qa('.wsp-panel').every((p) => p.hidden));
-  const chapters = t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1);
   check('buttons say they are closed', chapters.getAttribute('aria-expanded') === 'false' && speedBtn.getAttribute('aria-expanded') === 'false');
   chapters.click();
   check('Chapters opens below', t.full.getAttribute('data-view') === 'chapters' && chapters.getAttribute('aria-expanded') === 'true' &&
@@ -477,11 +448,19 @@ await run('panels open below and close again; Playback settings goes back to Cha
   tune.click();
   check('Playback settings', t.full.getAttribute('data-view') === 'settings');
   tune.click();
-  check('pressed again: Chapters, not nothing', t.full.getAttribute('data-view') === 'chapters' && !t.q('[data-panel="chapters"]').hidden);
+  check('pressed again: closed, back to the player alone', !t.full.hasAttribute('data-view'));
+  chapters.click();
   t.q('.wsp-chapter-item[data-index="2"]').click();
   check('a chapter jumps and the list stays', t.engine.calls.some((c) => c[0] === 'jump' && c[1] === 2) && t.full.getAttribute('data-view') === 'chapters');
+  const esc = t.key(t.q('.wsp-chapter-item[data-index="2"]'), 'Escape');
+  check('Escape closes the panel first, focus back on its button', esc.defaultPrevented && t.ui.isOpen() &&
+    !t.full.hasAttribute('data-view') && t.doc.activeElement === chapters);
+  t.key(chapters, 'Escape');
+  check('then Escape collapses', !t.ui.isOpen());
+  t.ui.open();
+  ch().click();
   t.ui.close();
-  check('closing closes the panel', !t.full.hasAttribute('data-view'));
+  check('collapsing closes the panel', !t.full.hasAttribute('data-view') && t.full.style.height === '');
   check('on the sheet the buttons carry no expanded state', (() => {
     const p = setup({ state: BOOK, wide: false });
     p.ui.open();
@@ -489,13 +468,44 @@ await run('panels open below and close again; Playback settings goes back to Cha
   })());
 });
 
-await run('prompts and notices show inside the window while it is open', () => {
+await run('a panel grows the drop-down to the room under the top bar, smoothly, and it shrinks back', async () => {
   const t = setup({ state: BOOK });
+  const { speedBtn, chapters } = withPanels(t);
   t.ui.open();
+  check('the player alone: its content\'s height', t.rect().h === null);
+  chapters().click();
+  check('Chapters: from its own height...', t.full.classList.contains('is-sizing') && t.rect().h === 812, [t.full.className, t.rect()]);
+  await t.clock.advance(300);
+  check('...to the room under the top bar, and stays', !t.full.classList.contains('is-sizing') && t.rect().h === 812, t.rect());
+  speedBtn.click();
+  check('another panel: the same height, nothing runs', !t.full.classList.contains('is-sizing') && t.rect().h === 812);
+  speedBtn.click();
+  check('closed: back down to the player', t.full.classList.contains('is-sizing') && t.rect().h === 400, t.rect());
+  await t.clock.advance(300);
+  check('then its content\'s height again', !t.full.classList.contains('is-sizing') && t.rect().h === null, t.rect());
+  t.env.vp = { w: 1440, h: 700 };
+  chapters().click();
+  await t.clock.advance(300);
+  check('a shorter screen: less room', t.rect().h === 700 - 74 - 14, t.rect());
+
+  const r = setup({ state: BOOK, reduce: true });
+  withPanels(r);
+  r.ui.open();
+  r.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  check('reduced motion: at once', !r.full.classList.contains('is-sizing') && r.rect().h === 812, r.rect());
+});
+
+await run('prompts and notices: inside the drop-down while expanded, on the page while collapsed', () => {
+  const t = setup({ state: BOOK });
+  const early = t.ui.prompt({ message: 'Up next: Book Two. Play it?', actions: [{ label: 'Play', primary: true }], id: 'upnext' });
+  check('collapsed: on the page, not hidden', !!t.q('.wsp-prompt') && !t.full.contains(t.q('.wsp-prompt')) && !t.q('#wsPlayer').hidden);
+  t.ui.open();
+  check('expanded: it moves inside', t.full.contains(t.q('.wsp-prompt')));
+  early.remove();
   const pr = t.ui.prompt({ message: 'Continue from 1:02:03 (Chrome on Android, 2 h ago)?', actions: [{ label: 'Continue', primary: true }] });
-  check('inside the window', t.full.contains(t.q('.wsp-prompt')));
+  check('inside the drop-down', t.full.contains(t.q('.wsp-prompt')));
   t.ui.close();
-  check('in the page once it closes', !t.full.contains(t.q('.wsp-prompt')) && !!t.q('.wsp-prompt'));
+  check('in the page once it collapses', !t.full.contains(t.q('.wsp-prompt')) && !!t.q('.wsp-prompt'));
   pr.remove();
 });
 
@@ -528,10 +538,10 @@ await run('the pill\'s Stop: right of Play, playing or paused; the book closes, 
   t.engine.set({ playing: false }, 'pause');
 
   t.ui.open();
-  check('the window open: Stop is still the pill\'s', !stop.hidden);
+  check('expanded: Stop is still the pill\'s', !stop.hidden);
   stop.focus();
   stop.click();
-  check('the book is closed, the window too', t.engine.calls.some((c) => c[0] === 'close') && !t.ui.isOpen());
+  check('the book is closed, the drop-down too', t.engine.calls.some((c) => c[0] === 'close') && !t.ui.isOpen());
   const n = t.q('.wsp-notice');
   check('says where, and that it is saved', n && n.textContent.indexOf('Stopped at 11:40. Your place is saved.') !== -1, n && n.textContent);
   check('the pill goes', t.q('#wsPlayerPill').hidden);
@@ -544,7 +554,7 @@ await run('the pill\'s Stop: right of Play, playing or paused; the book closes, 
 
   const c = setup({ state: Object.assign({}, BOOK, { playing: false }) });
   c.q('.wsp-pill-stop').click();
-  check('window closed: the same', c.engine.calls.some((x) => x[0] === 'close') && c.q('#wsPlayerPill').hidden &&
+  check('collapsed: the same', c.engine.calls.some((x) => x[0] === 'close') && c.q('#wsPlayerPill').hidden &&
     c.doc.activeElement === Array.from(c.q('.wsp-notice').querySelectorAll('button')).find((b) => b.textContent === 'Resume'));
 
   const h = setup({ state: Object.assign({}, BOOK, { playing: false, safetyNet: { failed: false, orphans: [] } }) });
@@ -589,11 +599,12 @@ await run('tablets: the bar with Stop right of Play, room for it and its gap; ph
   check('widened: the pill shows (the room follows the bar\'s ResizeObserver)', !p.q('#wsPlayerPill').hidden);
 });
 
-await run('a place kept by the earlier movable bar is dropped on load', () => {
-  const keys = ['ws-player-dock:abc0123456789def', 'ws-player-dock:fff0123456789aaa', 'ws-player-dock', 'ws-player-window:abc0123456789def', 'ws-player-docked'];
+await run('places kept by the earlier movable window and bar are dropped on load', () => {
+  const keys = ['ws-player-dock:abc0123456789def', 'ws-player-dock:fff0123456789aaa', 'ws-player-dock', 'ws-player-window:abc0123456789def',
+    'ws-player-window:fff0123456789aaa', 'ws-player-window', 'ws-player-docked', 'ws-player-windowed'];
   const t = setup({ state: BOOK, storageKeys: keys });
-  check('dock places gone', ['ws-player-dock:abc0123456789def', 'ws-player-dock:fff0123456789aaa', 'ws-player-dock'].every((k) => t.storage.getItem(k) === null));
-  check('everything else kept', t.storage.getItem('ws-player-window:abc0123456789def') !== null && t.storage.getItem('ws-player-docked') !== null);
+  check('dock and window places gone', keys.slice(0, 6).every((k) => t.storage.getItem(k) === null), Array.from(t.storage.m.keys()));
+  check('everything else kept', t.storage.getItem('ws-player-docked') !== null && t.storage.getItem('ws-player-windowed') !== null);
   check('the pill shows as ever', !t.q('#wsPlayerPill').hidden);
   const s = memoryStorage();
   s.key = () => { throw new Error('blocked'); };
@@ -638,13 +649,13 @@ await run('Pop out with Picture-in-Picture: the window moves into it and back', 
   check('Pop out is offered', !btn.hidden);
   btn.click();
   await flush();
-  check('asked for a window its size', pip.asked.length === 1 && pip.asked[0].width === 380, pip.asked);
+  check('asked for a window its size', pip.asked.length === 1 && pip.asked[0].width === 400, pip.asked);
   const pdoc = pip.win.document;
   check('the same window, moved into it', pdoc.body.contains(t.full) && !t.doc.body.contains(t.full) && t.full.classList.contains('is-pip'));
   check('dressed like the page', !!pdoc.getElementById('ws-theme') && pdoc.documentElement.getAttribute('data-shell') === 'hidden');
   check('inside #wsPlayer there, so its rules hold', pdoc.getElementById('wsPlayer').contains(t.full));
-  check('nothing to move, size, minimise or pop', label(t, 'Move the player. Arrow keys move it, Home puts it back.').hidden &&
-    label(t, 'Close player window').hidden && label(t, 'Pop out into its own window').hidden);
+  check('nothing to collapse or pop, no pointer', label(t, 'Collapse the player').hidden && label(t, 'Pop out into its own window').hidden &&
+    !t.full.style.getPropertyValue('--wsp-caret') && !t.full.style.left);
   check('the pill says it is popped out', t.q('.wsp-pill').hasAttribute('data-popped') && po.active() === 'docked');
   check('the audio host stays in the page', t.doc.getElementById('wsPlayer') !== null);
   t.key(t.q('#wspTitle') || pdoc.getElementById('wspTitle'), 'Escape');

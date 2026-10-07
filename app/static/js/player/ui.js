@@ -113,25 +113,28 @@
  * Desktop (lg and up, where the shell's top bar shows and has the pill's
  * slot, #wsPlayerPill): the mini bar gives way to a pill in the top bar
  * (cover, title, chapter and time left, play/pause, a thin progress line;
- * playing, paused, open, popped out and loading), and open() shows the same
- * player as a floating window instead of the full-screen sheet. The window
- * is part of the page, not a dialog: Tab goes in and out of it, nothing
- * behind it is blocked, page keys still reach the page, and soft navigation
- * leaves it open. It moves by its top bar and resizes from its corner (and by
- * the keyboard: the grip's arrows move it, Shift for bigger steps, Home puts
- * it back; the corner's arrows size it), stays inside the viewport, and its
- * place and size are kept per listener on this device. Its panels open
- * below the player and close again from the same button (Playback settings
- * gives way to Chapters). Escape or its X (Close player window) sends it back
- * to the pill and focus with it; the book plays on. Only the pill (and a
- * tablet's bar) stops a book: its Stop, right of Play, closes the book
- * playing or paused ("Your place is saved", Resume). A full-screen view (the
- * reader) keeps the bar and the sheet. Below lg a tablet's bar floats over
- * the tab bar with Stop; a phone's is edge to edge without it.
+ * playing, paused, expanded, popped out and loading), and open() expands the
+ * pill into the same player as a panel that drops down from it (the
+ * .is-window layout), instead of the full-screen sheet. It hangs under the
+ * top bar, right-aligned with the pill and at least as wide, never off
+ * screen; it does not move or resize. It is part of the page, not a dialog:
+ * Tab goes in and out of it, nothing behind it is blocked, page keys still
+ * reach the page, a click outside leaves it open, and so do scrolling and
+ * soft navigation. Its panels (Chapters, Speed, Sleep, History, Playback
+ * settings) open below the player and close again from the same button; one
+ * open, the panel grows to the viewport's height under the top bar so the
+ * list has room, and shrinks back when it closes (smoothly; at once with
+ * reduced motion). The pill again, the panel's collapse button or Escape
+ * (a panel first, then the player) collapse it to the pill, focus with it;
+ * the book plays on. Only the pill (and a tablet's bar) stops a book: its
+ * Stop, right of Play, closes the book playing or paused ("Your place is
+ * saved", Resume). A full-screen view (the reader) keeps the bar and the
+ * sheet. Below lg a tablet's bar floats over the tab bar with Stop; a
+ * phone's is edge to edge without it.
  *
- * Pop out (popout.js) moves the window into a window of its own: dock()
- * puts this same window in a Document Picture-in-Picture document, and
- * setPopped() marks the pill while a remote-control window plays the tab.
+ * Pop out (popout.js) moves the expanded player into a window of its own:
+ * dock() puts this same element in a Document Picture-in-Picture document,
+ * and setPopped() marks the pill while a remote-control window plays the tab.
  */
 
 export const SWIPE_CLOSE_PX = 120;     // a swipe down this far closes the full player
@@ -146,15 +149,19 @@ export const MAX_NOTICES = 3;
 export const CLOCK_MS = 30000;         // the "finishes around" clock, while paused
 export const SLOTS = ['menu', 'speed', 'sleep', 'history'];
 
-// The desktop window: its size and limits, the gap it keeps from the
-// viewport's edges, and the arrow keys' steps.
-export const WIN = { w: 380, minW: 340, maxW: 520, h: 600, minH: 480, maxH: 900 };
-export const WIN_GAP = 8;
-export const WIN_STEP = 16;
-export const WIN_STEP_BIG = 64;
+// The desktop drop-down: its width (the pill's when that is wider), the gap
+// it keeps from the viewport's sides and bottom, the room above it for its
+// pointer to the pill, and the shortest Pop out window it asks for.
+export const DROP = { w: 400, minH: 480 };
+export const DROP_GAP = 8;
+export const DROP_TOP = 10;            // under the top bar: room for the pointer
+export const DROP_BOTTOM = 14;         // so top + bottom keep 24 px clear
+export const DROP_CARET = 24;          // the pointer stays this far in from its corners
 export const WIN_IN_MS = 200;          // its open (opacity only with reduced motion)
 export const WIN_OUT_MS = 160;         // ...and its close
-export const WIN_KEY = 'ws-player-window';   // + ':' + the listener's identity key
+export const SIZE_MS = 220;            // growing for a panel, and back
+// Places kept by the earlier movable window and bar: dropped on load.
+const OLD_KEYS = ['ws-player-window', 'ws-player-dock'];
 
 const WIDE = '(min-width: 1024px)';
 const RESUME_LOST = "Couldn't find your saved place in this book";
@@ -246,22 +253,24 @@ function given(v) {
   return typeof v === 'number' && isFinite(v);
 }
 
-/* Where the desktop window goes: the listener's place and size (geo: x, y,
-   w, h, each may be missing) kept inside the viewport (vp: w, h, top: the
-   first row under the top bar), at the size limits (WIN). collapsedH: the
-   window's own height when no panel is open (it sizes to its content), else
-   null. Missing values are the default: WIN's size, at the top right. */
-export function fitWindow(geo, vp, collapsedH) {
-  const g = geo || {};
-  const top = num(vp.top);
-  const room = Math.max(0, num(vp.h) - top - WIN_GAP);
-  const w = clampN(given(g.w) ? g.w : WIN.w, Math.min(WIN.minW, num(vp.w) - 2 * WIN_GAP), Math.min(WIN.maxW, num(vp.w) - 2 * WIN_GAP));
-  const h = collapsedH !== null && collapsedH !== undefined
-    ? Math.min(num(collapsedH), room)
-    : clampN(given(g.h) ? g.h : WIN.h, Math.min(WIN.minH, room), Math.min(WIN.maxH, room));
-  const x = clampN(given(g.x) ? g.x : num(vp.w) - w - 3 * WIN_GAP, WIN_GAP, Math.max(WIN_GAP, num(vp.w) - w - WIN_GAP));
-  const y = clampN(given(g.y) ? g.y : top + WIN_GAP / 2, top, Math.max(top, num(vp.h) - h - WIN_GAP));
-  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), room: Math.round(room) };
+/* Where the desktop drop-down goes. pill: the pill's box ({ left, right }),
+   or none (then the top right). vp: { w, h, top } (top: the top bar's bottom
+   edge). As wide as the pill and at least DROP.w, its right edge on the
+   pill's, slid left as far as it must to stay DROP_GAP inside the viewport.
+   room: the height it may take, down to DROP_BOTTOM above the viewport's
+   bottom. caret: its pointer's centre, from its own left edge, under the
+   pill's middle. */
+export function fitDrop(pill, vp) {
+  const vw = num(vp.w);
+  const p = pill && given(pill.left) && given(pill.right) && pill.right > pill.left ? pill : null;
+  const w = Math.max(0, Math.min(Math.max(DROP.w, p ? p.right - p.left : 0), vw - 2 * DROP_GAP));
+  const right = p ? Math.min(p.right, vw - DROP_GAP) : vw - 3 * DROP_GAP;
+  const x = clampN(right - w, DROP_GAP, Math.max(DROP_GAP, vw - w - DROP_GAP));
+  const y = num(vp.top) + DROP_TOP;
+  const room = Math.max(0, num(vp.h) - y - DROP_BOTTOM);
+  const mid = p ? (p.left + p.right) / 2 - x : w - DROP_CARET * 2;
+  const caret = clampN(mid, DROP_CARET, Math.max(DROP_CARET, w - DROP_CARET));
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), room: Math.round(room), caret: Math.round(caret) };
 }
 
 // ---------------------------------------------------------------------------
@@ -273,9 +282,10 @@ export function fitWindow(geo, vp, collapsedH) {
    ResizeObserver, isDialogOpen(), leaveTo(url), win (for the router's
    events), CloseWatcher (the browser's, or none), hasActivation() (a tap or
    a key is being handled now), pillSlot (the top bar's #wsPlayerPill, or
-   none: no desktop window), storage (localStorage, or none), identity() (the
-   listener's identity key), viewport() -> { w, h }, topLimit() (px: the
-   window stays below the top bar) }. */
+   none: no desktop drop-down), storage (localStorage, or none: only to drop
+   places the earlier movable window kept), viewport() -> { w, h },
+   topLimit() (px: the top bar's bottom edge), pillBox() -> { left, right }
+   (the pill's box on screen) }. */
 export function createUI(env) {
   const doc = env.doc;
   const host = env.host;
@@ -324,16 +334,16 @@ export function createUI(env) {
   // two would share one close request, and one Back would close both).
   // Escape still closes it first.
   let watcherTap = false;
-  // The desktop window: the open player is the floating window (not the
+  // The desktop drop-down: the open player hangs under the pill (not the
   // sheet); docked: it sits in a Picture-in-Picture document ({ doc, holder });
   // popped: it plays in a window of its own ({ kind, end }), shown on the pill.
   let windowed = false;
   let docked = null;
   let popped = null;
   let popOutFn = null;         // popout.js: what Pop out does
-  let winDrag = null;          // a move or resize: { kind, id, x0, y0, from }
   let winWatch = null;         // the viewport's resize listener while it shows
   let winAnim = null;          // the open's class timer
+  let sizing = null;           // its height's change running: the timer that ends it
 
   // again: re-made for a layer that had one (the screen turned), not a new
   // layer, so no tap is needed.
@@ -500,20 +510,12 @@ export function createUI(env) {
   const chaptersBtn = actionButton({ icon: 'format_list_bulleted', label: 'Chapters' });
   const chaptersSlot = h('div', { class: 'wsp-slot', 'data-no-swipe': '', hidden: true }, [chaptersBtn]);
   const actionsRow = h('div', { class: 'wsp-actions' }, [slots.speed, chaptersSlot, slots.sleep, slots.history]);
-  // The desktop window's own controls, in its top bar (hidden on the sheet).
-  const grip = h('button', {
-    type: 'button', class: 'wsp-icon-btn wsp-win-grip', hidden: true, title: 'Move',
-    'aria-label': 'Move the player. Arrow keys move it, Home puts it back.'
-  }, [icon('drag_indicator')]);
+  // The desktop drop-down's own controls, in its top bar (hidden on the sheet).
   const popBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Pop out', 'aria-label': 'Pop out into its own window' }, [icon('picture_in_picture_alt')]);
   const winSep = h('span', { class: 'wsp-win-sep', 'aria-hidden': 'true', hidden: true });
-  // The window's X only closes the window: the book plays on in the pill.
-  // Stopping is the pill's own ✕, offered while paused.
-  const winCloseBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Close player window', 'aria-label': 'Close player window' }, [icon('close')]);
-  const resizeBtn = h('button', {
-    type: 'button', class: 'wsp-win-resize', hidden: true, title: 'Resize',
-    'aria-label': 'Resize the player. Arrow keys change its size.'
-  });
+  // Collapse only folds the player back into the pill: the book plays on.
+  // Stopping is the pill's own Stop.
+  const winCloseBtn = h('button', { type: 'button', class: 'wsp-icon-btn wsp-win-btn', hidden: true, title: 'Collapse', 'aria-label': 'Collapse the player' }, [icon('expand_less')]);
   const main = h('div', { class: 'wsp-main' }, [
     fullArt.frame,
     h('div', { class: 'wsp-meta', 'data-swipe': '' }, [series, title, byline]),
@@ -534,7 +536,6 @@ export function createUI(env) {
   const topBar = h('div', { class: 'wsp-top', 'data-swipe': '' }, [
     h('span', { class: 'wsp-grab', 'aria-hidden': 'true' }),
     closeBtn,
-    grip,
     h('span', { class: 'wsp-top-label', text: 'Now playing' }),
     slots.menu,
     popBtn,
@@ -545,10 +546,11 @@ export function createUI(env) {
     h('div', { class: 'wsp-ambient', 'aria-hidden': 'true' }, [ambientImg]),
     topBar,
     alerts,
-    h('div', { class: 'wsp-body' }, [main, side]),
-    resizeBtn
+    h('div', { class: 'wsp-body' }, [main, side])
   ]);
-  const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
+  // The drop-down's pointer up to the pill (drawn on the desktop only).
+  const caret = h('span', { class: 'wsp-drop-caret', 'aria-hidden': 'true' });
+  const full = h('div', { class: 'wsp-full', id: 'wspFull', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [caret, sheet]);
 
   host.appendChild(bar);
   host.appendChild(full);
@@ -556,9 +558,10 @@ export function createUI(env) {
 
   // ---- The top bar's pill (desktop) ----
   //
-  // In the shell's top bar, left of the bell: the cover and title open the
-  // window (or hide it, or bring a popped-out player back); the round button
-  // plays and pauses without opening anything. Shown while the bar would be.
+  // In the shell's top bar, left of the bell: the cover and title expand it
+  // into the player (or collapse it, or bring a popped-out player back); the
+  // round button plays and pauses without opening anything. Shown while the
+  // bar would be.
 
   const pillArt = art('wsp-pill-art');
   const pillTitle = h('span', { class: 'wsp-pill-title' });
@@ -567,7 +570,7 @@ export function createUI(env) {
     h('span', { class: 'wsp-eq', 'aria-hidden': 'true' }, [h('span'), h('span'), h('span')]),
     pillWords
   ]);
-  const pillOpen = h('button', { type: 'button', class: 'wsp-pill-open', 'aria-expanded': 'false' }, [
+  const pillOpen = h('button', { type: 'button', class: 'wsp-pill-open', 'aria-expanded': 'false', 'aria-controls': 'wspFull' }, [
     pillArt.frame,
     h('span', { class: 'wsp-pill-text' }, [pillTitle, pillMeta])
   ]);
@@ -576,8 +579,8 @@ export function createUI(env) {
   // never moves under the pointer. Inert (aria-disabled) while it can't act.
   const pillStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-pill-stop', title: 'Stop listening' }, [icon('stop')]);
   const pillFill = h('span', { class: 'wsp-pill-fill' });
-  // The not-saved warning, said here while the window is not open (the
-  // window's own says it then), so it is announced once.
+  // The not-saved warning, said here while the player is collapsed (the
+  // drop-down's own says it then), so it is announced once.
   const pillWarn = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const pill = h('div', { class: 'wsp-pill', role: 'group', 'aria-label': 'Audiobook player', 'data-state': 'paused' }, [
     pillOpen,
@@ -634,13 +637,13 @@ export function createUI(env) {
 
   function drawPanels() {
     const many = chapterCount() > 1;
-    // The window opens a panel below the player only when asked, and
+    // The drop-down opens a panel below the player only when asked, and
     // closes it again; the sheet on a wide screen keeps Chapters beside it.
     const shown = windowed ? view : view || (many ? 'chapters' : null);
     panels.forEach(function (p, name) { setHidden(p.section, name !== shown); });
     setAttr(full, 'data-view', view);
     setAttr(full, 'data-side', shown ? '' : null);
-    // In the window each action button opens and closes its panel: it says so.
+    // In the drop-down each action button opens and closes its panel: it says so.
     [chaptersSlot, slots.speed, slots.sleep, slots.history].forEach(function (s) {
       const b = s.querySelector('button');
       if (b) setAttr(b, 'aria-expanded', windowed ? (view === slotPanel(s) ? 'true' : 'false') : null);
@@ -653,12 +656,13 @@ export function createUI(env) {
     if (!panels.has(name)) return;
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     const was = view;
+    const before = dropHeight();
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
     if (isOpen && !windowed && !panelWatcher && !watcherTap && !matches(WIDE)) panelTapped = watchPanel(false);
     drawPanels();
-    // The window grows to hold it (and stays on screen).
-    placeWindow();
+    // The drop-down grows to the viewport's height to hold it.
+    resizeDrop(before);
     fitDocked();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
@@ -678,7 +682,7 @@ export function createUI(env) {
 
   // The screen turned: a panel is a layer only while it covers the player.
   function onWideChange() {
-    // Across lg the window and the sheet trade places: the open one closes
+    // Across lg the drop-down and the sheet trade places: the open one closes
     // (in its own window it stays).
     if (isOpen && !docked && windowed !== windowable()) {
       close();
@@ -701,17 +705,15 @@ export function createUI(env) {
     if (name && view !== name) return;
     if (view === null) return;
     const was = view;
-    // In the window, Playback settings gives way to Chapters (as the sheet
-    // on a wide screen shows them beside it), not to nothing.
-    view = windowed && was === 'settings' && chapterCount() > 1 ? 'chapters' : null;
+    const before = dropHeight();
+    view = null;
     panelTapped = false;
     const w = panelWatcher;
     panelWatcher = null;
     unwatch(w);
     drawPanels();
-    if (view === 'chapters') centreCurrent();
-    fitDocked();
-    placeWindow();
+    // The drop-down shrinks back to the player.
+    resizeDrop(before);
     const back = panelFrom;
     panelFrom = null;
     if (isOpen && back && back.isConnected && full.contains(back) && isVisible(back)) back.focus({ preventScroll: true });
@@ -779,7 +781,7 @@ export function createUI(env) {
     if (!matches(WIDE)) hidePanel('chapters');
   });
   chaptersBtn.addEventListener('click', function () { showPanel('chapters', chaptersBtn); });
-  // In the window an action button pressed again closes its panel (before
+  // In the drop-down an action button pressed again closes its panel (before
   // the button's own handler, which only ever shows it).
   actionsRow.addEventListener('click', function (e) {
     if (!windowed || !e.target || !e.target.closest) return;
@@ -1123,11 +1125,11 @@ export function createUI(env) {
     if (pillFill.style.transform !== tf) pillFill.style.transform = tf;
     setArt(pillArt, s.cover || '');
     drawPlay(pillPlay, s);
-    const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
+    const what = popped ? 'Bring the player back' : up ? 'Collapse the player' : 'Open the player';
     setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
     setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
     setAttr(pillOpen, 'title', warnText || (popped ? 'Bring the player back into the page' : what));
-    // The warning is said here only while the window's own is not showing.
+    // The warning is said here only while the drop-down's own is not showing.
     const say = warnText && !isOpen ? warnText : '';
     if (pillWarn.textContent !== say) pillWarn.textContent = say;
   }
@@ -1257,6 +1259,12 @@ export function createUI(env) {
     else if (isOpen && windowed) close();
     else open();
   });
+  // Escape on the pill (its cover, Play or Stop) collapses it too.
+  pill.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented || !isOpen || !windowed || docked || dialogOpen()) return;
+    e.preventDefault();
+    close();
+  });
   fullPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
   full.addEventListener('keydown', onKey);
   backBtn.addEventListener('click', function () { player.skip(-(num(player.setSkip()) || 10)); });
@@ -1335,10 +1343,15 @@ export function createUI(env) {
     e.stopPropagation();
     if (dialogOpen() || e.defaultPrevented) return;
     if (windowed) {
-      // The window: Escape sends it back to the top bar (in its own window
-      // it stays), Tab goes on through the page, other keys are the
-      // features' shortcuts.
+      // The drop-down: Escape closes an open panel, else collapses it to
+      // the pill (in its own window it stays), Tab goes on through the
+      // page, other keys are the features' shortcuts.
       if (e.key === 'Escape' && !e.isComposing) {
+        if (view !== null) {
+          e.preventDefault();
+          hidePanel(view);
+          return;
+        }
         if (docked) return;
         e.preventDefault();
         close();
@@ -1397,6 +1410,16 @@ export function createUI(env) {
     syncHost();
   }
 
+  // The panel's height change (resizeDrop) is over: with no panel open its
+  // height is its content's again.
+  function endSizing() {
+    if (sizing === null) return;
+    clearT(sizing);
+    sizing = null;
+    full.classList.remove('is-sizing');
+    if (view === null) full.style.height = '';
+  }
+
   function tickClock() {
     clockTimer = null;
     if (!isOpen) return;
@@ -1404,15 +1427,15 @@ export function createUI(env) {
     clockTimer = setT(tickClock, CLOCK_MS);
   }
 
-  // ---- The desktop window ----
+  // ---- The desktop drop-down ----
 
-  // The window, rather than the sheet: a desktop page whose top bar shows
+  // The drop-down, rather than the sheet: a desktop page whose top bar shows
   // (and holds the pill), not a full-screen view such as the reader.
   function windowable() {
     return !!pillSlot && matches(WIDE) && root.getAttribute('data-shell') !== 'hidden';
   }
 
-  // The same element as the sheet, dressed as a window or back.
+  // The same element as the sheet, dressed as the drop-down or back.
   function shapeWindow(on) {
     full.classList.toggle('is-window', on);
     setAttr(full, 'role', on ? 'region' : 'dialog');
@@ -1421,59 +1444,39 @@ export function createUI(env) {
     setAttr(full, 'aria-label', on ? 'Audiobook player' : null);
     setAttr(title, 'tabindex', on ? '-1' : null);
     setHidden(closeBtn, on);
-    [grip, popBtn, winSep, winCloseBtn, resizeBtn].forEach(function (b) { setHidden(b, !on); });
+    [popBtn, winSep, winCloseBtn].forEach(function (b) { setHidden(b, !on); });
     drawWindowChrome();
     if (!on) {
-      full.classList.remove('is-pip', 'is-opening', 'is-closing', 'is-moving');
-      ['left', 'top', 'width', 'height', 'maxHeight'].forEach(function (k) { full.style[k] = ''; });
+      endSizing();
+      full.classList.remove('is-pip', 'is-opening', 'is-closing');
+      clearPlace();
     }
     drawPanels();
   }
 
-  // In a window of its own there is nothing to move, size or pop, and that
+  function clearPlace() {
+    ['left', 'top', 'width', 'height', 'maxHeight'].forEach(function (k) { full.style[k] = ''; });
+    full.style.removeProperty('--wsp-caret');
+  }
+
+  // In a window of its own there is nothing to collapse or pop, and that
   // window's own close brings the player back to the pill.
   function drawWindowChrome() {
     const free = windowed && !docked;
-    [grip, winCloseBtn, resizeBtn].forEach(function (b) { setHidden(b, !free); });
+    setHidden(winCloseBtn, !free);
     setHidden(popBtn, !free || !popOutFn);
     setHidden(winSep, !free);
   }
 
-  function storeKey() {
-    let id = '';
-    try {
-      id = String((env.identity && env.identity()) || '');
-    } catch (e) { /* none */ }
-    return WIN_KEY + (id ? ':' + id : '');
-  }
-
-  // Where the listener left it, on this device; {} when nothing is kept (or
-  // storage is off: a private window simply forgets).
-  let geo = null;
-  function readGeo() {
-    if (geo) return geo;
-    geo = {};
-    try {
-      const raw = env.storage ? env.storage.getItem(storeKey()) : null;
-      const v = raw ? JSON.parse(raw) : null;
-      if (v && typeof v === 'object') ['x', 'y', 'w', 'h'].forEach(function (k) { if (given(v[k])) geo[k] = v[k]; });
-    } catch (e) { /* not remembered */ }
-    return geo;
-  }
-  function saveGeo() {
-    try {
-      if (env.storage) env.storage.setItem(storeKey(), JSON.stringify(readGeo()));
-    } catch (e) { /* not remembered */ }
-  }
-
-  // A place kept by the earlier movable desktop bar ('ws-player-dock', per
-  // listener) means nothing now: the pill is always in the top bar.
+  // Places the earlier movable window ('ws-player-window') and bar
+  // ('ws-player-dock') kept, per listener, mean nothing now: the player
+  // always drops down from the pill.
   try {
     const st = env.storage;
     const old = [];
     for (let i = 0; st && i < st.length; i++) {
       const k = st.key(i);
-      if (k === 'ws-player-dock' || (k && k.indexOf('ws-player-dock:') === 0)) old.push(k);
+      if (k && OLD_KEYS.some(function (o) { return k === o || k.indexOf(o + ':') === 0; })) old.push(k);
     }
     old.forEach(function (k) { st.removeItem(k); });
   } catch (e) { /* nothing kept, or storage is off */ }
@@ -1485,33 +1488,54 @@ export function createUI(env) {
   function topLimit() {
     if (env.topLimit) return num(env.topLimit());
     const hdr = doc.getElementById('appHeader');
-    const b = hdr ? hdr.getBoundingClientRect().bottom : 0;
-    return Math.max(0, b) + WIN_GAP;
+    return hdr ? Math.max(0, hdr.getBoundingClientRect().bottom) : 0;
+  }
+  function pillBox() {
+    if (env.pillBox) return env.pillBox();
+    const r = pill.getBoundingClientRect();
+    return r.width ? { left: r.left, right: r.right } : null;
   }
 
-  // Puts it where it belongs: the kept place and size, inside the viewport.
+  // Hangs it under the pill: its place and width, its pointer, and its
+  // height (the room under the top bar while a panel is open, else its
+  // content's, at most that room).
   function placeWindow() {
     if (!isOpen || !windowed || docked) return null;
     const vp = viewport();
     vp.top = topLimit();
-    const g = readGeo();
-    const collapsed = view === null;
-    let r = fitWindow(g, vp, collapsed ? 0 : null);
-    full.style.width = r.w + 'px';
-    full.style.maxHeight = r.room + 'px';
-    if (collapsed) {
-      full.style.height = '';
-      r = fitWindow(g, vp, num(measure(full)));
-    } else {
-      full.style.height = r.h + 'px';
-    }
+    const r = fitDrop(pillBox(), vp);
     full.style.left = r.x + 'px';
     full.style.top = r.y + 'px';
+    full.style.width = r.w + 'px';
+    full.style.maxHeight = r.room + 'px';
+    full.style.setProperty('--wsp-caret', r.caret + 'px');
+    if (sizing === null) full.style.height = view === null ? '' : r.room + 'px';
     return r;
   }
 
+  // Its height before a panel opens or closes, to grow or shrink from.
+  function dropHeight() {
+    return isOpen && windowed && !docked ? num(measure(full)) : null;
+  }
+
+  // A panel opened or closed: the new height, reached smoothly from the old
+  // one (at once with reduced motion). Only the height moves; the panel's
+  // list scrolls inside it.
+  function resizeDrop(before) {
+    endSizing();
+    if (!placeWindow()) return;
+    if (before === null || !motion()) return;
+    const after = num(measure(full));
+    if (!(Math.abs(after - before) >= 1)) return;
+    full.style.height = before + 'px';
+    void full.offsetWidth;
+    full.classList.add('is-sizing');
+    full.style.height = after + 'px';
+    sizing = setT(endSizing, SIZE_MS + 50);
+  }
+
   function onViewport() {
-    if (!winDrag) placeWindow();
+    placeWindow();
   }
 
   function watchWindow(on) {
@@ -1526,118 +1550,14 @@ export function createUI(env) {
     }
   }
 
-  // Its height follows its content while no panel is open (a prompt, the
-  // warning): kept on screen as it grows.
-  if (typeof env.ResizeObserver === 'function') {
+  // The pill changes width (a page's top bar, a longer title): it follows.
+  if (typeof env.ResizeObserver === 'function' && pillSlot) {
     try {
-      new env.ResizeObserver(function () { if (windowed && !winDrag && view === null) placeWindow(); }).observe(full);
+      new env.ResizeObserver(function () { if (windowed) placeWindow(); }).observe(pillSlot);
     } catch (e) { /* placed on each change instead */ }
   }
 
-  // ---- Moving and sizing it ----
-
-  function startDrag(kind, e) {
-    if (!windowed || docked || winDrag || (e.button !== undefined && e.button > 0)) return;
-    const r = placeWindow();
-    if (!r) return;
-    winDrag = { kind: kind, id: e.pointerId, x0: e.clientX, y0: e.clientY, from: r, el: e.currentTarget };
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (err) { /* moves still arrive while over it */ }
-    full.classList.add('is-moving');
-    e.preventDefault();
-  }
-
-  function moveDrag(e) {
-    const d = winDrag;
-    if (!d || e.pointerId !== d.id) return;
-    const g = readGeo();
-    const dx = e.clientX - d.x0;
-    const dy = e.clientY - d.y0;
-    if (d.kind === 'move') {
-      g.x = d.from.x + dx;
-      g.y = d.from.y + dy;
-    } else {
-      g.w = d.from.w + dx;
-      if (view !== null) g.h = d.from.h + dy;
-    }
-    keepPlaced();
-  }
-
-  function endWinDrag(e) {
-    const d = winDrag;
-    if (!d || (e && e.pointerId !== d.id)) return;
-    winDrag = null;
-    full.classList.remove('is-moving');
-    saveGeo();
-  }
-
-  // What was applied is what is kept, so the limits stick.
-  function keepPlaced() {
-    const r = placeWindow();
-    if (!r) return;
-    const g = readGeo();
-    if (given(g.x)) g.x = r.x;
-    if (given(g.y)) g.y = r.y;
-    if (given(g.w)) g.w = r.w;
-    if (given(g.h) && view !== null) g.h = r.h;
-  }
-
-  topBar.addEventListener('pointerdown', function (e) {
-    const t = e.target;
-    if (!windowed || !t || !t.closest) return;
-    // Its buttons are buttons; the grip and the bar itself move it.
-    const b = t.closest('button');
-    if (b && b !== grip) return;
-    startDrag('move', e);
-  });
-  resizeBtn.addEventListener('pointerdown', function (e) { startDrag('size', e); });
-  [topBar, resizeBtn].forEach(function (n) {
-    n.addEventListener('pointermove', moveDrag);
-    n.addEventListener('pointerup', endWinDrag);
-    n.addEventListener('pointercancel', endWinDrag);
-  });
-
-  function arrowStep(e) {
-    const step = e.shiftKey ? WIN_STEP_BIG : WIN_STEP;
-    return { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key] || null;
-  }
-
-  grip.addEventListener('keydown', function (e) {
-    if (!windowed || docked || e.altKey || e.ctrlKey || e.metaKey) return;
-    const g = readGeo();
-    const d = arrowStep(e);
-    if (e.key === 'Home') {
-      delete g.x;
-      delete g.y;
-    } else if (d) {
-      const r = placeWindow();
-      if (!r) return;
-      g.x = r.x + d[0];
-      g.y = r.y + d[1];
-    } else {
-      return;
-    }
-    e.preventDefault();
-    keepPlaced();
-    saveGeo();
-  });
-
-  resizeBtn.addEventListener('keydown', function (e) {
-    if (!windowed || docked || e.altKey || e.ctrlKey || e.metaKey) return;
-    const d = arrowStep(e);
-    if (!d) return;
-    e.preventDefault();
-    const r = placeWindow();
-    if (!r) return;
-    const g = readGeo();
-    g.w = r.w + d[0];
-    if (view !== null) g.h = r.h + d[1];
-    keepPlaced();
-    saveGeo();
-  });
-
-  // The window's X: back to the pill, as Escape does; the book plays on.
+  // Collapse: back to the pill, as Escape does; the book plays on.
   winCloseBtn.addEventListener('click', function () { close(); });
   popBtn.addEventListener('click', function () {
     if (popOutFn) safely(popOutFn)();
@@ -1667,18 +1587,18 @@ export function createUI(env) {
 
   // ---- Its own window (popout.js) ----
 
-  // The window into a Picture-in-Picture document (it must be open in the
+  // The drop-down into a Picture-in-Picture document (it must be open in the
   // page): the same nodes, so every control, panel and prompt goes with it;
   // the audio stays in this tab. end() closes that window.
   function dock(pdoc, end) {
     if (!isOpen || !windowed || docked || !pdoc || !pdoc.body) return false;
-    endWinDrag();
+    endSizing();
     watchWindow(false);
     const holder = pdoc.createElement('div');
     holder.id = 'wsPlayer';
     holder.className = 'wsp-pip-host';
     pdoc.body.appendChild(holder);
-    ['left', 'top', 'width', 'height', 'maxHeight'].forEach(function (k) { full.style[k] = ''; });
+    clearPlace();
     full.classList.remove('is-opening', 'is-closing');
     full.classList.add('is-pip');
     holder.appendChild(full);
@@ -1740,7 +1660,7 @@ export function createUI(env) {
   // Its own window is the size of this one; with a panel open it wants room.
   function windowRect() {
     const r = isOpen && windowed && !docked ? full.getBoundingClientRect() : null;
-    return { w: r && r.width ? Math.round(r.width) : WIN.w, h: r && r.height ? Math.round(r.height) : WIN.minH - 80 };
+    return { w: r && r.width ? Math.round(r.width) : DROP.w, h: r && r.height ? Math.round(r.height) : DROP.minH - 80 };
   }
 
   // In its own window, a panel opening asks for the height to show it.
@@ -1748,7 +1668,7 @@ export function createUI(env) {
     if (!docked || view === null) return;
     const w = docked.doc.defaultView;
     try {
-      if (w && w.innerHeight < WIN.minH && typeof w.resizeTo === 'function') w.resizeTo(w.outerWidth, w.outerHeight + (WIN.minH - w.innerHeight));
+      if (w && w.innerHeight < DROP.minH && typeof w.resizeTo === 'function') w.resizeTo(w.outerWidth, w.outerHeight + (DROP.minH - w.innerHeight));
     } catch (e) { /* the browser decides */ }
   }
 
@@ -1858,7 +1778,7 @@ export function createUI(env) {
     unwatch(pw);
     unwatch(w);
     endDrag();
-    endWinDrag();
+    endSizing();
     watchWindow(false);
     full.classList.remove('is-open');
     doc.removeEventListener('focusin', onFocusIn);
@@ -1876,8 +1796,10 @@ export function createUI(env) {
     drawPanels();
     left(was);
     if (windowed) {
-      // A short fade back towards the top bar (opacity only with reduced
-      // motion), then gone. Focus goes to the pill when it was in the window.
+      // A short fade back up into the pill (opacity only with reduced
+      // motion), then gone, at the player's own height (a panel that was
+      // open has gone with it). Focus goes to the pill when it was inside.
+      full.style.height = '';
       if (winAnim !== null) {
         clearT(winAnim);
         winAnim = null;
@@ -2067,10 +1989,12 @@ export function createUI(env) {
         // over (tapped while it loaded) is the page it opened on.
         const url = e && e.detail && e.detail.url;
         if (!isOpen) return;
-        // The window stays open from page to page (in its own window it is
-        // no page's); a full-screen view (the reader) is the sheet's.
+        // The drop-down stays open from page to page (in its own window it
+        // is no page's), under the pill wherever the new top bar has put it;
+        // a full-screen view (the reader) is the sheet's.
         if (windowed) {
           if (!docked && !windowable()) close();
+          else placeWindow();
           return;
         }
         if (!url || withoutHash(url) !== withoutHash(openedAt)) close();
@@ -2084,10 +2008,10 @@ export function createUI(env) {
     open: open,
     close: close,
     isOpen: function () { return isOpen; },
-    // The open player is the floating window (desktop), not a modal sheet:
+    // The open player is the drop-down (desktop), not a modal sheet:
     // keys on the page are still the page's (features.js).
     isWindow: function () { return isOpen && windowed; },
-    // Pop out (popout.js): fn() runs from the window's Pop out press.
+    // Pop out (popout.js): fn() runs from the drop-down's Pop out press.
     popOut: function (fn) {
       popOutFn = typeof fn === 'function' ? fn : null;
       drawWindowChrome();
@@ -2159,11 +2083,7 @@ export function boot(win, overrides) {
       } catch (e) {
         return null;
       }
-    })(),
-    identity: function () {
-      const u = WS.user;
-      return u && typeof u.identity_key === 'string' ? u.identity_key : '';
-    }
+    })()
   }, overrides || {}));
   WS.playerUI = ui;
   return ui;
