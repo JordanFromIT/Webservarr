@@ -3,7 +3,8 @@ Cloudflare Web Analytics and the CSP (app/web_analytics.py).
 
 Off, the shipped default, every response keeps the strict CSP byte for byte.
 On, HTML responses (shell pages, the login page, static HTML) also allow the
-beacon's script host and the host it reports to, and nothing else changes.
+beacon's script host, and nothing else changes: the injected beacon reports to
+the site's own /cdn-cgi/rum, which connect-src 'self' already covers.
 The switch is cached in Redis, which both workers share, and a settings save
 that writes it takes effect on the next page.
 """
@@ -21,7 +22,6 @@ except Exception:  # pragma: no cover - the laptop has no FastAPI
 
 KEY = "security.cloudflare_web_analytics"
 SCRIPT = "https://static.cloudflareinsights.com"
-CONNECT = "https://cloudflareinsights.com"
 
 
 class FakeRedis:
@@ -135,17 +135,14 @@ class WebAnalyticsCsp(Base):
             self.assertEqual(self.client.get("/static/css/theme.css").headers["content-security-policy"],
                              strict_csp())
 
-    def test_on_adds_exactly_the_two_hosts_to_html(self):
+    def test_on_adds_exactly_the_script_host_to_html(self):
         self.switch("true")
-        strict = directives(strict_csp())
+        want = directives(strict_csp())
+        want["script-src"] = "'self' " + SCRIPT
         for path, csp in self.html_csps().items():
-            got = directives(csp)
-            self.assertEqual(got["script-src"], "'self' " + SCRIPT, path)
-            self.assertEqual(got["connect-src"], strict["connect-src"] + " " + CONNECT, path)
-            got.pop("script-src"), got.pop("connect-src")
-            rest = dict(strict)
-            rest.pop("script-src"), rest.pop("connect-src")
-            self.assertEqual(got, rest, path)
+            self.assertEqual(directives(csp), want, path)
+            self.assertEqual(csp, strict_csp().replace("script-src 'self';", f"script-src 'self' {SCRIPT};"),
+                             path)
 
     def test_on_leaves_other_responses_alone(self):
         self.switch("true")

@@ -172,7 +172,7 @@ def _build() -> List[SettingDef]:
         _icon("icon.sidebar_logo", "settings_input_component", "Icon shown in place of a logo when none is set",
               public=True),
         # Off by default, so the CSP allows no outside script. On, HTML
-        # responses' CSP also allows the beacon Cloudflare injects
+        # responses' script-src also allows the beacon Cloudflare injects
         # (app/web_analytics.py).
         _bool("security.cloudflare_web_analytics", "false",
               "Allow Cloudflare Web Analytics' script (only if your site is behind Cloudflare with Web Analytics on)"),

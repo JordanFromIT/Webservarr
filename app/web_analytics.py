@@ -4,8 +4,12 @@ Cloudflare Web Analytics and the site's Content Security Policy.
 A site behind Cloudflare with Web Analytics on has Cloudflare's beacon script
 injected into every HTML page on the way out. The CSP (app/main.py) refuses it
 unless the operator turns security.cloudflare_web_analytics on; then HTML
-responses also allow the beacon's script host and the host it reports to.
-Off, the shipped default, the CSP stays exactly as strict as before.
+responses' script-src also allows the beacon's host. Off, the shipped
+default, the CSP stays exactly as strict as before.
+
+connect-src needs nothing: an injected beacon reports to the site's own
+/cdn-cgi/rum, which 'self' already allows. Only a beacon pasted into a page
+by hand reports to cloudflareinsights.com, and this app has no way to do that.
 
 The switch is read for every HTML response, so the answer is cached in Redis,
 which both workers share: a miss reads the database once and keeps the answer
@@ -32,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 SETTING_KEY = "security.cloudflare_web_analytics"
 SCRIPT_SOURCE = "https://static.cloudflareinsights.com"
-CONNECT_SOURCE = "https://cloudflareinsights.com"
 CACHE_KEY = "webservarr:cache:cloudflare-web-analytics"
 # Bounds how long a save that could not drop the cached answer stays unseen.
 CACHE_SECONDS = 60

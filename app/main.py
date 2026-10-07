@@ -318,7 +318,6 @@ async def add_security_headers(request: Request, call_next):
             and response.headers.get("content-type", "").startswith("text/html")
             and await web_analytics.allowed()):
         script_sources.append(web_analytics.SCRIPT_SOURCE)
-        connect_sources.append(web_analytics.CONNECT_SOURCE)
 
     csp_directives = [
         "default-src 'self'",
