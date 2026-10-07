@@ -742,6 +742,12 @@ class BooksPage(unittest.TestCase):
         self.assertIn('html[data-books-filtered] #toolbarSkel [data-skel="filters"] { display: block; }', h)
         src = module_source("books")
         self.assertIn("html.removeAttribute('data-books-filtered');", src)
+        # A remembered format is a filter in use too; Group series off (or a series filter)
+        # holds a third line on every skeleton card.
+        self.assertIn("view = JSON.parse(localStorage.getItem('webservarr_books_view:' + name) || 'null');", loader)
+        self.assertIn("setAttribute('data-books-flat', '')", loader)
+        self.assertIn('html[data-books-flat] #gridSkeleton [data-skel="series"] { display: block; }', h)
+        self.assertIn("html.removeAttribute('data-books-flat');", src)
 
     def test_the_discovery_shelves_are_held_like_the_rows_above(self):
         # Books 3c: Recently added and Popular on the server, after My list and before the toolbar.
@@ -771,7 +777,7 @@ class BooksPage(unittest.TestCase):
         src = module_source("books")
         self.assertIn("const GUIDE_KEY = 'webservarr_books_guide_seen:';", src)
         self.assertEqual(len(re.findall(r"^\s+target: '", src[src.index("const GUIDE_STEPS"):src.index("function isAbort")], re.M)), 4)
-        for words in ("#booksSearch", "#continueHost [data-continue]", "#formatChips", "#libraryGrid > li:first-child"):
+        for words in ("#booksSearch", "#continueHost [data-continue]", "#filtersBtn", "#libraryGrid > li:first-child"):
             self.assertIn(f"target: '{words}'", src)
         self.assertIn("window.WebServarrTour.init({", src)
         self.assertIn("seenKey: GUIDE_KEY + user,", src)

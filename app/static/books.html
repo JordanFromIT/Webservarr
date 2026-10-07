@@ -29,6 +29,27 @@
      carries filters (theme-loader.js on a full load, pages/books.js on every visit). */
   #toolbarSkel [data-skel="filters"] { display: none; }
   html[data-books-filtered] #toolbarSkel [data-skel="filters"] { display: block; }
+  /* Group series off (or a series filter): every card has a third line, "Dune #2";
+     held in the grid's skeleton the same way (data-books-flat). */
+  #gridSkeleton [data-skel="series"] { display: none; }
+  html[data-books-flat] #gridSkeleton [data-skel="series"] { display: block; }
+
+  /* The filters panel drops from the toolbar over the books: the Requests search
+     bar's frosted tint over a dim of the page colour, so the covers show faintly
+     through and its text keeps its contrast whatever cover is behind it. */
+  .ws-filter-panel {
+    background:
+      linear-gradient(rgb(var(--color-secondary) / .25), rgb(var(--color-secondary) / .25)),
+      rgb(var(--color-background) / .84);
+    -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    backdrop-filter: blur(24px) saturate(1.2);
+  }
+  .ws-filter-panel:not(.hidden) { animation: ws-filter-in 160ms ease-out; }
+  @keyframes ws-filter-in { from { opacity: 0; transform: translateY(-4px); } }
+  @keyframes ws-filter-fade { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ws-filter-panel:not(.hidden) { animation-name: ws-filter-fade; }
+  }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
      scrollbar would only take a strip of height from the cards. */
@@ -122,45 +143,111 @@
       <p id="booksSaid" class="sr-only" role="status" aria-live="polite"></p>
       <!-- The toolbar, the notes and Continue all arrive in one write with the first
            books (pages/books.js commitFrame), so nothing already on screen moves.
-           Until then the toolbar is this skeleton, the controls' own size. -->
-      <div id="toolbarSkel" class="mb-6 flex flex-wrap items-center gap-3" aria-hidden="true">
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="skel h-10 w-[3.25rem] rounded-full"></div>
-          <div class="skel h-10 w-[5rem] rounded-full"></div>
-          <div class="skel h-10 w-[6.5rem] rounded-full"></div>
+           Until then the toolbar is this skeleton: the controls' own boxes, unseen words
+           and all, so it wraps where theirs will. -->
+      <div id="toolbarSkel" class="mb-6" aria-hidden="true">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div class="skel inline-flex h-10 shrink-0 items-center gap-2 rounded-full pl-3 pr-4 text-[15px] font-semibold"><span class="invisible size-5"></span><span class="invisible">Filters</span></div>
+          <div class="ml-auto flex items-center gap-2">
+            <div class="skel inline-flex h-10 shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-[15px] font-medium"><span class="invisible h-6 w-10"></span><span class="invisible">Group series</span></div>
+            <div class="skel h-10 w-44 rounded-[10px]"></div>
+          </div>
         </div>
-        <!-- The filter buttons' own words and arrow, unseen: the same widths, so the rows wrap where theirs will. -->
-        <div class="-m-1 flex min-w-0 max-w-full items-center gap-2 overflow-hidden p-1">
-          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Author</span><span class="invisible size-5"></span></div>
-          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Series</span><span class="invisible size-5"></span></div>
-          <div class="skel inline-flex h-10 shrink-0 items-center gap-1 pl-4 pr-3 text-[15px] font-semibold"><span class="invisible">Narrator</span><span class="invisible size-5"></span></div>
-        </div>
-        <div class="skel h-10 w-44 rounded-[10px] lg:ml-auto"></div>
-        <!-- Shown while the address carries filters (html[data-books-filtered]): their row's room. -->
-        <div data-skel="filters" class="basis-full h-9"></div>
+        <!-- Shown while filters are in use (html[data-books-filtered]): their row's room. -->
+        <div data-skel="filters" class="mt-3 h-9"></div>
       </div>
-      <div id="toolbar" class="hidden mb-6 flex flex-wrap items-center gap-3">
-        <div id="formatChips" class="flex flex-wrap items-center gap-2" role="group" aria-label="Show">
-          <button type="button" data-format="all" aria-pressed="true" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright">All</button>
-          <button type="button" data-format="ebook" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Ebooks</button>
-          <button type="button" data-format="audio" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Audiobooks</button>
-        </div>
-        <!-- Author, Series and Narrator: each opens a picker of the names in the books this
-             person can see (pages/books.js). Scrolls sideways inside itself on the narrowest
-             phones; the padding keeps the focus ring inside the scroll box. -->
-        <div id="filterButtons" class="books-row -m-1 flex min-w-0 max-w-full items-center gap-2 overflow-x-auto p-1" role="group" aria-label="Filter by">
-          <button type="button" data-filter="author" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Author</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
-          <button type="button" data-filter="series" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Series</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
-          <button type="button" data-filter="narrator" aria-haspopup="dialog" aria-expanded="false" class="inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue"><span>Narrator</span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
-        </div>
-        <!-- The sort: a button that opens a list of the orders (pages/books.js openSort),
-             a popover from 640px up and a bottom sheet below, as the filter pickers are. -->
-        <div class="lg:ml-auto">
-          <span id="sortLabel" class="sr-only">Sort by</span>
-          <button id="sortBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sortLabel sortValue" class="inline-flex h-10 w-44 items-center justify-between gap-2 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"><span id="sortValue" class="truncate">Recently added</span><span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
+      <div id="toolbar" class="hidden mb-6">
+        <div id="toolbarRow" class="relative flex flex-wrap items-center gap-x-3 gap-y-2">
+          <!-- Filters: opens the panel under the toolbar (pages/books.js). The badge counts the filters in use. -->
+          <button id="filtersBtn" type="button" aria-expanded="false" aria-controls="filterPanel"
+                  class="inline-flex h-10 shrink-0 items-center gap-2 rounded-full pl-3 pr-4 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 aria-expanded:bg-frosted-blue/[0.15] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+            <span class="material-symbols-outlined text-[20px]" aria-hidden="true">tune</span><span>Filters</span><span id="filtersCount" class="hidden -mr-1 min-w-[22px] h-[22px] rounded-full bg-primary px-1.5 text-center text-[13px] font-bold leading-[22px] tabular-nums text-bright" aria-hidden="true"></span>
+          </button>
+
+          <!-- The filters panel: not a dialog, a region that drops over the books under the
+               toolbar. Every tick filters the books at once (pages/books.js). Escape, the
+               Filters button, Close or a click outside closes it. -->
+          <div id="filterPanel" role="region" aria-labelledby="filterPanelTitle"
+               class="ws-filter-panel hidden absolute inset-x-0 top-full z-30 mt-2 flex flex-col overflow-hidden rounded-2xl border border-frosted-blue/10 shadow-lg shadow-black/30 text-frosted-blue">
+            <div class="flex items-center gap-1 pb-1 pl-4 pr-2 pt-2 sm:pl-5">
+              <h2 id="filterPanelTitle" class="min-w-0 flex-1 text-[17px] font-semibold text-frosted-blue">Filters</h2>
+              <button id="filterClearAll" type="button" aria-disabled="true" class="inline-flex h-10 shrink-0 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] aria-disabled:cursor-default aria-disabled:text-frosted-blue/45 aria-disabled:hover:bg-transparent transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Clear all</button>
+              <button id="filterClose" type="button" aria-label="Close filters" title="Close filters" class="grid size-10 shrink-0 place-items-center rounded-full text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+                <span class="material-symbols-outlined text-[24px]" aria-hidden="true">close</span>
+              </button>
+            </div>
+            <div id="filterPanelBody" class="@container min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 sm:px-5">
+              <div id="facetError" class="hidden mb-3 flex flex-wrap items-center gap-3" role="status">
+                <p class="text-[15px] text-frosted-blue">The filters didn’t load.</p>
+                <button id="facetRetry" type="button" class="inline-flex h-9 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/10 hover:bg-frosted-blue/[0.15] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Try again</button>
+              </div>
+              <div class="grid gap-y-4 @lg:grid-cols-3 @lg:gap-x-6">
+                <section data-facet="format" aria-labelledby="facetFormatTitle" class="border-b border-frosted-blue/10 pb-3 @lg:col-span-3">
+                  <h3 id="facetFormatTitle" class="mb-1 text-[15px] font-semibold text-frosted-blue">Format</h3>
+                  <div role="radiogroup" aria-labelledby="facetFormatTitle" class="flex flex-col @md:flex-row @md:flex-wrap @md:gap-x-6">
+                    <label class="group/opt -mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-[10px] px-2 text-[15px] text-frosted-blue hover:bg-frosted-blue/[0.07] @lg:min-h-10"><input type="radio" name="booksFormat" value="all" data-fk="format:all" class="peer sr-only"/><span class="grid size-5 shrink-0 place-items-center rounded-full border-2 border-frosted-blue/60 peer-checked:border-frosted-blue peer-checked:bg-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-frosted-blue" aria-hidden="true"><span class="size-2 rounded-full bg-frosted-blue opacity-0 group-has-[:checked]/opt:opacity-100"></span></span><span class="group-has-[:checked]/opt:font-semibold">All books</span><span data-count="all" class="shrink-0 text-[13px] tabular-nums text-frosted-blue/70"></span></label>
+                    <label class="group/opt -mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-[10px] px-2 text-[15px] text-frosted-blue hover:bg-frosted-blue/[0.07] @lg:min-h-10"><input type="radio" name="booksFormat" value="ebook" data-fk="format:ebook" class="peer sr-only"/><span class="grid size-5 shrink-0 place-items-center rounded-full border-2 border-frosted-blue/60 peer-checked:border-frosted-blue peer-checked:bg-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-frosted-blue" aria-hidden="true"><span class="size-2 rounded-full bg-frosted-blue opacity-0 group-has-[:checked]/opt:opacity-100"></span></span><span class="group-has-[:checked]/opt:font-semibold">Ebooks</span><span data-count="ebook" class="shrink-0 text-[13px] tabular-nums text-frosted-blue/70"></span></label>
+                    <label class="group/opt -mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-[10px] px-2 text-[15px] text-frosted-blue hover:bg-frosted-blue/[0.07] @lg:min-h-10"><input type="radio" name="booksFormat" value="audio" data-fk="format:audio" class="peer sr-only"/><span class="grid size-5 shrink-0 place-items-center rounded-full border-2 border-frosted-blue/60 peer-checked:border-frosted-blue peer-checked:bg-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-frosted-blue" aria-hidden="true"><span class="size-2 rounded-full bg-frosted-blue opacity-0 group-has-[:checked]/opt:opacity-100"></span></span><span class="group-has-[:checked]/opt:font-semibold">Audiobooks</span><span data-count="audio" class="shrink-0 text-[13px] tabular-nums text-frosted-blue/70"></span></label>
+                  </div>
+                </section>
+                <section data-facet="author" aria-labelledby="facetAuthorTitle" class="min-w-0">
+                  <div class="mb-1 flex items-baseline justify-between gap-2">
+                    <h3 id="facetAuthorTitle" class="text-[15px] font-semibold text-frosted-blue">Author</h3>
+                    <span data-selected class="text-[13px] text-frosted-blue/70"></span>
+                  </div>
+                  <div data-find class="relative mb-1 hidden">
+                    <span class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70" aria-hidden="true">search</span>
+                    <input type="search" maxlength="200" autocomplete="off" placeholder="Find an author" aria-label="Find an author" data-fk="author:find"
+                           class="h-10 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+                  </div>
+                  <ul data-list aria-labelledby="facetAuthorTitle"></ul>
+                  <p data-none class="hidden py-2 text-[15px] text-frosted-blue/70"></p>
+                  <button data-more type="button" aria-expanded="false" data-fk="author:more" class="hidden -ml-2 mt-1 inline-flex h-9 items-center gap-0.5 rounded-lg px-2 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"><span data-more-text></span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
+                </section>
+                <section data-facet="series" aria-labelledby="facetSeriesTitle" class="min-w-0">
+                  <div class="mb-1 flex items-baseline justify-between gap-2">
+                    <h3 id="facetSeriesTitle" class="text-[15px] font-semibold text-frosted-blue">Series</h3>
+                    <span data-selected class="text-[13px] text-frosted-blue/70"></span>
+                  </div>
+                  <div data-find class="relative mb-1 hidden">
+                    <span class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70" aria-hidden="true">search</span>
+                    <input type="search" maxlength="200" autocomplete="off" placeholder="Find a series" aria-label="Find a series" data-fk="series:find"
+                           class="h-10 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+                  </div>
+                  <ul data-list aria-labelledby="facetSeriesTitle"></ul>
+                  <p data-none class="hidden py-2 text-[15px] text-frosted-blue/70"></p>
+                  <button data-more type="button" aria-expanded="false" data-fk="series:more" class="hidden -ml-2 mt-1 inline-flex h-9 items-center gap-0.5 rounded-lg px-2 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"><span data-more-text></span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
+                </section>
+                <section data-facet="narrator" aria-labelledby="facetNarratorTitle" class="min-w-0">
+                  <div class="mb-1 flex items-baseline justify-between gap-2">
+                    <h3 id="facetNarratorTitle" class="text-[15px] font-semibold text-frosted-blue">Narrator</h3>
+                    <span data-selected class="text-[13px] text-frosted-blue/70"></span>
+                  </div>
+                  <div data-find class="relative mb-1 hidden">
+                    <span class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70" aria-hidden="true">search</span>
+                    <input type="search" maxlength="200" autocomplete="off" placeholder="Find a narrator" aria-label="Find a narrator" data-fk="narrator:find"
+                           class="h-10 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+                  </div>
+                  <ul data-list aria-labelledby="facetNarratorTitle"></ul>
+                  <p data-none class="hidden py-2 text-[15px] text-frosted-blue/70"></p>
+                  <button data-more type="button" aria-expanded="false" data-fk="narrator:more" class="hidden -ml-2 mt-1 inline-flex h-9 items-center gap-0.5 rounded-lg px-2 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"><span data-more-text></span><span class="material-symbols-outlined text-[20px]" aria-hidden="true">expand_more</span></button>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <!-- Group series and the sort (pages/books.js openSort: a popover from 640px up, a bottom sheet below). -->
+          <div class="ml-auto flex items-center gap-2">
+            <button id="groupSwitch" type="button" role="switch" aria-checked="true"
+                    class="group/sw inline-flex h-10 shrink-0 items-center gap-2.5 rounded-[10px] px-2 text-[15px] font-medium text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+              <span class="relative h-6 w-10 shrink-0 rounded-full border border-frosted-blue/60 bg-frosted-blue/[0.15] transition-colors group-aria-checked/sw:border-frosted-blue group-aria-checked/sw:bg-primary" aria-hidden="true"><span class="absolute left-[3px] top-[3px] size-4 rounded-full bg-frosted-blue/70 transition-transform duration-150 motion-reduce:transition-none group-aria-checked/sw:translate-x-4 group-aria-checked/sw:bg-bright"></span></span><span>Group series</span>
+            </button>
+            <span id="sortLabel" class="sr-only">Sort by</span>
+            <button id="sortBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sortLabel sortValue" class="inline-flex h-10 w-44 items-center justify-between gap-2 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"><span id="sortValue" class="truncate">Recently added</span><span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
+          </div>
         </div>
         <!-- The filters in use, each removable, and Clear all (pages/books.js). -->
-        <div id="activeFilters" data-active-filters class="hidden basis-full min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
+        <div id="activeFilters" data-active-filters class="hidden mt-3 min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
       </div>
 
       <!-- The ebook sign-in failed, or was just tried and still doesn't work (see
@@ -178,7 +265,7 @@
       <!-- One of these shows at a time (pages/books.js showBody). The skeleton
            is the grid's own shape: same columns, a cover and two lines of text. -->
       <div id="gridSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
-        <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><p data-skel="series" class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
       </div>
 
       <ul id="libraryGrid" class="hidden grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></ul>

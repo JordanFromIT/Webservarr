@@ -275,6 +275,15 @@ function usual(over = {}) {
 
 const sortOptions = (t) => t.qa('#booksSortList [role="option"]');
 
+// The filters panel's Format: a real radio, picked as a person does (a change event), then the tick's short wait.
+async function pickFormat(t, value) {
+  const radio = t.q('input[name="booksFormat"][value="' + value + '"]');
+  radio.checked = true;
+  radio.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  await t.clock.advance(200);
+}
+const formatPicked = (t) => (t.q('input[name="booksFormat"]:checked') || { value: null }).value;
+
 async function run(name, fn) {
   current = name;
   const made = [];
@@ -302,7 +311,9 @@ await run('the skeleton holds the grid, then the books replace it', async (make)
   await flush();
   check('the skeleton shows', !t.hidden('#gridSkeleton'));
   check('with the shape of twelve books', t.qa('#gridSkeleton > div').length === 12, t.qa('#gridSkeleton > div').length);
-  check('each skeleton is a cover and two lines', t.qa('#gridSkeleton > div').every((d) => d.children.length === 3));
+  check('each skeleton is a cover, two lines and the room of a series line (shown with Group series off)',
+    t.qa('#gridSkeleton > div').every((d) => d.children.length === 4 && d.lastChild.getAttribute('data-skel') === 'series'));
+  check('which is held only while every book is its own card', !t.doc.documentElement.hasAttribute('data-books-flat'));
   check('the grid and every message are away', t.hidden('#libraryGrid') && t.hidden('#errorState') && t.hidden('#emptyState') && t.hidden('#buildingState'));
   slow.resolve();
   await t.clock.advance(1600);
@@ -353,27 +364,33 @@ await run('sections arrive top-down: the library waits for Continue', async (mak
   check('a repeat visit shows the books after the short gate', !k.hidden('#libraryGrid'));
 });
 
-await run('the chips filter the library and are remembered', async (make) => {
+await run('the format (in the filters panel) filters the library and is remembered', async (make) => {
+  const slowEbooks = deferred();
   const t = make({ routes: (net) => {
     usual()(net);
-    net.on('/api/books?format=ebook', () => ({ body: { items: [ebook(2, 'Emma', 'Jane Austen')], next_cursor: null, notes: [] } }));
+    net.on('/api/books?format=ebook', () => slowEbooks.promise.then(() => ({ body: { items: [ebook(2, 'Emma', 'Jane Austen')], next_cursor: null, notes: [] } })));
     net.on('/api/books?format=audio', () => ({ body: { items: [audio(3, 'The Hobbit', 'Tolkien')], next_cursor: null, notes: [] } }));
   } });
   await t.mount();
-  const chips = t.qa('#formatChips button');
-  check('three chips: All, Ebooks, Audiobooks', chips.map((c) => c.textContent).join('|') === 'All|Ebooks|Audiobooks');
-  check('All is pressed to begin with', chips[0].getAttribute('aria-pressed') === 'true' && chips[1].getAttribute('aria-pressed') === 'false');
-  t.click('[data-format="ebook"]');
-  check('the skeleton shows while the new list loads', !t.hidden('#gridSkeleton'));
+  const radios = t.qa('input[name="booksFormat"]');
+  check('three real radios: All books, Ebooks, Audiobooks', radios.map((r) => r.type + ':' + r.value + ':' + r.closest('label').textContent.trim()).join('|') === 'radio:all:All books|radio:ebook:Ebooks|radio:audio:Audiobooks',
+    radios.map((r) => r.closest('label').textContent));
+  check('All books to begin with', formatPicked(t) === 'all');
+  const radio = t.q('input[name="booksFormat"][value="ebook"]');
+  radio.checked = true;
+  radio.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  check('the badge counts it at once', t.text('#filtersCount') === '1' && !t.hidden('#filtersCount'));
+  await t.clock.advance(200);
+  check('the books on screen stay, dimmed, while the new list loads', !t.hidden('#libraryGrid') && t.q('#libraryGrid').getAttribute('aria-busy') === 'true'
+    && /opacity-60/.test(t.q('#libraryGrid').className) && t.hidden('#gridSkeleton'));
+  slowEbooks.resolve();
   await t.clock.advance(50);
   check('Ebooks asks for ebooks', t.net.urls('/api/books?').pop() === '/api/books?format=ebook&sort=added&limit=36', t.net.urls('/api/books?'));
-  check('Ebooks is pressed and All is not', t.qa('#formatChips button').map((c) => c.getAttribute('aria-pressed')).join() === 'false,true,false');
-  check('and the grid is the ebooks', t.cards('libraryGrid').length === 1 && /Emma/.test(t.cards('libraryGrid')[0].textContent));
-  check('the pressed chip is a primary fill, the others are not', /bg-primary/.test(t.q('[data-format="ebook"]').className) && !/bg-primary/.test(t.q('[data-format="all"]').className));
-  t.click('[data-format="audio"]');
-  await t.clock.advance(50);
+  check('and the grid is the ebooks, no longer busy', t.cards('libraryGrid').length === 1 && /Emma/.test(t.cards('libraryGrid')[0].textContent) && !t.q('#libraryGrid').hasAttribute('aria-busy'));
+  check('a pill says it', t.text('#activeFilters [data-remove="format"]').replace('close', '') === 'Format Ebooks, remove filter');
+  await pickFormat(t, 'audio');
   check('Audiobooks asks for audio', t.net.urls('/api/books?').pop() === '/api/books?format=audio&sort=added&limit=36');
-  check('the choice is remembered for this person', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added"}', t.win.localStorage.getItem('webservarr_books_view:sam'));
+  check('the choice is remembered for this person', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added","group":true}', t.win.localStorage.getItem('webservarr_books_view:sam'));
 
   // The next visit starts where this one left off.
   const u = make({ storage: { 'webservarr_books_view:sam': '{"format":"audio","sort":"title"}' }, routes: (net) => {
@@ -382,11 +399,12 @@ await run('the chips filter the library and are remembered', async (make) => {
   } });
   await u.mount();
   check('it asks for the remembered view at once', u.net.urls('/api/books?')[0] === '/api/books?format=audio&sort=title&limit=36', u.net.urls('/api/books?'));
-  check('and the controls show it', u.q('[data-format="audio"]').getAttribute('aria-pressed') === 'true' && u.text('#sortValue') === 'Title');
+  check('and the controls show it', formatPicked(u) === 'audio' && u.text('#sortValue') === 'Title' && u.text('#filtersCount') === '1');
+  check('the pills\' row is held from the first frame', u.doc.documentElement.hasAttribute('data-books-filtered'));
   // Rubbish in storage is ignored.
-  const v = make({ storage: { 'webservarr_books_view:sam': '{"format":"pdf","sort":"nope"}' }, routes: usual() });
+  const v = make({ storage: { 'webservarr_books_view:sam': '{"format":"pdf","sort":"nope","group":"no"}' }, routes: usual() });
   await v.mount();
-  check('an unknown value falls back to the defaults', v.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36');
+  check('an unknown value falls back to the defaults', v.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36' && v.q('#groupSwitch').getAttribute('aria-checked') === 'true');
 });
 
 await run('the sort reloads the list and an older answer cannot overwrite a newer one', async (make) => {
@@ -737,8 +755,7 @@ await run('not connected: the hand-off runs once, from a fresh answer, and the p
   check('the audiobooks are on screen meanwhile', t.cards('libraryGrid').length === 1 && t.qa('#continueHost li').length === 2);
   check('no problem is shown while the hand-off is under way (its room is held, unseen)', t.q('#connectState').classList.contains('invisible'));
   check('and the missing sign-in is not repeated as a note', t.hidden('#notes'));
-  t.click('#formatChips [data-format="audio"]');
-  await t.clock.advance(50);
+  await pickFormat(t, 'audio');
   check('later answers do not start it again', t.kav.reconnect.length === 1);
 });
 
@@ -822,13 +839,12 @@ await run('an empty filter says which, and one tap shows everything again', asyn
     net.on('/api/books?format=audio', () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }));
   } });
   await t.mount();
-  t.click('[data-format="audio"]');
-  await t.clock.advance(50);
+  await pickFormat(t, 'audio');
   check('the message names the filter', t.text('#emptyTitle') === 'No audiobooks to show');
   check('Show all books is offered, Request a book is not', !t.hidden('#emptyReset') && t.hidden('#emptyRequest'));
   t.click('#emptyReset');
   await t.clock.advance(50);
-  check('All is chosen again and the books are back', t.q('[data-format="all"]').getAttribute('aria-pressed') === 'true' && t.cards('libraryGrid').length === 5);
+  check('All is chosen again and the books are back', formatPicked(t) === 'all' && t.cards('libraryGrid').length === 5 && t.hidden('#activeFilters'));
 });
 
 await run('an empty library with a source down says to check back, not that there are no books', async (make) => {
@@ -843,7 +859,7 @@ await run('a library that cannot be read shows an error with Try again', async (
   await t.mount();
   check('the error shows, not a blank page', !t.hidden('#errorState') && t.hidden('#gridSkeleton') && t.hidden('#libraryGrid'));
   check('in plain words, with nothing technical', /couldn't load the library/.test(t.text('#errorState')) && !/503|HTTP|api/i.test(t.text('#errorState')));
-  check('the search and the chips are still there', !!t.q('#booksSearch') && t.qa('#formatChips button').length === 3);
+  check('the search and the filters are still there', !!t.q('#booksSearch') && !!t.q('#filtersBtn'));
   down = false;
   t.click('#retryBtn');
   await t.clock.advance(50);
@@ -943,8 +959,7 @@ await run('T3H4: a chip tapped while the catalog is first built shows building a
   await t.mount();
   check('All: building, polling', !t.hidden('#buildingState') && t.polls.filter((p) => !p.stopped).length === 1);
   check('nothing is saved as this person\'s view', t.win.localStorage.getItem('webservarr_books_view:sam') === null, t.win.localStorage.getItem('webservarr_books_view:sam'));
-  t.click('#formatChips [data-format="audio"]');
-  await t.clock.advance(50);
+  await pickFormat(t, 'audio');
   check('Audiobooks: building too, not "no audiobooks"', !t.hidden('#buildingState') && t.hidden('#emptyState'));
   check('one poll again after the chip', t.polls.filter((p) => !p.stopped).length === 1);
   check('the empty answer is not kept for the next visit', !t.WS.cache.has('books:list:audio:added') && !t.WS.cache.has('books:list:all:added'), Array.from(t.WS.cache.keys()));
@@ -952,7 +967,7 @@ await run('T3H4: a chip tapped while the catalog is first built shows building a
   building = false;
   t.polls.filter((p) => !p.stopped)[0].fn();
   await t.clock.advance(50);
-  check('when the books arrive they show, and the view is kept then', t.cards('libraryGrid').length === 1 && t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added"}');
+  check('when the books arrive they show, and the view is kept then', t.cards('libraryGrid').length === 1 && t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added","group":true}');
 });
 
 await run('T3H5: the toolbar, notes, connect message and Continue come in one write with the books', async (make) => {
@@ -1258,7 +1273,7 @@ await run('3b: Remove: the card goes at once, the focus to its neighbour; the la
   upBtn(t, 3, 'remove').click();
   await t.clock.advance(10);
   check('the last one: the row hides and is remembered as none', !t.q('#upnextHost [data-upnext]') && !t.doc.documentElement.hasAttribute('data-books-upnext') && t.win.localStorage.getItem('webservarr_books_upnext:sam') === '0');
-  check('the focus went on down the page, not lost', t.doc.activeElement && t.doc.activeElement !== t.doc.body && t.doc.activeElement.closest('#formatChips'), t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
+  check('the focus went on down the page, not lost', t.doc.activeElement === t.q('#filtersBtn'), t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
   const srv2 = mine({ queue: QUEUE });
   srv2.removeStatus = 503;
   const u = make({ routes: withMine(srv2) });
@@ -1488,11 +1503,21 @@ await run('3c: shelves write titles as text, never markup', async (make) => {
 
 // ---- Filters: Author, Series, Narrator (the toolbar's pickers) ----
 
-const AUTHORS = { facet: 'author', values: [{ name: 'Charlotte Brontë', count: 1 }, { name: 'Frank Herbert', count: 3 },
-  { name: 'Jane Austen', count: 2 }], notes: [] };
+// ---- The filters panel ----
 
-// The picker's surroundings: a phone or a wider screen, reduced motion (so a
-// closed picker leaves at once), and WSUI.modal as ui.js has it (focus in, close runs onClose).
+const FACETS = {
+  format: [{ name: 'all', count: 5 }, { name: 'ebook', count: 3 }, { name: 'audio', count: 2 }],
+  author: [{ name: 'Charlotte Brontë', count: 1 }, { name: 'Frank Herbert', count: 3 }, { name: 'Jane Austen', count: 2 }],
+  series: [{ name: 'Dune', count: 3 }],
+  narrator: []
+};
+const facetBody = (over) => {
+  const f = Object.assign({}, FACETS, over || {});
+  return { facets: f, facet: 'format', values: f.format, notes: [] };
+};
+
+// The sort's surroundings: a phone or a wider screen, reduced motion (so a
+// closed list leaves at once), and WSUI.modal as ui.js has it (focus in, close runs onClose).
 function pickerKit(t, o = {}) {
   const wide = o.wide !== false;
   t.win.matchMedia = (q) => ({ matches: /reduce/.test(q) ? true : wide, addEventListener() {}, removeEventListener() {} });
@@ -1509,155 +1534,233 @@ function pickerKit(t, o = {}) {
 function filterRoutes(over = {}) {
   return (net) => {
     usual(over)(net);
-    net.on('/api/books/facets', over.facets || ((url) => ({ body: /facet=author/.test(url) ? AUTHORS
-      : { facet: 'series', values: [{ name: 'Dune', count: 3 }], notes: [] } })));
+    net.on('/api/books/facets', over.facets || (() => ({ body: facetBody() })));
   };
 }
 
-const pickerBox = (t) => t.q('[role="combobox"]');
-const options = (t) => t.qa('[role="listbox"] [role="option"]');
-function pickerKey(t, key) {
-  pickerBox(t).dispatchEvent(new t.win.KeyboardEvent('keydown', { key, bubbles: true }));
+const panelOpen = (t) => !t.hidden('#filterPanel');
+const facetBoxes = (t, kind) => t.qa(`[data-facet="${kind}"] [data-list] input[type="checkbox"]`);
+const facetNames = (t, kind) => t.qa(`[data-facet="${kind}"] [data-list] label`).map((l) => l.querySelector('.truncate').textContent + ':' + l.querySelector('.tabular-nums').textContent);
+const ticked = (t, kind) => facetBoxes(t, kind).filter((b) => b.checked).map((b) => b.value);
+function tick(t, kind, name) {
+  const box = facetBoxes(t, kind).find((b) => b.value === name);
+  box.checked = !box.checked;
+  box.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  return box;
 }
-function pickerType(t, value) {
-  const box = pickerBox(t);
-  box.value = value;
-  box.dispatchEvent(new t.win.Event('input', { bubbles: true }));
+function key(t, k, target) {
+  (target || t.doc.activeElement || t.doc.body).dispatchEvent(new t.win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
 }
+const ALL_FACETS = '/api/books/facets?facet=format&facet=author&facet=series&facet=narrator';
 
-await run('filters: the address and the buttons round-trip (filtersFrom, filterHref)', async () => {
-  const f = books.filtersFrom(new URL('https://ws.test/books?author=%20Frank%20%20Herbert%20&series=&x=1&narrator=' + 'n'.repeat(300)));
-  check('a name has its spacing collapsed', f.author === 'Frank Herbert', f);
-  check('an empty one is no filter', f.series === '');
-  check('a long one is cut to what the server takes', f.narrator.length === 200);
-  check('the address keeps any other part of the query',
-    books.filterHref({ author: 'A B', series: '', narrator: 'N' }, '/books?ws-debug=leaks&author=old') === '/books?ws-debug=leaks&author=A+B&narrator=N',
-    books.filterHref({ author: 'A B', series: '', narrator: 'N' }, '/books?ws-debug=leaks&author=old'));
-  check('no filters is the plain address', books.filterHref({ author: '', series: '', narrator: '' }, '/books?author=x') === '/books');
-  check('and back again', JSON.stringify(books.filtersFrom(new URL('https://ws.test' + books.filterHref({ author: 'Brontë & Co / 100%', series: 'Dune', narrator: '' }))))
-    === JSON.stringify({ author: 'Brontë & Co / 100%', series: 'Dune', narrator: '' }));
+await run('filters: the address round-trips, several names each (filtersFrom, filterHref)', async () => {
+  const f = books.filtersFrom(new URL('https://ws.test/books?author=%20Frank%20%20Herbert%20&author=frank%20HERBERT&author=Jane%20Austen&series=&x=1&narrator=' + 'n'.repeat(300)));
+  check('names have their spacing collapsed and repeats (ignoring case) dropped', JSON.stringify(f.author) === '["Frank Herbert","Jane Austen"]', f);
+  check('an empty one is no filter', Array.isArray(f.series) && f.series.length === 0);
+  check('a long one is cut to what the server takes', f.narrator.length === 1 && f.narrator[0].length === 200);
+  const many = books.filtersFrom(new URL('https://ws.test/books?' + Array.from({ length: 60 }, (_, i) => 'author=n' + i).join('&')));
+  check('at most 50 names a filter', many.author.length === 50);
+  check('repeated parameters, keeping any other part of the query',
+    books.filterHref({ author: ['A B', 'C'], series: [], narrator: ['N'] }, '/books?ws-debug=leaks&author=old') === '/books?ws-debug=leaks&author=A+B&author=C&narrator=N',
+    books.filterHref({ author: ['A B', 'C'], series: [], narrator: ['N'] }, '/books?ws-debug=leaks&author=old'));
+  check('no filters is the plain address', books.filterHref({ author: [], series: [], narrator: [] }, '/books?author=x') === '/books');
+  const round = { author: ['Brontë & Co / 100%', 'X,Y'], series: ['Dune'], narrator: [] };
+  check('and back again', JSON.stringify(books.filtersFrom(new URL('https://ws.test' + books.filterHref(round)))) === JSON.stringify(round));
 });
 
-await run('filters: three closed buttons after the format chips; no filter changes nothing that was asked', async (make) => {
+await run('filters: one Filters button, closed; no filter changes nothing that was asked', async (make) => {
   const t = make({ routes: filterRoutes() });
   await t.mount();
-  const buttons = t.qa('#filterButtons [data-filter]');
-  check('Author, Series and Narrator', buttons.map((b) => b.textContent.replace('expand_more', '')).join('|') === 'Author|Series|Narrator',
-    buttons.map((b) => b.textContent));
-  check('each says it opens a picker and is closed', buttons.every((b) => b.getAttribute('aria-haspopup') === 'dialog' && b.getAttribute('aria-expanded') === 'false'));
-  check('none is filled', buttons.every((b) => !/bg-primary/.test(b.className)));
-  check('they sit in the toolbar after the format chips', t.q('#toolbar').children[1] === t.q('#filterButtons'));
+  const btn = t.q('#filtersBtn');
+  check('a button named Filters that controls the panel, closed', btn.tagName === 'BUTTON' && btn.getAttribute('type') === 'button' && /Filters/.test(btn.textContent)
+    && btn.getAttribute('aria-controls') === 'filterPanel' && btn.getAttribute('aria-expanded') === 'false');
+  check('no badge and no extra name', t.hidden('#filtersCount') && !btn.hasAttribute('aria-label'));
+  const panel = t.q('#filterPanel');
+  check('the panel is a region with its heading, not a dialog, and closed', panel.getAttribute('role') === 'region' && panel.getAttribute('aria-labelledby') === 'filterPanelTitle'
+    && t.text('#filterPanelTitle') === 'Filters' && !panel.hasAttribute('aria-modal') && !panelOpen(t));
+  check('a heading per filter', t.qa('#filterPanel h3').map((h) => h.textContent).join('|') === 'Format|Author|Series|Narrator');
+  check('it follows the button in the toolbar (the next Tab goes into it)', btn.nextElementSibling === panel && t.q('#toolbarRow').contains(panel));
   check('no row of filters in use', t.hidden('#activeFilters') && t.qa('#activeFilters button').length === 0);
   check('the library is asked for as before', t.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36');
-  check('no names are asked for until a picker is opened', t.net.urls('/api/books/facets').length === 0);
+  check('no counts are asked for until the panel is wanted', t.net.urls('/api/books/facets').length === 0);
   check('the skeleton holds no row for filters', !t.doc.documentElement.hasAttribute('data-books-filtered'));
+  check('Group series beside the sort: a switch, on', t.q('#groupSwitch').getAttribute('role') === 'switch' && t.q('#groupSwitch').getAttribute('aria-checked') === 'true'
+    && t.q('#groupSwitch').nextElementSibling.id === 'sortLabel');
 });
 
-await run('filters: an address with filters: the books, the buttons, the pills and their room', async (make) => {
+await run('filters: the panel opens with counts, and closes by its button, Escape, Close, a click outside and the focus moving on', async (make) => {
+  const t = make({ routes: filterRoutes() });
+  await t.mount();
+  const btn = t.q('#filtersBtn');
+  btn.focus();
+  btn.click();
+  await t.clock.advance(50);
+  check('open: the button says so and keeps the focus', panelOpen(t) && btn.getAttribute('aria-expanded') === 'true' && t.doc.activeElement === btn);
+  check('every count in one request, with the format', t.net.urls('/api/books/facets')[0] === ALL_FACETS + '&format=all', t.net.urls('/api/books/facets'));
+  check('Format: its counts beside the radios, All books picked', ['all', 'ebook', 'audio'].map((f) => t.text(`[data-count="${f}"]`)).join() === '5,3,2' && formatPicked(t) === 'all');
+  check('names with most books first, each a real checkbox with its count', facetNames(t, 'author').join('|') === 'Frank Herbert:3|Jane Austen:2|Charlotte Brontë:1'
+    && facetBoxes(t, 'author').every((b) => !b.checked && b.closest('label')), facetNames(t, 'author'));
+  check('a name is read with its count', /Frank Herbert, 3 books$/.test(facetBoxes(t, 'author')[0].closest('label').textContent.replace('check', '').replace(/(Herbert)3/, '$1')));
+  check('a list of one name needs no find box', t.hidden('[data-facet="series"] [data-find]') && t.hidden('[data-facet="series"] [data-more]'));
+  check('an empty list says so', !t.hidden('[data-facet="narrator"] [data-none]') && /No narrators in the books shown/.test(t.text('[data-facet="narrator"] [data-none]')));
+  check('nothing to clear yet', t.q('#filterClearAll').getAttribute('aria-disabled') === 'true');
+
+  btn.click();
+  check('its button closes it, the focus on the button', !panelOpen(t) && btn.getAttribute('aria-expanded') === 'false' && t.doc.activeElement === btn);
+  btn.click();
+  await t.clock.advance(10);
+  facetBoxes(t, 'author')[1].focus();
+  key(t, 'Escape');
+  check('Escape closes it, the focus back on the button', !panelOpen(t) && t.doc.activeElement === btn);
+  btn.click();
+  await t.clock.advance(10);
+  t.click('#filterClose');
+  check('Close closes it, the focus back on the button', !panelOpen(t) && t.doc.activeElement === btn);
+  btn.click();
+  await t.clock.advance(10);
+  t.q('#libraryGrid').click();
+  check('a click outside closes it', !panelOpen(t) && btn.getAttribute('aria-expanded') === 'false');
+  btn.click();
+  await t.clock.advance(10);
+  t.click('#filterPanelTitle');
+  check('a click inside does not', panelOpen(t));
+  facetBoxes(t, 'author')[0].focus();
+  t.q('#groupSwitch').focus();
+  check('Tab on past it closes it, so nothing it covers takes the focus', !panelOpen(t) && t.doc.activeElement === t.q('#groupSwitch'));
+  check('the counts were asked for once for these filters', t.net.urls('/api/books/facets').length === 1, t.net.urls('/api/books/facets'));
+});
+
+await run('filters: a tick filters the books at once; the badge, the pills and the address follow', async (make) => {
+  const t = make({ routes: filterRoutes() });
+  await t.mount();
+  t.click('#filtersBtn');
+  await t.clock.advance(50);
+  const asked = t.net.urls('/api/books?').length;
+  tick(t, 'author', 'Jane Austen');
+  check('the badge counts it at once', t.text('#filtersCount') === '1' && !t.hidden('#filtersCount') && t.q('#filtersBtn').getAttribute('aria-label') === 'Filters, 1 in use');
+  check('its pill shows at once, and the list says how many', t.qa('#activeFilters [data-remove="author"]').length === 1 && t.text('[data-facet="author"] [data-selected]') === '1 selected');
+  check('Clear all is there to use', t.q('#filterClearAll').getAttribute('aria-disabled') === 'false');
+  check('the books are not asked for yet: a run of ticks is one request', t.net.urls('/api/books?').length === asked);
+  tick(t, 'author', 'Charlotte Brontë');
+  await t.clock.advance(200);
+  check('then once, with both names', t.net.urls('/api/books?').length === asked + 1
+    && t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&author=Jane%20Austen&author=Charlotte%20Bront%C3%AB', t.net.urls('/api/books?'));
+  check('the address carries both, one parameter each', t.win.location.search === '?author=Jane+Austen&author=Charlotte+Bront%C3%AB', t.win.location.search);
+  check('the counts are asked for again with them', t.net.urls('/api/books/facets').pop() === ALL_FACETS + '&format=all&author=Jane%20Austen&author=Charlotte%20Bront%C3%AB');
+  check('the panel stays open with both ticked', panelOpen(t) && ticked(t, 'author').sort().join() === 'Charlotte Brontë,Jane Austen');
+  check('there is nothing to apply: no Show or Apply button', !t.qa('#filterPanel button').some((b) => /^(Show \d|Show books|Apply)/.test(b.textContent.trim())));
+
+  facetBoxes(t, 'author').find((b) => b.value === 'Jane Austen').focus();
+  tick(t, 'author', 'Jane Austen');
+  await t.clock.advance(200);
+  check('the focus stays on the box it was on, across the lists drawn again', t.doc.activeElement && t.doc.activeElement.type === 'checkbox' && t.doc.activeElement.value === 'Jane Austen' && !t.doc.activeElement.checked);
+  check('unticked, it goes', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&author=Charlotte%20Bront%C3%AB' && t.text('#filtersCount') === '1');
+
+  tick(t, 'series', 'Dune');
+  await t.clock.advance(200);
+  check('another filter applies with it', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&author=Charlotte%20Bront%C3%AB&series=Dune');
+  check('a series filter lists its books one by one: the cards make room for "Dune #2"', t.doc.documentElement.hasAttribute('data-books-flat'));
+  await pickFormat(t, 'audio');
+  check('the format is a filter too: the books, the badge and its pill', t.net.urls('/api/books?').pop() === '/api/books?format=audio&sort=added&limit=36&author=Charlotte%20Bront%C3%AB&series=Dune'
+    && t.text('#filtersCount') === '3' && t.qa('#activeFilters [data-remove="format"]').length === 1);
+  check('and the names are counted in that format', t.net.urls('/api/books/facets').pop() === ALL_FACETS + '&format=audio&author=Charlotte%20Bront%C3%AB&series=Dune');
+
+  t.click('#filterClearAll');
+  await t.clock.advance(10);
+  check('Clear all in the panel clears them all, the format too, at once', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36'
+    && t.hidden('#filtersCount') && t.hidden('#activeFilters') && formatPicked(t) === 'all' && ticked(t, 'author').length === 0 && t.win.location.search === '');
+  check('and stays open', panelOpen(t));
+});
+
+await run('filters: a long list has a find box and Show all; a name in use is always shown', async (make) => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ name: 'Author ' + (i + 1), count: 20 - i }));
+  const t = make({ routes: filterRoutes({ facets: () => ({ body: facetBody({ author: many }) }) }) });
+  await t.mount();
+  t.click('#filtersBtn');
+  await t.clock.advance(50);
+  const more = t.q('[data-facet="author"] [data-more]');
+  check('the first six, then Show all', facetBoxes(t, 'author').length === 6 && !t.hidden('[data-facet="author"] [data-more]')
+    && more.textContent.replace(/expand_(more|less)/, '') === 'Show all 12 authors' && more.getAttribute('aria-expanded') === 'false');
+  check('a find box over it, named', !t.hidden('[data-facet="author"] [data-find]') && t.q('[data-facet="author"] [data-find] input').getAttribute('aria-label') === 'Find an author');
+  more.click();
+  check('Show all shows them all', facetBoxes(t, 'author').length === 12 && more.getAttribute('aria-expanded') === 'true' && /Show fewer/.test(more.textContent));
+  tick(t, 'author', 'Author 12');
+  more.click();
+  check('Show fewer keeps a name in use, in its place', facetBoxes(t, 'author').length === 7 && facetBoxes(t, 'author')[6].value === 'Author 12' && facetBoxes(t, 'author')[6].checked);
+  const find = t.q('[data-facet="author"] [data-find] input');
+  find.value = 'AUTHOR 1';
+  find.dispatchEvent(new t.win.Event('input', { bubbles: true }));
+  check('typing narrows it, ignoring case', facetBoxes(t, 'author').map((b) => b.value).join('|') === 'Author 1|Author 10|Author 11|Author 12' && t.hidden('[data-facet="author"] [data-more]'),
+    facetBoxes(t, 'author').map((b) => b.value));
+  find.value = 'zz';
+  find.dispatchEvent(new t.win.Event('input', { bubbles: true }));
+  check('nothing matching says so', facetBoxes(t, 'author').length === 0 && t.text('[data-facet="author"] [data-none]') === 'No authors match “zz”.');
+  find.focus();
+  key(t, 'Escape', find);
+  check('Escape in a find box with words in it leaves the panel open (the browser empties the box)', panelOpen(t));
+  find.value = '';
+  key(t, 'Escape', find);
+  check('Escape in an empty one closes it', !panelOpen(t) && t.doc.activeElement === t.q('#filtersBtn'));
+  check('and the find box starts empty next time', find.value === '');
+});
+
+await run('filters: an address with several names: the books, the badge, the pills and their room', async (make) => {
   const slow = deferred();
-  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert&series=Dune', routes: (net) => {
+  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert&author=Jane%20Austen&series=Dune', routes: (net) => {
     filterRoutes()(net);
-    net.on('/api/books?', () => slow.promise.then(() => ({ body: { items: [ebook(1, 'Dune', 'Frank Herbert')], next_cursor: null, notes: [] } })));
+    net.on('/api/books?', () => slow.promise.then(() => ({ body: { items: [ebook(1, 'Dune', 'Frank Herbert', { series: 'Dune', series_number: 1 })], next_cursor: null, notes: [] } })));
   } });
   const mounted = t.mount();
   await flush();
-  check('before the books, the skeleton holds the pills\' row', t.doc.documentElement.hasAttribute('data-books-filtered'));
+  check('before the books, the skeleton holds the pills\' row and the series line', t.doc.documentElement.hasAttribute('data-books-filtered') && t.doc.documentElement.hasAttribute('data-books-flat'));
   slow.resolve();
   await t.clock.advance(1600);
   await mounted;
-  check('the books are asked for with both', t.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&author=Frank%20Herbert&series=Dune',
+  check('the books are asked for with all of them', t.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&author=Frank%20Herbert&author=Jane%20Austen&series=Dune',
     t.net.urls('/api/books?'));
-  const author = t.q('[data-filter="author"]');
-  check('the buttons in use are filled and say what they hold', /bg-primary/.test(author.className) && author.getAttribute('aria-label') === 'Author, Frank Herbert'
-    && /bg-primary/.test(t.q('[data-filter="series"]').className) && !/bg-primary/.test(t.q('[data-filter="narrator"]').className));
-  check('the pills: one per filter, and Clear all', !t.hidden('#activeFilters') && t.qa('#activeFilters [data-remove]').length === 2 && t.qa('#activeFilters [data-clear-filters]').length === 1);
+  check('the badge counts three', t.text('#filtersCount') === '3' && t.q('#filtersBtn').getAttribute('aria-label') === 'Filters, 3 in use');
+  check('a pill for each, and Clear all', t.qa('#activeFilters [data-remove]').length === 3 && t.qa('#activeFilters [data-clear-filters]').length === 1);
   const pill = t.q('#activeFilters [data-remove="author"]');
-  check('each pill is named by its words, then what a press does', !pill.hasAttribute('aria-label')
-    && pill.textContent.replace('close', '') === 'Author Frank Herbert, remove filter', pill.textContent);
-  check('a filtered list is kept apart from the whole one', t.WS.cache.has('books:list:all:added:Frank%20Herbert|Dune|') && !t.WS.cache.has('books:list:all:added'),
+  check('each pill is named by its words, then what a press does', !pill.hasAttribute('aria-label') && pill.textContent.replace('close', '') === 'Author Frank Herbert, remove filter', pill.textContent);
+  check('a series filter shows the book\'s series and number', t.text('#libraryGrid [data-series-line]') === 'Dune#1');
+  check('a filtered list is kept apart from the whole one', t.WS.cache.has('books:list:all:added:Frank%20Herbert,Jane%20Austen|Dune|') && !t.WS.cache.has('books:list:all:added'),
     Array.from(t.WS.cache.keys()));
+  t.click('#filtersBtn');
+  await t.clock.advance(50);
+  check('the panel ticks them', ticked(t, 'author').join() === 'Frank Herbert,Jane Austen' && ticked(t, 'series').join() === 'Dune');
 });
 
-await run('filters: a picker lists the names with counts, finds by typing, picks with the keyboard', async (make) => {
-  const t = make({ routes: filterRoutes() });
-  const kit = pickerKit(t);
-  await t.mount();
-  const btn = t.q('[data-filter="author"]');
-  btn.click();
-  check('the button says it is open', btn.getAttribute('aria-expanded') === 'true');
-  check('it is a dialog on the shared stack, the search box first', kit.opened === 1 && t.doc.activeElement === pickerBox(t));
-  await t.clock.advance(50);
-  check('the names are asked for in this format', t.net.urls('/api/books/facets')[0] === '/api/books/facets?facet=author&format=all', t.net.urls('/api/books/facets'));
-  const opts = options(t);
-  check('"All authors" first, then each name with its count', opts.map((o) => o.textContent.replace('check', '')).join('|') === 'All authors|Charlotte Brontë1|Frank Herbert3|Jane Austen2',
-    opts.map((o) => o.textContent));
-  check('All authors is the pick in use, and highlighted', opts[0].getAttribute('aria-selected') === 'true' && pickerBox(t).getAttribute('aria-activedescendant') === opts[0].id);
-  check('a name is read with its count', opts[2].getAttribute('aria-label') === 'Frank Herbert, 3 books' && opts[1].getAttribute('aria-label') === 'Charlotte Brontë, 1 book');
-  check('the box drives the list', pickerBox(t).getAttribute('aria-controls') === t.q('[role="listbox"]').id && pickerBox(t).getAttribute('aria-expanded') === 'true');
-  pickerType(t, 'BRONTE');
-  check('typing narrows it, ignoring case and accents, and "All" steps aside', options(t).length === 1 && /Charlotte Brontë/.test(options(t)[0].textContent));
-  pickerType(t, 'zz');
-  check('nothing matching says so', options(t).length === 0 && /No authors match “zz”/.test(t.q('[role="listbox"]').parentNode.textContent));
-  pickerType(t, '');
-  pickerKey(t, 'ArrowDown');
-  pickerKey(t, 'ArrowDown');
-  check('the arrows move the highlight', pickerBox(t).getAttribute('aria-activedescendant') === options(t)[2].id);
-  pickerKey(t, 'ArrowUp');
-  pickerKey(t, 'Enter');
-  await t.clock.advance(50);
-  check('Enter picks it and the picker goes', !t.q('[role="listbox"]') && btn.getAttribute('aria-expanded') === 'false');
-  check('the books are asked for by that author', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&author=Charlotte%20Bront%C3%AB',
-    t.net.urls('/api/books?'));
-  check('the address carries it', t.win.location.search === '?author=Charlotte+Bront%C3%AB', t.win.location.href);
-  check('the button fills and the pill shows', /bg-primary/.test(btn.className) && t.qa('#activeFilters [data-remove="author"]').length === 1);
-  check('a screen reader hears it', /filtered by author: Charlotte Brontë/.test(t.text('#booksSaid')));
-
-  // Opened again: the pick in use is marked, and a click on "All authors" drops it.
-  btn.click();
-  await t.clock.advance(50);
-  const again = options(t);
-  check('the pick in use is marked', again[1].getAttribute('aria-selected') === 'true' && again[0].getAttribute('aria-selected') === 'false');
-  again[0].click();
-  await t.clock.advance(50);
-  check('All authors drops the filter', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36' && t.hidden('#activeFilters'));
-});
-
-await run('filters: a picker asks with the format and the other filters, never its own', async (make) => {
-  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert&series=Dune', storage: { 'webservarr_books_view:sam': '{"format":"ebook","sort":"added"}' },
+await run('filters: removing a pill moves the focus on; Clear all clears every filter and the format', async (make) => {
+  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert&series=Dune&narrator=Simon%20Vance', storage: { 'webservarr_books_view:sam': '{"format":"ebook","sort":"added"}' },
     routes: filterRoutes() });
-  pickerKit(t);
   await t.mount();
-  t.click('[data-filter="author"]');
-  await t.clock.advance(50);
-  check('author: the format and the series', t.net.urls('/api/books/facets').pop() === '/api/books/facets?facet=author&format=ebook&series=Dune', t.net.urls('/api/books/facets'));
-  check('the author in use starts highlighted', pickerBox(t).getAttribute('aria-activedescendant') === options(t).find((o) => o.getAttribute('aria-selected') === 'true').id);
-});
-
-await run('filters: removing a pill moves the focus on; Clear all clears every filter', async (make) => {
-  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert&series=Dune&narrator=Simon%20Vance', routes: filterRoutes() });
-  await t.mount();
+  check('the format\'s pill first', t.qa('#activeFilters [data-remove]').map((p) => p.getAttribute('data-remove')).join() === 'format,author,series,narrator');
   const author = t.q('#activeFilters [data-remove="author"]');
   author.focus();
   author.click();
   await t.clock.advance(50);
-  check('the author filter goes', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&series=Dune&narrator=Simon%20Vance');
+  check('the author filter goes', t.net.urls('/api/books?').pop() === '/api/books?format=ebook&sort=added&limit=36&series=Dune&narrator=Simon%20Vance');
   check('the address follows', t.win.location.search === '?series=Dune&narrator=Simon+Vance', t.win.location.search);
   check('the focus goes to the next pill', t.doc.activeElement === t.q('#activeFilters [data-remove="series"]'));
+  check('a screen reader hears it', t.text('#booksSaid') === 'Filter removed');
   t.q('#activeFilters [data-remove="narrator"]').click();
   await t.clock.advance(50);
   check('the last pill hands the focus to the one before', t.doc.activeElement === t.q('#activeFilters [data-remove="series"]'));
   t.q('#activeFilters [data-remove="series"]').click();
+  t.q('#activeFilters [data-remove="format"]').click();
   await t.clock.advance(50);
-  check('with none left, the focus goes to its button and the row goes', t.doc.activeElement === t.q('[data-filter="series"]') && t.hidden('#activeFilters'));
+  check('with none left, the focus goes to the Filters button and the row goes', t.doc.activeElement === t.q('#filtersBtn') && t.hidden('#activeFilters'));
+  check('the format is all again, and remembered', formatPicked(t) === 'all' && t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36'
+    && JSON.parse(t.win.localStorage.getItem('webservarr_books_view:sam')).format === 'all');
   check('the address is plain again', t.win.location.search === '');
   check('and the skeleton no longer holds the pills\' row', !t.doc.documentElement.hasAttribute('data-books-filtered'));
 
-  const u = make({ url: 'https://ws.test/books?author=Frank%20Herbert&series=Dune', routes: filterRoutes() });
+  const u = make({ url: 'https://ws.test/books?author=Frank%20Herbert&author=Jane%20Austen&series=Dune', routes: filterRoutes() });
   await u.mount();
   u.click('#activeFilters [data-clear-filters]');
   await u.clock.advance(50);
   check('Clear all asks for every book', u.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36');
-  check('and puts the focus on the first filter button', u.doc.activeElement === u.q('[data-filter="author"]'));
+  check('and puts the focus on the Filters button', u.doc.activeElement === u.q('#filtersBtn'));
   check('a screen reader hears it', u.text('#booksSaid') === 'Filters cleared');
 });
 
@@ -1669,27 +1772,28 @@ await run('filters: nothing matching is one quiet line with Clear, not the empty
   t.click('#filterEmptyClear');
   await t.clock.advance(50);
   check('Clear shows every book again', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36' && !t.hidden('#libraryGrid') && t.hidden('#filterEmpty'));
-  check('and the focus lands on the first filter button', t.doc.activeElement === t.q('[data-filter="author"]'));
+  check('and the focus lands on the Filters button', t.doc.activeElement === t.q('#filtersBtn'));
 });
 
-await run('filters: a search is narrowed by them and shows them', async (make) => {
-  const t = make({ url: 'https://ws.test/books?author=Jane%20Austen', routes: filterRoutes({ search: { items: [], request_url: '/requests?q=dune', notes: [] } }) });
+await run('filters: a search is narrowed by them, the format too, and shows them', async (make) => {
+  const t = make({ url: 'https://ws.test/books?author=Jane%20Austen&author=Frank%20Herbert', storage: { 'webservarr_books_view:sam': '{"format":"audio","sort":"added"}' },
+    routes: filterRoutes({ search: { items: [], request_url: '/requests?q=dune', notes: [] } }) });
   await t.mount();
   t.type('dune');
   await t.clock.advance(400);
-  check('the search carries the filter', t.net.urls('/api/books/search').pop() === '/api/books/search?q=dune&limit=60&author=Jane%20Austen', t.net.urls('/api/books/search'));
-  check('the pills show above the results', !t.hidden('#searchFilters') && t.qa('#searchFilters [data-remove="author"]').length === 1);
+  check('the search carries them', t.net.urls('/api/books/search').pop() === '/api/books/search?q=dune&limit=60&format=audio&author=Jane%20Austen&author=Frank%20Herbert', t.net.urls('/api/books/search'));
+  check('the pills show above the results', !t.hidden('#searchFilters') && t.qa('#searchFilters [data-remove]').length === 3);
   check('no match says the filters may be why', /with these filters/.test(t.text('#searchEmptyTitle')));
   check('and offers Clear filters, not a request', !t.hidden('#searchClear') && t.hidden('#searchRequest'));
   t.click('#searchClear');
   await t.clock.advance(50);
   check('Clear runs the search again on the whole library', t.net.urls('/api/books/search').pop() === '/api/books/search?q=dune&limit=60');
   check('the request link comes back for a search with no filters', !t.hidden('#searchRequest') && t.hidden('#searchClear') && t.hidden('#searchFilters'));
+  check('and the focus stays in the search', t.doc.activeElement === t.q('#booksSearch'));
 });
 
 await run('filters: the router claims our own change and Back or Forward, nothing else', async (make) => {
   const t = make({ routes: filterRoutes() });
-  pickerKit(t);
   let claim = null;
   let claims = null;
   t.ctx.onNavigate = (fn, which) => { claim = fn; claims = which; };
@@ -1698,87 +1802,97 @@ await run('filters: the router claims our own change and Back or Forward, nothin
   await t.mount();
   check('the page claims addresses', typeof claim === 'function' && typeof claims === 'function');
   check('and none for the prefetch (links still warm)', claims(new URL('https://ws.test/books?author=x')) === false);
-  t.click('[data-filter="series"]');
+  t.click('#filtersBtn');
   await t.clock.advance(50);
-  options(t)[1].click();
-  await t.clock.advance(50);
+  tick(t, 'series', 'Dune');
+  await t.clock.advance(200);
   const fetched = t.net.urls('/api/books?').length;
-  check('a pick asks the router to replace the address', asked.length === 1 && asked[0][0] === '/books?series=Dune' && asked[0][1].replace === true, asked);
+  check('a tick asks the router to replace the address', asked.length === 1 && asked[0][0] === '/books?series=Dune' && asked[0][1].replace === true, asked);
   check('which it claims without asking for the books twice', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&series=Dune' && fetched === 2, t.net.urls('/api/books?'));
-  check('Back to another Books address is drawn here', claim(new URL('https://ws.test/books?narrator=Rob%20Inglis'), { pop: true }) === true);
+  check('Back to another Books address is drawn here', claim(new URL('https://ws.test/books?narrator=Rob%20Inglis&narrator=Kate%20Reading'), { pop: true }) === true);
   await t.clock.advance(50);
-  check('with that address\'s filters', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&narrator=Rob%20Inglis'
-    && /bg-primary/.test(t.q('[data-filter="narrator"]').className) && !/bg-primary/.test(t.q('[data-filter="series"]').className));
+  check('with that address\'s filters: the books, the badge and the pills', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&narrator=Rob%20Inglis&narrator=Kate%20Reading'
+    && t.text('#filtersCount') === '2' && t.qa('#activeFilters [data-remove="narrator"]').length === 2 && t.qa('#activeFilters [data-remove="series"]').length === 0);
+  check('and the open panel ticks them (names the counts no longer list, at 0)', ticked(t, 'narrator').sort().join() === 'Kate Reading,Rob Inglis' && ticked(t, 'series').length === 0
+    && facetNames(t, 'narrator').join() === 'Kate Reading:0,Rob Inglis:0', facetNames(t, 'narrator'));
   check('the sidebar\'s Books is a fresh visit, as before', claim(new URL('https://ws.test/books'), { pop: false }) === false);
   check('a book page is not this page\'s', claim(new URL('https://ws.test/books/12'), { pop: true }) === false);
 });
 
-await run('filters: on a phone the picker is a bottom sheet; wider, a popover under its button', async (make) => {
-  const t = make({ routes: filterRoutes() });
-  pickerKit(t, { wide: false });
-  await t.mount();
-  t.click('[data-filter="author"]');
-  await t.clock.advance(50);
-  const sheet = t.doc.body.querySelector('.ws-sheet');
-  check('a sheet with the More sheet\'s pieces', !!sheet && sheet.classList.contains('is-open') && !!sheet.querySelector('.ws-sheet-panel .ws-sheet-grip') && !!sheet.querySelector('.ws-sheet-close'));
-  check('titled by its heading', sheet.querySelector('.ws-sheet-panel').getAttribute('aria-labelledby') === sheet.querySelector('h2').id && sheet.querySelector('h2').textContent === 'Author');
-  check('the keyboard waits for a tap in the search', t.doc.activeElement === sheet.querySelector('.ws-sheet-panel'));
-  sheet.querySelector('.ws-sheet-scrim').click();
-  check('a tap on the dim closes it', !t.doc.body.querySelector('.ws-sheet') && t.q('[data-filter="author"]').getAttribute('aria-expanded') === 'false');
-
-  const u = make({ routes: filterRoutes() });
-  pickerKit(u, { wide: true });
-  await u.mount();
-  u.click('[data-filter="author"]');
-  const pop = u.doc.body.querySelector('.ws-dialog .ws-dialog-box');
-  check('a popover placed by the button', !!pop && /px$/.test(pop.style.top || pop.style.bottom) && /px$/.test(pop.style.left));
-  u.doc.body.querySelector('[aria-label="Close"]').click();
-  check('Close closes it', !u.doc.body.querySelector('.ws-dialog'));
-});
-
-await run('filters: the picker while its list loads, when it fails, and Try again', async (make) => {
+await run('filters: the counts while they load, when they fail, and Try again', async (make) => {
   let fail = true;
   const slow = deferred();
-  const t = make({ routes: filterRoutes({ facets: () => slow.promise.then(() => (fail ? { status: 503, body: {} } : { body: AUTHORS })) }) });
-  pickerKit(t);
+  const t = make({ routes: filterRoutes({ facets: () => slow.promise.then(() => (fail ? { status: 503, body: {} } : { body: facetBody() })) }) });
   await t.mount();
-  t.click('[data-filter="author"]');
+  t.click('#filtersBtn');
   await flush();
-  check('a skeleton list while it loads', t.q('[role="listbox"]').getAttribute('aria-busy') === 'true' && t.qa('[role="listbox"] .skel').length === 5);
+  check('a skeleton in each list while they load, the panel busy', t.qa('[data-facet="author"] [data-list] .skel').length === 4 && t.q('#filterPanelBody').getAttribute('aria-busy') === 'true');
   slow.resolve();
   await t.clock.advance(50);
-  check('a failure says so with Try again', /didn’t load/.test(t.q('[role="listbox"]').textContent) && !!t.q('[role="listbox"] button'));
+  check('a failure says so with Try again', !t.hidden('#facetError') && /didn’t load/.test(t.text('#facetError')) && t.qa('[data-facet="author"] [data-list] li').length === 0);
   fail = false;
-  t.q('[role="listbox"] button').click();
+  t.click('#facetRetry');
   await t.clock.advance(50);
-  check('Try again asks again and shows the names', options(t).length === 4 && t.net.urls('/api/books/facets').length === 2);
-  check('and the focus is back in the search', t.doc.activeElement === pickerBox(t));
+  check('Try again asks again and shows the names', facetBoxes(t, 'author').length === 3 && t.net.urls('/api/books/facets').length === 2 && t.hidden('#facetError'));
+  check('and the focus waits on the format in use', t.doc.activeElement === t.q('input[name="booksFormat"][value="all"]'));
 });
 
-await run('filters: an empty list says so; names are text, never markup', async (make) => {
-  const t = make({ url: 'https://ws.test/books?series=%3Cimg%20src%3Dx%3E', routes: filterRoutes({ facets: (url) => ({ body: /narrator/.test(url) ? { values: [] }
-    : { values: [{ name: '<b>Bold</b><img src=x onerror=alert(1)>', count: 2 }] } }) }) });
-  pickerKit(t);
+await run('filters: names are text, never markup', async (make) => {
+  const t = make({ url: 'https://ws.test/books?series=%3Cimg%20src%3Dx%3E', routes: filterRoutes({ facets: () => ({ body: facetBody({ author: [{ name: '<b>Bold</b><img src=x onerror=alert(1)>', count: 2 }] }) }) }) });
   await t.mount();
-  t.click('[data-filter="narrator"]');
+  t.click('#filtersBtn');
   await t.clock.advance(50);
-  check('nothing to choose says so', options(t).length === 1 && /No narrators in the books shown/.test(t.q('[role="listbox"]').parentNode.textContent));
-  t.q('[aria-label="Close"]').click();
-  t.click('[data-filter="author"]');
-  await t.clock.advance(50);
-  check('a name is drawn as text', /<b>Bold<\/b>/.test(options(t)[1].textContent) && !t.doc.querySelector('[role="listbox"] img, [role="listbox"] b'));
+  check('a name is drawn as text', /<b>Bold<\/b>/.test(facetBoxes(t, 'author')[0].closest('label').textContent) && !t.doc.querySelector('#filterPanel img, #filterPanel b'));
   check('the pill too', /<img src=x>/.test(t.text('#activeFilters [data-remove="series"]')) && !t.doc.querySelector('#activeFilters img'));
+  check('and a name in use with no count still shows, ticked', ticked(t, 'series').join() === '<img src=x>');
 });
 
-await run('filters: leaving the page takes an open picker with it', async (make) => {
+await run('filters: leaving the page takes the open panel and its listeners with it', async (make) => {
   const t = make({ routes: filterRoutes() });
-  pickerKit(t);
   await t.mount();
-  t.click('[data-filter="author"]');
+  t.click('#filtersBtn');
   await t.clock.advance(50);
-  check('it is open', !!t.q('[role="listbox"]'));
+  const before = t.net.calls.length;
   t.ctl.abort();
-  check('and gone with the page', !t.q('[role="listbox"]') && !t.doc.body.querySelector('.ws-dialog'));
+  check('it goes with the page', !panelOpen(t) && t.q('#filtersBtn').getAttribute('aria-expanded') === 'false');
+  t.click('#filtersBtn');
+  check('and its button no longer opens it', !panelOpen(t));
+  tick(t, 'author', 'Jane Austen');
+  await t.clock.advance(300);
+  check('and nothing is asked for', t.net.calls.length === before);
+});
+
+await run('Group series: off lists every book with its series and number, and is remembered', async (make) => {
+  const FLAT = [ebook(1, 'Dune', 'Frank Herbert', { series: 'Dune', series_number: 1 }),
+    ebook(2, 'Dune Messiah', 'Frank Herbert', { series: 'The Very Long Name of a Collected Saga Edition', series_number: 12.5 }),
+    ebook(4, 'Emma', 'Jane Austen', { series: '', series_number: null })];
+  const routes = (net) => {
+    usual()(net);
+    net.on('/api/books?format=all&sort=added&limit=36&group=false', () => ({ body: { items: FLAT, next_cursor: null, notes: [] } }));
+  };
+  const t = make({ routes });
+  await t.mount();
+  check('grouped to begin with: two lines a card', !t.q('#libraryGrid [data-series-line]') && t.qa('#libraryGrid a').some((a) => /Harry Potter/.test(a.textContent)));
+  t.click('#groupSwitch');
+  check('the switch says off at once', t.q('#groupSwitch').getAttribute('aria-checked') === 'false');
+  check('the skeleton holds the third line', t.doc.documentElement.hasAttribute('data-books-flat') && !t.hidden('#gridSkeleton'));
+  await t.clock.advance(50);
+  check('the books are asked for one by one', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&group=false', t.net.urls('/api/books?'));
+  const lines = t.qa('#libraryGrid [data-series-line]');
+  check('every card has the line', lines.length === 3);
+  check('the series and its number', lines[0].children[0].textContent === 'Dune' && lines[0].children[1].textContent === '#1' && lines[1].children[1].textContent === '#12.5');
+  check('the name gives way, the number never does', /truncate/.test(lines[1].children[0].className) && /shrink-0/.test(lines[1].children[1].className) && !/truncate/.test(lines[1].children[1].className));
+  check('a book in no series keeps the room, empty', lines[2].children.length === 0 && /min-h-5/.test(lines[2].className));
+  check('remembered for this person', JSON.parse(t.win.localStorage.getItem('webservarr_books_view:sam')).group === false);
+  check('kept apart from the grouped list', t.WS.cache.has('books:list:all:added:flat'));
+
+  const u = make({ storage: { 'webservarr_books_view:sam': '{"format":"all","sort":"added","group":false}' }, routes });
+  await u.mount();
+  check('the next visit asks for it at once, the switch off', u.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&group=false' && u.q('#groupSwitch').getAttribute('aria-checked') === 'false');
+  u.click('#groupSwitch');
+  await u.clock.advance(50);
+  check('on again: the series are one card each, the line and its room go', u.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36'
+    && !u.doc.documentElement.hasAttribute('data-books-flat') && !u.q('#libraryGrid [data-series-line]'));
 });
 
 // ---- The sort menu ----
@@ -1817,7 +1931,7 @@ await run('sort: a button that opens a listbox of the orders, with the one in us
   check('Enter picks it and the list goes', !t.q('#booksSortList') && btn.getAttribute('aria-expanded') === 'false' && !btn.hasAttribute('aria-controls'));
   check('the button says it', t.text('#sortValue') === 'Title');
   check('the books are asked for in that order', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=title&limit=36');
-  check('and it is remembered', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"all","sort":"title"}');
+  check('and it is remembered', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"all","sort":"title","group":true}');
 
   btn.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
   check('the arrow keys open it from the button too, on the order in use', !!t.q('#booksSortList') && t.q('#booksSortList').getAttribute('aria-activedescendant') === sortOptions(t)[1].id &&
@@ -1865,15 +1979,15 @@ await run('sort: on a phone the list is a bottom sheet titled Sort by; leaving t
   check('and it goes with the page', !t.doc.body.querySelector('.ws-sheet'));
 });
 
-await run('sort: opening a filter picker closes the sort, and the sort closes a picker', async (make) => {
+await run('sort: opening the filters closes the sort, and the sort closes the filters', async (make) => {
   const t = make({ routes: filterRoutes() });
   pickerKit(t);
   await t.mount();
   t.click('#sortBtn');
-  t.click('[data-filter="author"]');
-  check('one at a time', !t.q('#booksSortList') && !!pickerBox(t));
+  t.click('#filtersBtn');
+  check('one at a time', !t.q('#booksSortList') && panelOpen(t));
   t.click('#sortBtn');
-  check('and the other way round', !!t.q('#booksSortList') && !pickerBox(t));
+  check('and the other way round', !!t.q('#booksSortList') && !panelOpen(t) && t.q('#filtersBtn').getAttribute('aria-expanded') === 'false');
 });
 
 // ---- Markup safety ----
@@ -1898,7 +2012,8 @@ await run('leaving the page ends its listeners, polls and requests', async (make
   await t.mount();
   const before = t.net.calls.length;
   t.ctl.abort();
-  t.click('[data-format="ebook"]');
+  t.click('#filtersBtn');
+  check('the filters no longer open', t.hidden('#filterPanel'));
   t.click('#sortBtn');
   check('the sort no longer opens', !t.q('#booksSortList'));
   t.type('dune');
@@ -1949,12 +2064,13 @@ await run('the guide: four short steps, in the order a person meets them, each o
     t.doc.getElementById('tourNext').click();
     await t.clock.advance(10);
   }
-  check('search, Continue, the chips, then opening a book', titles.join('|') === 'Find a book|Pick up where you left off|Ebooks, audiobooks or both|Open a book', titles);
+  check('search, Continue, the filters, then opening a book', titles.join('|') === 'Find a book|Pick up where you left off|Narrow the library|Open a book', titles);
+  check('the filters step says what they do and that the books follow at once', /ebooks or only audiobooks/.test(asked[2]) && /author, a series or a narrator/.test(asked[2]) && /as you tick/.test(asked[2]), asked[2]);
   check('the last step is where Read and Listen are named', /Read opens the ebook/.test(asked[3]) && /Listen plays the audiobook/.test(asked[3]), asked[3]);
   check('the search step says the page can ask for a missing book', /ask for it/.test(asked[0]));
   check('the last button finishes it', !tourOn(t));
   // Every step points at something on the page (the Continue one only when there is a row).
-  for (const sel of ['#booksSearch', '#continueHost [data-continue]', '#formatChips', '#libraryGrid > li:first-child']) {
+  for (const sel of ['#booksSearch', '#continueHost [data-continue]', '#filtersBtn', '#libraryGrid > li:first-child']) {
     check('step target ' + sel + ' is on the page', !!t.q(sel), sel);
   }
 });
