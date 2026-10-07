@@ -294,5 +294,115 @@ await run('phone search row: its own reserved row, folded once the bar moves dow
   } finally { t.release(); }
 });
 
+// ---- Book search: real states, the book detail, and requests that report back ----
+
+const BANE = (over) => Object.assign({
+  id: 'gr:3341500', media_type: 'book', title: 'Rule of Two (Star Wars: Darth Bane, #2)', short_title: 'Rule of Two',
+  series: 'Star Wars: Darth Bane', series_number: '2', author: 'Drew Karpyshyn', year: 2007, poster_url: '',
+  overview: 'Darth Bane takes an apprentice.', media_status: null, states: { ebook: null, audiobook: null }, rating: 3.9
+}, over || {});
+const BOOK_RESULTS = [
+  BANE({ id: 'gr:1330495', title: 'Path of Destruction (Star Wars: Darth Bane, #1)', short_title: 'Path of Destruction',
+    series_number: '1', media_status: 'available', states: { ebook: 'available', audiobook: 'searching' } }),
+  BANE(),
+  BANE({ id: 'gr:6538485', title: 'Dynasty of Evil (Star Wars: Darth Bane, #3)', short_title: 'Dynasty of Evil',
+    series_number: '3', media_status: 'processing', states: { ebook: 'downloading', audiobook: null } })
+];
+
+const bookRoutes = (requestAnswer) => (net) => {
+  routes({ body: FILMS }, { body: BOOKS })(net);
+  net.on('/api/integrations/seerr-search', () => ({ body: { results: [], totalResults: 0, totalPages: 1 } }));
+  net.on('/api/integrations/chaptarr-search', () => ({ body: { results: BOOK_RESULTS.map((b) => JSON.parse(JSON.stringify(b))) } }));
+  net.on('/api/integrations/chaptarr-request', requestAnswer);
+  net.on('/api/integrations/book-in-library', () => ({ body: { book_id: 24, formats: ['ebook'] } }));
+};
+
+async function searchBooks(t) {
+  await t.mount();
+  const input = t.q('#searchInput');
+  input.value = 'darth bane';
+  input.dispatchEvent(new t.win.Event('input'));
+  await t.clock.advance(400);
+}
+
+const cardFor = (t, i) => t.q('[data-action="open-search-book"][data-index="' + i + '"]').parentElement;
+
+await run('book search: each card says where its format stands', async () => {
+  const t = visit(bookRoutes(() => ({ body: { ok: true, state: 'requested' } })));
+  try {
+    await searchBooks(t);
+    check('three book cards, each with a detail opener', t.doc.querySelectorAll('[data-action="open-search-book"]').length === 3);
+    const state = (i) => { const el = cardFor(t, i).querySelector('[data-book-state]'); return el ? el.getAttribute('data-book-state') + ':' + el.textContent.trim() : null; };
+    check('in the library', state(0) === 'available:In Library', state(0));
+    check('not asked for: a Request button', !state(1) && !!cardFor(t, 1).querySelector('[data-action="request-media"]'));
+    check('downloading', state(2) === 'downloading:Downloading', state(2));
+    check('the opener holds no control of its own', !t.q('[data-action="open-search-book"] button'));
+  } finally { t.release(); }
+});
+
+await run('book detail: series, author, both formats, request from it', async () => {
+  const sent = [];
+  const t = visit(bookRoutes((url, init) => { sent.push(JSON.parse(init.body)); return { body: { ok: true, message: 'Book requested', state: 'requested' } }; }));
+  const toasts = [];
+  globalThis.WSUI.toast = (m, k) => toasts.push(k + ':' + m);
+  try {
+    await searchBooks(t);
+    t.q('[data-action="open-search-book"][data-index="1"]').click();
+    await flush();
+    check('the detail is open', !t.q('#mediaModal').classList.contains('hidden'));
+    check('title without the series', t.q('#modalTitle').textContent === 'Rule of Two', t.q('#modalTitle').textContent);
+    check('the series and its number', t.q('#modalSeries').textContent === 'Star Wars: Darth Bane, book 2' && !t.q('#modalSeries').classList.contains('hidden'));
+    check('the author', t.q('#modalByline').textContent === 'by Drew Karpyshyn');
+    check('year and description', t.q('#modalYear').textContent === '2007' && t.q('#modalOverview').textContent === 'Darth Bane takes an apprentice.');
+    check('no library line for a book not here', t.q('#modalLibrary').classList.contains('hidden'));
+    const buttons = Array.from(t.q('#modalActionArea').querySelectorAll('[data-action="request-from-modal"]'));
+    check('a Request button per format', buttons.map((b) => b.getAttribute('data-media-type')).join(',') === 'book,audiobook');
+    buttons[0].click();
+    await flush();
+    check('the ebook is asked for, as an ebook, by its id', sent.length === 1 && sent[0].bookId === 'gr:3341500' && sent[0].format === 'ebook', sent);
+    const block = t.q('#modalActionArea [data-book-state]');
+    check('the detail now says Requested', !!block && block.getAttribute('data-book-state') === 'requested' && block.textContent.trim() === 'Requested', block && block.textContent);
+    check('the audiobook can still be asked for', t.q('#modalActionArea [data-media-type="audiobook"]') !== null);
+    const cardState = cardFor(t, 1).querySelector('[data-book-state]');
+    check('and so does its card', !!cardState && cardState.getAttribute('data-book-state') === 'requested');
+    check('a success toast naming it', toasts.indexOf('ok:Requested Rule of Two (Star Wars: Darth Bane, #2)') !== -1, toasts);
+  } finally { t.release(); }
+});
+
+await run('a refused book request is an error, and the button comes back', async () => {
+  const t = visit(bookRoutes(() => ({ status: 400, body: { detail: 'This book has already been added.' } })));
+  const toasts = [];
+  globalThis.WSUI.toast = (m, k) => toasts.push(k + ':' + m);
+  try {
+    await searchBooks(t);
+    const btn = cardFor(t, 1).querySelector('[data-action="request-media"]');
+    btn.click();
+    await flush();
+    check('Chaptarr’s reason is shown', toasts.indexOf('err:This book has already been added.') !== -1, toasts);
+    const again = cardFor(t, 1).querySelector('[data-action="request-media"]');
+    check('the Request button is back, enabled', !!again && !again.disabled && again.textContent.indexOf('Request') === 0);
+    check('no status claimed', !cardFor(t, 1).querySelector('[data-book-state]'));
+  } finally { t.release(); }
+});
+
+await run('a book already here links its Books entry', async () => {
+  const t = visit(bookRoutes(() => ({ body: {} })));
+  try {
+    await searchBooks(t);
+    t.q('[data-action="open-search-book"][data-index="0"]').click();
+    await flush();
+    const line = t.q('#modalLibrary');
+    check('the line is shown', !line.classList.contains('hidden') && line.textContent === 'Already in the library');
+    const asked = t.net.urls('/api/integrations/book-in-library');
+    check('asked by title and author', asked.length === 1 && asked[0].indexOf('title=Path%20of%20Destruction') !== -1 && asked[0].indexOf('author=Drew%20Karpyshyn') !== -1, asked);
+    const a = line.querySelector('a');
+    check('a link to the Books entry, same words', !!a && a.getAttribute('href') === '/books/24' && a.textContent === 'Already in the library');
+    const states = Array.from(t.q('#modalActionArea').querySelectorAll('[data-book-state]')).map((e) => e.getAttribute('data-book-state'));
+    check('each format says where it stands', states.join(',') === 'available,searching', states);
+    t.q('[data-action="close-modal"]').click();
+    await flush();
+  } finally { t.release(); }
+});
+
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));
 process.exit(failed ? 1 : 0);

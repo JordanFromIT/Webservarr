@@ -573,6 +573,55 @@ async def book_rating(
     return await chaptarr.book_rating(title.strip(), author.strip())
 
 
+def _title_key(title: str) -> str:
+    """A title for matching a request result to the library: before any
+    subtitle, folded ("Dune: Deluxe Edition" and "dune" alike)."""
+    from app.services import book_catalog
+
+    return book_catalog.fold((title or "").split(":")[0])
+
+
+@router.get("/book-in-library")
+@limiter.limit("60/minute")
+async def book_in_library(
+    request: Request,
+    title: str = Query(..., max_length=300),
+    author: str = Query("", max_length=200),
+    current_user: dict = Depends(get_current_user),
+    session_id: str = Cookie(None, alias=settings.session_cookie_name),
+    db: Session = Depends(get_db),
+):
+    """
+    The Books page entry for a book from request search, for the detail's
+    "Already in the library" line: {"book_id", "formats"}, or {} when the
+    caller can see no such book.
+
+    Matched by title and author, as the library and Chaptarr share no id.
+    Only the books this caller can reach count (the Books page's own scope),
+    so the line never points at a book their account cannot open.
+    """
+    from app.routers import books as books_router
+    from app.services import book_catalog
+
+    wanted = _title_key(title)
+    if not wanted:
+        return {}
+    try:
+        who = await books_router.scope_of(current_user, session_id)
+        rows = book_catalog.visible_rows(db, who.series, who.audio)
+    except SQLAlchemyError as exc:
+        logger.warning("Book library lookup failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="The library could not be read right now.") from None
+    want_author = book_catalog.fold(author)
+    for row in rows:
+        if _title_key(row.title) != wanted:
+            continue
+        if want_author and row.author and book_catalog.fold(row.author) != want_author:
+            continue
+        return {"book_id": row.id, "formats": row.formats}
+    return {}
+
+
 @router.get("/book-cover")
 @limiter.limit("120/minute")
 async def book_cover(

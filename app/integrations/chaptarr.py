@@ -181,14 +181,86 @@ def _format_status(local: Any) -> Optional[str]:
     return None
 
 
-async def _normalise(result: Dict[str, Any], fmt: str = "ebook") -> Optional[Dict[str, Any]]:
+# The request-status reason codes (services/book_requests.py, the film table's
+# codes) as the one word a book card or detail shows for a format.
+_REASON_STATES = {
+    "DOWNLOADING": "downloading",
+    "DOWNLOAD_STALLED": "retrying",
+    "IMPORT_BLOCKED": "stuck",
+    "NO_RELEASE_FOUND": "searching",
+    "NOT_RELEASED_YET": "unreleased",
+}
+
+
+def _local_rows(local: Any) -> List[Dict[str, Any]]:
+    return [r for r in local if isinstance(r, dict)] if isinstance(local, list) else []
+
+
+def _format_state(local: Any, reasons: Optional[Dict[int, str]] = None) -> Optional[str]:
+    """
+    Where one format of a book stands, finer than _format_status: "available"
+    (a row has files), the request snapshot's word for a monitored row
+    ("searching", "downloading", "retrying", "stuck", "unreleased"), or
+    "requested" for a monitored row the snapshot has not seen yet (it is
+    rebuilt every quarter hour). None when nobody asked for it.
+
+    `reasons` maps a Chaptarr book id to its reason code, from
+    book_requests' cached snapshot.
+    """
+    rows = _local_rows(local)
+    if any(r.get("hasFiles") for r in rows):
+        return "available"
+    wanted = [r for r in rows if r.get("monitored")]
+    if not wanted:
+        return None
+    for row in wanted:
+        state = _REASON_STATES.get((reasons or {}).get(row.get("id")))
+        if state:
+            return state
+    return "requested"
+
+
+# A Goodreads title carries its series: "Rule of Two (Star Wars: Darth Bane,
+# #2)", or "The Darth Bane Series (Star Wars: Darth Bane #1-3)" for a set.
+_SERIES_SUFFIX = re.compile(
+    r"^(?P<title>.+?)\s*\((?P<series>[^()]+?),?\s+#(?P<number>[\d.]+(?:-[\d.]+)?)\)\s*$"
+)
+
+
+def _split_series(title: str) -> tuple:
+    """(title without the series, series name, number in it), the last two
+    empty when the title names no series."""
+    match = _SERIES_SUFFIX.match(title or "")
+    if not match:
+        return title, "", ""
+    return match.group("title"), match.group("series").strip(), match.group("number")
+
+
+async def _request_reasons() -> Dict[int, str]:
+    """Chaptarr book id -> reason code, from the cached request snapshot only:
+    a search must not wait for a rebuild, and without one every monitored
+    book simply reads "requested"."""
+    from app.services import book_requests
+
+    snapshot = await book_requests.get_cached_snapshot()
+    reasons: Dict[int, str] = {}
+    for row in (snapshot or {}).get("items") or []:
+        rid = str(row.get("request_id") or "")
+        if rid.startswith("book-") and rid[5:].isdigit():
+            reasons[int(rid[5:])] = row.get("reason_code") or ""
+    return reasons
+
+
+async def _normalise(result: Dict[str, Any], fmt: str = "ebook",
+                     reasons: Optional[Dict[int, str]] = None) -> Optional[Dict[str, Any]]:
     """
     Convert a Chaptarr search result into the shape the requests page already
     uses for Seerr items, so book cards render through the same code path.
 
     `fmt` ("ebook" or "audiobook") picks whose library status the card
     carries: a book can be on the server as an audiobook and still be
-    requestable as an ebook.
+    requestable as an ebook. `states` carries both formats, finer grained
+    (see _format_state), for the book detail and the card's status block.
 
     Author-type results are dropped: they are not directly requestable.
     """
@@ -218,15 +290,23 @@ async def _normalise(result: Dict[str, Any], fmt: str = "ebook") -> Optional[Dic
     book_id = result.get("foreignId") or book.get("foreignBookId")
     await _cache_book(book_id, book)
 
+    short_title, series, series_number = _split_series(title)
     return {
         "id": book_id,
         "media_type": "book",
         "title": title,
+        "short_title": short_title,
+        "series": series,
+        "series_number": series_number,
         "author": author_name,
         "year": year,
         "poster_url": _poster_from(book.get("images")),
         "overview": _plain_text(book.get("overview")),
         "media_status": _format_status(book.get(local_key)),
+        "states": {
+            "ebook": _format_state(book.get("localEbookBooks"), reasons),
+            "audiobook": _format_state(book.get("localAudiobookBooks"), reasons),
+        },
         "rating": (book.get("ratings") or {}).get("value"),
         "votes": (book.get("ratings") or {}).get("votes") or 0,
     }
@@ -258,9 +338,10 @@ async def search(term: str, limit: int = 20) -> List[Dict[str, Any]]:
     except ValueError:
         return []
 
+    reasons = await _request_reasons()
     items = []
     for result in raw if isinstance(raw, list) else []:
-        norm = await _normalise(result)
+        norm = await _normalise(result, reasons=reasons)
         if norm and norm["id"]:
             items.append(norm)
         if len(items) >= limit:
@@ -427,19 +508,24 @@ async def resolve_trending(
     return cards
 
 
-async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:
+async def _lookup_book(cfg: dict, foreign_id: str, term: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Re-fetch a book from Chaptarr by its foreign id.
+    Re-fetch a book from Chaptarr by its foreign id, searching for `term`.
 
     The add payload is the lookup result posted back augmented, which is how
     Chaptarr's own UI does it. Re-fetching server-side means the browser never
-    supplies the object we send to Chaptarr.
+    supplies the object we send to Chaptarr, and it brings the book's library
+    rows as they are now rather than as the search saw them.
+
+    Search by title where one is known: Chaptarr's search is a text match, and
+    the id string alone often finds the library's own copy of the work (under
+    another provider's id) instead of the result the person picked.
     """
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.get(
                 f"{cfg['url']}/api/v1/search",
-                params={"term": foreign_id, "provider": SEARCH_PROVIDER},
+                params={"term": term or foreign_id, "provider": SEARCH_PROVIDER},
                 headers={"X-Api-Key": cfg["api_key"]},
             )
     except httpx.RequestError as exc:
@@ -455,21 +541,75 @@ async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     for result in raw if isinstance(raw, list) else []:
-        if result.get("foreignId") == foreign_id:
-            return result.get("book")
+        if result.get("foreignId") == foreign_id and isinstance(result.get("book"), dict):
+            await _cache_book(foreign_id, result["book"])
+            return result["book"]
     return None
+
+
+def _error_detail(resp: httpx.Response) -> str:
+    """Chaptarr's reason for refusing a write: a list of validation errors, or
+    one message."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text[:160]
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        return body[0].get("errorMessage") or body[0].get("message") or ""
+    if isinstance(body, dict):
+        return body.get("message") or body.get("errorMessage") or ""
+    return ""
+
+
+async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str, Any]:
+    """
+    Request a book Chaptarr already holds a row for: monitor that row and
+    search for it, as its own UI's monitor toggle and Search button do.
+
+    Adding an author imports every one of their books unmonitored, so the
+    second book of a series is usually here already by the time it is asked
+    for. Posting it as a new book again is answered 200 and changes nothing.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.put(
+                f"{cfg['url']}/api/v1/book/monitor",
+                headers=_headers(cfg),
+                json={"bookIds": book_ids, "monitored": True},
+            )
+            if resp.status_code not in (200, 202):
+                detail = _error_detail(resp)
+                logger.warning("Chaptarr monitor returned HTTP %d for %s: %s", resp.status_code, book_ids, detail)
+                return {"ok": False, "message": detail or f"Chaptarr refused the request ({resp.status_code})"}
+            resp = await client.post(
+                f"{cfg['url']}/api/v1/command",
+                headers=_headers(cfg),
+                json={"name": "BookSearch", "bookIds": book_ids},
+            )
+            if resp.status_code not in (200, 201):
+                detail = _error_detail(resp)
+                logger.warning("Chaptarr search command returned HTTP %d for %s: %s",
+                               resp.status_code, book_ids, detail)
+                return {"ok": False, "message": "The book was added, but the search for it did not start. "
+                                                "Try again in a minute."}
+    except httpx.RequestError as exc:
+        logger.warning("Chaptarr monitor/search failed for %s: %s", book_ids, exc)
+        return {"ok": False, "message": "Could not reach Chaptarr"}
+    return {"ok": True, "message": "Book requested", "title": title, "state": "requested"}
 
 
 async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     """
-    Add a book to Chaptarr and start searching for it.
+    Request a book in one format: add it to Chaptarr and start searching, or,
+    when Chaptarr already holds the book unmonitored, monitor and search it.
 
     `fmt` is "ebook" or "audiobook" and selects which root folder and profile
     pair the request lands in - Chaptarr keeps the two apart, so requesting an
     audiobook into the ebook folder would download the wrong edition.
 
-    Returns {"ok": bool, "message": str}, and the book's "title" when it
-    was added.
+    Returns {"ok": bool, "message": str}; on success also "state" (what the
+    page shows for that format now) and, for a real new request, the book's
+    "title".
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
@@ -482,11 +622,22 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         label = "audiobook" if audiobook else "book"
         return {"ok": False, "message": f"No Chaptarr {label} root folder configured"}
 
-    book = await _get_cached_book(foreign_id)
-    if not book:
-        book = await _lookup_book(cfg, foreign_id)
+    # The cached copy is what the search showed, up to an hour old: it names
+    # the title to search for, but its library rows are re-read, since a
+    # request for another book by the same author since then has imported
+    # this one.
+    cached = await _get_cached_book(foreign_id)
+    book = await _lookup_book(cfg, foreign_id, (cached or {}).get("title")) or cached
     if not book:
         return {"ok": False, "message": "Could not find that book in Chaptarr"}
+    title = book.get("title") or ""
+
+    rows = _local_rows(book.get("localAudiobookBooks" if audiobook else "localEbookBooks"))
+    if any(r.get("hasFiles") for r in rows):
+        return {"ok": True, "message": "Already in the library", "state": "available"}
+    row_ids = [r["id"] for r in rows if isinstance(r.get("id"), int)]
+    if row_ids:
+        return await _want_existing(cfg, row_ids, title)
 
     # A book from a brand-new author arrives with an author record that has
     # no profiles or root folders of its own (it isn't tracked yet), and
@@ -536,23 +687,24 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         return {"ok": False, "message": "Could not reach Chaptarr"}
 
     if resp.status_code in (200, 201):
+        try:
+            added = resp.json()
+        except ValueError:
+            added = None
+        # Chaptarr answers 200 with its existing record, unmonitored and
+        # unchanged, when the book was already there under another id. That
+        # is not a request, so the record it named is monitored and searched.
+        if isinstance(added, dict) and isinstance(added.get("id"), int) and added["id"] > 0 \
+                and added.get("monitored") is False:
+            return await _want_existing(cfg, [added["id"]], title)
         # The title is for the event log's "Requested:" line (the router takes it out).
-        return {"ok": True, "message": "Book requested", "title": book.get("title") or ""}
+        return {"ok": True, "message": "Book requested", "title": title, "state": "requested"}
 
-    # Chaptarr returns a list of validation errors on rejection.
-    detail = ""
-    try:
-        body = resp.json()
-        if isinstance(body, list) and body:
-            detail = body[0].get("errorMessage") or body[0].get("message") or ""
-        elif isinstance(body, dict):
-            detail = body.get("message") or body.get("errorMessage") or ""
-    except ValueError:
-        detail = resp.text[:160]
-
+    detail = _error_detail(resp)
     logger.warning("Chaptarr add returned HTTP %d: %s", resp.status_code, detail)
-    if resp.status_code == 400 and "already" in detail.lower():
-        return {"ok": True, "message": "Already in your library"}
+    # "Already added" used to be answered as success, which is how a book
+    # Chaptarr held unmonitored kept its Request button forever. The rows
+    # were read just above, so this is a copy the lookup could not see.
     return {"ok": False, "message": detail or f"Chaptarr rejected the request ({resp.status_code})"}
 
 

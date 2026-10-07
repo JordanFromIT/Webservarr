@@ -58,9 +58,23 @@ class _FakeClient:
     async def __aexit__(self, *exc):
         return False
 
+    async def get(self, url, params=None, headers=None):
+        # The fresh lookup finds nothing, so the cached copy stands.
+        return _Listing([])
+
     async def post(self, url, headers=None, json=None):
         self._sent.append(json)
         return _Response()
+
+
+class _Listing:
+    status_code = 200
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

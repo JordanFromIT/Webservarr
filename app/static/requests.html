@@ -656,12 +656,17 @@ Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</sp
       </div>
       <div class="flex-1 min-w-0 pr-8">
         <h2 id="modalTitle" class="text-frosted-blue font-bold text-lead leading-tight mb-1"></h2>
+        <!-- A book's author and series; empty and hidden for a film or show. -->
+        <p id="modalByline" class="hidden text-frosted-blue/70 text-label mb-1"></p>
+        <p id="modalSeries" class="hidden text-frosted-blue/70 text-label mb-1"></p>
         <div class="flex items-center flex-wrap gap-2 mb-3">
           <span id="modalYear" class="text-frosted-blue/70 text-label tabular-nums"></span>
           <span id="modalTypeBadge" class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold"></span>
           <span id="modalRating" class="text-label text-frosted-blue/70 tabular-nums"></span>
         </div>
         <p id="modalOverview" class="text-frosted-blue/70 text-label leading-relaxed line-clamp-4 mb-4"></p>
+        <!-- "Already in the library", a link to its Books entry once found. -->
+        <p id="modalLibrary" class="hidden text-frosted-blue text-label font-semibold mb-3"></p>
         <div id="modalActionArea"></div>
       </div>
     </div>
