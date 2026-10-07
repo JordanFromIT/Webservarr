@@ -208,3 +208,129 @@ an agent) is open.
 ## 10. Out of scope
 
 Download-failure detection; Plex checks inside WebServarr; per-user filtering of library lines.
+
+## 11. More sources (2026-10-07)
+
+Approved by Jordan on 2026-10-07, from the sources survey of 2026-10-06. Three more kinds of line join
+the event log. They are library lines in every way that matters (section 6): source `library`, the
+neutral grey tick, never pinned, never pushed, never an outage, under 200 characters with only the
+title cut, kept 30 days. Their `app` is `requests`, `n8n` or `kometa`. None of them names a person.
+
+### 11.1 Requests
+
+| Where it comes from | Event log line |
+|---|---|
+| A new Seerr request for a film | `Requested: Dune Messiah (2026)` |
+| A new Seerr request for a show | `Requested: Severance` |
+| A book requested through WebServarr's own Chaptarr path | `Requested: Dune Messiah (audiobook)` (or `(ebook)`) |
+| Three or more requests in one burst | `Requested: 3 titles` (the count) |
+
+- **Seerr:** the notification poller already reads Seerr's newest requests each Seerr cycle. The same
+  list is checked for new request ids; a new one's title and year come from Seerr's own movie or TV
+  lookup. Seerr's webhook is not used (its one webhook agent belongs to the n8n issue triage). A request
+  that is already declined when first seen makes no line.
+- **Books:** `POST /api/integrations/chaptarr-request` writes the line once Chaptarr has added the book
+  ("Book requested"). "Already in your library" and failures write nothing. A failed write never fails
+  the request.
+- **The backlog is never announced.** Seerr's request ids only grow. The first successful read stores
+  the highest id in the internal setting `status_feed.seerr_requests_seen` and writes nothing; after
+  that, a request with a higher id is new. The mark lives in the database, so a restart (which empties
+  Redis) does not announce anything again.
+- **Once per request:** each request is recorded in `status_event_refs` under `seerr-request:<id>` or
+  `book-request:<book id>:<format>`, inserted first, so the two workers and the poller can never
+  write it twice.
+- **Bursts:** requests whose line started less than 15 minutes ago form a burst. The first two
+  requests of a burst each get their own line. The third folds the burst into one line,
+  `Requested: 3 titles`, which counts on from there (`Requested: 4 titles`) and moves to the time of
+  its newest request. A request once the burst's first line is 15 minutes old starts a new burst.
+
+### 11.2 Fixed issues, from n8n
+
+- **Route:** `POST /api/webhooks/n8n`. Header `X-Webhook-Secret`, compared in constant time with the
+  setting `integration.n8n.webhook_secret`. An empty setting refuses every call.
+- **Body:** structured, never free text:
+  `{"kind": "issue_fixed", "title": "Severance", "code": "S02E03", "year": null, "problem": "subtitles", "ref": "123"}`.
+  `kind` is one of `issue_fixed`. `problem` is one of `subtitles`, `audio`, `video`, `playback`,
+  `wrong_file`, `other`. `code` is null (or empty) or `S<season>E<episode>` (two to four digits each).
+  `year` is null (or empty) or a year from 1800 to 2999, as a number or as four digits of text. `ref`
+  is the Seerr issue id: a positive number, or letters, digits, `_ . : -`, up to 64 characters.
+- **WebServarr writes the sentence:**
+
+  | `problem` | Line |
+  |---|---|
+  | `subtitles` | `Fixed: subtitles on Severance S02E03` |
+  | `audio` | `Fixed: audio on Severance S02E03` |
+  | `video` | `Fixed: video on Dune (2021)` |
+  | `playback` | `Fixed: playback of Dune (2021)` |
+  | `wrong_file` | `Fixed: the wrong file for Dune (2021)` |
+  | `other` | `Fixed: an issue with Dune (2021)` |
+
+  The title is followed by the episode code when there is one, else by the year when there is one.
+- **Screening:** the title and code are refused (422, nothing stored) when they hold a URL or a domain
+  name, an IP address, an email address or an `@handle`, a file path (a backslash, a leading `/` or `~`,
+  a drive letter, or two slashes in one word; a single slash as in `Face/Off` is fine), a long token
+  (16 or more hex characters, or a word of 20 or more characters with a digit in it), or more than
+  120 characters. An unknown `kind` or `problem`, a body that is not a JSON object, or a bad `code`,
+  `year` or `ref` is also a 422.
+- **Once per issue:** keyed `n8n:issue_fixed:<ref>`; a repeat is a 204 and writes nothing.
+- **Cap:** at most 30 lines an hour from n8n; past that, 429 and nothing is stored. The route is also
+  rate limited per caller (60 a minute).
+- **Responses:** 204 written or repeated, 401 bad or missing secret, 422 as above, 429 over the cap or
+  the rate limit, 503 when the database can't be written.
+
+### 11.3 Kometa runs
+
+- **Route:** `POST /api/webhooks/kometa/<token>`. Kometa's webhooks can't send headers, so a long
+  random token in the address is the secret, compared in constant time with the setting
+  `integration.kometa.webhook_token`. An empty setting refuses every call (401). The token is never
+  logged: the access log shows the address as `/api/webhooks/kometa/…`.
+- **Only `run_end`** makes lines. `run_start`, `changes`, `error`, `version`, `delete` and anything else
+  get a 204 and nothing is written (the site's usual 16 MB body limit applies).
+- **Which libraries:** Kometa 2.5.1's `run_end` carries `names`, a list of `{"name": <collection>,
+  "library": <library name>}` for every collection it ran, but not the library's type. WebServarr asks
+  Plex for its libraries (`GET /library/sections`, with the Plex token it already holds) and maps each
+  named library to its type:
+
+  | The run covered | Line |
+  |---|---|
+  | a movie library | `Movie posters updated` |
+  | a show library | `TV show posters updated` |
+  | no library WebServarr can type (no `names`, or Plex didn't answer) | `Posters updated` |
+
+  Libraries of other types (music, photos) make no line.
+- **Cap:** at most one line per library type (movie, show, or the untyped one) per 6 hours. Kometa runs
+  hourly, so this is up to four lines a day per type. Keyed per type and 6-hour window, and also checked
+  against the newest line of that type, so a window boundary never lets two through close together.
+- **Responses:** 204 written, ignored or capped, 401 bad token, 422 not JSON, 429 over the rate limit
+  (30 a minute per caller), 503 when the database can't be written.
+
+### 11.4 Settings
+
+A new group on Settings > Integrations, "Event log", with two cards. They have no address to test, so
+their status line says only whether the secret is saved ("Set up" or "Not set up") and they have no
+Test button.
+
+- **n8n:** the webhook address (the site's own origin plus `/api/webhooks/n8n`), a Generate secret
+  control (shown once, like Chaptarr's), and one line: an HTTP Request node, POST, header
+  `X-Webhook-Secret`, the JSON body above.
+- **Kometa:** a Generate token control (shown once). While it shows, the address field holds the full
+  address with the token, and the snippet to paste into Kometa's `config.yml` is filled in:
+
+  ```yaml
+  webhooks:
+    run_end: https://<site>/api/webhooks/kometa/<token>
+  ```
+
+  Once saved, the token is hidden again and the address reads `…/kometa/<your token>`.
+
+### 11.5 Testing
+
+- **Python:** the Seerr seed (first read writes nothing, a restart writes nothing again), new ids
+  announced once, declined skipped, book requests (written on "Book requested" only, never failing the
+  request), bursts (two lines, then one folded line counting on, a new burst after 15 minutes), the
+  n8n auth, sentence per problem, screening rejects, repeats and the cap, Kometa's token, `run_end` per
+  library type, the fallback, the 6-hour cap, every other event ignored, the redacted access log, and
+  privacy (no requester in any line).
+- **Live on dev:** temporary secrets; post sample n8n and Kometa bodies; check the lines on Home at 1440
+  and 375; confirm the Seerr poller seeded without announcing; delete the test rows and clear the
+  secrets.
