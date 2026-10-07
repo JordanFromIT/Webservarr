@@ -346,8 +346,8 @@ function resumeAudio(key) {
 
 // The round button on a Continue cover. Shown on hover or focus where there is
 // a mouse; always shown on touch, where there is no hover to find it with.
-const RESUME_BTN = 'pointer-events-auto grid size-12 place-items-center rounded-full bg-background-dark/80 text-bright ' +
-  'ring-1 ring-frosted-blue/25 shadow-lg transition-[opacity,background-color] duration-150 hover:bg-primary ' +
+const RESUME_BTN = 'pointer-events-auto grid size-12 place-items-center rounded-full bg-background-dark/80 text-frosted-blue ' +
+  'ring-1 ring-frosted-blue/25 shadow-lg transition-[opacity,background-color,box-shadow] duration-150 hover:bg-background-dark hover:ring-2 hover:ring-frosted-blue ' +
   '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 ' + LINK_FOCUS;
 let continueIds = 0;
 
