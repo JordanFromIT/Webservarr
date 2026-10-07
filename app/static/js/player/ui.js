@@ -111,15 +111,9 @@
  * including Back on a desktop browser, which is no close request.
  *
  * Desktop (lg and up, where the shell's top bar shows and has the pill's
- * slot, #wsPlayerPill): the mini bar floats, at the bottom centre of the
- * page column by default, with a handle and Stop; dragged by the handle it
- * stays where it is let go, or snaps to the bottom centre or into the top
- * bar, where it is the pill (handle, cover, title, chapter and time left,
- * play/pause, a thin progress line; playing, paused, open, popped out and
- * loading). The handle's menu and arrow keys do the same without a drag
- * (see "The desktop bar's place"). The bar's cover and title open and hide
- * the window as the pill's do. Below lg a tablet's bar floats over the tab
- * bar (no handle) and a phone's is as it was. open() shows the same
+ * slot, #wsPlayerPill): the mini bar gives way to a pill in the top bar
+ * (cover, title, chapter and time left, play/pause, a thin progress line;
+ * playing, paused, open, popped out and loading), and open() shows the same
  * player as a floating window instead of the full-screen sheet. The window
  * is part of the page, not a dialog: Tab goes in and out of it, nothing
  * behind it is blocked, page keys still reach the page, and soft navigation
@@ -129,9 +123,9 @@
  * place and size are kept per listener on this device. Its panels open
  * below the player and close again from the same button (Playback settings
  * gives way to Chapters). Escape or its X (Close player window) sends it back
- * to the bar or the pill and focus with it; the book plays on. Only their
- * Stop, right of Play, stops a book: it closes the book playing or paused
- * ("Your place is saved", Resume). A full-screen view (the reader) keeps the bar
+ * to the pill and focus with it; the book plays on. Only the pill stops a
+ * book: its Stop, right of Play, closes the book playing or paused ("Your
+ * place is saved", Resume). A full-screen view (the reader) keeps the bar
  * and the sheet.
  *
  * Pop out (popout.js) moves the window into a window of its own: dock()
@@ -160,23 +154,6 @@ export const WIN_STEP_BIG = 64;
 export const WIN_IN_MS = 200;          // its open (opacity only with reduced motion)
 export const WIN_OUT_MS = 160;         // ...and its close
 export const WIN_KEY = 'ws-player-window';   // + ':' + the listener's identity key
-
-// The desktop bar: where it is kept (the bottom centre, the top bar, or a
-// spot of the listener's own), per listener on this device; its size at the
-// bottom centre; and what counts as letting go on a snap zone.
-export const DOCK_KEY = 'ws-player-dock';     // + ':' + the listener's identity key
-export const DOCK_PLACES = ['bottom', 'top', 'free'];
-export const BAR_MAX_W = 720;
-export const BAR_H = 66;               // the row and its border, before it is measured
-export const BAR_GAP = 24;             // the bottom centre: this far above the bottom edge
-export const BAR_SIDE = 24;            // ...and at least this far inside the page column
-export const BAR_EDGE = 8;             // a spot of its own: this far inside the viewport
-export const BAR_GRIP_X = 16;          // the grip's centre, from the bar's left edge
-export const DRAG_PX = 5;              // a press that travels this far is a drag, not a click
-export const TOP_BAND = 72;            // px under the top bar that still count as the top bar
-export const SNAP_X = 120;             // the bottom centre catches a bar this close to it
-export const SNAP_Y = 72;
-export const MOVE_MS = 240;            // a move between places (a fade with reduced motion)
 
 const WIDE = '(min-width: 1024px)';
 const RESUME_LOST = "Couldn't find your saved place in this book";
@@ -286,45 +263,6 @@ export function fitWindow(geo, vp, collapsedH) {
   return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h), room: Math.round(room) };
 }
 
-/* Where the desktop bar is kept, from what was stored: { at, x, y }, the
-   bottom centre for anything else. */
-export function readDock(v) {
-  const d = v && typeof v === 'object' ? v : {};
-  const at = DOCK_PLACES.indexOf(d.at) !== -1 ? d.at : 'bottom';
-  if (at === 'free' && !(given(d.x) && given(d.y))) return { at: 'bottom' };
-  return at === 'free' ? { at: at, x: Math.round(d.x), y: Math.round(d.y) } : { at: at };
-}
-
-/* The bottom centre: the bar centred over the page column (vp: w, h;
-   lane: the column's left edge), BAR_GAP above the bottom, h tall. */
-export function homeRect(vp, lane, h) {
-  const left = Math.max(0, num(lane));
-  const w = Math.max(0, Math.min(BAR_MAX_W, num(vp.w) - left - 2 * BAR_SIDE));
-  const bh = num(h) || BAR_H;
-  return { x: Math.round(left + (num(vp.w) - left - w) / 2), y: Math.round(num(vp.h) - BAR_GAP - bh), w: Math.round(w), h: Math.round(bh) };
-}
-
-/* A spot of its own (pos: x, y of its top left), kept inside the viewport
-   (vp: w, h, top: the first row under the top bar) for a bar of size (w, h). */
-export function fitBar(pos, vp, size) {
-  const top = num(vp.top);
-  const x = clampN(num(pos.x), BAR_EDGE, Math.max(BAR_EDGE, num(vp.w) - num(size.w) - BAR_EDGE));
-  const y = clampN(num(pos.y), top, Math.max(top, num(vp.h) - num(size.h) - BAR_EDGE));
-  return { x: Math.round(x), y: Math.round(y) };
-}
-
-/* What letting go here gives: 'top' with the pointer (p) over the top bar
-   or the TOP_BAND under it (edge: the top bar's bottom; lane: the page
-   column's left edge), 'bottom' with the bar (bar: x, y, w, h) near the
-   bottom centre (home), else 'free'. */
-export function dropZone(p, bar, home, edge, lane) {
-  if (num(p.y) < num(edge) + TOP_BAND && num(p.x) >= num(lane) - BAR_SIDE) return 'top';
-  const dx = (num(bar.x) + num(bar.w) / 2) - (num(home.x) + num(home.w) / 2);
-  const dy = (num(bar.y) + num(bar.h) / 2) - (num(home.y) + num(home.h) / 2);
-  if (Math.abs(dx) <= SNAP_X && Math.abs(dy) <= SNAP_Y) return 'bottom';
-  return 'free';
-}
-
 // ---------------------------------------------------------------------------
 // The UI
 // ---------------------------------------------------------------------------
@@ -336,8 +274,7 @@ export function dropZone(p, bar, home, edge, lane) {
    a key is being handled now), pillSlot (the top bar's #wsPlayerPill, or
    none: no desktop window), storage (localStorage, or none), identity() (the
    listener's identity key), viewport() -> { w, h }, topLimit() (px: the
-   window stays below the top bar), laneLeft() (px: the page column's left
-   edge, right of the sidebar) }. */
+   window stays below the top bar) }. */
 export function createUI(env) {
   const doc = env.doc;
   const host = env.host;
@@ -396,16 +333,6 @@ export function createUI(env) {
   let winDrag = null;          // a move or resize: { kind, id, x0, y0, from }
   let winWatch = null;         // the viewport's resize listener while it shows
   let winAnim = null;          // the open's class timer
-  // The desktop bar's place: { at: 'bottom' | 'top' | 'free', x, y } (read
-  // once), a drag of it ({ from, id, sx, sy, started, offX, offY, x, y, zone,
-  // focus, grip }), the grip whose menu is open, and the move's class timers.
-  let place = null;
-  let barDrag = null;
-  let lastBarDrag = -1e9;
-  let menuFrom = null;
-  let moveTimer = null;
-  let arriveTimer = null;
-  const hostWin = env.win || doc.defaultView;
 
   // again: re-made for a layer that had one (the screen turned), not a new
   // layer, so no tap is needed.
@@ -524,29 +451,18 @@ export function createUI(env) {
   const barArt = art('wsp-bar-art');
   const barTitle = h('span', { class: 'wsp-bar-title' });
   const barMeta = h('span', { class: 'wsp-bar-meta' });
-  const openSr = h('span', { class: 'sr-only', text: 'Open the player: ' });
   const openBtn = h('button', { type: 'button', class: 'wsp-bar-open', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, [
-    openSr,
+    h('span', { class: 'sr-only', text: 'Open the player: ' }),
     barArt.frame,
     h('span', { class: 'wsp-bar-text' }, [barTitle, barMeta])
   ]);
   const barPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-sm', 'aria-label': 'Play' }, [icon('play_arrow')]);
-  // The desktop bar's handle (theme.css shows it only there): drag it, or
-  // press it for the places to put the bar; its arrows move it.
-  const barGrip = h('button', {
-    type: 'button', class: 'wsp-grip wsp-bar-grip', title: 'Drag to move, or click for places to put it',
-    'aria-label': 'Move the player. Press for places to put it, or use the arrow keys.',
-    'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'wspDockMenu'
-  }, [icon('drag_indicator')]);
-  // Stop, right of Play, from tablet width up (theme.css), as on the pill.
-  const barStop = h('button', { type: 'button', class: 'wsp-icon-btn wsp-bar-stop', title: 'Stop listening' }, [icon('stop')]);
-  // With the top bar's slot (a desktop page) the bar floats: at the bottom
-  // centre, where it was let go, or not at all while it is in the top bar
-  // (data-dock). Below lg and on a full-screen view it is the phone's bar.
-  const bar = h('section', { class: 'wsp-bar' + (pillSlot ? ' wsp-bar-dockable' : ''), 'aria-label': 'Audiobook player', hidden: true }, [
+  // With the top bar's pill (a desktop page), the bar shows only below lg and
+  // on a full-screen view (theme.css): its measured height is 0 elsewhere.
+  const bar = h('section', { class: 'wsp-bar' + (pillSlot ? ' wsp-bar-pilled' : ''), 'aria-label': 'Audiobook player', hidden: true }, [
     h('div', { class: 'wsp-line', 'aria-hidden': 'true' }, [barLine]),
     barWarn,
-    h('div', { class: 'wsp-bar-row' }, [barGrip, openBtn, barPlay, barStop])
+    h('div', { class: 'wsp-bar-row' }, [openBtn, barPlay])
   ]);
 
   // ---- The full player ----
@@ -631,39 +547,16 @@ export function createUI(env) {
   ]);
   const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
 
-  // While the bar is dragged: where letting go puts it back at the bottom
-  // centre (the top bar's zone is in its slot, below).
-  const ghost = h('div', { class: 'wsp-dock-ghost', 'aria-hidden': 'true' });
-  // The handle's places, a menu under the pill's handle or over the bar's.
-  const menuTop = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'top' }, [
-    icon('vertical_align_top'), h('span', { text: 'Move to top bar' })
-  ]);
-  const menuBottom = h('button', { type: 'button', class: 'wsp-dock-item', role: 'menuitem', tabindex: '-1', 'data-to': 'bottom' }, [
-    icon('vertical_align_bottom'), h('span', { text: 'Move to bottom centre' })
-  ]);
-  const dockMenu = h('div', { class: 'wsp-dock-menu', id: 'wspDockMenu', role: 'menu', 'aria-label': 'Move the player', hidden: true }, [menuTop, menuBottom]);
-  // Where the player went, said once.
-  const dockSay = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
-
   host.appendChild(bar);
   host.appendChild(full);
   host.appendChild(noticeBox);
-  host.appendChild(ghost);
-  host.appendChild(dockMenu);
-  host.appendChild(dockSay);
 
   // ---- The top bar's pill (desktop) ----
   //
-  // In the shell's top bar, left of the bell, while the listener keeps the
-  // player there: the handle moves it out again; the cover and title open
-  // the window (or hide it, or bring a popped-out player back); the round
-  // button plays and pauses without opening anything.
+  // In the shell's top bar, left of the bell: the cover and title open the
+  // window (or hide it, or bring a popped-out player back); the round button
+  // plays and pauses without opening anything. Shown while the bar would be.
 
-  const pillGrip = h('button', {
-    type: 'button', class: 'wsp-grip wsp-pill-grip', title: 'Drag to move, or click for places to put it',
-    'aria-label': 'Move the player. Press for places to put it.',
-    'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': 'wspDockMenu'
-  }, [icon('drag_indicator')]);
   const pillArt = art('wsp-pill-art');
   const pillTitle = h('span', { class: 'wsp-pill-title' });
   const pillWords = h('span', { class: 'wsp-pill-words' });
@@ -684,21 +577,15 @@ export function createUI(env) {
   // window's own says it then), so it is announced once.
   const pillWarn = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
   const pill = h('div', { class: 'wsp-pill', role: 'group', 'aria-label': 'Audiobook player', 'data-state': 'paused' }, [
-    pillGrip,
     pillOpen,
     pillPlay,
     pillStop,
     h('span', { class: 'wsp-pill-line', 'aria-hidden': 'true' }, [pillFill]),
     pillWarn
   ]);
-  // The top bar's drop zone, shown in the slot while the bar is dragged.
-  const dockTarget = h('div', { class: 'wsp-dock-target', 'aria-hidden': 'true' }, [
-    icon('vertical_align_top'), h('span', { class: 'wsp-dock-word', text: 'Top bar' })
-  ]);
   if (pillSlot) {
     pillSlot.textContent = '';
     pillSlot.appendChild(pill);
-    pillSlot.appendChild(dockTarget);
   }
 
   // ---- Panels ----
@@ -788,11 +675,6 @@ export function createUI(env) {
 
   // The screen turned: a panel is a layer only while it covers the player.
   function onWideChange() {
-    // Across lg the floating bar and the phone's bar trade places.
-    endBarDrag('cancel');
-    closeDockMenu(false);
-    if (barShown) applyDock();
-    if (lastState) drawPill(lastState);
     // Across lg the window and the sheet trade places: the open one closes
     // (in its own window it stays).
     if (isOpen && !docked && windowed !== windowable()) {
@@ -1056,29 +938,11 @@ export function createUI(env) {
 
   // ---- The bar's place on the page ----
 
-  // The room the page keeps at the bottom: the bar and the space under it
-  // (on a tablet, the gap above the tab bar: theme.css --wsp-bar-gap). On a
-  // desktop page only at the bottom centre: in the top bar or at a spot of
-  // its own the bar asks for none.
   function measureBar() {
-    let px = 0;
-    if (barShown) {
-      if (!windowable()) px = num(measure(bar)) + barGap();
-      else if (dockPlace().at === 'bottom') px = num(measure(bar)) + BAR_GAP;
-    }
-    px = Math.max(0, Math.round(px));
+    const px = barShown ? Math.max(0, Math.round(num(measure(bar)))) : 0;
     if (px === lastPx) return;
     lastPx = px;
     root.style.setProperty('--ws-player-h', px + 'px');
-  }
-
-  function barGap() {
-    try {
-      const v = parseFloat(hostWin.getComputedStyle(bar).getPropertyValue('--wsp-bar-gap'));
-      return isFinite(v) ? v : 0;
-    } catch (e) {
-      return 0;
-    }
   }
 
   function syncHost() {
@@ -1089,16 +953,13 @@ export function createUI(env) {
     if (show === barShown) return;
     barShown = show;
     setHidden(bar, !show);
-    if (!show) {
-      endBarDrag('cancel');
-      closeDockMenu(false);
-    }
+    if (pillSlot) setHidden(pillSlot, !show);
     syncHost();
-    applyDock();
+    measureBar();
   }
 
   function pillOnScreen() {
-    return !!pillSlot && barShown && dockPlace().at === 'top' && isVisible(pill);
+    return !!pillSlot && barShown && isVisible(pill);
   }
 
   if (typeof env.ResizeObserver === 'function') {
@@ -1233,7 +1094,6 @@ export function createUI(env) {
     if (!pillSlot || !s) return;
     const loadingOnly = !s.book;
     const up = isOpen && windowed && !docked;
-    drawDeskBar(s, up);
     setAttr(pill, 'data-state', loadingOnly ? 'loading' : playing(s) ? 'playing' : 'paused');
     setAttr(pill, 'data-open', up ? '' : null);
     setAttr(pill, 'data-popped', popped ? '' : null);
@@ -1250,35 +1110,15 @@ export function createUI(env) {
     // loads a part or reads its saved places (a newer place may be coming).
     const canStop = !loadingOnly && !s.loading && !s.checking;
     const held = !!(s.filesChanged || s.safetyNet);
-    [pillStop, barStop].forEach(function (b) {
-      setAttr(b, 'aria-disabled', canStop ? null : 'true');
-      setAttr(b, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
-    });
+    setAttr(pillStop, 'aria-disabled', canStop ? null : 'true');
+    setAttr(pillStop, 'aria-label', held ? 'Stop listening' : 'Stop listening, your place is saved');
     const what = popped ? 'Bring the player back' : up ? 'Hide the player' : 'Open the player';
     setAttr(pillOpen, 'aria-label', what + (s.title ? ': ' + s.title : ''));
     setAttr(pillOpen, 'aria-expanded', up ? 'true' : 'false');
     setAttr(pillOpen, 'title', warnText || (popped ? 'Bring the player back into the page' : what));
     // The warning is said here only while the window's own is not showing.
-    const said = warnText && !isOpen ? warnText : '';
-    if (pillWarn.textContent !== said) pillWarn.textContent = said;
-  }
-
-  // The bar on a desktop page: its cover and title open and hide the window
-  // as the pill's do, and its warning is not said twice while the window's
-  // own says it. Elsewhere it opens the full player, as ever.
-  function drawDeskBar(s, up) {
-    const desk = windowable();
-    setAttr(bar, 'data-open', desk && up ? '' : null);
-    setAttr(bar, 'data-state', !s.book ? 'loading' : playing(s) ? 'playing' : 'paused');
-    setAttr(barWarn, 'aria-hidden', desk && isOpen ? 'true' : null);
-    if (!desk) {
-      setAttr(openBtn, 'aria-haspopup', 'dialog');
-      setText(openSr, 'Open the player: ');
-      return;
-    }
-    setAttr(openBtn, 'aria-haspopup', null);
-    setAttr(openBtn, 'aria-expanded', up ? 'true' : 'false');
-    setText(openSr, popped ? 'Bring the player back: ' : up ? 'Hide the player: ' : 'Open the player: ');
+    const say = warnText && !isOpen ? warnText : '';
+    if (pillWarn.textContent !== say) pillWarn.textContent = say;
   }
 
   function render(s) {
@@ -1388,22 +1228,16 @@ export function createUI(env) {
   });
   barPlay.addEventListener('click', miniPlay);
   pillPlay.addEventListener('click', miniPlay);
-  // On a desktop page the bar's cover and title do what the pill's do: open
-  // the window, hide it, or bring a popped-out player back.
-  function openOrHide() {
+  pillOpen.addEventListener('click', function () {
     if (popped) bringBack();
     else if (isOpen && windowed) close();
     else open();
-  }
-  pillOpen.addEventListener('click', openOrHide);
+  });
   fullPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
   full.addEventListener('keydown', onKey);
   backBtn.addEventListener('click', function () { player.skip(-(num(player.setSkip()) || 10)); });
   fwdBtn.addEventListener('click', function () { player.skip(num(player.setSkip()) || 10); });
-  openBtn.addEventListener('click', function () {
-    if (windowable()) openOrHide();
-    else open();
-  });
+  openBtn.addEventListener('click', function () { open(); });
   closeBtn.addEventListener('click', function () { close(); });
 
   // ---- Open and close ----
@@ -1773,9 +1607,9 @@ export function createUI(env) {
     if (popOutFn) safely(popOutFn)();
   });
 
-  // The pill's Stop (and the floating bar's): the book closes, playing or
-  // paused (its last save goes as it does), with a way back to the same place.
-  function stopBook() {
+  // The pill's Stop: the book closes, playing or paused (its last save goes
+  // as it does), with a way back to the same place.
+  pillStop.addEventListener('click', function () {
     const s = player.state();
     if (!s || !s.book || s.loading || s.checking) return;
     const key = s.book;
@@ -1791,9 +1625,7 @@ export function createUI(env) {
     // The pill has gone with the book: focus to Resume.
     const resume = stopped && stopped.el.querySelector('.wsp-notice-btn');
     if (resume && resume.isConnected) resume.focus({ preventScroll: true });
-  }
-  pillStop.addEventListener('click', stopBook);
-  barStop.addEventListener('click', stopBook);
+  });
 
   // ---- Its own window (popout.js) ----
 
@@ -1880,439 +1712,6 @@ export function createUI(env) {
     try {
       if (w && w.innerHeight < WIN.minH && typeof w.resizeTo === 'function') w.resizeTo(w.outerWidth, w.outerHeight + (WIN.minH - w.innerHeight));
     } catch (e) { /* the browser decides */ }
-  }
-
-  // ---- The desktop bar's place ----
-  //
-  // On a desktop page the bar floats. It starts at the bottom centre of the
-  // page column, where the page keeps room for it. Dragged by its handle it
-  // goes where it is let go and stays there (inside the viewport, below the
-  // top bar; the page keeps no room for it then), unless it is let go on one
-  // of the two snap zones that show while it is dragged: the top bar, where
-  // it becomes the pill left of the bell, and the bottom centre. The pill's
-  // handle drags it out again. Pressing either handle offers the places in a
-  // small menu; the bar's arrows move it (Shift: further), Home puts it back
-  // at the bottom centre. Focus follows a move and a polite line says where
-  // the player went. Escape cancels a drag. Kept per listener on this
-  // device. With reduced motion a move fades instead of flying.
-
-  function dockKey() {
-    let id = '';
-    try {
-      id = String((env.identity && env.identity()) || '');
-    } catch (e) { /* none */ }
-    return DOCK_KEY + (id ? ':' + id : '');
-  }
-
-  function dockPlace() {
-    if (place) return place;
-    let v = null;
-    try {
-      const raw = env.storage ? env.storage.getItem(dockKey()) : null;
-      v = raw ? JSON.parse(raw) : null;
-    } catch (e) { /* not remembered */ }
-    place = readDock(v);
-    return place;
-  }
-
-  function saveDock() {
-    try {
-      if (env.storage) env.storage.setItem(dockKey(), JSON.stringify(dockPlace()));
-    } catch (e) { /* not remembered */ }
-  }
-
-  function laneLeft() {
-    if (env.laneLeft) return num(env.laneLeft());
-    const sb = doc.getElementById('desktopSidebar');
-    const r = sb ? sb.getBoundingClientRect() : null;
-    return r && r.width ? Math.max(0, r.right) : 0;
-  }
-
-  function barHeight() {
-    return num(measure(bar)) || BAR_H;
-  }
-
-  function vpTop() {
-    const vp = viewport();
-    vp.top = topLimit();
-    return vp;
-  }
-
-  function home() {
-    return homeRect(viewport(), laneLeft(), barHeight());
-  }
-
-  // Its spot of its own, as it shows now: kept inside the viewport.
-  function freeSpot() {
-    const d = dockPlace();
-    const hm = home();
-    return fitBar({ x: d.x, y: d.y }, vpTop(), { w: hm.w, h: hm.h });
-  }
-
-  // Where it is drawn now: its spot, or the bottom centre.
-  function barSpot() {
-    const hm = home();
-    if (dockPlace().at !== 'free') return hm;
-    const p = freeSpot();
-    return { x: p.x, y: p.y, w: hm.w, h: hm.h };
-  }
-
-  function setSpot(p) {
-    bar.style.setProperty('--wsp-x', p.x + 'px');
-    bar.style.setProperty('--wsp-y', p.y + 'px');
-  }
-
-  function clearSpot() {
-    bar.style.removeProperty('--wsp-x');
-    bar.style.removeProperty('--wsp-y');
-  }
-
-  // The slot in the top bar shows while the player is kept there, and while
-  // the bar is dragged (the top bar's zone).
-  function syncSlot() {
-    if (!pillSlot) return;
-    setHidden(pillSlot, !(barShown && (dockPlace().at === 'top' || !!(barDrag && barDrag.started))));
-  }
-
-  // Draws the place: the bar's data-dock, its spot, the slot, the page's room.
-  function applyDock() {
-    const at = dockPlace().at;
-    setAttr(bar, 'data-dock', pillSlot ? at : null);
-    if (!barDrag) {
-      if (at === 'free' && windowable()) setSpot(freeSpot());
-      else clearSpot();
-    }
-    syncSlot();
-    measureBar();
-  }
-
-  function say(text) {
-    dockSay.textContent = '';
-    setT(function () { dockSay.textContent = text; }, 60);
-  }
-
-  const SAID = {
-    top: 'Player moved to the top bar.',
-    bottom: 'Player moved to the bottom centre.',
-    free: 'Player moved.'
-  };
-
-  function classFor(el, cls, ms) {
-    el.classList.remove(cls);
-    void el.offsetWidth;
-    el.classList.add(cls);
-    return setT(function () { el.classList.remove(cls); }, ms);
-  }
-
-  // The bar flies (or, with reduced motion, fades) from rect `from` into its
-  // place at the bottom centre.
-  function settleFrom(from) {
-    const hm = home();
-    if (arriveTimer !== null) clearT(arriveTimer);
-    if (!motion() || !from) {
-      arriveTimer = classFor(bar, 'is-arriving', MOVE_MS);
-      return;
-    }
-    bar.classList.remove('is-settling');
-    bar.style.transform = 'translate(' + Math.round(from.x - hm.x) + 'px, ' + Math.round(from.y - hm.y) + 'px)';
-    void bar.offsetWidth;
-    bar.classList.add('is-settling');
-    bar.style.transform = '';
-    arriveTimer = setT(function () {
-      arriveTimer = null;
-      bar.classList.remove('is-settling');
-    }, MOVE_MS + 20);
-  }
-
-  /* The bar to a place: 'top', 'bottom', or 'free' at o.x, o.y. o.focus:
-     focus goes to the handle in the new place. o.from: the rect it was drawn
-     at, to fly from. o.quiet: nothing said (the arrow keys). */
-  function putBar(at, o) {
-    o = o || {};
-    const before = dockPlace().at;
-    place = at === 'free' ? readDock({ at: 'free', x: o.x, y: o.y }) : { at: at };
-    saveDock();
-    applyDock();
-    if (at === 'top') {
-      if (arriveTimer !== null) clearT(arriveTimer);
-      arriveTimer = classFor(pill, 'is-arriving', MOVE_MS);
-    } else if (at === 'bottom' && (o.from || before === 'top')) {
-      settleFrom(o.from || null);
-    } else if (at === 'free' && before === 'top' && !o.dropped) {
-      if (arriveTimer !== null) clearT(arriveTimer);
-      arriveTimer = classFor(bar, 'is-arriving', MOVE_MS);
-    }
-    if (o.focus) {
-      const g = at === 'top' ? pillGrip : barGrip;
-      try {
-        g.focus({ preventScroll: true });
-      } catch (e) { /* not focusable */ }
-    }
-    if (!o.quiet && (before !== at || at === 'free')) say(SAID[at]);
-  }
-
-  // Into the top bar from the menu: the bar flies to the slot and the pill
-  // takes over (a fade with reduced motion).
-  function toTop(focus) {
-    if (moveTimer !== null) return;
-    if (dockPlace().at === 'top' || !windowable()) {
-      putBar('top', { focus: focus });
-      return;
-    }
-    root.setAttribute('data-wsp-docking', '');
-    setHidden(pillSlot, false);
-    if (motion()) {
-      const b = bar.getBoundingClientRect();
-      const s = pillSlot.getBoundingClientRect();
-      const scale = b.width ? Math.min(1, s.width / b.width) : 1;
-      bar.style.transform = 'translate(' + Math.round(s.left + s.width / 2 - (b.left + b.width / 2)) + 'px, ' +
-        Math.round(s.top + s.height / 2 - (b.top + b.height / 2)) + 'px) scale(' + scale.toFixed(3) + ')';
-    }
-    bar.classList.add('is-leaving');
-    moveTimer = setT(function () {
-      moveTimer = null;
-      root.removeAttribute('data-wsp-docking');
-      bar.classList.remove('is-leaving');
-      bar.style.transform = '';
-      putBar('top', { focus: focus });
-    }, MOVE_MS);
-  }
-
-  function toBottom(focus) {
-    if (moveTimer !== null) return;
-    putBar('bottom', { focus: focus, from: dockPlace().at === 'free' ? barSpot() : null });
-  }
-
-  // ---- The handle's menu ----
-
-  function menuItems() {
-    return [menuTop, menuBottom].filter(function (b) { return !b.hidden; });
-  }
-
-  function openDockMenu(grip) {
-    if (!windowable()) return;
-    const at = dockPlace().at;
-    setHidden(menuTop, at === 'top');
-    setHidden(menuBottom, at === 'bottom');
-    dockMenu.hidden = false;
-    const r = grip.getBoundingClientRect();
-    const vp = viewport();
-    dockMenu.style.left = Math.round(Math.max(BAR_EDGE, Math.min(r.left, vp.w - 240))) + 'px';
-    if (grip === pillGrip) {
-      dockMenu.style.top = Math.round(r.bottom + 8) + 'px';
-      dockMenu.style.bottom = '';
-    } else {
-      dockMenu.style.top = '';
-      dockMenu.style.bottom = Math.round(vp.h - r.top + 8) + 'px';
-    }
-    menuFrom = grip;
-    setAttr(grip, 'aria-expanded', 'true');
-    doc.addEventListener('pointerdown', onMenuOutside, true);
-    // Only one menu at a time: the bell panel and the account menu close.
-    announceMenu(dockMenu);
-    const first = menuItems()[0];
-    if (first) first.focus({ preventScroll: true });
-  }
-
-  function closeDockMenu(focusBack) {
-    if (!menuFrom) return;
-    const g = menuFrom;
-    menuFrom = null;
-    dockMenu.hidden = true;
-    doc.removeEventListener('pointerdown', onMenuOutside, true);
-    setAttr(g, 'aria-expanded', 'false');
-    if (focusBack && g.isConnected && isVisible(g)) g.focus({ preventScroll: true });
-  }
-
-  function onMenuOutside(e) {
-    const t = e.target;
-    if (t && (dockMenu.contains(t) || t === menuFrom || (menuFrom && menuFrom.contains(t)))) return;
-    closeDockMenu(false);
-  }
-
-  function announceMenu(detail) {
-    try {
-      doc.dispatchEvent(new hostWin.CustomEvent('ws:menu-open', { detail: detail }));
-    } catch (e) { /* no other menus */ }
-  }
-
-  doc.addEventListener('ws:menu-open', function (e) {
-    if (!e || e.detail !== dockMenu) closeDockMenu(false);
-  });
-
-  dockMenu.addEventListener('keydown', function (e) {
-    const items = menuItems();
-    const at = items.indexOf(doc.activeElement);
-    let to = null;
-    if (e.key === 'ArrowDown') to = items[(at + 1) % items.length];
-    else if (e.key === 'ArrowUp') to = items[(at - 1 + items.length) % items.length];
-    else if (e.key === 'Home') to = items[0];
-    else if (e.key === 'End') to = items[items.length - 1];
-    else if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      closeDockMenu(true);
-      return;
-    } else if (e.key === 'Tab') {
-      // Tab leaves the menu from its handle, on to the next control.
-      closeDockMenu(true);
-      return;
-    }
-    if (to) {
-      e.preventDefault();
-      to.focus({ preventScroll: true });
-    }
-  });
-
-  dockMenu.addEventListener('click', function (e) {
-    const b = e.target && e.target.closest ? e.target.closest('.wsp-dock-item') : null;
-    if (!b) return;
-    closeDockMenu(false);
-    if (b.getAttribute('data-to') === 'top') toTop(true);
-    else toBottom(true);
-  });
-
-  [barGrip, pillGrip].forEach(function (g) {
-    g.addEventListener('click', function () {
-      // The click that ends a drag is not a press.
-      if (now() - lastBarDrag < 400) return;
-      if (menuFrom === g) closeDockMenu(false);
-      else {
-        closeDockMenu(false);
-        openDockMenu(g);
-      }
-    });
-    g.addEventListener('pointerdown', function (e) { gripDown(e, g); });
-  });
-
-  barGrip.addEventListener('keydown', function (e) {
-    if (!windowable() || barDrag || e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === 'Home') {
-      e.preventDefault();
-      closeDockMenu(false);
-      toBottom(true);
-      return;
-    }
-    const d = arrowStep(e);
-    if (!d || moveTimer !== null) return;
-    e.preventDefault();
-    closeDockMenu(false);
-    const from = barSpot();
-    const p = fitBar({ x: from.x + d[0], y: from.y + d[1] }, vpTop(), { w: from.w, h: from.h });
-    putBar('free', { x: p.x, y: p.y, quiet: true });
-  });
-
-  // ---- Dragging the bar ----
-
-  function gripDown(e, g) {
-    if (barDrag || moveTimer !== null || !barShown || !windowable() || (e.button !== undefined && e.button > 0)) return;
-    barDrag = { from: g === pillGrip ? 'top' : dockPlace().at, id: e.pointerId, sx: e.clientX, sy: e.clientY, started: false, grip: g, zone: null };
-    hostWin.addEventListener('pointermove', onBarMove);
-    hostWin.addEventListener('pointerup', onBarUp);
-    hostWin.addEventListener('pointercancel', onBarCancel);
-  }
-
-  function startBarDrag() {
-    const d = barDrag;
-    d.started = true;
-    d.focus = doc.activeElement === d.grip;
-    closeDockMenu(false);
-    announceMenu(dockMenu);
-    const hm = home();
-    d.home = hm;
-    if (d.from === 'top') {
-      // The pill lifts out as the bar, held by its handle.
-      d.offX = BAR_GRIP_X;
-      d.offY = hm.h / 2;
-      d.start = null;
-    } else {
-      const r = barSpot();
-      d.offX = d.sx - r.x;
-      d.offY = d.sy - r.y;
-      d.start = r;
-    }
-    ghost.style.height = hm.h + 'px';
-    bar.classList.add('is-dragging');
-    root.setAttribute('data-wsp-drag', '');
-    syncSlot();
-    doc.addEventListener('keydown', onBarDragKey, true);
-  }
-
-  function moveBar(x, y) {
-    const d = barDrag;
-    const hm = d.home;
-    const p = fitBar({ x: x - d.offX, y: y - d.offY }, vpTop(), { w: hm.w, h: hm.h });
-    d.x = p.x;
-    d.y = p.y;
-    setSpot(p);
-    const zone = dropZone({ x: x, y: y }, { x: p.x, y: p.y, w: hm.w, h: hm.h }, hm, topLimit() - WIN_GAP, laneLeft());
-    if (zone !== d.zone) {
-      d.zone = zone;
-      setAttr(root, 'data-wsp-drop', zone === 'free' ? null : zone);
-      bar.classList.toggle('is-near', zone === 'top');
-    }
-  }
-
-  function onBarMove(e) {
-    const d = barDrag;
-    if (!d || e.pointerId !== d.id) return;
-    if (!d.started) {
-      if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) < DRAG_PX) return;
-      startBarDrag();
-    }
-    if (e.cancelable) e.preventDefault();
-    moveBar(e.clientX, e.clientY);
-  }
-
-  function onBarUp(e) {
-    if (barDrag && e.pointerId === barDrag.id) endBarDrag('drop');
-  }
-
-  function onBarCancel(e) {
-    if (barDrag && e.pointerId === barDrag.id) endBarDrag('cancel');
-  }
-
-  function onBarDragKey(e) {
-    if (e.key !== 'Escape' || !barDrag) return;
-    e.preventDefault();
-    e.stopPropagation();
-    endBarDrag('cancel');
-    say('Move cancelled.');
-  }
-
-  function endBarDrag(how) {
-    const d = barDrag;
-    if (!d) return;
-    barDrag = null;
-    hostWin.removeEventListener('pointermove', onBarMove);
-    hostWin.removeEventListener('pointerup', onBarUp);
-    hostWin.removeEventListener('pointercancel', onBarCancel);
-    doc.removeEventListener('keydown', onBarDragKey, true);
-    if (!d.started) return;
-    lastBarDrag = now();
-    bar.classList.remove('is-dragging', 'is-near');
-    root.removeAttribute('data-wsp-drag');
-    root.removeAttribute('data-wsp-drop');
-    if (how === 'cancel' || !barShown) {
-      applyDock();
-      if (d.focus) {
-        const g = dockPlace().at === 'top' ? pillGrip : barGrip;
-        if (isVisible(g)) g.focus({ preventScroll: true });
-      }
-      return;
-    }
-    if (d.zone === 'top') putBar('top', { focus: d.focus });
-    else if (d.zone === 'bottom') putBar('bottom', { focus: d.focus, from: { x: d.x, y: d.y } });
-    else putBar('free', { focus: d.focus, x: d.x, y: d.y, dropped: true });
-  }
-
-  // A smaller or larger window: a spot of its own kept inside it.
-  if (hostWin && typeof hostWin.addEventListener === 'function') {
-    hostWin.addEventListener('resize', function () {
-      if (barDrag) return;
-      closeDockMenu(false);
-      if (barShown) applyDock();
-    });
   }
 
   // ---- Open and close ----
@@ -2451,8 +1850,8 @@ export function createUI(env) {
       lastFocus = null;
       if (lastState) drawPill(lastState);
       if (focusIn) {
-        // Back to what opens it: the pill's cover, or the floating bar's.
-        const back = pillOnScreen() ? pillOpen : barShown && dockPlace().at !== 'top' && isVisible(openBtn) ? openBtn : fallbackFocus();
+        // The narrowest top bar has no cover to open the window: Play then.
+        const back = pillOnScreen() ? (isVisible(pillOpen) ? pillOpen : pillPlay) : fallbackFocus();
         if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
       }
       emit('close');
@@ -2629,9 +2028,6 @@ export function createUI(env) {
         // A page mounts after its first fetches: one the player was opened
         // over (tapped while it loaded) is the page it opened on.
         const url = e && e.detail && e.detail.url;
-        // A full-screen view (the reader) has the phone's bar; back from it,
-        // the floating one in its place.
-        if (barShown) applyDock();
         if (!isOpen) return;
         // The window stays open from page to page (in its own window it is
         // no page's); a full-screen view (the reader) is the sheet's.

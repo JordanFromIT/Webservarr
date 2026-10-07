@@ -722,19 +722,12 @@ html.ws-vt #wsPlayer       { view-transition-name: ws-player; }
  * ever under the player: below lg the document scrolls, so <body> pads its
  * bottom; from lg the sidebar and <main> are one screen tall and scroll
  * inside, so they end that much higher (max-height wins over h-screen).
- * On a desktop page the bar floats over the page column only (from
- * --ws-lane-left, the sidebar's width), so only <main> ends higher, and
- * <body> pads nothing; the room is 0px while the bar is kept in the top bar
- * or at a spot of its own (ui.js).
  */
-html { --ws-player-h: 0px; --ws-lane-left: 0px; }
+html { --ws-player-h: 0px; }
 #wsPlayer { position: fixed; left: 0; right: 0; bottom: var(--ws-tabbar-h); z-index: 45; }
 body { padding-bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h)); }
 @media (min-width: 1024px) {
   #desktopSidebar, #desktopSidebar ~ main { max-height: calc(100vh - var(--ws-player-h)); }
-  html:not([data-shell="hidden"]) { --ws-lane-left: 16rem; }
-  html:not([data-shell="hidden"]) body { padding-bottom: 0; }
-  html:not([data-shell="hidden"]) #desktopSidebar { max-height: none; }
 }
 
 /* ---- Navigation progress ----
@@ -1927,161 +1920,23 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 
 /* ---- The desktop player (js/player/ui.js, popout.js, remote.js) ----
- * From lg, on a page whose top bar shows: the bar floats (below), or the
- * listener keeps it in the top bar as the pill; the player opens as a
- * floating window instead of the full-screen sheet (the same element,
- * .wsp-full.is-window). A full-screen view (the reader), where the top bar
- * is hidden, keeps the phone's bar. The window sits over the page under the
- * top bar (#wsPlayer's z 45, the header's 50), so the bell panel and the
- * account menu open over it. Its surface, the floating bar's and the
- * handle's menu's is the background with a primary tint; text as the rest
- * of the player. Motion: the window opens and closes with a short scale and
- * fade, the bar flies between its places (opacity only with reduced
- * motion); the pill's three bars move only while it plays.
+ * From lg, on a page whose top bar shows: a pill in the top bar instead of
+ * the bar, and the player as a floating window instead of the full-screen
+ * sheet (the same element, .wsp-full.is-window). The bar still shows on a
+ * full-screen view (the reader), where the top bar is hidden. The window
+ * sits over the page under the top bar (#wsPlayer's z 45, the header's 50),
+ * so the bell panel and the account menu open over it. Its surface is the
+ * background with a primary tint; text as the rest of the player. Motion:
+ * the window opens and closes with a short scale and fade (opacity only
+ * with reduced motion); the pill's three bars move only while it plays.
  */
-
-/* The floating bar: from 640px on a page with the shell. On a tablet it sits
-   over the tab bar, 16px in from each side and 12px above it, with no handle
-   (there is no top bar to keep it in). On a desktop page it is a card at the
-   bottom centre of the page column (720px at most, 24px above the bottom),
-   or at a spot of its own (ui.js sets --wsp-x and --wsp-y), or hidden while
-   it is kept in the top bar (data-dock="top"), with a handle on its left.
-   The handle and Stop are hidden on a phone, which keeps its bar as it was. */
-.wsp-grip, .wsp-bar-stop { display: none; }
-.wsp-grip {
-  align-items: center; justify-content: center; flex-shrink: 0; color: rgb(var(--color-text) / .7);
-  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
-  transition: color 150ms ease-out, background-color 150ms ease-out;
-}
-.wsp-grip .material-symbols-outlined { font-size: 20px; }
-.wsp-grip:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
-.wsp-bar-stop { width: 40px; height: 40px; }
-.wsp-bar-stop .material-symbols-outlined { font-size: 20px; font-variation-settings: 'FILL' 1; }
-.wsp-bar-stop[aria-disabled="true"] { opacity: .45; cursor: default; background: none; color: rgb(var(--color-text) / .7); }
-@media (hover: hover) and (pointer: fine) {
-  .wsp-grip:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
-}
-@media (min-width: 640px) {
-  html:not([data-shell="hidden"]) .wsp-bar-stop { display: inline-flex; }
-  html:not([data-shell="hidden"]) .wsp-bar {
-    --wsp-bar-gap: 12px;
-    width: calc(100% - 32px); margin: 0 auto var(--wsp-bar-gap); overflow: hidden;
-    border: 1px solid rgb(var(--color-text) / .14); border-radius: 16px;
-    background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
-    -webkit-backdrop-filter: none; backdrop-filter: none;
-    box-shadow: 0 16px 40px -12px var(--ws-shade), 0 2px 6px var(--ws-shade);
-  }
-  html:not([data-shell="hidden"]) .wsp-bar .wsp-line { top: 0; }
-}
-@media (min-width: 900px) {
-  html:not([data-shell="hidden"]) .wsp-bar { width: min(720px, calc(100% - 32px)); }
-}
 @media (min-width: 1024px) {
-  html:not([data-shell="hidden"]) .wsp-bar-dockable {
-    --wsp-bar-gap: 0px;
-    position: fixed; left: var(--ws-lane-left); right: 0; bottom: 24px; margin: 0 auto;
-    width: min(720px, calc(100vw - var(--ws-lane-left) - 48px));
-    animation: wsp-bar-in 220ms cubic-bezier(.2, .8, .2, 1);
-    transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out;
-  }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-dock="top"]:not(.is-dragging) { display: none; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-dock="free"],
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-dragging {
-    left: var(--wsp-x, 8px); top: var(--wsp-y, 72px); right: auto; bottom: auto; margin: 0;
-  }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-row { height: 64px; padding: 0 12px 0 0; gap: 8px; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-open { height: 52px; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable .wsp-bar-grip { display: inline-flex; width: 32px; align-self: stretch; border-radius: 15px 0 0 15px; }
-  /* The window it opened is open. */
-  html:not([data-shell="hidden"]) .wsp-bar-dockable[data-open] {
-    border-color: rgb(var(--color-accent) / .5);
-    background: linear-gradient(rgb(var(--color-primary) / .22), rgb(var(--color-primary) / .22)), rgb(var(--color-background));
-  }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-arriving { animation: wsp-fade-in 160ms ease-out; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-dragging {
-    cursor: grabbing; box-shadow: 0 28px 64px -12px var(--ws-shade), 0 2px 8px var(--ws-shade);
-  }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-dragging .wsp-grip { cursor: grabbing; color: rgb(var(--color-text)); }
-  /* Over the top bar it gives way to the pill shown there (the pointer
-     still holds it). */
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-near { opacity: 0; transition: opacity 120ms ease-out; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-settling { transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-leaving {
-    opacity: 0; pointer-events: none;
-    transition: transform 240ms cubic-bezier(.4, 0, .2, 1), opacity 240ms ease-in;
-  }
+  html:not([data-shell="hidden"]) .wsp-bar.wsp-bar-pilled { display: none; }
 }
-@keyframes wsp-bar-in { from { opacity: 0; transform: translateY(16px); } }
-@media (hover: hover) and (pointer: fine) {
-  html:not([data-shell="hidden"]) .wsp-bar-dockable:not([data-open]) .wsp-bar-open:hover { background: rgb(var(--color-text) / .05); }
-}
-
-/* While it is dragged: the two snap zones, the bottom centre (a dashed
-   outline where it goes back to) and the top bar (a dashed slot left of the
-   bell). The one letting go would snap to turns solid; over the top bar the
-   pill itself shows in the slot and the top bar takes the primary tint. */
-html[data-wsp-drag], html[data-wsp-drag] * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
-.wsp-dock-ghost { display: none; }
-@media (min-width: 1024px) {
-  html[data-wsp-drag]:not([data-shell="hidden"]) .wsp-dock-ghost {
-    display: block; position: fixed; z-index: -1; left: var(--ws-lane-left); right: 0; bottom: 24px; margin: 0 auto;
-    width: min(720px, calc(100vw - var(--ws-lane-left) - 48px)); height: 66px;
-    border: 2px dashed rgb(var(--color-text) / .45); border-radius: 16px; pointer-events: none;
-  }
-  html[data-wsp-drop="bottom"]:not([data-shell="hidden"]) .wsp-dock-ghost { border-style: solid; border-color: rgb(var(--color-accent)); background: rgb(var(--color-primary) / .2); }
-}
-.wsp-dock-target { display: none; }
-html[data-wsp-drag] .wsp-dock-target, html[data-wsp-docking] .wsp-dock-target {
-  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; margin-block: -4px; padding: 0 12px;
-  border-radius: 9999px; border: 2px dashed rgb(var(--color-accent) / .8); background: rgb(var(--color-primary) / .12);
-  color: rgb(var(--color-text) / .85); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden;
-}
-.wsp-dock-target .material-symbols-outlined { font-size: 20px; }
-html[data-wsp-docking] .wsp-dock-target { border-style: solid; border-color: rgb(var(--color-accent)); background: rgb(var(--color-primary) / .4); }
-html[data-wsp-drag] .wsp-pill, html[data-wsp-docking] .wsp-pill { display: none; }
-html[data-wsp-drop="top"] .wsp-dock-target { display: none; }
-html[data-wsp-drop="top"] .wsp-pill {
-  display: flex; pointer-events: none;
-  background: rgb(var(--color-primary) / .4); border-color: rgb(var(--color-accent)); box-shadow: 0 0 0 1px rgb(var(--color-accent));
-}
-html[data-wsp-drop="top"] #appHeader {
-  background: linear-gradient(rgb(var(--color-primary) / .2), rgb(var(--color-primary) / .2)), rgb(var(--color-background));
-  border-bottom-color: rgb(var(--color-accent) / .7);
-}
-@container (max-width: 159px) {
-  .wsp-dock-word { display: none; }
-}
-
-/* The handle's menu: the places to put the player, over the bar's handle or
-   under the pill's (ui.js places it). */
-.wsp-dock-menu {
-  position: fixed; z-index: 2; min-width: 216px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
-  border-radius: 12px; border: 1px solid rgb(var(--color-text) / .14); color: rgb(var(--color-text));
-  background: linear-gradient(rgb(var(--color-primary) / .10), rgb(var(--color-primary) / .10)), rgb(var(--color-background));
-  box-shadow: 0 16px 36px -12px var(--ws-shade), 0 2px 6px var(--ws-shade);
-  animation: wsp-fade-in 120ms ease-out;
-}
-.wsp-dock-item {
-  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px;
-  font-size: 14px; font-weight: 600; text-align: left; white-space: nowrap; color: inherit;
-  transition: background-color 150ms ease-out;
-}
-.wsp-dock-item .material-symbols-outlined { font-size: 20px; color: rgb(var(--color-text) / .7); }
-.wsp-dock-item:focus { outline: none; background: rgb(var(--color-text) / .08); }
-.wsp-dock-item:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
-@media (hover: hover) and (pointer: fine) {
-  .wsp-dock-item:hover { background: rgb(var(--color-text) / .08); }
-}
-
 #wsPlayerPill[hidden], #wsPlayerPill [hidden] { display: none !important; }
 /* The slot narrows into the top bar's free width (300px at most); under
-   200px the pill is its handle, cover, Play and Stop, the title in its
-   label; under 140px all a size down. It never gets narrower than that
-   smallest pill (102px), so the pill never runs under the bell: in the
-   tightest top bar (Home's gauges at 1024px) the account menu gives up a
-   few pixels of the top bar's padding instead. Its right margin takes 8px
-   of the gap to the bell, whose own padding keeps them apart. */
-#wsPlayerPill { flex: 0 1 auto; width: 300px; min-width: 102px; margin-inline-end: -8px; container-type: inline-size; }
+   200px the pill is its cover and its play button, the title in its label. */
+#wsPlayerPill { flex: 0 1 auto; width: 300px; min-width: 80px; container-type: inline-size; }
 /* Only the pill gives way: the bell and the account menu keep their size. */
 #wsPlayerPill ~ * { flex-shrink: 0; }
 
@@ -2095,12 +1950,9 @@ html[data-wsp-drop="top"] #appHeader {
   background: rgb(var(--color-text) / .06); border: 1px solid rgb(var(--color-text) / .10);
   transition: background-color 150ms ease-out, border-color 150ms ease-out;
 }
-/* Its handle, on its left edge: drag the player out of the top bar, or
-   press it for the places to put it (ui.js). */
-.wsp-pill-grip { display: inline-flex; width: 24px; height: 100%; padding-inline-start: 4px; border-radius: 9999px 0 0 9999px; }
 .wsp-pill-open {
   flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px;
-  padding: 0 4px 0 2px; border-radius: 9999px; text-align: left; color: inherit;
+  padding: 0 4px 0 6px; border-radius: 9999px; text-align: left; color: inherit;
   transition: background-color 150ms ease-out;
 }
 .wsp-pill-open:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
@@ -2123,9 +1975,6 @@ html[data-wsp-drop="top"] #appHeader {
 .wsp-pill-line { position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; pointer-events: none; background: rgb(var(--color-text) / .12); }
 .wsp-pill-fill { display: block; height: 100%; background: rgb(var(--color-accent)); transform-origin: 0 50%; transform: scaleX(0); }
 .wsp-pill[data-open] { background: rgb(var(--color-primary) / .3); border-color: rgb(var(--color-accent) / .5); }
-/* Into the top bar: it arrives from a little smaller (a fade with reduced motion). */
-.wsp-pill.is-arriving { animation: wsp-pill-in 200ms cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes wsp-pill-in { from { opacity: 0; transform: scale(.92); } }
 .wsp-pill[data-state="paused"] .wsp-pill-title { color: rgb(var(--color-text) / .85); }
 .wsp-pill[data-warn] { border-color: rgb(var(--ws-status-warn) / .6); }
 .wsp-pill[data-warn] .wsp-pill-meta { color: var(--ws-status-warn-text); font-weight: 600; }
@@ -2150,18 +1999,11 @@ html[data-wsp-drop="top"] #appHeader {
   .wsp-pill-play { width: 32px; height: 32px; }
   .wsp-pill-line { left: 12px; right: 12px; }
 }
-/* The tightest top bar (about 1024 to 1070px wide on Home): everything a
-   size down, so the cover still opens the window and Stop never clips. */
-@container (max-width: 139px) {
-  .wsp-pill { gap: 0; padding-right: 0; }
-  .wsp-pill-grip { width: 24px; padding-inline-start: 4px; }
-  .wsp-pill-open { padding: 0; border-radius: 6px; }
-  .wsp-pill-art { width: 24px; height: 24px; border-radius: 4px; }
-  .wsp-pill-art .wsp-art-mark { font-size: 16px; }
-  .wsp-pill-play { width: 28px; height: 28px; }
-  .wsp-pill-play .material-symbols-outlined { font-size: 20px; }
-  .wsp-pill-stop { width: 24px; margin-inline-start: 0; }
-  .wsp-pill-line { left: 16px; right: 14px; }
+/* Too narrow for the cover, Play and Stop together (about 1024 to 1050px
+   wide): the cover gives way, Play and Stop stay. */
+@container (max-width: 111px) {
+  .wsp-pill-open { display: none; }
+  .wsp-pill-play { margin-inline-start: 6px; }
 }
 @media (hover: hover) and (pointer: fine) {
   .wsp-pill:not([data-open]) .wsp-pill-open:hover { background: rgb(var(--color-text) / .06); }
@@ -2309,12 +2151,8 @@ html[data-wsp-drop="top"] #appHeader {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wsp-pill, .wsp-pill-open, .wsr-btn, .wsp-grip, .wsp-dock-item { transition: none; }
+  .wsp-pill, .wsp-pill-open, .wsr-btn { transition: none; }
   .wsp-pill[data-state="playing"] .wsp-eq span { animation: none; }
-  .wsp-pill.is-arriving { animation: wsp-fade-in 160ms ease-out both; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable { animation: wsp-fade-in 160ms ease-out; transition: none; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-settling { transition: none; }
-  html:not([data-shell="hidden"]) .wsp-bar-dockable.is-leaving { transition: opacity 160ms ease-in; }
   .wsp-full.is-window.is-opening { animation: wsp-fade-in 160ms ease-out both; }
   .wsp-full.is-window.is-closing { animation: wsp-fade-out 120ms ease-in both; }
 }
