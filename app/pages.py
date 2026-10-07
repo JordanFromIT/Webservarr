@@ -394,12 +394,12 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
 _LINK_ACTIVE = (
     '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-bright '
     'font-bold transition-all shadow-baltic-blue/20" href="{href}" aria-current="page">'
-    '<span class="ws-nav-icon material-symbols-outlined fill-1 shrink-0">{icon}</span>{label}{badge}</a>'
+    '<span class="ws-nav-icon material-symbols-outlined fill-1 shrink-0" aria-hidden="true">{icon}</span>{label}{badge}</a>'
 )
 _LINK = (
     '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue '
     'transition-all group" href="{href}">'
-    '<span class="ws-nav-icon material-symbols-outlined text-steel-blue group-hover:text-frosted-blue transition-colors shrink-0">{icon}</span>'
+    '<span class="ws-nav-icon material-symbols-outlined text-steel-blue group-hover:text-frosted-blue transition-colors shrink-0" aria-hidden="true">{icon}</span>'
     '{label}{badge}</a>'
 )
 # A sublabel stacks under the label instead of sitting beside it, so the nav
@@ -667,7 +667,7 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str, 
         logo_html = (
             '<div class="size-14 bg-primary rounded-lg flex items-center justify-center '
             'shadow-lg shadow-baltic-blue/20 mb-3">'
-            f'<span class="material-symbols-outlined text-bright font-bold text-3xl">{logo_icon}</span>'
+            f'<span class="material-symbols-outlined text-bright font-bold text-3xl" aria-hidden="true">{logo_icon}</span>'
             '</div>'
         )
     else:

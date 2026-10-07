@@ -27,7 +27,7 @@
   <div class="min-w-0 flex items-center gap-4">
     <div id="wsPlayerPill" hidden></div>
     <button class="relative inline-flex p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications" aria-label="Notifications">
-      <span class="material-symbols-outlined">notifications</span>
+      <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
     </button>
     <div class="relative">
       <button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity" aria-label="Account menu">
@@ -39,11 +39,11 @@
       </button>
       <div id="userMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
         <a href="/settings#sign-in" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
-          <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+          <span class="material-symbols-outlined text-steel-blue text-sm" aria-hidden="true">manage_accounts</span>
           Account settings
         </a>
         <button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
-          <span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+          <span class="material-symbols-outlined text-steel-blue text-sm" aria-hidden="true">logout</span>
           Sign out
         </button>
       </div>

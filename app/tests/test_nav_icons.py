@@ -102,7 +102,7 @@ class Css(unittest.TestCase):
 class WhichIcons(unittest.TestCase):
     def test_every_sidebar_link_icon_carries_the_class(self):
         for tpl in (pages._LINK, pages._LINK_ACTIVE):
-            m = re.search(r'<a [^>]*>\s*<span class="([^"]*)">\{icon\}</span>', tpl)
+            m = re.search(r'<a [^>]*>\s*<span class="([^"]*)" aria-hidden="true">\{icon\}</span>', tpl)
             self.assertIsNotNone(m, tpl)
             self.assertIn("ws-nav-icon", m.group(1).split())
         nav = pages.render_nav_links(branding(), True, "settings")
