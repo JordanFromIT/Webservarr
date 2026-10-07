@@ -13,6 +13,9 @@
  * this person may see and sorts the series (by number, books without one
  * last); the page draws what it is given, in that order.
  *
+ * A book (a card, a series row) opens in the pop-up over the page, at its own
+ * address (books.js withBookDialog, pages/book.js bookDialog).
+ *
  * Drawn in one write over a skeleton with the same shape: the heading stays
  * and everything after it is a new element, so nothing already on screen moves.
  *
@@ -86,7 +89,9 @@ export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
-  const { renderBookCard, coverBox, noteLine, sendBooks } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  const { renderBookCard, coverBox, noteLine, sendBooks, withBookDialog } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  // A book opens in the pop-up over this page (books.js withBookDialog); Back closes it.
+  if (typeof withBookDialog === 'function') withBookDialog(ctx, null, null);
 
   const kind = root.getAttribute('data-kind') === 'series' ? 'series' : 'person';
   const params = ctx.url.searchParams;

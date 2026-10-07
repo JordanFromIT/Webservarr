@@ -8,6 +8,11 @@
 <script src="/static/js/theme-loader.js?v=1"></script>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+  /* The book pop-up (partials/book-dialog.html) is open: the page under it
+     holds still, at the place it was. */
+  html[data-book-open] body { overflow: hidden; }
+</style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
@@ -49,6 +54,7 @@
 
 </div>
 </div>
+<!-- ws:book-dialog -->
 </div>
 </main>
 

@@ -15,7 +15,7 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "books", "reader",
-             "requests", "requests-embed", "player-test", "book", "books-person", "books-series", "books-stats"]
+             "requests", "requests-embed", "player-test", "books-person", "books-series", "books-stats"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -30,6 +30,10 @@ _TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
 _HANDLER_ATTR_RE = re.compile(r"\son[a-z]+\s*=", re.I)
 _HANDLER_IN_STRING_RE = re.compile(r"""\bon[a-z]+=\\?["']""", re.I)
 _FUNCTION_ARG_RE = re.compile(r"^\s*(?:async\s+)?function\b")
+
+
+# The Books pages' book pop-up, written into each by app/pages.py.
+BOOK_DIALOG = (STATIC / "partials" / "book-dialog.html").read_text(encoding="utf-8")
 
 
 def module_name(name: str) -> str:
@@ -821,12 +825,13 @@ class BookPages(unittest.TestCase):
             with self.subTest(name):
                 self.assertNotRegex(js_code_only(src), r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|document\.write")
                 self.assertNotRegex(js_code_only(src), r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
-        for name in ("book", "books-person", "books-series", "books-stats"):
+        for name in ("books-person", "books-series", "books-stats"):
             with self.subTest(name):
                 self.assertNotIn("onerror", read(name))
+        self.assertNotIn("onerror", BOOK_DIALOG)
 
     def test_each_page_is_one_section_that_arrives_at_once(self):
-        for name, key, src in (("book", "book", "book"), ("books-person", "list", "books-list"),
+        for name, key, src in (("books-person", "list", "books-list"),
                                ("books-series", "list", "books-list"), ("books-stats", "stats", "books-stats")):
             with self.subTest(name):
                 h = read(name)
@@ -867,7 +872,7 @@ class BookPages(unittest.TestCase):
         self.assertIn("f.read_url.indexOf('/reader?') === 0", module_source("books"))
 
     def test_the_hand_off_is_the_books_pages_helper(self):
-        for name in ("book", "books-person", "books-series"):
+        for name in ("books", "books-person", "books-series"):
             with self.subTest(name):
                 self.assertIn('<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>', read(name))
         # (Your stats runs no hand-off: its reading note sends the person to Books, which does.)
@@ -901,9 +906,48 @@ class BookPages(unittest.TestCase):
                 self.assertNotRegex(js_code_only(src), r"(?m)^\s*import\b[^(]")
                 self.assertNotIn("./books.js'", src.replace("|| './books.js'", ""))
                 self.assertIn("await import(root.getAttribute('data-ws-dep') || './books.js')", src)
-        for name in ("book", "books-person", "books-series", "books-stats"):
+        for name in ("books-person", "books-series", "books-stats"):
             with self.subTest(name):
                 self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', read(name))
+        # The pop-up's book draws with the same helpers, named on its own body.
+        self.assertIn('<div id="bookBody" data-ws-dep="/static/js/pages/books.js?v=1"', BOOK_DIALOG)
+
+
+class BookPopup(unittest.TestCase):
+    """A book opens in a pop-up over the Books pages (partials/book-dialog.html,
+    pages/book.js bookDialog, books.js withBookDialog), not as a page of its own."""
+
+    def test_each_books_page_carries_it_once_inside_the_page(self):
+        for name in ("books", "books-person", "books-series"):
+            with self.subTest(name):
+                h = read(name)
+                page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+                self.assertEqual(page.count("<!-- ws:book-dialog -->"), 1)
+                self.assertIn("html[data-book-open] body { overflow: hidden; }", h)
+        self.assertFalse((STATIC / "book.html").exists(), "/books/<id> is the Books page with the pop-up open")
+
+    def test_it_is_a_labelled_modal_on_the_frosted_surface(self):
+        d = BOOK_DIALOG
+        self.assertIn('role="dialog" aria-modal="true" aria-labelledby="bookTitle"', d)
+        self.assertEqual(len(re.findall(r'<h2 id="bookTitle"', d)), 1)
+        self.assertNotIn("<h1", d)
+        self.assertIn("ws-frost", d)
+        self.assertIn("[html[data-book-open]_&]:flex", d)
+        self.assertEqual(d.count("data-book-close"), 2)          # the dim and Close
+        self.assertIn('aria-label="Close"', d)
+        # Drawn as soon as its answer is in, whatever the page under it is doing.
+        self.assertNotIn("data-arrive", d)
+        self.assertIn('id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=1"', d)
+
+    def test_the_pages_open_it_through_the_router(self):
+        self.assertRegex(module_source("book"), r"export function bookDialog\(page\)")
+        books = module_source("books")
+        self.assertRegex(books, r"export function withBookDialog\(ctx, own, changed\)")
+        self.assertIn("withBookDialog(ctx, function (url, how) {", books)
+        self.assertIn("withBookDialog(ctx, null, null)", module_source("books-list"))
+        # It is a WSUI modal (focus kept inside, Escape), and the timers are the page's.
+        code = js_code_only(module_source("book"))
+        self.assertIn("UI.modal(overlay, { box: box, onClose: onClose })", code)
 
 
 class ReaderPage(unittest.TestCase):

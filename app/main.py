@@ -706,12 +706,14 @@ async def book_page(
     book_id: int,
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Serve one book's page. Whether the book exists, and what this person may
-    see of it, is the page's own question to /api/books/<id>."""
+    """Serve one book: the Books page with the book's pop-up open (a refresh or
+    a shared link of the address a click on a book gives). Whether the book
+    exists, and what this person may see of it, is the pop-up's own question
+    to /api/books/<id>."""
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("book", request, user, gate="library")
+    return render_page("books", request, user, gate="library", extra_flags={"book_open": True})
 
 
 # Legacy redirects: /ebooks (the old eBooks page) and /library (before that) → /books (301)

@@ -598,6 +598,9 @@ def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -
 
 SIDEBAR_MARKER = "<!-- ws:sidebar -->"
 HEADER_MARKER = "<!-- ws:header -->"
+# The Books pages' book pop-up (partials/book-dialog.html): one copy, written
+# wherever a page carries the marker (books, books-person, books-series).
+BOOK_DIALOG_MARKER = "<!-- ws:book-dialog -->"
 # Home's event log section; flags["feed_off"] renders it hidden (render_html).
 EVENT_LOG_OPEN = '<section id="homeEventLog"'
 # Home's pinned problems: flags["event_pinned"] ({"items", "now_ms"}) writes
@@ -1067,6 +1070,9 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
             header += PAGE_OFF_BANNER
         out = out.replace(HEADER_MARKER, header, 1)
 
+    if BOOK_DIALOG_MARKER in out:
+        out = out.replace(BOOK_DIALOG_MARKER, _partial("book-dialog.html"), 1)
+
     if name == "login":
         out = _fill_login_name(out, branding)
 
@@ -1130,6 +1136,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         # /requests: nothing waiting in Request Status, so the section is
         # collapsed from the first paint (requests.html).
         attrs += " data-rs-empty"
+    if flags.get("book_open"):
+        # /books/<id>: the Books page with the book's pop-up on screen from the
+        # first paint (partials/book-dialog.html); pages/book.js takes it over.
+        attrs += " data-book-open"
     out = re.sub(r"<html\b", "<html" + attrs, out, count=1)
 
     return _stamp_asset_versions(out)

@@ -9,6 +9,9 @@
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
+  /* The book pop-up (partials/book-dialog.html) is open: the page under it
+     holds still, at the place it was. */
+  html[data-book-open] body { overflow: hidden; }
   /* Continue is always there. Its skeleton is a row of cards for a person who
      had books in progress last visit (theme-loader.js on a full load and
      pages/books.js on every visit, before its first await, put
@@ -263,6 +266,7 @@
 
 </div>
 </div>
+<!-- ws:book-dialog -->
 </div>
 </main>
 

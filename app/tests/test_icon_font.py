@@ -104,7 +104,7 @@ class TheList(unittest.TestCase):
     def test_the_scan_finds_the_ways_the_code_draws_icons(self):
         # One of each: page markup, a JS helper call, a JS table, Python markup.
         found = names_in_code()
-        for name, where in (("chevron_left", "static/book.html"), ("content_copy", "static/js/settings/integrations.js"),
+        for name, where in (("chevron_left", "static/books-person.html"), ("content_copy", "static/js/settings/integrations.js"),
                             ("format_bold", "static/js/news-editor.js"), ("push_pin", "home_news.py")):
             self.assertIn(where, found.get(name, ()), name)
 

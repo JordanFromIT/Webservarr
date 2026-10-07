@@ -12,7 +12,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 SHELL_PAGES = ["index", "requests", "requests-embed", "issues", "calendar", "tickets",
-               "books", "book", "books-person", "books-series", "books-stats", "news", "wiki", "settings", "reader",
+               "books", "books-person", "books-series", "books-stats", "news", "wiki", "settings", "reader",
                "player-test"]
 BARE_PAGES = ["login", "setup"]
 

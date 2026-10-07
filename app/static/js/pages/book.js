@@ -1,7 +1,9 @@
 /**
- * WebServarr, a book (page module)
+ * WebServarr, a book (the Books pages' pop-up)
  *
- * /books/<id>: one book, whatever formats it comes in. The cover, the title,
+ * /books/<id>: one book, whatever formats it comes in, in a pop-up over the
+ * Books page it was opened from (bookDialog, below; the frame is
+ * partials/book-dialog.html). The cover, the title,
  * who wrote and read it (each a link to their page), the series it belongs to,
  * and two buttons: Read, which opens the reader at the book's own chapter, and
  * Listen, which plays the audiobook. Each says how far the person is. A book
@@ -30,10 +32,26 @@
  * sample" with the time left. The player's own corner says so too
  * (features.js), since a sample plays on across pages.
  *
- * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
- * each visit has its own state, and every listener, fetch and timer ends with
- * ctx.signal (a write the person made is let finish: books.js sendBooks).
- * Markup is built with textContent only.
+ * mount(ctx) draws one book into ctx.root (#bookBody) and is run by
+ * bookDialog for each book it opens, as the router runs a page: each book has
+ * its own state, and every listener, fetch and timer ends with ctx.signal (a
+ * write the person made is let finish: books.js sendBooks). In the pop-up
+ * ctx also has close() (the not-found state's way out is Close) and
+ * onChange(kind), told of a change the page under it shows ('list', 'queue',
+ * 'listen'). Markup is built with textContent only.
+ *
+ * bookDialog(page) runs the pop-up for a Books page (books.js withBookDialog
+ * calls it, with the page's ctx). A click on a book is claimed from the router:
+ * the address becomes /books/<id> (a history entry), the pop-up opens over the
+ * page, which keeps its place and its scroll, and Back closes it. Escape, Close
+ * and a press on the dim close it too, by the same step back (or, when the
+ * address was never the page's, by replacing it with the page's own). A full
+ * load of /books/<id> is the Books page with the pop-up already on screen
+ * (<html data-book-open>, server-rendered); it is taken over here. It is a
+ * modal (WSUI.modal: focus kept inside, Escape), labelled by the book's title;
+ * focus goes back to the card that opened it. A link inside it (an author, a
+ * narrator, a series) is an ordinary navigation, and the router closes the
+ * pop-up as it swaps the page.
  */
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
@@ -131,6 +149,11 @@ export async function mount(ctx) {
   const $ = function (id) { return root.querySelector('#' + id); };
   const { coverBox, rememberContinue, rememberRow, sendBooks } = await import(root.getAttribute('data-ws-dep') || './books.js');
   const who = ((ctx.data || {}).user || {}).username || '';
+  // In the pop-up: its Close, and what the page under it is told.
+  const closeView = typeof ctx.close === 'function' ? ctx.close : null;
+  function told(kind) {
+    if (typeof ctx.onChange === 'function') ctx.onChange(kind);
+  }
 
   const state = {
     id: bookId(ctx.url.pathname),
@@ -263,6 +286,7 @@ export async function mount(ctx) {
     Promise.resolve(p.open(key, { autoplay: true })).then(function () {
       // A place now exists, so the next Books visit has cards in Continue: it is told now.
       rememberContinue(who);
+      told('listen');
     }, function (e) {
       if (signal.aborted) return;
       console.warn('The player could not open ' + key, e);
@@ -403,6 +427,7 @@ export async function mount(ctx) {
       // The server's place in the queue is the one shown.
       if (kind === 'queue' && data && 'queue_position' in data) state.mine.queue = data.queue_position;
       syncMine();
+      told(kind);
     }, function (err) {
       state.busy[kind] = false;
       if (signal.aborted) return;
@@ -555,8 +580,8 @@ export async function mount(ctx) {
     if (!state.mine) return null;
     const box = el('div', 'mt-6 max-w-xl');
     box.setAttribute('data-mine-block', '');
-    // The same two columns as Read and Listen above, one under the other on a phone.
-    const row = el('div', 'grid gap-3 sm:grid-cols-2');
+    // The same two columns as Read and Listen above, one under the other when narrow.
+    const row = el('div', 'grid gap-3 @[30rem]:grid-cols-2');
     const list = mineButton('list');
     list.addEventListener('click', toggleList, { signal: signal });
     row.appendChild(list);
@@ -816,7 +841,7 @@ export async function mount(ctx) {
     const lead = leader(data);
     const cells = [ebookSlot(data, lead), audioSlot(data, lead)].filter(Boolean);
     if (cells.length) {
-      const actions = el('div', 'mt-6 grid max-w-xl items-start gap-3 sm:grid-cols-2');
+      const actions = el('div', 'mt-6 grid max-w-xl items-start gap-3 @[30rem]:grid-cols-2');
       cells.forEach(function (c) { actions.appendChild(c); });
       rest.appendChild(actions);
     }
@@ -853,7 +878,7 @@ export async function mount(ctx) {
     const formats = [];
     if (data.formats.ebook) formats.push('ebook');
     if (data.formats.audio) formats.push('audio');
-    const cover = el('div', 'w-40 sm:w-full');
+    const cover = el('div', 'w-36 @[34rem]:w-full');
     cover.appendChild(coverBox(b.cover_url, formats, signal, { badges: false, eager: true }));
     swapCover(cover);
     $('bookTitle').textContent = b.title || 'Untitled';
@@ -864,8 +889,9 @@ export async function mount(ctx) {
     syncListen();
     syncSample();
     syncMine();
-    // A merged book: the address becomes the surviving book's, without a history entry.
-    if (b.id !== state.id && !state.addressFixed && typeof b.id === 'number') {
+    // A merged book: the address becomes the surviving book's, without a history
+    // entry (while it is still this book's: the pop-up may be closing).
+    if (b.id !== state.id && !state.addressFixed && typeof b.id === 'number' && bookId(window.location.pathname) === state.id) {
       state.addressFixed = true;
       try {
         window.history.replaceState(window.history.state, '', '/books/' + b.id + ctx.url.search + ctx.url.hash);
@@ -880,7 +906,7 @@ export async function mount(ctx) {
     rest.appendChild(el('p', 'text-[17px] text-frosted-blue/70', text));
     if (action) rest.appendChild(action);
     swapCover((function () {
-      const c = el('div', 'w-40 sm:w-full');
+      const c = el('div', 'w-36 @[34rem]:w-full');
       c.appendChild(coverBox(null, [], signal, { badges: false }));
       return c;
     })());
@@ -890,8 +916,16 @@ export async function mount(ctx) {
   }
 
   function showNotFound() {
-    const back = el('a', 'ws-lift mt-6 inline-flex h-11 items-center rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Back to Books');
-    back.href = '/books';
+    let back;
+    if (closeView) {
+      // In the pop-up the page is under it: Close is the way back.
+      back = el('button', 'ws-lift mt-6 inline-flex h-11 items-center rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Close');
+      back.type = 'button';
+      back.addEventListener('click', closeView, { signal: signal });
+    } else {
+      back = el('a', 'ws-lift mt-6 inline-flex h-11 items-center rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Back to Books');
+      back.href = '/books';
+    }
     message('notfound', 'We couldn’t find that book', 'It may have been removed from the library, or this link is out of date.', back);
   }
 
@@ -901,7 +935,7 @@ export async function mount(ctx) {
   function showConnect() {
     state.connectView = true;
     const action = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Connect');
-    action.id = 'connectBtn';
+    action.id = 'bookConnect';
     action.type = 'button';
     action.addEventListener('click', retryConnect, { signal: signal });
     message('connect', 'Connect your ebook library',
@@ -914,7 +948,7 @@ export async function mount(ctx) {
       there, it just cannot be opened now. Never "removed from the library". */
   function showUnavailable(note) {
     const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
-    retry.id = 'retryBtn';
+    retry.id = 'bookRetry';
     retry.type = 'button';
     retry.addEventListener('click', function () { showSkeleton(); load(true); }, { signal: signal });
     message('unavailable', note && note.text ? note.text : 'Books are unavailable right now',
@@ -923,7 +957,7 @@ export async function mount(ctx) {
 
   function showError() {
     const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
-    retry.id = 'retryBtn';
+    retry.id = 'bookRetry';
     retry.type = 'button';
     retry.addEventListener('click', function () { showSkeleton(); load(true); }, { signal: signal });
     message('error', 'We couldn’t load this book', 'Everything else on the site is unaffected. Try again in a moment.', retry);
@@ -1002,9 +1036,10 @@ export async function mount(ctx) {
 
   // ---- Boot ----
 
-  if (window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
+  // (In the pop-up the page under it has started the visit, and read the address.)
+  if (!closeView && window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
   // A sign-in that just failed sends the person back here: no automatic attempt this visit.
-  if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
+  if (!closeView && window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
   if (!state.id) {
     WS.arrive('book', showNotFound);
@@ -1019,4 +1054,277 @@ export async function mount(ctx) {
     first,
     new Promise(function (resolve) { ctx.setTimeout(resolve, MOUNT_WAIT_MS); })
   ]);
+}
+
+// ---- The pop-up ----
+
+const CLOSE_MS = 130;               // the pop-up's fade out (its keyframes are theme.css's)
+// Written out whole for Tailwind. The dim fades in and the box rises with it;
+// on the way out both fade. Each animates its own opacity, never an ancestor's,
+// so the frosted box keeps its blur of the page throughout.
+const DIM_IN = 'animate-[ws-vt-in_160ms_ease-out_both]';
+const BOX_IN = 'animate-[ws-dialog-in_180ms_ease-out_both]';
+const FADE_OUT = 'animate-[ws-vt-out_130ms_ease-in_both]';
+
+function reduceMotion() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+/** "<site> - <name>", as the router titles a view (router.js pageTitle). */
+function viewTitle(name) {
+  const b = (window.WS && window.WS.data && window.WS.data.branding) || {};
+  const site = typeof b.app_name === 'string' ? b.app_name.trim() : '';
+  return site ? site + ' - ' + name : name;
+}
+
+function entryOf(st) {
+  return st && st.ws === 1 && typeof st.i === 'number' ? st.i : null;
+}
+
+/**
+ * The pop-up over a Books page. page: { root (#wsPage), signal, url, data,
+ * setTimeout, clearTimeout } (the page's ctx), entry (the page's history
+ * entry, router.js state.i, when it was mounted) and changed(kind) (what to
+ * tell it). Null when the page has no #bookDialog. Returns:
+ *   open(url, link)  a book's address: drawn here; link, the one pressed (focus
+ *                goes back to it). A promise of the book's title (the router
+ *                titles and announces the view with it)
+ *   leave(url)   true when url is the pop-up's own way back (the page's
+ *                address under it, or the one it asked the router for), which
+ *                then closes it; anything else is left to the page and router
+ *   at(url)      the page is at url now (its own claim took it): the address
+ *                under the pop-up, which closes if it was open
+ */
+export function bookDialog(page) {
+  const overlay = page.root.querySelector('#bookDialog');
+  if (!overlay) return null;
+  const box = overlay.querySelector('[data-dialog-box]');
+  const dim = overlay.querySelector('.ws-scrim');
+  const html = document.documentElement;
+  // The skeleton as the server sent it: each book starts from a fresh copy.
+  const blank = overlay.querySelector('#bookBody').cloneNode(true);
+  const UI = window.WSUI;
+
+  // The page's own address under the pop-up, and its history entry (as the
+  // page had them when it was mounted: the address may already be a book's by
+  // the time this module is loaded). A full load of /books/<id> never had
+  // one: the Books page's, with no entry.
+  const loaded = bookId(page.url.pathname) !== null;
+  let base = loaded ? { href: new URL('/books', page.url.href).href, i: null }
+    : { href: page.url.href, i: typeof page.entry === 'number' ? page.entry : null };
+  let visit = null;         // the book on screen: { id, ctl, done(title) }
+  let modal = null;         // its WSUI.modal while it is open
+  let closing = '';         // 'nav': closed for a navigation, which moves the address itself
+  let keep = false;         // the router closes every dialog after a claim; not this one
+  let leaving = '';         // the address this pop-up asked the router for on closing
+  let opener = null;        // the link that opened it (focus goes back to it)
+  let pageTitle = '';
+  let hideTimer = 0;
+  let listened = false;
+
+  overlay.addEventListener('click', function (e) {
+    if (e.target && e.target.closest && e.target.closest('[data-book-close]')) close();
+  }, { signal: page.signal });
+  page.signal.addEventListener('abort', function () {
+    endVisit();
+    if (modal) { closing = 'nav'; modal.close(); }
+  }, { once: true });
+
+  function isOpen() { return !!visit; }
+
+  function endVisit() {
+    if (!visit) return;
+    visit.ctl.abort();
+    visit.done('');
+    visit = null;
+  }
+
+  function startModal() {
+    if (modal || !visit || page.signal.aborted) return;
+    // The card that opened it has the focus first, so it gets it back.
+    if (opener && document.activeElement !== opener && document.contains(opener)) {
+      try { opener.focus({ preventScroll: true }); } catch (e) { /* the modal takes it anyway */ }
+    }
+    if (!UI || typeof UI.modal !== 'function') return;
+    modal = UI.modal(overlay, { box: box, onClose: onClose });
+  }
+
+  /** WSUI.modal closed it: Escape, close() below, or the router before a swap. */
+  function onClose() {
+    modal = null;
+    if (keep) {
+      // The router's closing of every dialog after it gave this pop-up a book.
+      keep = false;
+      startModal();
+      return;
+    }
+    const why = closing;
+    closing = '';
+    hide();
+    // The router closes dialogs and leaves the page in one go: then nothing
+    // here is left to do.
+    Promise.resolve().then(function () {
+      if (page.signal.aborted) return;
+      if (why !== 'nav') leaveAddress();
+      refocus();
+    });
+  }
+
+  /** Escape, Close, the dim, or the not-found state's Close. */
+  function close() {
+    if (modal) { modal.close(); return; }
+    if (!visit) return;
+    hide();
+    leaveAddress();
+    refocus();
+  }
+
+  /** Closed for a navigation (Back, or the page's own claim): no address change here. */
+  function closeForNav() {
+    if (!visit) return;
+    if (modal) { closing = 'nav'; modal.close(); return; }
+    hide();
+    refocus();
+  }
+
+  function refocus() {
+    const to = opener && document.contains(opener) ? opener : page.root.querySelector('h1');
+    opener = null;
+    if (!to) return;
+    if (to.tagName === 'H1' && !to.hasAttribute('tabindex')) to.setAttribute('tabindex', '-1');
+    try { to.focus({ preventScroll: true }); } catch (e) { /* nothing to focus */ }
+  }
+
+  /** The address back to the page's: one step back when the entry before is
+      the page's (the pop-up was opened from it), else the page's address in
+      place of this one. */
+  function leaveAddress() {
+    const at = entryOf(window.history.state);
+    // Either way the router hands the address back (leave), and it is taken as is.
+    leaving = base.href;
+    if (base.i !== null && at !== null && at === base.i + 1) {
+      window.history.back();
+      return;
+    }
+    const router = window.WS && window.WS.router;
+    if (router && typeof router.navigate === 'function') {
+      Promise.resolve(router.navigate(base.href, { replace: true })).catch(function () { /* the page is already shown */ });
+    } else {
+      leaving = '';
+      try { window.history.replaceState(window.history.state, '', base.href); } catch (e) { /* only the address is off */ }
+    }
+  }
+
+  function hide() {
+    if (!visit) return;
+    endVisit();
+    if (pageTitle) document.title = pageTitle;
+    if (listened) {
+      listened = false;
+      tell('listen');
+    }
+    const animated = !reduceMotion() && box.classList.contains(BOX_IN);
+    if (!animated) { finishHide(); return; }
+    overlay.inert = true;
+    box.classList.remove(BOX_IN);
+    dim.classList.remove(DIM_IN);
+    box.classList.add(FADE_OUT);
+    dim.classList.add(FADE_OUT);
+    hideTimer = page.setTimeout(finishHide, CLOSE_MS);
+  }
+
+  function finishHide() {
+    if (hideTimer) page.clearTimeout(hideTimer);
+    hideTimer = 0;
+    overlay.inert = false;
+    [BOX_IN, DIM_IN, FADE_OUT].forEach(function (c) { box.classList.remove(c); dim.classList.remove(c); });
+    if (!visit) html.removeAttribute('data-book-open');
+  }
+
+  function tell(kind) {
+    if (typeof page.changed === 'function') {
+      try { page.changed(kind); } catch (e) { console.error(e); }
+    }
+  }
+
+  function open(url, link) {
+    const id = bookId(url.pathname);
+    if (id === null) return Promise.resolve('');
+    if (visit && visit.id === id) return visit.title;
+    const was = isOpen();
+    leaving = '';
+    if (hideTimer) finishHide();
+    if (!was) {
+      pageTitle = document.title;
+      opener = link && document.contains(link) ? link : null;
+    } else if (modal) {
+      keep = true;
+      Promise.resolve().then(function () { keep = false; });
+    }
+    endVisit();
+    const ctl = new AbortController();
+    let done;
+    const title = new Promise(function (resolve) { done = resolve; });
+    visit = { id: id, ctl: ctl, title: title, done: done };
+
+    const body = overlay.querySelector('#bookBody');
+    body.replaceWith(blank.cloneNode(true));
+    if (!was) {
+      // Opened by a press: it fades in. Already on screen (a full load of the
+      // address, server-rendered): it stays as it is.
+      if (!html.hasAttribute('data-book-open') && !reduceMotion()) {
+        dim.classList.add(DIM_IN);
+        box.classList.add(BOX_IN);
+      }
+      html.setAttribute('data-book-open', '');
+      // After the router has closed the dialogs it closes on a claim.
+      Promise.resolve().then(function () { if (visit && visit.ctl === ctl) startModal(); });
+    }
+
+    const signal = ctl.signal;
+    mount({
+      root: overlay.querySelector('#bookBody'),
+      signal: signal,
+      url: new URL(url.href),
+      data: (window.WS && window.WS.data) || page.data,
+      setTimeout: function (fn, ms) {
+        return page.setTimeout(function () { if (!signal.aborted) fn(); }, ms);
+      },
+      setTitle: function (name) {
+        if (signal.aborted || typeof name !== 'string' || !name) return;
+        document.title = viewTitle(name);
+        done(name);
+      },
+      close: close,
+      onChange: function (kind) {
+        if (kind === 'listen') listened = true;
+        else tell(kind);
+      }
+    }).then(function () {
+      // On screen (or its skeleton) without a title yet: the view is not
+      // named; the tab still takes the title when it comes.
+      done('');
+    }, function (e) {
+      if (!signal.aborted) console.error('[book] the pop-up could not draw the book', e);
+      done('');
+    });
+    return title;
+  }
+
+  function leave(url) {
+    if (leaving && url.href === leaving) {
+      leaving = '';
+      return true;
+    }
+    if (!isOpen() || url.href !== base.href) return false;
+    closeForNav();
+    return true;
+  }
+
+  function at(url) {
+    base = { href: url.href, i: entryOf(window.history.state) };
+    closeForNav();
+  }
+
+  return { open: open, leave: leave, at: at };
 }

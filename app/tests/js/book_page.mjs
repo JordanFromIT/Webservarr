@@ -28,8 +28,12 @@ const BOOK_PATH = process.env.BOOK_JS || join(STATIC, 'js/pages/book.js');
 const LIST_PATH = process.env.BOOKS_LIST_JS || join(STATIC, 'js/pages/books-list.js');
 const BOOKS_PATH = join(STATIC, 'js/pages/books.js');
 const READER_PATH = process.env.READER_JS || join(STATIC, 'js/pages/reader.js');
+// A book is drawn into the Books pages' pop-up (partials/book-dialog.html): its
+// body is the markup the renderer (book.js mount) runs over, as a page here.
+const DIALOG_HTML = readFileSync(join(STATIC, 'partials/book-dialog.html'), 'utf8');
+const BOOK_VIEW = DIALOG_HTML.match(/<section id="bookView"[\s\S]*<\/section>/)[0];
 const HTML = {
-  book: readFileSync(join(STATIC, 'book.html'), 'utf8'),
+  book: '<div id="wsPage">' + BOOK_VIEW + '</div></main>',
   person: readFileSync(join(STATIC, 'books-person.html'), 'utf8'),
   series: readFileSync(join(STATIC, 'books-series.html'), 'utf8')
 };
@@ -365,7 +369,8 @@ await run('the skeleton holds the page, then one write replaces what follows the
   check('the cover holds a 2:3 box', /aspect-\[2\/3\]/.test(t.q('#bookCover').innerHTML));
   check('the cover is what the page waits for: loaded at once, not lazily', t.q('#bookCover img').getAttribute('loading') === 'eager' && t.q('#bookCover img').getAttribute('fetchpriority') === 'high');
   check('the cover has no format badges (the buttons say it)', t.qa('#bookCover [data-format]').length === 0);
-  check('the page arrived as one section', t.WS.arrived.join(',') === 'book', t.WS.arrived);
+  // In the pop-up it waits for nothing on the page under it: no place in the page's arrival order.
+  check('the book is drawn as its answer lands, not in the page\'s arrival order', t.WS.arrived.length === 0 && !t.q('[data-arrive]'), t.WS.arrived);
 });
 
 await run('both formats: Read and Listen with the person\'s progress', async (make) => {
@@ -673,7 +678,7 @@ await run('not found: a plain message and the way back', async (make) => {
   check('nothing says "404", "undefined" or a vendor', !/404|undefined|Kavita|Plex/.test(t.text('#bookView')));
   check('the cover is the placeholder', !t.q('#bookCover img'));
   check('no skeleton is left', t.qa('#bookView .skel').length === 0);
-  check('no retry for a book that is not there', !t.q('#retryBtn'));
+  check('no retry for a book that is not there', !t.q('#bookRetry'));
   check('the section is not busy', t.q('#bookView').getAttribute('aria-busy') === 'false');
   const u = make('book', { url: 'https://ws.test/books/abc', routes: bookRoutes(detail()) });
   const m = u.mount();
@@ -695,10 +700,10 @@ await run('an error: what happened, and Try again that works', async (make) => {
   await m;
   const box = t.q('[data-state="error"]');
   check('the error shows under a heading that says what happened, with no code in it', !!box && /couldn.t load this book/i.test(t.text('#bookTitle')) && /Try again in a moment/.test(box.textContent) && !/503|HTTP|undefined/.test(t.text('#bookView')), [t.text('#bookTitle'), box && box.textContent]);
-  check('with Try again', !!t.q('#retryBtn'));
+  check('with Try again', !!t.q('#bookRetry'));
   check('the section is not busy', t.q('#bookView').getAttribute('aria-busy') === 'false');
   down = false;
-  t.click('#retryBtn');
+  t.click('#bookRetry');
   await t.clock.advance(1600);
   check('Try again loads the book', t.text('#bookTitle') === 'Harry Potter and the Prisoner of Azkaban' && !t.q('[data-state="error"]'));
   check('it asked again', t.net.urls('/api/books/').length === 2);
@@ -795,7 +800,7 @@ await run('a not-connected person opening an ebook-only book: the hand-off runs 
   check('the hand-off was started once', t.kav.reconnect.length === 1, t.kav.reconnect.length);
   const box = t.q('[data-state="connect"]');
   check('the page says it is connecting, not that the book is missing', !!box && /Connecting you now/.test(box.textContent) && /Connect your ebook library/.test(t.text('#bookTitle')) && !t.q('[data-state="notfound"]'), [t.text('#bookTitle'), box && box.textContent]);
-  check('no button while it is under way', !t.q('#connectBtn'));
+  check('no button while it is under way', !t.q('#bookConnect'));
   check('a failed sign-in coming back here is read first', t.kav.failedChecks === 1);
   // Refused (tried a minute ago, or the last sign-in failed): said, with Try again that tries once more.
   const u = make('book', { routes: bookRoutes(() => answer) });
@@ -803,8 +808,8 @@ await run('a not-connected person opening an ebook-only book: the hand-off runs 
   const m = u.mount();
   await u.clock.advance(1600);
   await m;
-  check('a refused hand-off says so and offers Connect', /couldn.t connect/i.test(u.text('[data-state="connect"]')) && !!u.q('#connectBtn'), u.text('[data-state="connect"]'));
-  u.click('#connectBtn');
+  check('a refused hand-off says so and offers Connect', /couldn.t connect/i.test(u.text('[data-state="connect"]')) && !!u.q('#bookConnect'), u.text('[data-state="connect"]'));
+  u.click('#bookConnect');
   check('Connect tries once more through the helper', u.kav.retry === 1);
   check('it asked for the book once and did not loop', u.net.urls('/api/books/').length === 1 && u.kav.reconnect.length === 1);
   // A plain 404, and a 404 about something else, stay "couldn't find".
@@ -1126,7 +1131,7 @@ await run('FR2: a source that is not answering is "unavailable", never "removed 
   await u.clock.advance(1600);
   await m;
   up = true;
-  u.click('#retryBtn');
+  u.click('#bookRetry');
   await u.clock.advance(1600);
   check('Try again loads the book once the source is back', u.text('#bookTitle') === 'Harry Potter and the Prisoner of Azkaban' && !u.q('[data-state="unavailable"]'));
   const plex = { status: 404, body: { detail: 'Audiobooks are unavailable right now', reason: 'unavailable', notes: [{ source: 'plex', reason: 'unavailable', text: 'Audiobooks are unavailable right now' }] } };
@@ -1371,7 +1376,7 @@ await run('3b: CLS: the skeleton has the shape of the new rows; nothing on scree
   const m = t.mount();
   await flush();
   check('the skeleton holds a sample row under each format button', t.qa('#bookRest .skel.h-14').length === 2 && t.qa('#bookRest .skel.h-14 + .mt-2.h-10').length === 2);
-  check('My list and Up next, in the two columns', t.qa('#bookRest .grid.sm\\:grid-cols-2 .skel.h-11').length === 2);
+  check('My list and Up next, in the two columns', t.qa('#bookRest .grid.\\@\\[30rem\\]\\:grid-cols-2 .skel.h-11').length === 2);
   check('and the stars\' row', t.qa('#bookRest .skel.h-10').length === 1);
   const title = t.q('#bookTitle');
   const cover = t.q('#bookCover');
@@ -1536,6 +1541,221 @@ await run('the reader\'s sample mode: the first page, no place read or saved, no
   check('without sample=1: no banner, bookmarks on, the place is asked for', !normal.seen.banner && !normal.seen.bookmarkHidden && normal.calls.some((u) => /get-progress\?chapterId=77/.test(u)), [normal.seen, normal.calls]);
   const other = await readerVisit('?seriesId=5&chapterId=77&sample=yes');
   check('only sample=1 is a sample', other.calls.some((u) => /get-progress\?chapterId=77/.test(u)), other.calls);
+});
+
+// ---- The pop-up (book.js bookDialog, books.js withBookDialog) ----
+// The Books page's own markup is not needed: a page with a heading, a book's
+// card and the pop-up as the server writes it in, over a scripted history
+// (the entry the address is on), a stub router and WSUI.modal as ui.js has it
+// (a stack; Escape and closeDialogs close the top one through onClose).
+
+const booksModule = await import(BOOKS_URL);
+
+function popupPage(o = {}) {
+  const url = o.url || 'https://ws.test/books?author=J.K.%20Rowling';
+  const win = new Window({ url });
+  const doc = win.document;
+  doc.body.innerHTML = '<main><div id="wsPage"><h1>Books</h1><a id="card" href="/books/2">The book</a><a id="other" href="/books/3">Another</a>' + DIALOG_HTML + '</div></main>';
+  doc.getElementById('bookDialog').setAttribute('data-ws-dep', dataUrl(readFileSync(BOOK_PATH, 'utf8')));
+  doc.getElementById('bookBody').setAttribute('data-ws-dep', BOOKS_URL);
+  if (o.loaded) doc.documentElement.setAttribute('data-book-open', '');
+  const clock = fakeClock();
+  const net = network();
+  net.on('/api/books/', (u) => (o.answer ? o.answer(u) : { body: detail() }));
+  const ctl = new win.AbortController();
+  const WS = fakeShell(doc, clock, net);
+  WS.data.branding = { app_name: 'WebServarr' };
+  const stack = [];
+  const modals = [];
+  const UI = {
+    toast() {},
+    modal(overlay, opts) {
+      const entry = { opts, overlay, done: false };
+      entry.close = function () {
+        if (entry.done) return;
+        entry.done = true;
+        stack.splice(stack.indexOf(entry), 1);
+        opts.onClose();
+      };
+      stack.push(entry);
+      modals.push(entry);
+      const first = (opts.box || overlay).querySelector('button');
+      if (first) first.focus();
+      return { close: entry.close };
+    },
+    closeDialogs() { while (stack.length) stack[stack.length - 1].close(); },
+    escape() { if (stack.length) stack[stack.length - 1].close(); }
+  };
+  let st = { ws: 1, i: o.i === undefined ? 3 : o.i };
+  const hist = { backs: 0, replaced: [] };
+  Object.defineProperty(win.history, 'state', { get: () => st, configurable: true });
+  win.history.back = () => { hist.backs += 1; };
+  win.history.replaceState = (state, title, to) => { hist.replaced.push(to); };
+  const navs = [];
+  WS.router = { navigate(href, opts) { navs.push([href, opts]); return Promise.resolve(); } };
+  const g = globalThis;
+  const saved = {};
+  const set = (k, v) => { saved[k] = Object.getOwnPropertyDescriptor(g, k); Object.defineProperty(g, k, { value: v, configurable: true, writable: true }); };
+  set('window', win);
+  set('document', doc);
+  set('localStorage', win.localStorage);
+  set('WS', WS);
+  win.WS = WS;
+  win.WSUI = UI;
+  set('WSUI', UI);
+  win.fetch = (u, init) => net.fetch(u, init);
+  const changed = [];
+  let claim = null;
+  let claims = null;
+  const ctx = {
+    root: doc.getElementById('wsPage'), signal: ctl.signal, url: new URL(url), data: WS.data,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms), clearTimeout: (id) => clock.clearTimeout(id),
+    setTitle() {}, onNavigate(fn, which) { claim = fn; claims = which; }
+  };
+  doc.title = 'WebServarr - Books';
+  // The router takes every link click (the address moves only with its claim).
+  win.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a[href]')) e.preventDefault(); });
+  WS.arriveReset();
+  return {
+    win, doc, clock, net, ctl, WS, UI, stack, modals, hist, navs, changed, ctx,
+    get claim() { return claim; }, get claims() { return claims; },
+    entry(i) { st = { ws: 1, i }; },
+    q: (sel) => doc.querySelector(sel),
+    open: () => doc.documentElement.hasAttribute('data-book-open'),
+    release() { for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; } }
+  };
+}
+
+async function popupRun(name, o, fn) {
+  current = name;
+  const t = popupPage(o);
+  try { await fn(t); } catch (e) { failed += 1; total += 1; report(`FAIL ${name}: threw ${e && e.stack || e}`); } finally { t.ctl.abort(); t.release(); }
+}
+
+await popupRun('the pop-up: a card opens it over the page, at the book\'s address; Back closes it', {}, async (t) => {
+  booksModule.withBookDialog(t.ctx, null, (k) => t.changed.push(k));
+  check('the page claims addresses', typeof t.claim === 'function' && typeof t.claims === 'function');
+  check('only a book\'s address is kept from the prefetch', t.claims(new URL('https://ws.test/books/2')) === true && t.claims(new URL('https://ws.test/books?author=x')) === false && t.claims(new URL('https://ws.test/books/person?role=author&name=x')) === false);
+  check('closed at first', !t.open());
+  const card = t.q('#card');
+  card.click();
+  const got = t.claim(new URL('https://ws.test/books/2'), { pop: false, scrollY: 0 });
+  check('a book is taken with a promise (the router titles the view with it)', !!got && typeof got.then === 'function');
+  // The router closes every dialog right after a claim: the pop-up starts after it.
+  t.UI.closeDialogs();
+  const name = await got;
+  await t.clock.advance(1600);
+  check('it is open over the page (html flag)', t.open());
+  check('it is a modal on the WSUI stack, for the dialog box', t.stack.length === 1 && t.stack[0].opts.box === t.q('[data-dialog-box]'));
+  check('focus is inside it (on Close)', t.doc.activeElement === t.q('#bookDialog [data-book-close][aria-label="Close"]'));
+  check('the book is drawn in it', t.q('#bookDialog #bookTitle').textContent === 'Harry Potter and the Prisoner of Azkaban' && !!t.q('#bookDialog [data-action="listen"]'));
+  check('its title is the book\'s', name === 'Harry Potter and the Prisoner of Azkaban' && t.doc.title === 'WebServarr - Harry Potter and the Prisoner of Azkaban', [name, t.doc.title]);
+  check('it fades in, opened by a press', /animate-\[ws-dialog-in/.test(t.q('[data-dialog-box]').className));
+  // Back: the router hands back the page's own address, which the pop-up takes.
+  const back = t.claim(new URL('https://ws.test/books?author=J.K.%20Rowling'), { pop: true, scrollY: 640 });
+  check('Back to the page\'s address is claimed (the page is not loaded again)', back === true);
+  check('and closes the modal', t.stack.length === 0);
+  await flush();
+  check('focus goes back to the card that opened it', t.doc.activeElement === card);
+  check('the page\'s title is back', t.doc.title === 'WebServarr - Books');
+  check('no step of its own (Back already moved the address)', t.hist.backs === 0 && t.navs.length === 0);
+  await t.clock.advance(200);
+  check('gone after its fade', !t.open());
+});
+
+await popupRun('the pop-up: Escape, Close and the dim step back to the page\'s entry', {}, async (t) => {
+  booksModule.withBookDialog(t.ctx, null, null);
+  const page = 'https://ws.test/books?author=J.K.%20Rowling';
+  async function openIt() {
+    t.q('#card').click();
+    const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+    t.UI.closeDialogs();
+    t.entry(4);                      // the router pushed the book's entry after the page's (3)
+    await p;
+    await t.clock.advance(1600);
+  }
+  await openIt();
+  t.UI.escape();
+  await flush();
+  check('Escape: one step back, to the page\'s own entry', t.hist.backs === 1 && t.navs.length === 0, t.hist);
+  t.entry(3);
+  check('which the pop-up then takes as its own', t.claim(new URL(page), { pop: true }) === true);
+  await t.clock.advance(200);
+  check('closed', !t.open() && t.stack.length === 0);
+  await openIt();
+  t.q('#bookDialog button[aria-label="Close"]').click();
+  await flush();
+  check('Close: the same', t.hist.backs === 2, t.hist);
+  t.entry(3);
+  t.claim(new URL(page), { pop: true });
+  await openIt();
+  t.q('#bookDialog .ws-scrim').click();
+  await flush();
+  check('the dim: the same', t.hist.backs === 3, t.hist);
+});
+
+await popupRun('the pop-up: a full load of /books/<id> is already open, and Close goes to Books in place', { url: 'https://ws.test/books/2', loaded: true, i: 0 }, async (t) => {
+  check('on screen from the first paint (server-rendered flag)', t.open());
+  booksModule.withBookDialog(t.ctx, null, null);
+  await t.clock.advance(1600);
+  check('taken over as a modal', t.stack.length === 1);
+  check('the book is drawn', t.q('#bookDialog #bookTitle').textContent === 'Harry Potter and the Prisoner of Azkaban');
+  check('nothing fades in: it was already there', !/animate-/.test(t.q('[data-dialog-box]').className));
+  t.UI.escape();
+  await flush();
+  check('closing replaces the address with the Books page\'s (never a step off the site)', t.hist.backs === 0 && t.navs.length === 1 && t.navs[0][0] === 'https://ws.test/books' && t.navs[0][1].replace === true, t.navs);
+  check('which the pop-up takes as its own', t.claim(new URL('https://ws.test/books'), { pop: false }) === true);
+  check('closed at once', !t.open());
+  check('focus goes to the page\'s heading', t.doc.activeElement === t.q('h1'));
+});
+
+await popupRun('the pop-up: a link inside is an ordinary navigation; the swap closes it without a step', {}, async (t) => {
+  booksModule.withBookDialog(t.ctx, null, null);
+  t.q('#card').click();
+  const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+  t.UI.closeDialogs();
+  await p;
+  await t.clock.advance(1600);
+  const author = t.q('#bookDialog [data-person="author"]');
+  check('the author is a link to their page', !!author && author.getAttribute('href') === '/books/person?role=author&name=J.K.%20Rowling');
+  check('which the pop-up leaves to the router', t.claim(new URL('https://ws.test' + author.getAttribute('href')), { pop: false }) === false);
+  check('and stays open until the page goes', t.open() && t.stack.length === 1);
+  // The router's swap: every dialog closed, then the page left, in one go.
+  t.UI.closeDialogs();
+  t.ctl.abort();
+  await flush();
+  check('no step and no address of its own', t.hist.backs === 0 && t.navs.length === 0);
+});
+
+await popupRun('the pop-up: what is changed in it is told to the page', {}, async (t) => {
+  t.net.on('/api/books/2/list', () => ({ body: { ok: true } }));
+  booksModule.withBookDialog(t.ctx, null, (k) => t.changed.push(k));
+  t.q('#card').click();
+  t.net.on('/api/books/2', () => ({ body: mine() }));
+  const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+  t.UI.closeDialogs();
+  await p;
+  await t.clock.advance(1600);
+  const add = t.q('#bookDialog [data-mine="list"]');
+  check('My list is in the pop-up', !!add);
+  add.click();
+  await t.clock.advance(10);
+  check('the page is told (it draws My list again)', t.changed.indexOf('list') !== -1, t.changed);
+});
+
+await popupRun('the pop-up: not found says so, and its button closes', { answer: () => ({ status: 404, body: { detail: 'No such book' } }) }, async (t) => {
+  booksModule.withBookDialog(t.ctx, null, null);
+  t.q('#card').click();
+  const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+  t.UI.closeDialogs();
+  t.entry(4);
+  await p;
+  await t.clock.advance(1600);
+  const btn = t.q('#bookDialog [data-state="notfound"] button');
+  check('a Close button, not a link away', !!btn && btn.textContent === 'Close' && !t.q('#bookDialog [data-state="notfound"] a'));
+  btn.click();
+  await flush();
+  check('it closes as Close does', t.hist.backs === 1 && t.stack.length === 0, t.hist);
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));

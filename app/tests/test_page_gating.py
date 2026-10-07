@@ -122,14 +122,21 @@ class MovedRoutes(PageRoutesBase):
         self.assertEqual(r.status_code, 200)
         self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
 
-    def test_a_book_serves_the_book_page_under_books_in_the_nav(self):
+    def test_a_book_serves_books_with_its_pop_up_open(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
         r = self.get("/books/7", MEMBER_SESSION, values)
         self.assertEqual(r.status_code, 200)
-        self.assertIn('data-page="book"', r.text)
-        self.assertIn("<title>WebServarr - Book</title>", r.text)
-        self.assertIn('data-ws-module="/static/js/pages/book.js?v=', r.text)
+        self.assertRegex(r.text, r'<html\b[^>]*data-page="books"[^>]*data-book-open')
+        self.assertIn('data-ws-module="/static/js/pages/books.js?v=', r.text)
+        # The pop-up is written in (partials/book-dialog.html), its scripts stamped.
+        self.assertIn('id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=', r.text)
+        self.assertNotIn("v=1\"", r.text[r.text.index('id="bookDialog"'):r.text.index('id="bookView"')])
+        self.assertNotIn("<!-- ws:book-dialog -->", r.text)
         self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+        # Books itself has the pop-up too, closed.
+        plain = self.get("/books", MEMBER_SESSION, values)
+        self.assertIn('id="bookDialog"', plain.text)
+        self.assertNotRegex(plain.text, r'<html\b[^>]*data-book-open')
 
     def test_your_stats_is_its_own_page_under_books_in_the_nav(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}

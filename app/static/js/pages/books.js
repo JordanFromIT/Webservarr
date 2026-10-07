@@ -3,8 +3,9 @@
  *
  * One library of ebooks (Kavita) and audiobooks (Plex): a search box, a
  * Continue row of what the person is partway through, and a cover grid with
- * format chips and a sort. A cover opens the book's own page (/books/<id>); a
- * series is one card that opens the series page. In Continue, the round play
+ * format chips and a sort. A cover opens the book in a pop-up over the page,
+ * at the book's own address (/books/<id>, withBookDialog); a series is one
+ * card that opens the series page. In Continue, the round play
  * button on a cover is what picks up from the person's place.
  *
  * Everything comes from the Books APIs (/api/books, /search, /continue). A
@@ -27,6 +28,8 @@
  *   rememberContinue(user)                             a book was just started: the next visit holds the row's room
  *   rememberRow(kind, user)                            the same for 'upnext' and 'mylist' (a book was just added)
  *   sendBooks(method, url, body)                       a write to the person's own Books data
+ *   withBookDialog(ctx, own, changed)                  the book pop-up on the page (pages/book.js
+ *                                                       bookDialog) and the page's ctx.onNavigate
  * They touch no DOM at import time.
  *
  * Continue is always shown, so the first-visit guide has it to point at; a
@@ -178,6 +181,78 @@ export function filterHref(filters, base) {
   });
   const qs = url.searchParams.toString();
   return '/books' + (qs ? '?' + qs : '');
+}
+
+/** True for a book's own address, /books/<id> (the pop-up's). */
+function isBookAddress(url) {
+  return !!url && /^\/books\/\d{1,10}\/?$/.test(url.pathname);
+}
+
+/**
+ * The book pop-up on a Books page (Books, an author's or narrator's page, a
+ * series): a book's address is drawn over the page by pages/book.js
+ * bookDialog, loaded from the address the server wrote on #bookDialog (stamped,
+ * like data-ws-dep on #wsPage). Registers the page's ctx.onNavigate: a book's
+ * address opens the pop-up (and is never prefetched); the page's own address
+ * under it closes it; anything else goes to own(url, how), the page's own
+ * claim (the Books page's filters), or to the router. changed(kind): told of
+ * a change made in the pop-up that the page shows ('list', 'queue', 'listen').
+ * A full load of /books/<id> opens it at once (the server already shows it).
+ */
+export function withBookDialog(ctx, own, changed) {
+  const host = ctx.root.querySelector('#bookDialog');
+  const src = host ? host.getAttribute('data-ws-dep') : '';
+  // The page's own history entry, now: a click may move the address before the pop-up loads.
+  const st = window.history.state;
+  const entry = st && st.ws === 1 && typeof st.i === 'number' ? st.i : null;
+  let dialog = null;
+  // The link last pressed on the page: the one that opened the pop-up gets the focus back.
+  let pressed = null;
+  if (src) {
+    ctx.root.addEventListener('click', function (e) {
+      const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (a && !host.contains(a)) pressed = a;
+    }, { capture: true, signal: ctx.signal });
+  }
+  function opener(url) {
+    const a = pressed;
+    pressed = null;
+    return a && new URL(a.href, window.location.href).pathname === url.pathname ? a : null;
+  }
+  const ready = !src ? Promise.resolve(null) : import(src).then(function (m) {
+    if (ctx.signal.aborted) return null;
+    dialog = m.bookDialog({
+      root: ctx.root, signal: ctx.signal, url: ctx.url, data: ctx.data, entry: entry,
+      setTimeout: ctx.setTimeout, clearTimeout: ctx.clearTimeout, changed: changed
+    });
+    return dialog;
+  }, function (e) {
+    if (!ctx.signal.aborted) console.error('[books] the book pop-up did not load', e);
+    return null;
+  });
+  if (isBookAddress(ctx.url)) {
+    ready.then(function (d) { if (d) d.open(new URL(ctx.url.href)); });
+  }
+  if (typeof ctx.onNavigate !== 'function') return;
+  ctx.onNavigate(function (url, how) {
+    if (src && isBookAddress(url)) {
+      const link = opener(url);
+      if (dialog) return dialog.open(url, link);
+      return ready.then(function (d) {
+        if (d) return d.open(url, link);
+        // No pop-up to draw it in: the book's own address, loaded whole.
+        if (!ctx.signal.aborted && window.WS && WS.router) WS.router.hardNavigate(url.href);
+        return '';
+      });
+    }
+    if (dialog && dialog.leave(url)) {
+      dialog.at(url);
+      return true;
+    }
+    const took = own ? own(url, how) : false;
+    if (took && dialog) dialog.at(url);
+    return took;
+  }, function (url) { return !!src && isBookAddress(url); });
 }
 
 /** "2", "2.5": a number in a series as a shelf writes it. */
@@ -1536,7 +1611,8 @@ export async function mount(ctx) {
     if (!guide || state.guideOffered || signal.aborted) return;
     state.guideOffered = true;
     ctx.setTimeout(function () {
-      if (signal.aborted || state.searching || state.connectProblem) return;
+      // Not over a book's pop-up (a full load of its address): next visit.
+      if (signal.aborted || state.searching || state.connectProblem || html.hasAttribute('data-book-open')) return;
       // Off to sign in to Kavita: the page comes back and the guide is then shown (not marked seen now).
       if (state.reconnectTried || (window.WSKavita && typeof window.WSKavita.isLeaving === 'function' && window.WSKavita.isLeaving())) return;
       const first = !guide.hasBeenSeen();
@@ -2418,19 +2494,22 @@ export async function mount(ctx) {
   // A filter change of ours, and Back or Forward between two Books
   // addresses, are drawn here: the router only records the address. Any
   // other way in (the sidebar's Books, a link) is a fresh visit, as before.
-  // Nothing is claimed for the prefetch, so links still warm as they did.
-  let claiming = false;
-  if (typeof ctx.onNavigate === 'function') {
-    claiming = true;
-    ctx.onNavigate(function (url, how) {
-      if (url.pathname.replace(/\/+$/, '') !== '/books') return false;
-      const mine = state.ownNav !== null && state.ownNav === url.href;
-      if (!mine && !(how && how.pop)) return false;
-      state.ownNav = null;
-      applyFilters(filtersFrom(url));
-      return true;
-    }, function () { return false; });
-  }
+  // A book's address is the pop-up's (withBookDialog), and only that is not
+  // prefetched, so the other links still warm as they did.
+  const claiming = typeof ctx.onNavigate === 'function';
+  withBookDialog(ctx, function (url, how) {
+    if (url.pathname.replace(/\/+$/, '') !== '/books') return false;
+    const mine = state.ownNav !== null && state.ownNav === url.href;
+    if (!mine && !(how && how.pop)) return false;
+    state.ownNav = null;
+    applyFilters(filtersFrom(url));
+    return true;
+  }, function (kind) {
+    // A change made in the book's pop-up: the row it shows is drawn again.
+    if (kind === 'list') loadMine('mylist');
+    else if (kind === 'queue') loadMine('upnext');
+    else if (kind === 'listen') loadContinue();
+  });
 
   // The next page comes in as the button nears the screen; the button is
   // still there for a keyboard or a browser without the observer.

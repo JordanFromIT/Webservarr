@@ -1,0 +1,52 @@
+<!--
+  One book, in a pop-up over the Books pages (books.html, books-person.html,
+  books-series.html carry the ws:book-dialog marker, and app/pages.py writes
+  this in its place). pages/book.js bookDialog runs it: a click on a book opens it
+  at /books/<id> (Back closes it), and a full load of /books/<id> is the Books
+  page with <html data-book-open>, so the pop-up is on screen from the first
+  paint. pages/book.js mount draws the book into #bookBody over this skeleton,
+  which has the drawn page's shape; the heading stays and what follows it is
+  replaced. A centred dialog from sm up, a full-height sheet on a phone (clear
+  of the notch and the home indicator).
+  #bookBody names the card helpers (books.js) the way #wsPage does.
+-->
+<div id="bookDialog" data-ws-dep="/static/js/pages/book.js?v=1" class="fixed inset-0 z-[60] hidden [html[data-book-open]_&]:flex items-stretch sm:items-center justify-center pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:p-6 lg:p-10">
+  <div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-book-close></div>
+  <div data-dialog-box role="dialog" aria-modal="true" aria-labelledby="bookTitle" class="ws-frost ws-frost-read relative flex w-full min-h-0 flex-col overflow-hidden sm:max-w-[900px] sm:max-h-full sm:rounded-2xl sm:border">
+    <button type="button" data-book-close aria-label="Close" class="absolute right-2 top-2 sm:right-3 sm:top-3 z-10 grid size-11 place-items-center rounded-full bg-background-dark/60 text-frosted-blue/80 hover:bg-frosted-blue/10 hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
+    </button>
+    <div id="bookBody" data-ws-dep="/static/js/pages/books.js?v=1" class="@container min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-4 sm:p-8">
+      <section id="bookView" aria-busy="true" class="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @[34rem]:grid-cols-[11rem_minmax(0,1fr)] @[34rem]:gap-8 @[46rem]:grid-cols-[14rem_minmax(0,1fr)] @[34rem]:[&_h2]:pr-12">
+        <div id="bookCover" class="w-36 @[34rem]:w-full" aria-hidden="true">
+          <div class="skel aspect-[2/3] rounded-xl"></div>
+        </div>
+        <div class="@container min-w-0">
+          <h2 id="bookTitle" class="text-[24px] @[30rem]:text-[30px] @[36rem]:text-[34px] font-extrabold leading-[1.1] tracking-[-0.02em] text-balance break-words text-frosted-blue"><span class="skel-text" aria-hidden="true">The title of the book</span><span class="sr-only">Loading the book</span></h2>
+          <div id="bookRest" aria-hidden="true">
+            <div class="mt-4 space-y-2">
+              <div class="skel h-5 w-48 max-w-full"></div>
+              <div class="skel h-5 w-64 max-w-full"></div>
+            </div>
+            <div class="mt-6 grid max-w-xl gap-3 @[30rem]:grid-cols-2">
+              <div><div class="skel h-14 rounded-[10px]"></div><div class="mt-2 h-10"></div></div>
+              <div><div class="skel h-14 rounded-[10px]"></div><div class="mt-2 h-10"></div></div>
+            </div>
+            <!-- My list, Up next and the stars (pages/book.js mineBlock) -->
+            <div class="mt-6 grid max-w-xl gap-3 @[30rem]:grid-cols-2">
+              <div class="skel h-11 rounded-[10px]"></div>
+              <div class="skel h-11 rounded-[10px]"></div>
+            </div>
+            <div class="mt-5"><div class="h-[22.5px]"></div><div class="mt-1 skel h-10 w-[12.5rem] rounded-[10px]"></div></div>
+            <div class="mt-8 max-w-[65ch] space-y-2">
+              <div class="skel h-4"></div>
+              <div class="skel h-4"></div>
+              <div class="skel h-4"></div>
+              <div class="skel h-4 w-2/3"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
