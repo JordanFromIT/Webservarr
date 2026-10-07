@@ -520,7 +520,9 @@ function buildSearchCard(item, index) {
       '<button type="button" data-action="open-search-book" data-index="' + index + '" class="group flex flex-col flex-1 w-full text-left">' +
         '<span class="block w-full aspect-[2/3] relative overflow-hidden">' + posterHtml + '</span>' +
         '<span class="block w-full flex-1 px-3 pt-3">' +
-          '<span class="block text-frosted-blue text-body font-semibold leading-tight line-clamp-2 group-hover:underline">' + title + '</span>' +
+          // No "block" here: it would override line-clamp's own display and
+          // let a long title run on unclamped.
+          '<span class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2 group-hover:underline">' + title + '</span>' +
           (item.author ? '<span class="block text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</span>' : '') +
           (year ? '<span class="block text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</span>' : '') +
         '</span>' +
