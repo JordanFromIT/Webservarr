@@ -230,5 +230,22 @@ class SavingTheSwitch(Base):
             self.save("true")
 
 
+class SettingsSwitch(unittest.TestCase):
+    """Settings > General carries the switch, with its one line of help, in
+    the card the backup import locks."""
+
+    def test_the_general_tab_has_the_switch(self):
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "static" / "js" / "settings" / "general.js").read_text(
+            encoding="utf-8")
+        site = re.search(r"\n  function siteCard\(.*?\n  }\n", src, re.S).group(0)
+        self.assertRegex(site, r"api\.toggle\(\{\s*key: 'security\.cloudflare_web_analytics'")
+        self.assertIn("help: 'Allow Cloudflare Web Analytics\u2019 script (only if your site is behind "
+                      "Cloudflare with Web Analytics on)'", site)
+        keys = re.search(r"var TAB_KEYS = \[([^\]]*)\]", src).group(1)
+        self.assertIn("'security.cloudflare_web_analytics'", keys)
+
+
 if __name__ == "__main__":
     unittest.main()
