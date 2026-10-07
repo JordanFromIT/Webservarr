@@ -25,7 +25,7 @@ from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
-from app import home_event_log, home_news
+from app import home_event_log, home_news, web_analytics
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
@@ -311,11 +311,20 @@ async def add_security_headers(request: Request, call_next):
         if src:
             connect_sources.append(src)
 
+    script_sources = ["'self'"]
+    # Cloudflare injects its Web Analytics beacon into HTML pages only, so
+    # only they ask whether the operator allows it (app/web_analytics.py).
+    if ("content-security-policy" not in response.headers
+            and response.headers.get("content-type", "").startswith("text/html")
+            and await web_analytics.allowed()):
+        script_sources.append(web_analytics.SCRIPT_SOURCE)
+        connect_sources.append(web_analytics.CONNECT_SOURCE)
+
     csp_directives = [
         "default-src 'self'",
         # No inline script, inline handler or javascript: URL anywhere
         # (test_soft_nav WholeSite), so nothing needs 'unsafe-inline'.
-        "script-src 'self'",
+        f"script-src {' '.join(script_sources)}",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",

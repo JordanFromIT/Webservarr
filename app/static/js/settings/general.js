@@ -1,6 +1,6 @@
 /**
- * Settings > General: site name, tagline, logo, home-screen icon, and
- * settings backup.
+ * Settings > General: site name, tagline, Cloudflare Web Analytics, logo,
+ * home-screen icon, and settings backup.
  *
  * A logo or icon upload stores the file straight away but only stages its
  * address; the setting is written when the admin presses Save, like
@@ -18,7 +18,8 @@
   // The visit the tab was last mounted in: its signal, ctx.setTimeout and
   // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
   var signal = null, later = null, cancel = function () {};
-  var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url', 'branding.app_icon_url'];
+  var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url', 'branding.app_icon_url',
+    'security.cloudflare_web_analytics'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
   var MAX_IMPORT_BYTES = 1024 * 1024;         // a real backup is a few kilobytes
@@ -101,6 +102,10 @@
     c.body.appendChild(api.text({
       key: 'branding.tagline', label: 'Tagline',
       help: 'Shown under the site name on the sign-in page, and in link previews when someone shares your site.'
+    }));
+    c.body.appendChild(api.toggle({
+      key: 'security.cloudflare_web_analytics', label: 'Cloudflare Web Analytics',
+      help: 'Allow Cloudflare Web Analytics’ script (only if your site is behind Cloudflare with Web Analytics on)'
     }));
     return c.root;
   }

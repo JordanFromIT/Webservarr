@@ -171,6 +171,11 @@ def _build() -> List[SettingDef]:
              "Home-screen icon (a square PNG, ideally 512 by 512)", public=True, allow_relative=True),
         _icon("icon.sidebar_logo", "settings_input_component", "Icon shown in place of a logo when none is set",
               public=True),
+        # Off by default, so the CSP allows no outside script. On, HTML
+        # responses' CSP also allows the beacon Cloudflare injects
+        # (app/web_analytics.py).
+        _bool("security.cloudflare_web_analytics", "false",
+              "Allow Cloudflare Web Analytics' script (only if your site is behind Cloudflare with Web Analytics on)"),
         # ---- Appearance ----
         _color("theme.color_primary", "#125793", "Primary colour"),
         _color("theme.color_secondary", "#2C6DA1", "Secondary colour"),

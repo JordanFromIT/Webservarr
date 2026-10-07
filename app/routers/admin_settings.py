@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import web_analytics
 from app.auth import session_manager
 from app.config import settings as app_settings
 from app.database import get_db
@@ -272,6 +273,8 @@ async def bulk_update_settings(
         return validation_error(errors)
     if kavita_moved:
         await reset_kavita_connections()
+    if web_analytics.SETTING_KEY in writes:
+        await web_analytics.forget()
     return {"saved": list(writes), "values": {k: mask(k, v) for k, v in writes.items()}}
 
 
@@ -449,4 +452,6 @@ async def import_settings(
         return validation_error(errors)
     if any(c.get("effect") == KAVITA_RESET for c in changes):
         await reset_kavita_connections()
+    if web_analytics.SETTING_KEY in writes:
+        await web_analytics.forget()
     return {"applied": list(writes)}
