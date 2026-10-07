@@ -1879,11 +1879,12 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-alerts .wsp-notices { position: static; }
 .wsp-notice {
   pointer-events: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: 100%; max-width: 28rem;
-  padding: 12px 12px 12px 16px; border-radius: 16px; border: 1px solid rgb(var(--color-text) / .10);
+  padding: 12px 12px 12px 16px; border-radius: 16px; border: 1px solid var(--ws-frost-edge);
   color: rgb(var(--color-text));
-  background: linear-gradient(rgb(var(--color-text) / .06), rgb(var(--color-text) / .06)), rgb(var(--color-background) / .94);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-  box-shadow: 0 16px 36px -16px var(--ws-shade);
+  /* The site's one frosted surface (the .ws-frost tokens), as the toasts. */
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur); backdrop-filter: var(--ws-frost-blur);
+  box-shadow: var(--ws-frost-shadow);
   animation: ws-fade-up 180ms ease-out both;
 }
 .wsp-notice-text { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 500; line-height: 1.35; }

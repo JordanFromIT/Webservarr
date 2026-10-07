@@ -160,6 +160,15 @@ class OneFrost(unittest.TestCase):
                 own = [c for c in classes if re.match(r"(?:lg:)?(?:bg-|backdrop-|shadow-)", c)]
                 self.assertEqual(own, [], name)
 
+    def test_the_player_notices_paint_the_tokens(self):
+        # The player's notices stack above its bar like toasts: the same frost.
+        rule = css_rule(THEME, ".wsp-notice")
+        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
+                      "rgb(var(--color-background) / var(--ws-frost-floor));", rule)
+        self.assertIn("backdrop-filter: var(--ws-frost-blur);", rule)
+        self.assertIn("border: 1px solid var(--ws-frost-edge);", rule)
+        self.assertIn("box-shadow: var(--ws-frost-shadow);", rule)
+
     def test_the_player_drop_down_paints_the_tokens(self):
         rule = css_rule(THEME, ".wsp-full.is-window")
         self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
