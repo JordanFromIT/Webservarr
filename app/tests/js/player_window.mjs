@@ -703,7 +703,7 @@ await run('the keyboard: the handle\'s menu, the arrows, Home; focus follows', a
   grip.focus();
   grip.click();
   check('pressed: the places, focus on the first', !menu.hidden && grip.getAttribute('aria-expanded') === 'true' &&
-    JSON.stringify(items()) === JSON.stringify(['arrow_upwardMove to top bar']) && t.doc.activeElement === menu.querySelector('[data-to="top"]'), items());
+    JSON.stringify(items()) === JSON.stringify(['vertical_align_topMove to top bar']) && t.doc.activeElement === menu.querySelector('[data-to="top"]'), items());
   t.key(t.doc.activeElement, 'Escape');
   check('Escape closes it, focus back on the handle', menu.hidden && grip.getAttribute('aria-expanded') === 'false' && t.doc.activeElement === grip);
   grip.click();
@@ -714,7 +714,7 @@ await run('the keyboard: the handle\'s menu, the arrows, Home; focus follows', a
   check('said', said(t) === 'Player moved to the top bar.');
   const pg = t.q('.wsp-pill-grip');
   pg.click();
-  check('the pill\'s menu offers the bottom centre', JSON.stringify(items()) === JSON.stringify(['arrow_downwardMove to bottom centre']) &&
+  check('the pill\'s menu offers the bottom centre', JSON.stringify(items()) === JSON.stringify(['vertical_align_bottomMove to bottom centre']) &&
     pg.getAttribute('aria-expanded') === 'true');
   t.doc.activeElement.click();
   check('Move to bottom centre: there, focus on the bar\'s handle', t.q('.wsp-bar').getAttribute('data-dock') === 'bottom' && t.doc.activeElement === grip);
