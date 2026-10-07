@@ -384,7 +384,7 @@ const RESUME_BTN = 'pointer-events-auto grid size-12 place-items-center rounded-
 const MORE_BTN = 'absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background-dark/80 text-frosted-blue ' +
   'ring-1 ring-frosted-blue/25 transition-[opacity,background-color,box-shadow] duration-150 hover:bg-background-dark hover:ring-2 hover:ring-frosted-blue ' +
   '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 aria-expanded:opacity-100 ' + LINK_FOCUS;
-const MENU_ITEM = 'flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[15px] font-semibold text-frosted-blue ' +
+const MENU_ITEM = 'flex min-h-11 w-full items-center gap-3 rounded-[10px] pl-3 pr-4 text-left text-[15px] font-semibold text-frosted-blue ' +
   'hover:bg-frosted-blue/[0.07] focus:bg-frosted-blue/10 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-frosted-blue';
 const CONTINUE_EMPTY = 'Books you start will show up here.';
 const FADE_MS = 160;               // a Continue card leaving, or coming back
@@ -528,7 +528,7 @@ function openContinueMenu(btn, run, signal) {
   const ends = new AbortController();
   const overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
   overlay.setAttribute('data-continue-menu-layer', '');
-  const menu = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-56 max-w-[calc(100vw-2rem)] rounded-2xl border p-1.5');
+  const menu = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-max min-w-48 max-w-[calc(100vw-2rem)] rounded-2xl border p-1.5');
   menu.id = 'continueMenu';
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-labelledby', btn.id);
@@ -539,7 +539,7 @@ function openContinueMenu(btn, run, signal) {
   item.setAttribute('role', 'menuitem');
   item.setAttribute('data-continue-remove', '');
   item.appendChild(icon('visibility_off', 'shrink-0 text-[20px] text-frosted-blue/70'));
-  item.appendChild(el('span', 'min-w-0 flex-1', 'Remove from Continue'));
+  item.appendChild(el('span', 'min-w-0 flex-1 whitespace-nowrap', 'Remove from Continue'));
   menu.appendChild(item);
   overlay.appendChild(menu);
 
@@ -576,7 +576,7 @@ function openContinueMenu(btn, run, signal) {
   document.body.appendChild(overlay);
   // Under the button, its right edge on the button's, inside the window (above it when there is no room below).
   const r = btn.getBoundingClientRect();
-  const w = Math.min(224, window.innerWidth - 32);
+  const w = Math.min(menu.getBoundingClientRect().width || 224, window.innerWidth - 32);
   menu.style.left = clamp(r.right - w, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
   if (window.innerHeight - r.bottom < 96 && r.top > 96) menu.style.bottom = (window.innerHeight - r.top + 6) + 'px';
   else menu.style.top = (r.bottom + 6) + 'px';
