@@ -158,6 +158,11 @@ class SummaryEndpoint(unittest.TestCase):
     """The library summary's queue figures carry the book requests."""
 
     def setUp(self):
+        # Setup is done (the setup gate reads the real settings table, which
+        # CI's database does not have).
+        setup_done = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        setup_done.start()
+        self.addCleanup(setup_done.stop)
         self.client = helpers.api_client(helpers.make_sessionmaker(), user=helpers.MEMBER)
 
     def tearDown(self):
@@ -280,6 +285,9 @@ class Endpoints(unittest.TestCase):
     """GET /api/request-status/books, and the film rows beside it."""
 
     def setUp(self):
+        setup_done = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        setup_done.start()
+        self.addCleanup(setup_done.stop)
         self.Session = helpers.make_sessionmaker()
         self.client = helpers.api_client(self.Session, user=helpers.MEMBER)
 
