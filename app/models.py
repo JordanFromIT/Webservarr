@@ -584,6 +584,30 @@ class BookQueueEntry(Base):
         return f"<BookQueueEntry(identity='{self.identity}', book_id={self.book_id}, position={self.position})>"
 
 
+class BookContinueHidden(Base):
+    """One book one person took out of their Continue row. Only the row: their
+    place in the book (the player's listening_positions, Kavita's progress)
+    is never touched, so Resume on the book page still works. `activity_at`
+    is the book's newest activity the row showed then (naive UTC, to the
+    millisecond the row sends; null for an ebook place Kavita gave no time),
+    so the book comes back by itself once they listen or read further. Kept
+    while the book is away from the catalog; follows a merge (merged_into)."""
+    __tablename__ = "book_continue_hidden"
+    __table_args__ = (
+        UniqueConstraint("identity", "book_id", name="uq_book_continue_hidden_identity_book"),
+        Index("ix_book_continue_hidden_book_id", "book_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_id = Column(Integer, nullable=False)
+    activity_at = Column(DateTime, nullable=True)                   # naive UTC
+    hidden_at = Column(DateTime, nullable=False)                    # naive UTC
+
+    def __repr__(self):
+        return f"<BookContinueHidden(identity='{self.identity}', book_id={self.book_id})>"
+
+
 class BookRating(Base):
     """One person's 1 to 5 star rating of one book: the record the site shows.
     It is also written through to Kavita (the book's chapter rating) and Plex

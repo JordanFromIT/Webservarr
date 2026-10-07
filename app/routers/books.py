@@ -736,7 +736,9 @@ async def continue_row(request: Request, who: Scope = Depends(caller), db: Sessi
     A book started in several editions or in both formats appears once, under
     its newest activity (an audiobook under the edition touched last).
     `resume` is {"read_url"} for an ebook and {"plex_book_key"} for an
-    audiobook. A source that cannot be read drops its items and adds a note;
+    audiobook. A book the caller took out of the row (PUT
+    /api/books/<id>/continue-hidden) is left out until its activity is newer
+    than it was then. A source that cannot be read drops its items and adds a note;
     the answer is still 200."""
     rows = {r.id: r for r in book_catalog.visible_rows(db, who.series, who.audio)}
     candidates: Dict[int, dict] = {}
@@ -790,6 +792,14 @@ async def continue_row(request: Request, who: Scope = Depends(caller), db: Sessi
         except SQLAlchemyError as exc:
             db.rollback()
             logger.warning("A series follow from reading could not be saved: %s", type(exc).__name__)
+
+    # Books the caller took out of the row stay out until there is newer
+    # activity than the row showed then; their places are untouched.
+    if who.identity:
+        hidden = book_personal.continue_hidden(db, who.identity)
+        for book_id in [b for b, i in candidates.items()
+                        if b in hidden and book_personal.to_ms(i["at"]) <= hidden[b]]:
+            del candidates[book_id]
 
     newest = sorted(candidates.values(), key=lambda i: (i["at"], i["book_id"]), reverse=True)[:CONTINUE_MAX]
     # The chapter number is read from the book's contents: only for what is shown.

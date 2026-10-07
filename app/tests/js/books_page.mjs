@@ -202,7 +202,11 @@ function visit(o = {}) {
   set('WS', WS);
   win.WS = WS;
   if (o.branding) WS.data.branding = o.branding;
-  win.WSUI = { toast(m, kind) { toasts.push([m, kind]); } };
+  win.WSUI = { toast(m, kind, opts) {
+    const entry = opts ? [m, kind, opts] : [m, kind];
+    toasts.push(entry);
+    return { remove() { entry.removed = true; } };
+  } };
   set('WSUI', win.WSUI);
   // Writes (sendBooks) go through window.fetch: the same scripted network.
   win.fetch = (u, init) => net.fetch(u, init);
@@ -725,6 +729,188 @@ await run('an empty Continue releases the slot and the next visit does not reser
   check('a person without one has no slot', !u.doc.documentElement.hasAttribute('data-books-continue'));
   await m;
   u.ctl.abort();
+});
+
+// ---- Taking a book out of Continue ----
+
+// The cards' fade and slide run on the window's real clock (Element.animate).
+const settle = async () => { await new Promise((r) => setTimeout(r, 450)); await flush(); };
+const contIds = (t) => t.qa('#continueHost li[data-continue-item]').map((li) => li.getAttribute('data-continue-item'));
+const key = (t, node, k, extra) => node.dispatchEvent(new t.win.KeyboardEvent('keydown', Object.assign({ key: k, bubbles: true, cancelable: true }, extra || {})));
+
+function hideRoutes(over = {}) {
+  return (net) => {
+    usual({ continue: { items: CONT, notes: [] } })(net);
+    net.on('/api/books/1/continue-hidden', over.hide || (() => ({ body: { hidden: true } })));
+    net.on('/api/books/3/continue-hidden', over.hide || (() => ({ body: { hidden: true } })));
+    net.on('/api/books/6/continue-hidden', over.hide || (() => ({ body: { hidden: true } })));
+  };
+}
+
+await run('Continue: each card has a More button beside its other controls, never inside them', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  const mores = t.qa('#continueHost [data-continue-more]');
+  check('one per card', mores.length === 3);
+  check('a menu button, named for its book', mores[1].tagName === 'BUTTON' && mores[1].getAttribute('type') === 'button' &&
+    mores[1].getAttribute('aria-haspopup') === 'menu' && mores[1].getAttribute('aria-expanded') === 'false' &&
+    mores[1].getAttribute('aria-label') === 'More for The Hobbit');
+  check('on the cover\'s top right corner, a sibling of the link and the play button', mores.every((m) => m.parentNode.matches('.group\\/cont') &&
+    /\babsolute\b/.test(m.className) && /\bright-1\.5\b/.test(m.className) && /\btop-1\.5\b/.test(m.className)));
+  check('the link still holds no control', t.qa('#continueHost [data-continue-open]').every((a) => !a.querySelector('a, button')));
+  check('shown on hover or focus where there is a mouse, always on touch, and while its menu is open',
+    /\[@media\(hover:hover\)_and_\(pointer:fine\)\]:opacity-0/.test(mores[0].className) && /group-hover\/cont:opacity-100/.test(mores[0].className) &&
+    /group-focus-within\/cont:opacity-100/.test(mores[0].className) && /aria-expanded:opacity-100/.test(mores[0].className) && !/(^| )opacity-0/.test(mores[0].className));
+  check('its icon is not read out', mores[0].querySelector('.material-symbols-outlined').getAttribute('aria-hidden') === 'true');
+  check('in the order link, play, More', (() => {
+    const kids = Array.from(t.q('#continueHost li .group\\/cont').querySelectorAll('a, button'));
+    return kids.length === 3 && kids[0].hasAttribute('data-continue-open') && kids[1].hasAttribute('data-resume-read') && kids[2].hasAttribute('data-continue-more');
+  })());
+});
+
+await run('Continue: the More menu opens, takes the focus, and Escape, Tab and a press outside close it', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  const more = t.qa('#continueHost [data-continue-more]')[1];
+  more.click();
+  const menu = t.q('[data-continue-menu]');
+  check('a menu opens', menu && menu.getAttribute('role') === 'menu');
+  check('named by its button, which says it is open', menu.getAttribute('aria-labelledby') === more.id && more.getAttribute('aria-expanded') === 'true' &&
+    more.getAttribute('aria-controls') === menu.id);
+  const item = menu.querySelector('[role="menuitem"]');
+  check('one item, Remove from Continue, with the focus', item && item.textContent.trim().endsWith('Remove from Continue') &&
+    menu.querySelectorAll('[role="menuitem"]').length === 1 && t.doc.activeElement === item);
+  check('outside the row (its scrolling would clip it)', !menu.closest('#continueHost'));
+  key(t, item, 'ArrowDown');
+  check('the arrows keep the one item', t.doc.activeElement === item && t.q('[data-continue-menu]'));
+  key(t, item, 'Escape');
+  await settle();
+  check('Escape closes it', !t.q('[data-continue-menu]') && more.getAttribute('aria-expanded') === 'false' && !more.hasAttribute('aria-controls'));
+  check('and the focus is back on the button', t.doc.activeElement === more);
+  more.click();
+  key(t, t.q('[data-continue-menu] [role="menuitem"]'), 'Tab');
+  await settle();
+  check('Tab closes it from the button', !t.q('[data-continue-menu]') && t.doc.activeElement === more);
+  more.click();
+  t.q('[data-continue-menu-layer]').dispatchEvent(new t.win.MouseEvent('click', { bubbles: true }));
+  await settle();
+  check('a press outside closes it', !t.q('[data-continue-menu]') && more.getAttribute('aria-expanded') === 'false');
+  more.click();
+  more.click();
+  await settle();
+  check('its button again closes it too', !t.q('[data-continue-menu]'));
+  check('nothing was sent', t.net.urls('/api/books/3/continue-hidden').length === 0);
+  more.click();
+  t.ctl.abort();
+  await settle();
+  check('leaving the page closes it', !t.q('[data-continue-menu]'));
+});
+
+await run('Continue: Remove takes the card out, the next card\'s More has the focus, and Undo puts it back', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  t.WS.cache.set('books:continue', { items: CONT, notes: [] });
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  check('the menu closes at once', !t.q('[data-continue-menu]') || t.q('[data-continue-menu-layer]').inert);
+  const sent = t.net.calls.filter((c) => c.url === '/api/books/3/continue-hidden');
+  check('the server is told, with the time the card showed', sent.length === 1 && sent[0].init.method === 'PUT' &&
+    JSON.parse(sent[0].init.body).updated_at === '2026-10-02T10:00:00Z', sent.map((c) => c.init));
+  check('a toast says so, with Undo', t.toasts.length === 1 && t.toasts[0][0] === 'Removed from Continue.' && t.toasts[0][1] === 'ok' &&
+    t.toasts[0][2].action.label === 'Undo', t.toasts);
+  check('the card cannot be used while it goes', t.q('#continueHost li[data-continue-item="3"]').inert === true);
+  await settle();
+  check('the card is gone, the others stay in order', contIds(t).join() === '1,6', contIds(t));
+  check('the next card\'s More button has the focus', t.doc.activeElement === t.q('#continueHost li[data-continue-item="6"] [data-continue-more]'));
+  check('the kept copy is dropped', !t.WS.cache.has('books:continue'));
+  check('the row is still remembered', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1');
+  t.toasts[0][2].action.run();
+  await settle();
+  check('Undo: the card is back where it was', contIds(t).join() === '1,3,6', contIds(t));
+  check('with the focus on it', t.doc.activeElement === t.q('#continueHost li[data-continue-item="3"] [data-continue-open]'));
+  const undone = t.net.calls.filter((c) => c.url === '/api/books/3/continue-hidden' && c.init.method === 'DELETE');
+  check('and the server told', undone.length === 1);
+  check('the card works again', t.q('#continueHost li[data-continue-item="3"]').inert !== true && t.q('#continueHost li[data-continue-item="3"] [data-continue-more]'));
+});
+
+await run('Continue: the last card gives way to the empty line, which takes the focus', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  const focusAfter = [];
+  for (const id of ['6', '1', '3']) {
+    t.q(`#continueHost li[data-continue-item="${id}"] [data-continue-more]`).click();
+    t.q('[data-continue-menu] [data-continue-remove]').click();
+    await settle();
+    const li = t.doc.activeElement && t.doc.activeElement.closest ? t.doc.activeElement.closest('li[data-continue-item]') : null;
+    focusAfter.push(li ? li.getAttribute('data-continue-item') : t.doc.activeElement && t.doc.activeElement.tagName);
+  }
+  check('the card before took the focus when the row\'s last card went, then the next one', focusAfter.join() === '3,3,P', focusAfter);
+  const line = t.q('#continueHost [data-continue-empty]');
+  check('the row shows its empty line', !t.q('#continueHost li') && line && line.textContent === 'Books you start will show up here.');
+  check('still the Continue section', t.q('#continueHost [data-continue] h2').textContent === 'Continue');
+  check('the line has the focus', t.doc.activeElement === line);
+  check('the next visit holds the line\'s room, not a row', t.win.localStorage.getItem('webservarr_books_continue:sam') === '0' &&
+    !t.doc.documentElement.hasAttribute('data-books-continue'));
+  t.toasts[2][2].action.run();
+  await settle();
+  check('Undo of the last one brings a row back with it', contIds(t).join() === '3' && !t.q('#continueHost [data-continue-empty]'));
+  check('focused', t.doc.activeElement === t.q('#continueHost li[data-continue-item="3"] [data-continue-open]'));
+  check('and remembered again', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1' && t.doc.documentElement.hasAttribute('data-books-continue'));
+  check('the restored row still drags', t.WS.drags.some((d) => d.el === t.q('#continueHost [data-continue-row]')));
+  t.toasts[0][2].action.run();
+  t.toasts[1][2].action.run();
+  await settle();
+  check('the others come back in their own order', contIds(t).join() === '1,3,6', contIds(t));
+});
+
+await run('Continue: Undo while the card is still fading keeps it', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  t.qa('#continueHost [data-continue-more]')[0].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  t.toasts[0][2].action.run();
+  await settle();
+  check('the card stays, once', contIds(t).join() === '1,3,6', contIds(t));
+  check('usable again', t.q('#continueHost li[data-continue-item="1"]').inert !== true && !t.q('#continueHost li[data-continue-item="1"]').hasAttribute('data-leaving'));
+});
+
+await run('Continue: a refused Remove puts the card back and says so', async (make) => {
+  const t = make({ routes: hideRoutes({ hide: () => ({ status: 503, body: {} }) }) });
+  await t.mount();
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  check('the card is back', contIds(t).join() === '1,3,6', contIds(t));
+  check('the Undo toast went, an error says so', t.toasts[0].removed === true && t.toasts.length === 2 &&
+    t.toasts[1][1] === 'err' && /Couldn’t remove it from Continue/.test(t.toasts[1][0]), t.toasts);
+});
+
+await run('Continue: a refused Undo takes the card out again and says so', async (make) => {
+  const t = make({ routes: (net) => {
+    hideRoutes()(net);
+    net.on('/api/books/3/continue-hidden', (u, init) => (init.method === 'DELETE' ? { status: 503, body: {} } : { body: { hidden: true } }));
+  } });
+  await t.mount();
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  t.toasts[0][2].action.run();
+  await settle();
+  check('it is out again, as the server has it', contIds(t).join() === '1,6', contIds(t));
+  check('with an error', t.toasts.some((x) => x[1] === 'err' && /put it back/.test(x[0])), t.toasts);
+});
+
+await run('Continue: Undo after leaving the page still tells the server, and draws nothing', async (make) => {
+  const t = make({ routes: hideRoutes() });
+  await t.mount();
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  t.ctl.abort();
+  t.toasts[0][2].action.run();
+  await settle();
+  check('the server is told', t.net.calls.some((c) => c.url === '/api/books/3/continue-hidden' && c.init.method === 'DELETE'));
+  check('the left page is not drawn on', contIds(t).join() === '1,6');
 });
 
 // ---- The Kavita hand-off ----

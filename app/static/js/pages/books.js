@@ -19,8 +19,9 @@
  *
  * Also exports what the other Books pages draw with:
  *   renderBookCard(card, { signal })                   a cover card (an <a>)
- *   renderContinueRow(items, { signal, failed })       the Continue section, always
- *                                                       (with nothing in progress, one quiet line)
+ *   renderContinueRow(items, { signal, failed, onChange })  the Continue section, always
+ *                                                       (with nothing in progress, one quiet line);
+ *                                                       each card's More menu takes it out of the row
  *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
  *   noteLine(text, href)                               a quiet line about a source that is down
  *   rememberContinue(user)                             a book was just started: the next visit holds the row's room
@@ -378,15 +379,25 @@ function resumeAudio(key) {
 const RESUME_BTN = 'pointer-events-auto grid size-12 place-items-center rounded-full bg-background-dark/80 text-frosted-blue ' +
   'ring-1 ring-frosted-blue/25 shadow-lg transition-[opacity,background-color,box-shadow] duration-150 hover:bg-background-dark hover:ring-2 hover:ring-frosted-blue ' +
   '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 ' + LINK_FOCUS;
+// The small More button on a Continue cover's top right corner: shown as the
+// play button is, and kept while its menu is open.
+const MORE_BTN = 'absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-background-dark/80 text-frosted-blue ' +
+  'ring-1 ring-frosted-blue/25 transition-[opacity,background-color,box-shadow] duration-150 hover:bg-background-dark hover:ring-2 hover:ring-frosted-blue ' +
+  '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 aria-expanded:opacity-100 ' + LINK_FOCUS;
+const MENU_ITEM = 'flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 text-left text-[15px] font-semibold text-frosted-blue ' +
+  'hover:bg-frosted-blue/[0.07] focus:bg-frosted-blue/10 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-frosted-blue';
+const CONTINUE_EMPTY = 'Books you start will show up here.';
+const FADE_MS = 160;               // a Continue card leaving, or coming back
 let continueIds = 0;
 
 /**
  * One Continue card. The cover and its words open the book's own page; a
  * round button centred on the cover picks up from the person's place (an
- * audiobook in the player, an ebook in the reader). The two are siblings,
- * the button laid over the cover, so neither control sits inside the other.
+ * audiobook in the player, an ebook in the reader); a small More button on
+ * its corner opens the card's menu (onMore). All three are siblings laid over
+ * the card, so no control sits inside another.
  */
-function continueCard(item, signal) {
+function continueCard(item, signal, onMore) {
   const audio = item.format === 'audio';
   const resume = item.resume || {};
   const title = item.title || 'Untitled';
@@ -436,6 +447,20 @@ function continueCard(item, signal) {
   play.appendChild(icon(audio ? 'play_arrow' : 'auto_stories', 'text-[28px]'));
   spot.appendChild(play);
   card.appendChild(spot);
+
+  if (onMore) {
+    const more = el('button', MORE_BTN);
+    more.type = 'button';
+    more.id = 'continueMore' + (++continueIds);
+    more.setAttribute('data-continue-more', '');
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', 'false');
+    more.setAttribute('aria-label', 'More for ' + title);
+    more.title = 'More';
+    more.appendChild(icon('more_horiz', 'text-[20px]'));
+    more.addEventListener('click', function () { onMore(more); }, { signal: signal });
+    card.appendChild(more);
+  }
   return card;
 }
 
@@ -454,12 +479,127 @@ export function noteLine(text, href) {
   return p;
 }
 
+function motionOff() {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Run an animation, then `done` (at once where there is none). */
+function animate(node, frames, ms, done) {
+  if (typeof node.animate !== 'function') { done(); return; }
+  let ran = false;
+  const finish = function () { if (!ran) { ran = true; done(); } };
+  const a = node.animate(frames, { duration: ms, easing: 'ease-out' });
+  if (a && a.finished && typeof a.finished.then === 'function') a.finished.then(finish, finish);
+  else finish();
+}
+
+/** Where each node is now, to slide them from there after the row changes. */
+function lefts(nodes) {
+  return nodes.map(function (n) { return n.getBoundingClientRect().left; });
+}
+
+/** The cards that moved slide from where they were (transform only, so nothing is
+    laid out again); with reduced motion they are simply there. */
+function slideFrom(nodes, before) {
+  if (motionOff()) return;
+  nodes.forEach(function (n, i) {
+    const dx = before[i] - n.getBoundingClientRect().left;
+    if (!dx || typeof n.animate !== 'function') return;
+    n.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], { duration: MOVE_MS, easing: 'ease-out' });
+  });
+}
+
+// The one Continue menu open, if any: { btn, close(back) }.
+let continueMenu = null;
+
+/**
+ * A Continue card's menu (a menu button's menu): one item, "Remove from
+ * Continue". A small popover under the More button, inside the window. The
+ * item takes the focus; Escape closes it and gives the focus back to the
+ * button, Tab closes it and goes on from the button, a press outside it or a
+ * scroll closes it. run() is the item's action, after the menu has closed.
+ */
+function openContinueMenu(btn, run, signal) {
+  if (continueMenu) {
+    const same = continueMenu.btn === btn;
+    continueMenu.close(true);
+    if (same) return;
+  }
+  const ends = new AbortController();
+  const overlay = el('div', 'ws-dialog fixed inset-0 z-[95]');
+  overlay.setAttribute('data-continue-menu-layer', '');
+  const menu = el('div', 'ws-dialog-box ws-frost ws-frost-read absolute w-56 max-w-[calc(100vw-2rem)] rounded-2xl border p-1.5');
+  menu.id = 'continueMenu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-labelledby', btn.id);
+  menu.setAttribute('data-continue-menu', '');
+  const item = el('button', MENU_ITEM);
+  item.type = 'button';
+  item.tabIndex = -1;
+  item.setAttribute('role', 'menuitem');
+  item.setAttribute('data-continue-remove', '');
+  item.appendChild(icon('visibility_off', 'shrink-0 text-[20px] text-frosted-blue/70'));
+  item.appendChild(el('span', 'min-w-0 flex-1', 'Remove from Continue'));
+  menu.appendChild(item);
+  overlay.appendChild(menu);
+
+  let gone = false;
+  function close(back) {
+    if (gone) return;
+    gone = true;
+    ends.abort();
+    btn.setAttribute('aria-expanded', 'false');
+    btn.removeAttribute('aria-controls');
+    if (continueMenu && continueMenu.btn === btn) continueMenu = null;
+    if (back && btn.isConnected) btn.focus({ preventScroll: true });
+    if (motionOff()) { overlay.remove(); return; }
+    overlay.inert = true;
+    overlay.classList.add('is-closing');
+    animate(overlay, [{ opacity: 1 }, { opacity: 0 }], 130, function () { overlay.remove(); });
+  }
+  continueMenu = { btn: btn, close: close };
+
+  item.addEventListener('click', function () { close(false); run(); }, { signal: ends.signal });
+  menu.addEventListener('keydown', function (e) {
+    if (e.isComposing) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+    // The default Tab then goes on from the button, as a menu button's Tab does.
+    else if (e.key === 'Tab') close(true);
+    // One item: the arrows, Home and End keep it.
+    else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(e.key) !== -1) { e.preventDefault(); item.focus(); }
+  }, { signal: ends.signal });
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); }, { signal: ends.signal });
+  window.addEventListener('scroll', function () { close(false); }, { passive: true, capture: true, signal: ends.signal });
+  window.addEventListener('resize', function () { close(false); }, { signal: ends.signal });
+  if (signal) signal.addEventListener('abort', function () { close(false); }, { once: true, signal: ends.signal });
+
+  document.body.appendChild(overlay);
+  // Under the button, its right edge on the button's, inside the window (above it when there is no room below).
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(224, window.innerWidth - 32);
+  menu.style.left = clamp(r.right - w, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
+  if (window.innerHeight - r.bottom < 96 && r.top > 96) menu.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+  else menu.style.top = (r.bottom + 6) + 'px';
+  btn.setAttribute('aria-expanded', 'true');
+  btn.setAttribute('aria-controls', menu.id);
+  item.focus({ preventScroll: true });
+}
+
 /**
  * The Continue section: what the person is partway through, newest first, as
  * a heading and a sideways row of cards. Always a section, so the first-visit
  * guide has it to point at: with nothing in progress it says where those
  * books will be, and when the list could not be read (failed) it says that.
  * Either line is the height books.html's empty skeleton holds.
+ *
+ * Each card's More menu takes the book out of this person's row (PUT
+ * /api/books/<id>/continue-hidden): only the row, never their place in the
+ * book, and it comes back by itself once they read or listen further. The
+ * card fades out and the cards after it slide over (nothing else on the page
+ * moves while there are cards left; the last one going gives way to the empty
+ * line); a toast offers Undo, which puts it back where it was. The focus goes
+ * to the next card's More button (the previous one's at the end), or to the
+ * empty line. opts.onChange(items) hears every change to what the row shows.
  */
 export function renderContinueRow(items, opts) {
   const o = opts || {};
@@ -468,33 +608,163 @@ export function renderContinueRow(items, opts) {
   section.setAttribute('aria-label', 'Continue');
   section.setAttribute('data-continue', '');
   section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
-  if (!list.length) {
+
+  function emptyLine(failed) {
     const line = el('p', 'text-[15px] leading-6 text-frosted-blue/70',
-      o.failed ? 'Your books in progress didn’t load.' : 'Books you start will show up here.');
+      failed ? 'Your books in progress didn’t load.' : CONTINUE_EMPTY);
     line.setAttribute('data-continue-empty', '');
-    section.appendChild(line);
+    return line;
+  }
+  if (!list.length) {
+    section.appendChild(emptyLine(o.failed));
     return section;
   }
-  const row = el('ul', 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
-  list.forEach(function (item) {
+
+  // The order the row came in, so Undo puts a card back where it was.
+  const order = list.map(function (item) { return String(item.book_id); });
+  const shown = {};
+  list.forEach(function (item) { shown[String(item.book_id)] = item; });
+
+  function liOf(id) {
+    return section.querySelector('li[data-continue-item="' + id + '"]');
+  }
+  function current() {
+    return Array.prototype.slice.call(section.querySelectorAll('li[data-continue-item]')).map(function (li) {
+      return shown[li.getAttribute('data-continue-item')];
+    });
+  }
+  function changed() {
+    if (typeof o.onChange === 'function') o.onChange(current());
+  }
+
+  function cardItem(item) {
     const li = el('li', 'shrink-0');
-    li.appendChild(continueCard(item, o.signal));
-    row.appendChild(li);
-  });
-  // A mouse drags the row, and a plain wheel moves it sideways until it can go
-  // no further (then the page scrolls on); a trackpad's sideways swipe and a
-  // finger already work natively.
-  if (window.WS && typeof window.WS.dragScroll === 'function') window.WS.dragScroll(row, { signal: o.signal });
-  row.addEventListener('wheel', function (e) {
-    if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-    const max = row.scrollWidth - row.clientWidth;
-    if (max <= 1) return;
-    const next = clamp(row.scrollLeft + (e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY), 0, max);
-    if (next === row.scrollLeft) return;
-    row.scrollLeft = next;
-    e.preventDefault();
-  }, { passive: false, signal: o.signal });
+    li.setAttribute('data-continue-item', String(item.book_id));
+    li.appendChild(continueCard(item, o.signal, function (btn) {
+      openContinueMenu(btn, function () { remove(String(item.book_id), true); }, o.signal);
+    }));
+    return li;
+  }
+
+  function makeRow() {
+    const row = el('ul', 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
+    row.setAttribute('data-continue-row', '');
+    // A mouse drags the row, and a plain wheel moves it sideways until it can go
+    // no further (then the page scrolls on); a trackpad's sideways swipe and a
+    // finger already work natively.
+    if (window.WS && typeof window.WS.dragScroll === 'function') window.WS.dragScroll(row, { signal: o.signal });
+    row.addEventListener('wheel', function (e) {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      const max = row.scrollWidth - row.clientWidth;
+      if (max <= 1) return;
+      const next = clamp(row.scrollLeft + (e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY), 0, max);
+      if (next === row.scrollLeft) return;
+      row.scrollLeft = next;
+      e.preventDefault();
+    }, { passive: false, signal: o.signal });
+    return row;
+  }
+
+  const row = makeRow();
+  list.forEach(function (item) { row.appendChild(cardItem(item)); });
   section.appendChild(row);
+
+  function rowNow() { return section.querySelector('[data-continue-row]'); }
+
+  /** Take a card out of the row (sent: tell the server, with a toast to undo it). */
+  function remove(id, send) {
+    const li = liOf(id);
+    if (!li) return;
+    const ul = li.parentNode;
+    const next = li.nextElementSibling || li.previousElementSibling;
+    const last = !next;
+    li.inert = true;
+    li.setAttribute('data-leaving', '');
+    const fade = motionOff() ? [{ opacity: 1 }, { opacity: 0 }]
+      : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.94)' }];
+    animate(li, fade, FADE_MS, function () {
+      // Undo pressed while it faded: it stays.
+      if (!li.isConnected || !li.hasAttribute('data-leaving')) return;
+      if (last) {
+        // The row gives way to its empty line, its height eased down to the line's.
+        const was = ul.getBoundingClientRect().height;
+        const line = emptyLine(false);
+        // Focusable only from here, for the focus to land on; it draws no ring.
+        line.tabIndex = -1;
+        line.classList.add('focus:outline-none');
+        ul.replaceWith(line);
+        if (!motionOff()) {
+          const now = line.getBoundingClientRect().height;
+          line.style.overflow = 'hidden';
+          animate(line, [{ height: was + 'px', opacity: 0 }, { height: now + 'px', opacity: 1 }], MOVE_MS, function () {
+            line.style.overflow = '';
+          });
+        }
+        line.focus({ preventScroll: true });
+      } else {
+        const others = Array.prototype.slice.call(ul.children).filter(function (n) { return n !== li; });
+        const before = lefts(others);
+        li.remove();
+        slideFrom(others, before);
+        const more = next.querySelector('[data-continue-more]');
+        if (more) more.focus({ preventScroll: true });
+      }
+      changed();
+    });
+    if (!send) return;
+    const item = shown[id];
+    const url = '/api/books/' + encodeURIComponent(id) + '/continue-hidden';
+    const toast = window.WSUI && typeof window.WSUI.toast === 'function'
+      ? window.WSUI.toast('Removed from Continue.', 'ok', { action: { label: 'Undo', run: function () { undo(id, url); } } })
+      : null;
+    sendBooks('PUT', url, { updated_at: item && item.updated_at ? item.updated_at : null }).then(null, function () {
+      if (toast && typeof toast.remove === 'function') toast.remove();
+      if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast('Couldn’t remove it from Continue. Try again.', 'err');
+      restore(id);
+    });
+  }
+
+  /** Put a card back where it was in the row, the focus on it. */
+  function restore(id) {
+    if ((o.signal && o.signal.aborted) || !section.isConnected || !shown[id]) return;
+    const leaving = liOf(id);
+    if (leaving) {
+      // Still fading out: it stops and comes back as it was.
+      leaving.removeAttribute('data-leaving');
+      leaving.inert = false;
+      if (typeof leaving.getAnimations === 'function') leaving.getAnimations().forEach(function (a) { a.cancel(); });
+      const open = leaving.querySelector('[data-continue-open]');
+      if (open) open.focus({ preventScroll: true });
+      return;
+    }
+    let ul = rowNow();
+    if (!ul) {
+      ul = makeRow();
+      const line = section.querySelector('[data-continue-empty]');
+      if (line) line.replaceWith(ul); else section.appendChild(ul);
+    }
+    const others = Array.prototype.slice.call(ul.children);
+    const before = lefts(others);
+    const li = cardItem(shown[id]);
+    const at = order.indexOf(id);
+    const after = others.find(function (n) { return order.indexOf(n.getAttribute('data-continue-item')) > at; });
+    ul.insertBefore(li, after || null);
+    slideFrom(others, before);
+    animate(li, [{ opacity: 0 }, { opacity: 1 }], FADE_MS, function () {});
+    const open = li.querySelector('[data-continue-open]');
+    if (open) open.focus({ preventScroll: true });
+    changed();
+  }
+
+  /** Undo: the card back at once; the server told. Should it refuse, the card goes again. */
+  function undo(id, url) {
+    restore(id);
+    sendBooks('DELETE', url).then(null, function () {
+      if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast('Couldn’t put it back in Continue. Try again.', 'err');
+      remove(id, false);
+    });
+  }
+
   return section;
 }
 
@@ -753,7 +1023,16 @@ export async function mount(ctx) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('continue', data && data.notes);
-    placeRow('continue', renderContinueRow(items, { signal: signal, failed: failed }), !fromCache && !failed, items.length > 0);
+    placeRow('continue', renderContinueRow(items, { signal: signal, failed: failed, onChange: continueChanged }), !fromCache && !failed, items.length > 0);
+  }
+
+  /** A book taken out of Continue (or put back): the kept copy is out of date,
+      and the next visit holds the room of what the row has now. */
+  function continueChanged(items) {
+    if (typeof WS.dropCache === 'function') WS.dropCache('books:continue');
+    const any = items.length > 0;
+    storageSet(rowKey('continue'), any ? '1' : '0');
+    markRow('continue', any);
   }
 
   function loadContinue() {

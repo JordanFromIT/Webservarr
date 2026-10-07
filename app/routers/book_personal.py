@@ -1,6 +1,7 @@
 """
 A person's own Books data (/api/books/me/... and /api/books/<id>/list,
-/queue, /rating): My list, the Up next queue and star ratings. The rows are
+/queue, /rating, /continue-hidden): My list, the Up next queue, star ratings
+and the books they took out of their Continue row. The rows are
 app/services/book_personal.py's; this module decides what the caller may see
 and change.
 
@@ -14,6 +15,7 @@ followed to the surviving book. Errors are 4xx or 503, never 500.
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Query, Request
@@ -271,3 +273,51 @@ async def clear_rating(request: Request, book_id: BookId, background: Background
         if book_personal.set_rating(db, identity, target, None):
             background.add_task(book_personal.push_rating, identity, target, dict(user), session_id)
     return {"my_rating": None}
+
+
+# --- Taken out of Continue ----------------------------------------------------------
+
+class HideIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    # The card's updated_at as the Continue row sent it (ISO 8601); null for
+    # a place with no time.
+    updated_at: Optional[str] = Field(None, max_length=40)
+
+
+def _activity_at(value: Optional[str]) -> Optional[datetime]:
+    """updated_at as naive UTC, or None; 422 for anything else."""
+    if value is None:
+        return None
+    try:
+        at = datetime.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="updated_at is an ISO 8601 time") from None
+    if at.tzinfo is not None:
+        at = at.astimezone(timezone.utc).replace(tzinfo=None)
+    return at
+
+
+@router.put("/{book_id}/continue-hidden", dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
+@books._limit(WRITE_LIMIT, "me-write")
+@books._db_503
+async def hide_from_continue(request: Request, book_id: BookId, body: HideIn, who: Scope = Depends(caller),
+                             db: Session = Depends(get_db)):
+    """Take a book the caller can see out of their Continue row, until they
+    listen or read past `updated_at` (the activity the row showed):
+    {"hidden": true}. Their place in the book is not touched."""
+    identity = _identity(who)
+    at = _activity_at(body.updated_at)
+    row = _visible_book(db, who, book_id)
+    book_personal.hide_from_continue(db, identity, row.id, at)
+    return {"hidden": True}
+
+
+@router.delete("/{book_id}/continue-hidden", dependencies=[Depends(require_same_origin)])
+@books._limit(WRITE_LIMIT, "me-write")
+@books._db_503
+async def show_in_continue(request: Request, book_id: BookId, identity: str = Depends(_owner),
+                           db: Session = Depends(get_db)):
+    """Undo: the book is back in the caller's Continue row: {"hidden": false}."""
+    book_personal.show_in_continue(db, identity, _ids_to_clear(db, book_id))
+    return {"hidden": False}

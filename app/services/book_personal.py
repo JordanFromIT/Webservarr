@@ -1,6 +1,7 @@
 """
-What each person keeps about the Books catalog: My list, the Up next queue
-and their 1 to 5 star ratings (spec 2026-10-04-books-page-personal-design.md).
+What each person keeps about the Books catalog: My list, the Up next queue,
+their 1 to 5 star ratings (spec 2026-10-04-books-page-personal-design.md)
+and the books they took out of their Continue row.
 
 Every row is keyed by account identity (tickets.account_identity), never by
 username, and by the catalog's book id. The catalog is shared and rebuilt
@@ -41,7 +42,7 @@ from app.database import SessionLocal
 from app.integrations import kavita
 from app.integrations import plex_player as pp
 from app.integrations.config import same_address
-from app.models import BookListEntry, BookQueueEntry, BookRating
+from app.models import BookContinueHidden, BookListEntry, BookQueueEntry, BookRating
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,49 @@ def move(db, identity: str, book_id: int, to: int, shown: Iterable[int]) -> bool
     _renumber(db, rest[:at] + [moving] + rest[at:])
     db.commit()
     return True
+
+
+# --- Taken out of Continue ----------------------------------------------------------
+# Only the row: nothing here reads or writes a place (the player's positions,
+# Kavita's progress), so the book page's Resume is unchanged. The book is shown
+# again once its activity is newer than what the row showed when it was taken
+# out, compared to the millisecond (the row's own updated_at precision).
+
+def to_ms(at: Optional[datetime]) -> datetime:
+    """An activity time as the Continue row compares it: to the millisecond
+    the row's updated_at carries; no time is the earliest."""
+    if at is None:
+        return datetime.min
+    return at.replace(microsecond=at.microsecond - at.microsecond % 1000)
+
+
+def continue_hidden(db, identity: str) -> Dict[int, datetime]:
+    """{book id: the activity it was taken out at (to_ms)} for the person."""
+    return {b: to_ms(at) for b, at in db.query(BookContinueHidden.book_id, BookContinueHidden.activity_at)
+            .filter(BookContinueHidden.identity == identity)}
+
+
+def hide_from_continue(db, identity: str, book_id: int, activity_at: Optional[datetime]) -> None:
+    """Take the book out of the person's Continue row until there is activity
+    newer than `activity_at` (naive UTC; None: until any activity with a
+    time). Taken out again: the newer time is kept."""
+    _take_write_lock(db, identity)
+    row = (db.query(BookContinueHidden)
+           .filter(BookContinueHidden.identity == identity, BookContinueHidden.book_id == book_id).first())
+    if row is None:
+        db.add(BookContinueHidden(identity=identity, book_id=book_id, activity_at=activity_at, hidden_at=_now()))
+    else:
+        if to_ms(activity_at) > to_ms(row.activity_at):
+            row.activity_at = activity_at
+        row.hidden_at = _now()
+    db.commit()
+
+
+def show_in_continue(db, identity: str, book_ids: Iterable[int]) -> None:
+    """Undo: the books are in the Continue row again (as the row would have them)."""
+    db.query(BookContinueHidden).filter(BookContinueHidden.identity == identity,
+                                        BookContinueHidden.book_id.in_(list(book_ids))).delete(synchronize_session=False)
+    db.commit()
 
 
 # --- Ratings ------------------------------------------------------------------------
@@ -453,7 +497,7 @@ def next_book_id(db) -> Optional[int]:
     row still names (a book that left the catalog and may come back), or None
     when the database's own next id is already past every such id."""
     from app.models import Book
-    named = max((db.query(func.max(m.book_id)).scalar() or 0) for m in (BookListEntry, BookQueueEntry, BookRating))
+    named = max((db.query(func.max(m.book_id)).scalar() or 0) for m in (BookListEntry, BookQueueEntry, BookRating, BookContinueHidden))
     top = db.query(func.max(Book.id)).scalar() or 0
     return named + 1 if named >= top else None
 
@@ -463,7 +507,8 @@ def follow_merges(db, moves: Dict[int, int]) -> None:
     into, in the rebuild's transaction (no commit). `moves` is {ghost id:
     surviving id}. Where the person already has a row for the survivor:
     the list keeps one entry (the earlier date), the queue keeps the earlier
-    place, and the newer rating wins. A rating that moves is written through
+    place, the newer rating wins, and a book taken out of Continue stays out
+    until activity newer than either. A rating that moves is written through
     again, because the survivor's items now include the ghost's."""
     moves = {g: t for g, t in moves.items() if g != t}
     if not moves:
@@ -510,4 +555,18 @@ def follow_merges(db, moves: Dict[int, int]) -> None:
                 held.stars, held.updated_at = rating.stars, rating.updated_at
             db.delete(rating)
         _mark_for_writing(winner, now)
+        db.flush()
+
+    for hidden in (db.query(BookContinueHidden).filter(BookContinueHidden.book_id.in_(ghosts))
+                   .order_by(BookContinueHidden.id).all()):
+        target = moves[hidden.book_id]
+        held = (db.query(BookContinueHidden).filter(BookContinueHidden.identity == hidden.identity,
+                                                    BookContinueHidden.book_id == target).first())
+        if held is None:
+            hidden.book_id = target
+        else:
+            if to_ms(hidden.activity_at) > to_ms(held.activity_at):
+                held.activity_at = hidden.activity_at
+            held.hidden_at = max(held.hidden_at, hidden.hidden_at)
+            db.delete(hidden)
         db.flush()
