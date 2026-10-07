@@ -66,6 +66,7 @@
  * timers, so cancelling one leaves nothing behind on the signal.
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
+ *   ws:swap             detail { root } the new #wsPage, synchronously inside the swap
  *   ws:page-mounted     detail { url, page } after each mount
  *   ws:page-claimed     detail { url } after the page claimed a navigation
  *   ws:nav-stayed       detail { url, reason } a navigation stayed on this page
@@ -968,7 +969,12 @@ function start() {
 
   function swapDom(doc, page) {
     const old = document.getElementById('wsPage');
-    old.replaceWith(document.importNode(page, true));
+    const fresh = document.importNode(page, true);
+    old.replaceWith(fresh);
+    // The shell's live parts that sit inside the page's content (the event
+    // log, event-log.js) take the place of the new page's copies now, in
+    // the same update, before anything is drawn. Dispatched synchronously.
+    window.dispatchEvent(new CustomEvent('ws:swap', { detail: { root: fresh } }));
     syncPageOffBanner(doc);
     syncStyles(doc);
     syncViewport(doc);

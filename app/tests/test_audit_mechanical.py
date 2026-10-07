@@ -23,9 +23,11 @@ except Exception:  # pragma: no cover
 STATIC = Path(__file__).resolve().parents[1] / "static"
 
 # Small type and caps labels still on Home and in the shell (nav sublabels,
-# caps links, chips): visible design, left out of the type-floor and caps
+# caps links, chips, the headers' gauges, which moved from Home into the
+# shell as they were): visible design, left out of the type-floor and caps
 # guards only.
-DEFERRED = {"index.html", "js/pages/home.js", "partials/shell-sidebar.html", "partials/shell-header.html"}
+DEFERRED = {"index.html", "js/pages/home.js", "partials/shell-sidebar.html", "partials/shell-header.html",
+            "partials/shell-gauges.html"}
 
 
 def read(rel: str) -> str:

@@ -1,8 +1,8 @@
-// Home's event log (app/static/js/pages/home.js, createEventLog): the real
-// Home page module run in happy-dom (a dev-only dependency) over the page's
-// own markup (index.html), with a scripted /api/status/feed, a fake clock for
-// the wheel's turns and a fake shell (WS.swr and WS.arrive written as shell.js
-// does them). The other sections' reads answer nothing.
+// The event log (app/static/js/event-log.js): the real shell module run in
+// happy-dom (a dev-only dependency) over the server's own markup
+// (partials/shell-event-log.html), with a scripted /api/status/feed, a fake
+// clock for the wheel's turns and a fake shell (WS.swr and WS.poll written
+// as shell.js does them).
 //
 // Covers: the feed's states (ok, down, unavailable, off, empty, a failed
 // read); events newest at the front (slot 0, last in the document), at most
@@ -17,10 +17,13 @@
 // of library lines, and the server's rows (event_pinned_vectors.json) taken
 // over without a change; turning back through the history by wheel, keys and
 // drag, with the page scrolling at either end, no yank from new events,
-// "Latest" and the 15 s return.
+// "Latest" and the 15 s return; and soft navigation: one live section put in
+// place of each new page's copy (ws:swap), its state, listeners and single
+// poll carried over, left out on a page without one (the reader), read again
+// only when its answer is old.
 //
-// HOME_JS=<path> runs the same cases against another copy of the module.
-// Run: node app/tests/js/home_event_log.mjs (npm run test:js; CI js-checks).
+// EVENT_LOG_JS=<path> runs the same cases against another copy of the module.
+// Run: node app/tests/js/event_log.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,11 +31,10 @@ import { Window } from 'happy-dom';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const STATIC = join(here, '../../static');
-const HOME_PATH = process.env.HOME_JS || join(STATIC, 'js/pages/home.js');
-const HOME_HTML = readFileSync(join(STATIC, 'index.html'), 'utf8');
+const LOG_PATH = process.env.EVENT_LOG_JS || join(STATIC, 'js/event-log.js');
+const LOG_HTML = readFileSync(join(STATIC, 'partials/shell-event-log.html'), 'utf8');
 const THEME_CSS = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
 const PINNED = JSON.parse(readFileSync(join(here, '../event_pinned_vectors.json'), 'utf8'));
-const BOOKS_SRC = readFileSync(join(STATIC, 'js/pages/books.js'), 'utf8');
 
 const report = console.error.bind(console);
 let failed = 0;
@@ -74,32 +76,16 @@ function fakeClock() {
   };
 }
 
-const BOOKS_URL = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(BOOKS_SRC);
-const home = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(
-  readFileSync(HOME_PATH, 'utf8').replace(/from\s+['"]\.\/books\.js(\?[^'"]*)?['"]/g, `from ${JSON.stringify(BOOKS_URL)}`)));
+const mod = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(readFileSync(LOG_PATH, 'utf8')));
 
 // ---- The feed, scripted: feed.answer is what the next read returns ----
 
-function fakeShell(doc, clock, feed) {
+function fakeShell(doc, clock, feed, polls) {
   const store = new Map();
-  const arr = { order: [], done: {}, queue: {}, gate: false };
   const WS = {
-    arrived: [],
     reads: 0,
-    arriveReset() {
-      arr.order = Array.from(doc.querySelectorAll('[data-arrive]')).map((n) => n.getAttribute('data-arrive'));
-      arr.done = {}; arr.queue = {}; arr.gate = false;
-      // As shell.js: a section the server wrote in full (Home's news) has arrived.
-      doc.querySelectorAll('[data-arrive][data-arrived]').forEach((n) => { arr.done[n.getAttribute('data-arrive')] = true; });
-      clock.setTimeout(() => { arr.gate = true; flushArrive(); }, 300);
-    },
-    arrive(key, write) {
-      if (arr.done[key] || arr.order.indexOf(key) === -1) { if (write) write(); return; }
-      arr.queue[key] = write || (() => {});
-      flushArrive();
-    },
     // shell.js's swr: a kept copy renders first, a changed answer renders again,
-    // onError only when nothing was shown. Only the feed is this test's business.
+    // onError only when nothing was shown.
     swr(key, fetcher, render, opts) {
       if (key !== 'status:feed') return Promise.resolve(null);
       opts = opts || {};
@@ -122,35 +108,23 @@ function fakeShell(doc, clock, feed) {
       if (a && a.status) { const e = new Error('HTTP ' + a.status); e.status = a.status; return Promise.reject(e); }
       return Promise.resolve(JSON.parse(JSON.stringify(a)));
     },
-    setHTML() {},
-    serviceStatus() { return Promise.resolve([]); },
-    dragScroll() {},
+    poll(fn, ms) { polls.push({ fn, ms }); return () => {}; },
     cache: store
   };
-  function flushArrive() {
-    for (const k of arr.order) {
-      if (arr.done[k]) continue;
-      if (!(k in arr.queue)) { if (arr.gate) continue; return; }
-      const write = arr.queue[k];
-      delete arr.queue[k];
-      arr.done[k] = true;
-      WS.arrived.push(k);
-      write();
-    }
-  }
   return WS;
 }
 
-const NAV = /<div id="wsPage"[\s\S]*<\/main>/;
+// A page as the server renders it: the section at the top of its content.
+// slot: false for a page without one (the reader).
+function pageHTML(slot = true) {
+  return '<div id="wsPage"><div class="p-4">' + (slot ? LOG_HTML : '') + '<h1>Page</h1></div></div>';
+}
 
 function visit(o = {}) {
   const win = new Window({ url: 'https://ws.test/' });
   const doc = win.document;
-  doc.body.innerHTML = HOME_HTML.match(NAV)[0].replace(/<\/main>$/, '');
-  if (o.serverHidden) doc.getElementById('homeEventLog').hidden = true;
-  // The server writes the news cards and marks News arrived (app/pages.py),
-  // so the event log under it on a phone never waits for it.
-  doc.querySelector('[data-arrive="news"]').setAttribute('data-arrived', '');
+  doc.body.innerHTML = '<main>' + pageHTML(o.slot !== false) + '</main>';
+  if (o.serverHidden) doc.getElementById('wsEventLog').hidden = true;
   if (o.pinnedHTML !== undefined) {
     // As the server writes them (app/home_event_log.py).
     const tpl = doc.createElement('template');
@@ -160,47 +134,40 @@ function visit(o = {}) {
   const clock = fakeClock();
   const feed = { answer: o.answer };
   const ctl = new win.AbortController();
-  const WS = fakeShell(doc, clock, feed);
+  const polls = [];
+  const WS = fakeShell(doc, clock, feed, polls);
   if (o.cached) WS.cache.set('status:feed', o.cached);
   const reduced = { on: !!o.reduced };
   win.matchMedia = (q) => ({ matches: q.indexOf('prefers-reduced-motion: reduce') !== -1 && reduced.on, media: q, addEventListener() {}, removeEventListener() {} });
   const g = globalThis;
   const saved = {};
   const set = (k, v) => { saved[k] = Object.getOwnPropertyDescriptor(g, k); Object.defineProperty(g, k, { value: v, configurable: true, writable: true }); };
-  set('window', win);
   set('document', doc);
-  set('localStorage', win.localStorage);
-  set('WS', WS);
-  win.WS = WS;
-  set('fetch', () => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }));
-  set('checkAuth', async () => ({ username: 'sam', is_admin: false }));
-  set('escapeHtml', (s) => String(s));
   set('console', { error() {}, warn() {}, log() {}, info() {} });
-  const polls = [];
-  const branding = { features: {}, sidebar_enabled: {}, home_sections: {} };
-  const ctx = {
-    root: doc.getElementById('wsPage'),
+  const mine = new Set();
+  const clockNow = { t: 1000000 };
+  // The module's own timers, as the browser's: none after its signal ends
+  // (the tests end it to stop a run), the pending ones cleared with it.
+  const env = {
+    document: doc,
+    WS,
+    target: win,
     signal: ctl.signal,
-    url: new URL('https://ws.test/'),
-    data: { branding, user: { username: 'sam' } },
-    poll(fn, ms) { polls.push({ fn, ms }); return () => {}; },
-    // The visit's timers, as the router's visitTimers: none after the
-    // signal aborts, and the pending ones cleared with it.
     setTimeout: (fn, ms) => {
       if (ctl.signal.aborted) return 0;
       const id = clock.setTimeout(() => { mine.delete(id); fn(); }, ms);
       mine.add(id);
       return id;
     },
-    clearTimeout: (id) => { if (mine.delete(id)) clock.clearTimeout(id); }
+    clearTimeout: (id) => { if (mine.delete(id)) clock.clearTimeout(id); },
+    reducedMotion: () => !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    now: () => clockNow.t
   };
-  const mine = new Set();
   ctl.signal.addEventListener('abort', () => { mine.forEach((id) => clock.clearTimeout(id)); mine.clear(); });
-  WS.arriveReset();
-  const section = doc.getElementById('homeEventLog');
-  const wheel = section.querySelector('[data-event-wheel]');
+  const section = doc.getElementById('wsEventLog');
+  const wheel = section ? section.querySelector('[data-event-wheel]') : null;
   const t = {
-    win, doc, clock, ctl, WS, feed, reduced, section, wheel,
+    win, doc, clock, ctl, WS, feed, reduced, section, wheel, polls, clockNow, env,
     pinnedList: () => section.querySelector('[data-event-pinned]'),
     pinned: () => Array.from(section.querySelector('[data-event-pinned]').children),
     pinnedTexts: () => t.pinned().map((el) => { const x = el.querySelector('.ws-pinned__text'); return x.textContent.slice(x.querySelector('.sr-only').textContent.length); }),
@@ -212,16 +179,25 @@ function visit(o = {}) {
     texts: () => t.slots().map(lineText),
     announced: () => section.querySelector('[data-event-announce]').textContent,
     async open() {
-      const m = home.mount(ctx);
+      t.handle = mod.startEventLog(env);
       await clock.advance(1700);
-      await m;
     },
-    // The 30 s poll Home runs for its live sections.
+    // The one 30 s poll the module runs.
     async poll(answer) {
       if (answer !== undefined) feed.answer = answer;
       const p = polls.find((x) => x.ms === 30000);
       p.fn();
       await flush();
+    },
+    // A soft navigation as router.js makes it: the new page in place of the
+    // old, then ws:swap, synchronously.
+    swap(slotted = true) {
+      const tpl = doc.createElement('template');
+      tpl.innerHTML = pageHTML(slotted);
+      const fresh = tpl.content.firstElementChild;
+      doc.getElementById('wsPage').replaceWith(fresh);
+      win.dispatchEvent(new win.CustomEvent('ws:swap', { detail: { root: fresh } }));
+      return fresh;
     },
     release() {
       for (const k of Object.keys(saved)) {
@@ -274,21 +250,13 @@ const QUIET_OK = answer('ok', [], [
 
 // ---------------------------------------------------------------------------
 
-await run('the section sits in Home\'s grid after News and before Recent Requests, with Home\'s heading and a wheel that holds its room', async (make) => {
+await run('the section is the shell\'s, at the top of the page, with its heading and a wheel that holds its room', async (make) => {
   const t = make({ answer: QUIET_OK });
-  const order = t.doc.querySelectorAll('[data-arrive]');
-  const keys = Array.from(order).map((n) => n.getAttribute('data-arrive'));
-  // The phone's order, which is the document's (and so Tab's): News, the
-  // event log, Recent Requests, Service Health, then the rest.
-  check('in the document: News, the event log, Recent Requests, Service Health, Active Streams, Upcoming Releases',
-        keys.join() === 'news,feed,requests,services,streams,releases', keys);
-  const grid = t.section.parentElement;
-  check('it is in the grid that holds them', grid && grid.hasAttribute('data-home-pair') && grid.firstElementChild.getAttribute('data-arrive') === 'news');
-  // From lg the grid order puts it in a strip across the top, as before.
-  check('from lg: first, across the page', t.section.classList.contains('lg:order-first') && t.section.classList.contains('lg:col-span-full'));
-  const h = t.section.querySelector('h3');
+  check('one section, the first thing in the page\'s content', t.doc.querySelectorAll('#wsEventLog').length === 1 && t.section.parentElement.firstElementChild === t.section);
+  check('it waits for no other section (no data-arrive)', !t.section.hasAttribute('data-arrive'));
+  check('its own gap below, and it never shrinks in a column', t.section.classList.contains('mb-8') && t.section.classList.contains('shrink-0'));
+  const h = t.section.querySelector('h2');
   check('the heading is "Event log", styled like the other sections, closer to its wheel', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-2');
-  check('a compact section: less room below it than between the other sections', t.section.classList.contains('-mb-3'));
   const icon = h.previousElementSibling;
   check('its icon follows the section icons setting', icon && icon.classList.contains('ws-section-icon') && icon.getAttribute('aria-hidden') === 'true');
   check('labelled by its heading', t.section.getAttribute('aria-labelledby') === h.id);
@@ -326,7 +294,7 @@ await run('down: an open outage is pinned above the wheel, never on it', async (
   check('before the answer the list is empty and hidden', t.pinned().length === 0 && t.pinnedList().hidden === true);
   await t.open();
   const list = t.pinnedList();
-  check('the list sits under the heading, above the wheel', list.previousElementSibling.querySelector('h3') && list.nextElementSibling === t.wheel);
+  check('the list sits under the heading, above the wheel', list.previousElementSibling.querySelector('h2') && list.nextElementSibling === t.wheel);
   check('a list named for what it holds', list.tagName === 'UL' && list.getAttribute('role') === 'list' && list.getAttribute('aria-label') === 'Current problems' && list.hidden === false);
   const [row] = t.pinned();
   check('one row: the outage', t.pinned().length === 1 && row.tagName === 'LI' && row.getAttribute('data-type') === 'down' && row.getAttribute('data-key') === 'a7:down');
@@ -374,7 +342,6 @@ await run('unavailable: one line, never a claim that everything is running', asy
 await run('a failed read reads as unavailable', async (make) => {
   const t = make({ answer: { status: 503 } });
   await t.open();
-  check('the section arrived', t.WS.arrived.indexOf('feed') !== -1);
   check('one line: unavailable', t.all().length === 1 && t.texts()[0] === 'Status unavailable right now');
 });
 
@@ -390,7 +357,6 @@ await run('off: hidden with nothing to show; notes still show without Uptime Kum
   const t = make({ answer: answer('off', [], []) });
   await t.open();
   check('hidden', t.section.hidden === true);
-  check('the arrival order is not held up', t.WS.arrived.indexOf('feed') !== -1);
   const s = make({ serverHidden: true, answer: answer('off', [], [note(5, 'Maintenance tonight', 10)]) });
   check('the server can render it hidden from the first paint', s.section.hidden === true);
   await s.open();
@@ -551,14 +517,14 @@ await run('a kept copy paints at once; what happened since turns in', async (mak
   check('five lines', t.all().length === 5);
 });
 
-await run('leaving the page: no turn runs afterwards', async (make) => {
+await run('stopped: no turn runs afterwards', async (make) => {
   const t = make({ answer: QUIET_OK });
   await t.open();
   await t.poll(answer('ok', [], [note(9, 'Books is slow', 0), note(8, 'Requests is slow', 1)].concat(QUIET_OK.items)));
   check('the first turn ran', t.texts()[0] === 'Requests is slow');
   t.ctl.abort();
   await t.clock.advance(5000);
-  check('the second never does once the page is left', t.texts()[0] === 'Requests is slow' && t.announced() === '');
+  check('the second never does once it is stopped', t.texts()[0] === 'Requests is slow' && t.announced() === '');
 });
 
 // ---- Library lines (Sonarr, Radarr, Chaptarr webhooks) ----
@@ -670,7 +636,7 @@ await run('a resolved outage is not held: library lines push it off like any lin
 });
 
 // Every real change to the section's hidden attribute after the first paint
-// (writing the value it already has is not one). home.js writes it only
+// (writing the value it already has is not one). event-log.js writes it only
 // through the `hidden` property; happy-dom's MutationObserver loses the old
 // value of an empty attribute, so the property is watched instead.
 function hiddenFlips(t) {
@@ -868,7 +834,7 @@ await run('reduced motion: each notch crossfades', async (make) => {
   check('the new set is there at once', JSON.stringify(t.texts()) === JSON.stringify(ORDER.slice(1, 6)), t.texts());
 });
 
-await run('nothing to turn: the quiet line, and leaving the page', async (make) => {
+await run('nothing to turn: the quiet line, and once stopped', async (make) => {
   const t = make({ answer: answer('ok', [], []) });
   await t.open();
   check('the quiet line takes no scroll and no key', scroll(t, -100) === false && key(t, 'ArrowUp') === false);
@@ -876,9 +842,74 @@ await run('nothing to turn: the quiet line, and leaving the page', async (make) 
   await u.open();
   scroll(u, -100);
   u.ctl.abort();
-  check('after leaving the page the wheel takes nothing', scroll(u, -100) === false && key(u, 'ArrowUp') === false);
+  check('once stopped the wheel takes nothing', scroll(u, -100) === false && key(u, 'ArrowUp') === false);
   await u.clock.advance(20000);
   check('and no return runs', u.texts()[0] === ORDER[1]);
+});
+
+// ---- Soft navigation: one live section for the whole visit ----
+
+await run('a soft navigation puts the live section in place of the new page\'s copy, state and all', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  scroll(t, -100);
+  await t.clock.advance(800);
+  const reads = t.WS.reads;
+  const texts = t.texts();
+  check('turned back one notch first', texts[0] === ORDER[1] && latestBtn(t).hidden === false);
+  const fresh = t.swap();
+  check('one section in the document', t.doc.querySelectorAll('#wsEventLog').length === 1);
+  check('the same element, now in the new page', t.doc.getElementById('wsEventLog') === t.section && fresh.contains(t.section));
+  check('at the top of the new page\'s content', fresh.firstElementChild.firstElementChild === t.section);
+  check('the new page\'s own copy is gone', fresh.querySelectorAll('[data-event-wheel]').length === 1 && fresh.querySelector('[data-event-wheel]') === t.wheel);
+  check('the same lines, still turned back, "Latest" still shown', JSON.stringify(t.texts()) === JSON.stringify(texts) && latestBtn(t).hidden === false, t.texts());
+  check('a fresh answer is not read again', t.WS.reads === reads);
+  check('still one poll, not one per page', t.polls.filter((x) => x.ms === 30000).length === 1);
+  check('one turn per key: the listeners were not added again', key(t, 'ArrowDown') === true && t.texts()[0] === ORDER[0]);
+  await t.clock.advance(800);
+  check('five settled lines', t.settled().length === 5);
+  t.swap();
+  t.swap();
+  check('three pages on, still one section and one poll', t.doc.querySelectorAll('#wsEventLog').length === 1 && t.doc.getElementById('wsEventLog') === t.section && t.polls.length === 1);
+});
+
+await run('a page taken over after 15 s reads the feed again, and what happened turns in', async (make) => {
+  const t = make({ answer: QUIET_OK });
+  await t.open();
+  const reads = t.WS.reads;
+  t.clockNow.t += 16000;
+  t.feed.answer = answer('ok', [], QUIET_OK.items.concat([note(20, 'Plex restarted', 0)]));
+  t.swap();
+  await t.clock.advance(800);
+  check('read once more', t.WS.reads === reads + 1, t.WS.reads);
+  check('the new event at the front, announced', t.texts()[0] === 'Plex restarted' && t.announced() === 'Note: Plex restarted');
+});
+
+await run('a page without the section (the reader) leaves it out; the next page gets it back', async (make) => {
+  const t = make({ answer: QUIET_OK });
+  await t.open();
+  const texts = t.texts();
+  const reads = t.WS.reads;
+  t.swap(false);
+  check('not in the document', !t.doc.getElementById('wsEventLog') && !t.section.isConnected);
+  await t.poll();
+  check('nothing read while it is out', t.WS.reads === reads);
+  const fresh = t.swap();
+  check('back: the same element, the same lines', t.doc.getElementById('wsEventLog') === t.section && fresh.contains(t.section) && JSON.stringify(t.texts()) === JSON.stringify(texts));
+  await t.poll();
+  check('and the poll reads again', t.WS.reads === reads + 1);
+});
+
+await run('a first page without the section: the first page with one is taken over', async (make) => {
+  const t = make({ slot: false, answer: QUIET_OK });
+  await t.open();
+  check('nothing read without a section', t.WS.reads === 0);
+  await t.poll();
+  check('the poll reads nothing either', t.WS.reads === 0);
+  const fresh = t.swap();
+  await t.clock.advance(800);
+  const section = t.doc.getElementById('wsEventLog');
+  check('the new page\'s section is taken and filled', section && fresh.contains(section) && t.WS.reads === 1 && !section.querySelector('.skel') && section.querySelectorAll('.ws-wheel__line').length === 5);
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));

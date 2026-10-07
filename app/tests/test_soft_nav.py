@@ -529,16 +529,16 @@ class HomePage(unittest.TestCase):
 
     def test_every_read_is_on_the_pages_signal(self):
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 5,
-                         "the event log, news, streams, requests, releases")
-        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 5)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 4,
+                         "news, streams, requests, releases (the event log is the shell's)")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 4)
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
-        self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
+        self.assertEqual(len(fetches), 1, "the sidebar's request badge (the gauges are the shell's)")
         for at in fetches:
             self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 6,
-                         "five onError handlers and the gauges' catch")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 4,
+                         "four onError handlers")
         self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
         for name in ("renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
                      "renderUpcomingReleases"):
@@ -561,7 +561,8 @@ class HomePage(unittest.TestCase):
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
         self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', "
-                      "'saves.js', 'features.js',\n  'findplace.js', 'safetynet.js', 'popout.js'];", leaks)
+                      "'saves.js', 'features.js',\n  'findplace.js', 'safetynet.js', 'popout.js', 'event-log.js', 'gauges.js'];",
+                      leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -572,8 +573,8 @@ class HomePage(unittest.TestCase):
         code = self.code()
         self.assertNotRegex(code, r"\bWS\.poll\(")
         self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
-        self.assertEqual(len(re.findall(r"\bctx\.poll\(", code)), 3)
-        self.assertIn("ctx.poll(loadSystemStats, 1000);", code)
+        self.assertEqual(len(re.findall(r"\bctx\.poll\(", code)), 2)
+        self.assertNotIn("loadSystemStats", code, "the gauges are the shell's (js/gauges.js)")
         self.assertIn("ctx.poll(tickLastChecked, 1000);", code)
         self.assertRegex(code, r"ctx\.poll\(function\(\) \{[^}]*loadRequestCount\(\);\s*\}, 30000\);")
         # The first read is the page's own (a poll on screen reads nothing at once).
@@ -585,19 +586,14 @@ class HomePage(unittest.TestCase):
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
         self.assertEqual(sorted(names), ["HOMELAB_ICONS", "NEWS_EMPTY_HTML", "NEWS_FRESH_MS",
-                                         "PINNED_ICON", "PINNED_PREFIX",
-                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE",
-                                         "WHEEL_DRAG_PX", "WHEEL_IDLE_MS", "WHEEL_LINES", "WHEEL_MS", "WHEEL_QUIET",
-                                         "WHEEL_QUIET_PINNED", "WHEEL_SR_PREFIX", "WHEEL_STEP_PX"])
+                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
-        # Every lookup stays inside the page, but two: the header's status
-        # pill and the top bar's title, which the gauges' copies go beside
-        # (taken out again by the cleanup mount returns).
+        # Every lookup stays inside the page: the headers' gauges and the
+        # event log are the shell's, so Home reaches into neither.
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bdocument\.getElementById\(", code)), 2)
-        self.assertIn("var pill = document.getElementById('systemStatus');", src)
-        self.assertIn("var barTitle = document.getElementById('wsBarTitle');", src)
-        self.assertIn("return function () { removeHeaderGauges(); };", code)
+        self.assertEqual(len(re.findall(r"\bdocument\.getElementById\(", code)), 0)
+        self.assertNotIn("data-ws-gauges", src)
+        self.assertNotIn("wsEventLog", src)
 
     def test_home_has_no_continue_row(self):
         # Continue lives on Books only (Jordan, 2026-10-05): Home neither draws
@@ -620,16 +616,13 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("scrollStreams(", h)
         src = module_source("index")
         self.assertEqual(src.count('data-action="stream-info"'), 1)
-        self.assertEqual(h.count('data-action="event-latest"'), 1)
-        for action in ("streams-prev", "streams-next", "stream-info", "event-latest"):
+        for action in ("streams-prev", "streams-next", "stream-info"):
             self.assertIn(f"case '{action}':", src, action)
         # One click listener, on the page, for them and the news cards' Read
-        # more. The event log's wheel has its own input listeners (scroll,
-        # drag, keys): those are not buttons.
+        # more. The event log (its wheel and "Latest") is the shell's.
         code = self.code()
-        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["wheel"] * 6 + ["root"])
-        self.assertEqual(re.findall(r"\bwheel\.addEventListener\('(\w+)'", src),
-                         ["wheel", "touchstart", "touchmove", "touchend", "touchcancel", "keydown"])
+        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["root"])
+        self.assertNotIn("event-latest", src)
         self.assertIn("root.addEventListener('click', function (e) {", src)
         self.assertIn("var toggle = t.closest('[data-news-toggle]');", src)
 

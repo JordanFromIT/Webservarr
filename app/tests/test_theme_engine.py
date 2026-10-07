@@ -690,8 +690,9 @@ class GaugeColours(unittest.TestCase):
 
     def test_the_rings_use_them(self):
         for g in ("cpu", "ram", "net"):
-            # One copy: the headers' template (Home clones it into each).
-            rings = re.findall(rf'<circle data-gauge-ring="{g}" class="([^"]*)"', INDEX)
+            # One copy: the headers' partial (app/pages.py writes it into each).
+            rings = re.findall(rf'<circle data-gauge-ring="{g}" class="([^"]*)"',
+                               (STATIC / "partials" / "shell-gauges.html").read_text(encoding="utf-8"))
             self.assertEqual(len(rings), 1, g)
             for ring in rings:
                 self.assertEqual(ring.split()[0], f"text-gauge-{g}", g)

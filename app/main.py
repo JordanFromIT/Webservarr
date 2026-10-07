@@ -465,8 +465,16 @@ async def root(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("index", request, user, extra_flags={
-        "feed_off": _event_log_off(), "event_pinned": await _event_log_pinned(), "home_news": _home_news})
+    return await shell_page("index", request, user, extra_flags={"home_news": _home_news})
+
+
+async def shell_page(name: str, request: Request, user: dict, **kwargs):
+    """render_page for a page with the shell: with the event log's first
+    paint (partials/shell-event-log.html), which every shell page but the
+    reader carries at the top of its content. extra_flags as render_page."""
+    flags = {"feed_off": _event_log_off(), "event_pinned": await _event_log_pinned()}
+    flags.update(kwargs.pop("extra_flags", None) or {})
+    return render_page(name, request, user, extra_flags=flags, **kwargs)
 
 
 def _home_news(branding: dict):
@@ -479,17 +487,17 @@ def _home_news(branding: dict):
 
 
 async def _event_log_pinned() -> Optional[dict]:
-    """Home's pinned problems for the page render (app/home_event_log.py): the
-    feed's open outages and important notes, none when the feed would answer
-    "unavailable" (home.js shows none then either). None leaves them to the
-    page script."""
+    """The event log's pinned problems for the page render
+    (app/home_event_log.py): the feed's open outages and important notes,
+    none when the feed would answer "unavailable" (js/event-log.js shows none
+    then either). None leaves them to the script."""
     db = None
     try:
         db = SessionLocal()
         items = status_feed_service.pinned_items(db)
         configured = status_feed_service.kuma_configured(db)
     except Exception:  # noqa: BLE001 - the page script writes them instead
-        logger.warning("Could not read Home's pinned problems", exc_info=True)
+        logger.warning("Could not read the event log's pinned problems", exc_info=True)
         return None
     finally:
         if db is not None:
@@ -500,8 +508,8 @@ async def _event_log_pinned() -> Optional[dict]:
 
 
 def _event_log_off() -> bool:
-    """Home's event log starts hidden when the status feed is off and empty
-    (status_feed.home_off). Not knowing (no database) leaves it to the page."""
+    """The event log starts hidden when the status feed is off and empty
+    (status_feed.home_off). Not knowing (no database) leaves it to the script."""
     db = None
     try:
         db = SessionLocal()
@@ -546,8 +554,8 @@ async def requests_page(
     if rs_empty:
         books = await book_requests_service.get_cached_snapshot()
         rs_empty = isinstance(books, dict) and not books.get("items")
-    return render_page("requests", request, user, gate="requests", pick=_requests_page,
-                       extra_flags={"rs_empty": rs_empty})
+    return await shell_page("requests", request, user, gate="requests", pick=_requests_page,
+                            extra_flags={"rs_empty": rs_empty})
 
 
 # Legacy redirect: /requests-embed → /requests (301)
@@ -575,7 +583,7 @@ async def issues_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("issues", request, user, gate="issues")
+    return await shell_page("issues", request, user, gate="issues")
 
 
 # News archive page
@@ -588,7 +596,7 @@ async def news_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("news", request, user)
+    return await shell_page("news", request, user)
 
 
 # Wiki
@@ -601,7 +609,7 @@ async def wiki_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("wiki", request, user, gate="wiki")
+    return await shell_page("wiki", request, user, gate="wiki")
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse, tags=["Pages"])
@@ -619,7 +627,7 @@ async def wiki_article_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("wiki", request, user, gate="wiki")
+    return await shell_page("wiki", request, user, gate="wiki")
 
 
 # Calendar page
@@ -632,7 +640,7 @@ async def calendar_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("calendar", request, user, gate="calendar")
+    return await shell_page("calendar", request, user, gate="calendar")
 
 
 @app.get("/tickets", response_class=HTMLResponse, tags=["Pages"])
@@ -644,7 +652,7 @@ async def tickets_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("tickets", request, user, gate="tickets")
+    return await shell_page("tickets", request, user, gate="tickets")
 
 
 # Books page (ebooks from Kavita and audiobooks from Plex, in one library)
@@ -657,7 +665,7 @@ async def books_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("books", request, user, gate="library")
+    return await shell_page("books", request, user, gate="library")
 
 
 # A person's or a series' books (names travel in the query string, so a "/" or a
@@ -672,7 +680,7 @@ async def books_person_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("books-person", request, user, gate="library")
+    return await shell_page("books-person", request, user, gate="library")
 
 
 @app.get("/books/series", response_class=HTMLResponse, tags=["Pages"])
@@ -684,7 +692,7 @@ async def books_series_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("books-series", request, user, gate="library")
+    return await shell_page("books-series", request, user, gate="library")
 
 
 @app.get("/books/stats", response_class=HTMLResponse, tags=["Pages"])
@@ -697,7 +705,7 @@ async def books_stats_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("books-stats", request, user, gate="library")
+    return await shell_page("books-stats", request, user, gate="library")
 
 
 @app.get("/books/{book_id:int}", response_class=HTMLResponse, tags=["Pages"])
@@ -713,7 +721,7 @@ async def book_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("books", request, user, gate="library", extra_flags={"book_open": True})
+    return await shell_page("books", request, user, gate="library", extra_flags={"book_open": True})
 
 
 # Legacy redirects: /ebooks (the old eBooks page) and /library (before that) → /books (301)
@@ -750,7 +758,7 @@ async def settings_page(
         return RedirectResponse(url="/login", status_code=302)
     if user.get("is_admin") != "true":
         return RedirectResponse(url="/", status_code=302)
-    return render_page("settings", request, user)
+    return await shell_page("settings", request, user)
 
 
 # The audiobook player's test launcher (admin only, not in the navigation)
@@ -767,7 +775,7 @@ async def player_test_page(
     user = await _require_session(session_id)
     if not user or user.get("is_admin") != "true" or not plex_player.player_on():
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
-    return render_page("player-test", request, user)
+    return await shell_page("player-test", request, user)
 
 
 # The player's remote window (desktop Pop out where the browser has no

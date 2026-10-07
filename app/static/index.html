@@ -19,9 +19,11 @@
 <h1 class="sr-only">Home</h1>
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8" data-home-stack>
-<!-- Push opt-in: one slim line at the top of Home, on every width. The
-     decision is known before the page is drawn, so it never pushes content
-     down after load: on a full load theme-loader.js decides in <head>
+<!-- The event log (partials/shell-event-log.html), at the top of every page. -->
+<!-- ws:event-log -->
+<!-- Push opt-in: one slim line at the top of Home (under the event log), on
+     every width. The decision is known before the page is drawn, so it never
+     pushes content down after load: on a full load theme-loader.js decides in <head>
      (html[data-push-offer] shows it), and pages/home.js decides on every
      visit and sets the hidden attribute. notifications.js wires the buttons
      (Turn on asks the browser, which needs the tap; the close button is
@@ -44,11 +46,11 @@
 </div>
 </div>
 </section>
-<!-- News & Updates, the event log, Recent Requests and Service Health. Below
-     lg they are one column in the order written here, so on a phone the news
-     comes first and Tab meets each section where it is seen. From lg the grid
-     order puts the event log and then Service Health in strips across the
-     page and Recent Requests and News side by side under them, and
+<!-- News & Updates, Recent Requests and Service Health. Below lg they are
+     one column in the order written here, so on a phone the news comes first
+     after the event log and Tab meets each section where it is seen. From lg
+     the grid order puts Service Health in a strip across the page and Recent
+     Requests and News side by side under it, and
      reading-flow takes Tab through them in that order where the browser has
      it. A section that is switched off or hidden is not displayed, so it
      takes no cell and no gap (theme.css, "Home sections switched off"). -->
@@ -80,30 +82,6 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 <!-- /ws:home-news -->
 </div>
-</section>
-<!-- Event log: the status feed's newest events (GET /api/status/feed) on a
-     wheel that turns on a horizontal axis. The newest line sits flat at the
-     bottom; older ones curl up over the top and dim. pages/home.js builds the
-     lines (createEventLog) and theme.css draws the wheel (.ws-wheel). The
-     wheel's height is fixed, so its answer never moves anything below it.
-     On a phone it follows News; from lg it is the strip at the top.
-     With no Uptime Kuma and nothing in the feed the server renders the
-     section hidden (pages.py, feed_off), so a person who never sees it never
-     has its room. Until the first answer the front line is a skeleton.
-     The wheel turns back through the history (wheel, drag, arrow keys);
-     "Latest", placed in the gap below so it moves nothing, turns it back. -->
-<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" class="relative -mb-3 lg:order-first lg:col-span-full">
-<div class="flex items-center gap-3 mb-2">
-<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
-<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>
-</div>
-<!-- Open outages and important notes, held above the wheel until they are
-     resolved (theme.css .ws-pinned). The server writes the rows in
-     (app/home_event_log.py) and pages/home.js takes them over. -->
-<ul class="ws-pinned" data-event-pinned role="list" aria-label="Current problems" hidden></ul>
-<div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
-<button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>
-<p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
 </section>
 <!-- Recent Requests, compact -->
 <section data-arrive="requests" class="lg:order-2">
@@ -159,64 +137,14 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 </section>
 <!-- Service Health: from lg one strip across the page. The server's gauges
-     are not in it: they sit in whichever header is on screen, beside the
-     status pill from lg and between the page title and the bell on a phone or
-     tablet. pages/home.js puts a copy of #homeHeaderGauges in each and takes
-     them out again when Home is left (both headers are the shell's). -->
+     are not in it: they are the shell's, in whichever header is on screen
+     (partials/shell-gauges.html). -->
 <section data-arrive="services" class="lg:order-1 lg:col-span-full">
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="ws-section-icon material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
 <span id="serviceLastChecked" class="min-w-0 truncate text-[10px] text-steel-blue"></span>
 </div>
-<!-- The header gauges, one copy in each header (only one header shows at
-     any width), filled by the same code (data-gauge-*). pages/home.js adds
-     them once the first reading is in, so they arrive whole, straight after
-     the status pill or the top bar's title; neither of those moves, and the
-     bell keeps its place at the far end. Below xl each gauge is a small ring
-     with its reading under it ("CPU 12%"; the network's arrows and unit name
-     it, and its name is for screen readers), and in the top bar the copy
-     takes the room up to the bell's own padding, so all three fit beside
-     "Home" at 320px even at 100% and three-figure speeds (below 375px each
-     reading takes two short lines: theme.css, .ws-gauge-*). From xl the ring
-     is larger with its name over the reading. The percentages hold four
-     characters and the network line a minimum width, so a changing reading
-     never pushes the gauge after it along, and the arrows sit right against
-     their figures. -->
-<template id="homeHeaderGauges">
-<div data-home-gauges class="flex flex-1 items-center gap-1.5 h-0 -ml-1 -mr-3 lg:flex-none lg:mx-0 xl:gap-5">
-<div class="flex flex-col items-center gap-1 xl:flex-row xl:gap-2.5">
-<svg class="size-6 shrink-0 xl:size-9" viewBox="0 0 100 100" aria-hidden="true">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
-<circle data-gauge-ring="cpu" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="ws-gauge-reading flex items-baseline gap-0.5 leading-none xl:block">
-<p class="text-[10px] font-medium text-steel-blue">CPU</p>
-<p data-gauge-text="cpu" class="min-w-[4ch] text-[11px] leading-none font-bold text-frosted-blue tabular-nums xl:mt-0.5 xl:text-sm">--%</p>
-</div>
-</div>
-<div class="flex flex-col items-center gap-1 xl:flex-row xl:gap-2.5">
-<svg class="size-6 shrink-0 xl:size-9" viewBox="0 0 100 100" aria-hidden="true">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
-<circle data-gauge-ring="ram" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="ws-gauge-reading flex items-baseline gap-0.5 leading-none xl:block">
-<p class="text-[10px] font-medium text-steel-blue">RAM</p>
-<p data-gauge-text="ram" class="min-w-[4ch] text-[11px] leading-none font-bold text-frosted-blue tabular-nums xl:mt-0.5 xl:text-sm">--%</p>
-</div>
-</div>
-<div class="flex flex-col items-center gap-1 xl:flex-row xl:gap-2.5">
-<svg class="size-6 shrink-0 xl:size-9" viewBox="0 0 100 100" aria-hidden="true">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="10"></circle>
-<circle data-gauge-ring="net" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="10" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="leading-none">
-<p class="sr-only text-[10px] font-medium text-steel-blue uppercase xl:not-sr-only">Network</p>
-<p class="ws-gauge-net flex items-center min-w-[12ch] whitespace-nowrap text-[10px] leading-none text-frosted-blue xl:mt-0.5 xl:text-xs"><span class="material-symbols-outlined text-[10px] -mr-px xl:text-xs" aria-hidden="true">arrow_upward</span><span class="sr-only">Upload</span><span data-gauge-net="up" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span class="material-symbols-outlined text-[10px] -mr-px ml-0.5 xl:ml-1.5 xl:text-xs" aria-hidden="true">arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down" class="tabular-nums">0</span><span data-gauge-unit-long class="sr-only">megabits per second</span><span data-gauge-unit class="ml-1 text-frosted-blue/70" aria-hidden="true">Mbps</span></p>
-</div>
-</div>
-</div>
-</template>
 <!-- Service Tiles: compact, an icon and the name on one line over the status
      bar. From sm each tile is only as wide as its name (never under 9rem, so
      the status bar reads), left-aligned in a row that wraps. On a phone they

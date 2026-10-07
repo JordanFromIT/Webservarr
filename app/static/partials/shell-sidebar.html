@@ -25,11 +25,15 @@
   </div>
 </aside>
 
-<!-- Phone top bar: where you are, and the bell. Account and sign-out are in
-     More. The bell's parent is the positioned box its panel drops from. -->
+<!-- Phone top bar: where you are, the server's gauges, the status chip and
+     the bell. Account and sign-out are in More. The bell's parent is the
+     positioned box its panel drops from. -->
 <div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 bg-background-dark/80 backdrop-blur-md border-b border-steel-blue/20">
   <div class="h-14 flex items-center justify-between gap-3 px-4">
     <p id="wsBarTitle" class="min-w-0 truncate text-[17px] font-bold tracking-[-0.02em] text-frosted-blue">{{bar_title}}</p>
+    <!-- The server's gauges (shell-gauges.html, js/gauges.js), the same as
+         the desktop header's. -->
+{{{gauges_html}}}
     <!-- Service status: a dot and one word (Online, Slow, 1 down, Unknown);
          below 360px the dot alone. Opens the status sheet (status-panel.js).
          shell.js paints it with the desktop pill; unknown keeps its box. -->
@@ -121,6 +125,14 @@
 <!-- The service status panel (status-panel.js): the header pill's popover
      and the top bar chip's sheet. A module, so shell.js has made window.WS. -->
 <script type="module" src="/static/js/status-panel.js?v=1"></script>
+
+<!-- The event log at the top of every page (event-log.js, WS.eventLog) and
+     the headers' gauges (gauges.js): one of each for the life of the
+     document, so a soft navigation neither rebuilds nor repeats them. Before
+     the router, so they are running when it mounts the first page and makes
+     its first swap. -->
+<script type="module" src="/static/js/event-log.js?v=1"></script>
+<script type="module" src="/static/js/gauges.js?v=1"></script>
 
 <!-- Soft navigation (router.js). A module runs after the page is parsed, so
      shell.js (a classic script at the end of every page) has made window.WS. -->

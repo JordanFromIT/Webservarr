@@ -61,13 +61,12 @@ def static_text(*parts):
 
 
 # Each Home loader and the section switch that must guard every call to it.
-# None: the call is not a home section and must stay unguarded. "netdata": the
-# header gauges, guarded by Netdata being set up (if (netdataOn)), never by
-# the Service Health section, which is off by default.
+# None: the call is not a home section and must stay unguarded. The headers'
+# gauges and the event log are the shell's (js/gauges.js, js/event-log.js),
+# not Home's.
 HOME_LOADERS = {
     "loadNews": "news",
     "loadServices": "services",
-    "loadSystemStats": "netdata",
     "loadActiveStreams": "streams",
     "loadRecentRequests": "requests",
     "loadUpcomingReleases": "releases",
@@ -122,8 +121,6 @@ def home_guard_problems(page: str) -> list:
                     r"function sectionOn\(id\) \{ return homeSections\[id\] !== false; \}"):
         if only(pattern) is None:
             problems.append("missing live: " + pattern)
-    if only(r"var netdataOn = document\.documentElement\.hasAttribute\('data-netdata'\);") is None:
-        problems.append("netdataOn is not read from html[data-netdata]")
     arrive = only(r"if \(!sectionOn\(id\)\) WS\.arrive\(id\);")
     auth = only(r"await checkAuth\(\)")
     if arrive is None or auth is None or not arrive.start() < auth.start():
@@ -135,10 +132,6 @@ def home_guard_problems(page: str) -> list:
         e = at(m.end())
         end = matching_brace(code, e) if code[e] == "{" else code.index(";", e)
         guards.append((m.group(1), e, end))
-    for m in live_matches(raw, r"if\s*\(\s*netdataOn\s*\)\s*"):
-        e = at(m.end())
-        end = matching_brace(code, e) if code[e] == "{" else code.index(";", e)
-        guards.append(("netdata", e, end))
 
     def guard_of(c):
         inside = [g for g in guards if g[1] <= c <= g[2]]
@@ -179,14 +172,12 @@ def home_guard_problems(page: str) -> list:
                  "loadUpcomingReleases", "loadRequestCount"):
         if (name, 30000) not in seen:
             problems.append(f"{name} is not in the 30 s poll")
-    if ("loadSystemStats", 1000) not in seen:
-        problems.append("loadSystemStats is not polled every second")
 
     intervals = sorted(p[0] or 0 for p in polls)
-    if intervals != [1000, 1000, 30000]:
+    if intervals != [1000, 30000]:
         problems.append(f"unexpected polls {intervals}")
     for interval, o, _ in polls:
-        if interval == 1000 and guard_of(o) not in ("services", "netdata"):
+        if interval == 1000 and guard_of(o) != "services":
             problems.append("a 1 s poll runs unguarded")
     return problems
 
@@ -512,12 +503,6 @@ class ShellRendering(unittest.TestCase):
                 self.assertTrue(any(p.startswith(loader + " guarded by None") for p in problems),
                                 (name, loader, problems))
             self.assertIn("a 1 s poll runs unguarded", problems, name)
-        # The gauges follow Netdata, not Service Health: guarding them by the
-        # section (which is off by default) would hide them.
-        by_section = page.replace("if (netdataOn) first.push(loadSystemStats());",
-                                  "if (sectionOn('services')) first.push(loadSystemStats());", 1)
-        self.assertNotEqual(by_section, page)
-        self.assertIn("loadSystemStats guarded by 'services', expected 'netdata'", home_guard_problems(by_section))
         self.assertEqual(page.count("first.push(loadRequestCount());   //"), 1)
         badge = page.replace("first.push(loadRequestCount());   //",
                              "if (sectionOn('requests')) first.push(loadRequestCount());   //", 1)
@@ -531,11 +516,14 @@ class ShellRendering(unittest.TestCase):
         for sid in ("requests", "news"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
                              .get("grid-template-columns"), "minmax(0, 1fr)", sid)
-        # The grid holds Service Health and the event log too, so it goes away
-        # only with all three off and the event log hidden.
+        # The grid holds the three, so it goes away with all three off (the
+        # event log above it is the shell's).
         self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="requests"]'
-                                   '[data-home-hide~="news"] [data-home-pair]:has(> #homeEventLog[hidden])', {})
+                                   '[data-home-hide~="news"] [data-home-pair]', {})
                          .get("display"), "none")
+        # In the flex stack the gap spaces the event log, not its own margin.
+        self.assertEqual(rules.get("html[data-home-hide] [data-home-stack] > #wsEventLog", {})
+                         .get("margin-bottom"), "0")
         self.assertNotIn('html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]', rules)
         stack = rules.get("html[data-home-hide] [data-home-stack]", {})
         self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
@@ -557,22 +545,23 @@ class ShellRendering(unittest.TestCase):
         pair_tag = re.search(r'<div class="([^"]*)" data-home-pair>', page)
         self.assertIsNotNone(pair_tag)
         pair = pair_tag.end()
-        services, requests, news, feed, streams = (page.index(f'data-arrive="{sid}"')
-                                                   for sid in ("services", "requests", "news", "feed", "streams"))
-        # Written in the phone's order: News, the event log, Recent Requests,
-        # Service Health, one column below lg (so Tab follows what is seen there).
-        self.assertTrue(stack.end() < pair < news < feed < requests < services < streams)
-        # From lg the grid order makes the event log and then Service Health
-        # strips across the top, with Recent Requests and News sharing the row
-        # under them, as before.
+        services, requests, news, streams = (page.index(f'data-arrive="{sid}"')
+                                             for sid in ("services", "requests", "news", "streams"))
+        log = page.index("<!-- ws:event-log -->")
+        push = page.index('<section id="pushPrompt"')
+        # The event log first, on every width, as on every page; then the push
+        # offer; then, in the phone's order, News, Recent Requests, Service
+        # Health, one column below lg (so Tab follows what is seen there).
+        self.assertTrue(stack.end() < log < push < pair < news < requests < services < streams)
+        self.assertNotIn("data-arrive=\"feed\"", page)
+        # From lg the grid order makes Service Health a strip across the top,
+        # with Recent Requests and News sharing the row under it, as before.
         pair_classes = pair_tag.group(1).split()
         for cls in ("grid", "grid-cols-1", "lg:grid-cols-2", "gap-8", "items-start",
                     "lg:[reading-flow:grid-order]"):
             self.assertIn(cls, pair_classes, cls)
         self.assertIn('<section data-arrive="news" class="lg:order-3">', page)
         self.assertIn('<section data-arrive="services" class="lg:order-1 lg:col-span-full">', page)
-        self.assertIn('<section id="homeEventLog" data-arrive="feed" aria-labelledby="eventLogTitle" '
-                      'class="relative -mb-3 lg:order-first lg:col-span-full">', page)
         self.assertIn('<section data-arrive="requests" class="lg:order-2">', page)
         # The grid closes before Active Streams: all three sections sit inside it.
         between = page[pair:streams]
@@ -1058,42 +1047,45 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
 
 
 class EventLogNeverMovesThePage(unittest.TestCase):
-    """Home's event log (the status feed on a wheel, above Service Health).
-    When the feed is off and empty the server renders the section hidden, so
-    a person who never sees it never has its room; otherwise it is there from
-    the first paint, its wheel a fixed height (theme.css .ws-wheel)."""
+    """The event log (the status feed on a wheel), at the top of every shell
+    page's content (partials/shell-event-log.html). When the feed is off and
+    empty the server renders the section hidden, so a person who never sees
+    it never has its room; otherwise it is there from the first paint, its
+    wheel a fixed height (theme.css .ws-wheel)."""
 
-    def page(self, flags):
-        return render(name="index", page=static_text("index.html"), flags=flags)
+    def page(self, flags, name="index"):
+        return render(name=name, page=static_text(name + ".html"), flags=flags)
 
     def test_hidden_from_the_first_paint_when_the_feed_is_off(self):
-        self.assertIn('<section id="homeEventLog" hidden data-arrive="feed"', self.page({"feed_off": True}))
-        shown = self.page({"feed_off": False})
-        self.assertIn('<section id="homeEventLog" data-arrive="feed"', shown)
-        self.assertNotIn('<section id="homeEventLog" hidden', shown)
-        self.assertNotIn('<section id="homeEventLog" hidden', self.page({}))
-        # Only Home has the section.
-        self.assertNotIn("homeEventLog", render(name="index", flags={"feed_off": True}))
+        for name in ("index", "books", "requests", "calendar", "settings"):
+            with self.subTest(name):
+                self.assertIn('<section id="wsEventLog" hidden aria-labelledby="eventLogTitle"',
+                              self.page({"feed_off": True}, name))
+                shown = self.page({"feed_off": False}, name)
+                self.assertIn('<section id="wsEventLog" aria-labelledby="eventLogTitle"', shown)
+                self.assertNotIn('<section id="wsEventLog" hidden', shown)
+                self.assertNotIn('<section id="wsEventLog" hidden', self.page({}, name))
+        # A page without the marker has no section.
+        self.assertNotIn("wsEventLog", render(name="index", flags={"feed_off": True}))
 
-    def test_it_sits_after_news_and_above_recent_requests(self):
-        page = static_text("index.html")
-        order = re.findall(r'data-arrive="(\w+)"', page)
-        # On a phone: News, the event log, Recent Requests; from lg the grid
-        # order puts it first, across the page.
-        self.assertEqual(order[order.index("feed") - 1:order.index("feed") + 2], ["news", "feed", "requests"])
-        log = page[page.index('<section id="homeEventLog"'):page.index('<!-- Recent Requests, compact -->')]
+    def test_the_section_is_the_shells_partial(self):
+        log = static_text("partials", "shell-event-log.html")
         self.assertEqual(log.count("<section"), 1)
-        self.assertIn('<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>', log)
+        self.assertIn('<section id="wsEventLog" aria-labelledby="eventLogTitle" class="relative shrink-0 mb-8">', log)
+        self.assertIn('<h2 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h2>', log)
         # Focusable and named, to turn back through the history with the keys.
         self.assertIn('<div class="ws-wheel" data-event-wheel tabindex="0" role="group" '
                       'aria-label="Event log, use arrow keys to see older events">', log)
-        self.assertIn('<button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>', log)
+        self.assertIn('<button type="button" class="ws-wheel-latest" data-event-latest hidden>Latest</button>', log)
         self.assertIn('aria-live="polite"', log)
         self.assertNotIn("<a ", log, "there is no feed page to link to")
+        self.assertNotIn("data-arrive", log, "it holds up no page's arrival order")
+        # The marker in the partial's own comment would be replaced instead.
+        self.assertNotIn("<!-- ws:event-log -->", log)
 
     def test_the_wheel_holds_five_slots_and_uses_theme_colours(self):
         theme = static_text("css", "theme.css")
-        wheel = theme[theme.index("/* ---- Home's event log"):]
+        wheel = theme[theme.index("/* ---- The event log: the status wheel"):]
         wheel = wheel[:wheel.index("/* ----", 10)] if "/* ----" in wheel[10:] else wheel
         self.assertIn("--wheel-lines: 5;", wheel)
         self.assertIn("height: calc(var(--wheel-radius) * sin(", wheel)
@@ -1102,9 +1094,60 @@ class EventLogNeverMovesThePage(unittest.TestCase):
         for token in ("--ws-status-err", "--ws-status-ok", "--ws-status-warn", "--color-accent", "--color-text"):
             self.assertIn(token, wheel)
         self.assertIn("@media (prefers-reduced-motion: reduce)", wheel)
-        home = static_text("js", "pages", "home.js")
+        home = static_text("js", "event-log.js")
         self.assertIn("const WHEEL_MS = 650;", home)
         self.assertIn("--wheel-duration: 650ms;", wheel)
+
+
+class SharedLivePartsOnEveryPage(unittest.TestCase):
+    """The headers' gauges and the event log, as every page is served: the
+    gauges in both headers of every page with the shell (the reader's is
+    rendered but hidden), the event log once at the top of every shell
+    page's content but the reader's, and neither on the sign-in or setup
+    pages, which have no shell."""
+
+    SHELL = ("index", "requests", "requests-embed", "issues", "calendar", "tickets", "books",
+             "books-person", "books-series", "books-stats", "news", "wiki", "settings", "player-test")
+
+    def out(self, name, flags=None):
+        return render(name=name, page=static_text(name + ".html"), flags=flags or {"netdata": True})
+
+    def test_on_every_shell_page(self):
+        for name in self.SHELL:
+            with self.subTest(name):
+                out = self.out(name)
+                self.assertEqual(out.count("<div data-ws-gauges data-pending "), 2)
+                self.assertEqual(out.count('<section id="wsEventLog"'), 1)
+                self.assertNotIn("<!-- ws:event-log -->", out)
+                self.assertNotIn("{{{gauges_html}}}", out)
+                # The log is inside the page the router swaps, under both headers.
+                self.assertLess(out.index('id="wsPage"'), out.index('<section id="wsEventLog"'))
+                self.assertLess(out.index('id="appHeader"'), out.index('<section id="wsEventLog"'))
+                # The desktop copy follows the pill, the phone's the title.
+                pill = out.index('id="systemStatus"')
+                self.assertLess(pill, out.index("<div data-ws-gauges", pill))
+                self.assertLess(out.index("<div data-ws-gauges", pill), out.index('title="Notifications"', pill))
+                title = out.index('id="wsBarTitle"')
+                self.assertLess(out.index("<div data-ws-gauges", title), out.index('id="wsStatusChip"'))
+
+    def test_the_gauges_follow_netdata_on_html(self):
+        # Rendered either way; html[data-netdata] decides (theme.css), which a
+        # soft navigation brings in step, so setting Netdata up needs no reload.
+        for netdata in (True, False):
+            out = self.out("books", {"netdata": netdata})
+            self.assertEqual(out.count("<div data-ws-gauges "), 2)
+            self.assertEqual("data-netdata" in html_tag(out), netdata)
+
+    def test_not_on_the_reader_or_the_bare_pages(self):
+        reader = self.out("reader")
+        self.assertNotIn("wsEventLog", reader)
+        for name in ("login", "setup"):
+            with self.subTest(name):
+                out = self.out(name)
+                self.assertNotIn("data-ws-gauges", out)
+                self.assertNotIn("wsEventLog", out)
+                self.assertNotIn("/static/js/event-log.js", out)
+                self.assertNotIn("/static/js/gauges.js", out)
 
 
 class FunctionText(unittest.TestCase):

@@ -1,14 +1,15 @@
 """
-Home's pinned problems, written into the page by the server
+The event log's pinned problems, written into the page by the server
 (app/home_event_log.py).
 
 An open outage or an open important note is a row above the event log's
-wheel, not a line on it. The server writes the rows into Home's HTML, so the
-section is its real height from the first paint, and pages/home.js takes
-them over without a change. These tests hold the markup to the shared cases
-(event_pinned_vectors.json, which app/tests/js/home_event_log.mjs holds the
+wheel, not a line on it. The server writes the rows into every shell page's
+copy of the log (partials/shell-event-log.html), so the section is its real
+height from the first paint, and js/event-log.js takes them over without a
+change. These tests hold the markup to the shared cases
+(event_pinned_vectors.json, which app/tests/js/event_log.mjs holds the
 script's rows to), the rows to the feed's pinned items, and the page render
-to writing them only on Home and only when the log is shown.
+to writing them on every page that carries the log, only when it is shown.
 """
 import asyncio
 import json
@@ -47,7 +48,7 @@ class SharedCases(unittest.TestCase):
             self.assertIn(topic, whys)
 
     def test_the_empty_list_is_the_one_in_the_page(self):
-        page = (TESTS.parent / "static" / "index.html").read_text(encoding="utf-8")
+        page = (TESTS.parent / "static" / "partials" / "shell-event-log.html").read_text(encoding="utf-8")
         self.assertEqual(page.count(home_event_log.PINNED_EMPTY), 1)
         # Under the heading, above the wheel.
         self.assertLess(page.index('id="eventLogTitle"'), page.index(home_event_log.PINNED_EMPTY))
@@ -83,14 +84,14 @@ class SharedCases(unittest.TestCase):
 
 class TheJavaScriptSideRuns(unittest.TestCase):
     def test_the_check_reads_the_shared_cases_and_the_real_module(self):
-        js = (TESTS / "js" / "home_event_log.mjs").read_text(encoding="utf-8")
-        for needle in ("event_pinned_vectors.json", "static/js/pages/home.js",
+        js = (TESTS / "js" / "event_log.mjs").read_text(encoding="utf-8")
+        for needle in ("event_pinned_vectors.json", "'js/event-log.js'", "partials/shell-event-log.html",
                        "the script writes exactly the rows the server writes",
                        "taking the server\\'s rows over changes nothing", "process.exit(failed ? 1 : 0)"):
             self.assertIn(needle, js)
-        home = (TESTS.parent / "static" / "js" / "pages" / "home.js").read_text(encoding="utf-8")
-        self.assertIn("const PINNED_ICON = { down: 'error', important: 'warning' };", home)
-        self.assertIn("const PINNED_PREFIX = { down: 'Problem: ', important: 'Important: ' };", home)
+        log = (TESTS.parent / "static" / "js" / "event-log.js").read_text(encoding="utf-8")
+        self.assertIn("const PINNED_ICON = { down: 'error', important: 'warning' };", log)
+        self.assertIn("const PINNED_PREFIX = { down: 'Problem: ', important: 'Important: ' };", log)
         self.assertEqual(home_event_log.PINNED_ICON, {"down": "error", "important": "warning"})
         self.assertEqual(home_event_log.PINNED_PREFIX, {"down": "Problem: ", "important": "Important: "})
 
@@ -108,7 +109,7 @@ class ThePageRender(unittest.TestCase):
         out = self.out({"event_pinned": {"items": case["open"], "now_ms": VECTORS["now_ms"]}})
         self.assertIn(case["html"], out)
         self.assertNotIn(home_event_log.PINNED_EMPTY, out)
-        log = out[out.index('<section id="homeEventLog"'):out.index("</section>", out.index('<section id="homeEventLog"'))]
+        log = out[out.index('<section id="wsEventLog"'):out.index("</section>", out.index('<section id="wsEventLog"'))]
         self.assertLess(log.index('id="eventLogTitle"'), log.index('class="ws-pinned"'))
         self.assertLess(log.index('class="ws-pinned"'), log.index("data-event-wheel"))
 
@@ -117,10 +118,18 @@ class ThePageRender(unittest.TestCase):
             with self.subTest(flags):
                 self.assertIn(home_event_log.PINNED_EMPTY, self.out(flags))
 
-    def test_not_written_into_a_hidden_log_or_another_page(self):
+    def test_not_written_into_a_hidden_log(self):
         pinned = {"items": VECTORS["cases"][0]["open"], "now_ms": VECTORS["now_ms"]}
         self.assertIn(home_event_log.PINNED_EMPTY, self.out({"feed_off": True, "event_pinned": pinned}))
-        self.assertNotIn('class="ws-pinned__row"', self.out({"event_pinned": pinned}, name="news"))
+
+    def test_written_on_every_page_that_carries_the_log(self):
+        case = VECTORS["cases"][0]
+        pinned = {"items": case["open"], "now_ms": VECTORS["now_ms"]}
+        for name in ("news", "books", "requests", "calendar", "settings"):
+            with self.subTest(name):
+                out = render(ADMIN, name, flags={"event_pinned": pinned}, page=static_text(name + ".html"))
+                self.assertIn(case["html"], out)
+                self.assertEqual(out.count('<section id="wsEventLog"'), 1)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -178,9 +187,9 @@ class TheRoute(unittest.TestCase):
         with mock.patch.object(self.main, "SessionLocal", side_effect=RuntimeError("no db")):
             self.assertIsNone(self.pinned())
 
-    def test_home_passes_them(self):
+    def test_every_shell_page_passes_them(self):
         src = Path(self.main.__file__).read_text(encoding="utf-8")
-        self.assertIn('"event_pinned": await _event_log_pinned()', src)
+        self.assertIn('flags = {"feed_off": _event_log_off(), "event_pinned": await _event_log_pinned()}', src)
 
 
 if __name__ == "__main__":

@@ -601,10 +601,13 @@ HEADER_MARKER = "<!-- ws:header -->"
 # The Books pages' book pop-up (partials/book-dialog.html): one copy, written
 # wherever a page carries the marker (books, books-person, books-series).
 BOOK_DIALOG_MARKER = "<!-- ws:book-dialog -->"
-# Home's event log section; flags["feed_off"] renders it hidden (render_html).
-EVENT_LOG_OPEN = '<section id="homeEventLog"'
-# Home's pinned problems: flags["event_pinned"] ({"items", "now_ms"}) writes
-# the rows into the empty list, home_event_log.PINNED_EMPTY.
+# The event log (partials/shell-event-log.html) goes where a page carries
+# this marker: the top of its content, on every shell page but the reader.
+# flags["feed_off"] renders it hidden; flags["event_pinned"] ({"items",
+# "now_ms"}) writes the pinned rows into the empty list,
+# home_event_log.PINNED_EMPTY (event_log_html).
+EVENT_LOG_MARKER = "<!-- ws:event-log -->"
+EVENT_LOG_OPEN = '<section id="wsEventLog"'
 # Home's news cards: flags["home_news"] replaces the skeleton between these
 # with the real cards (app/home_news.py) and marks the section arrived.
 HOME_NEWS_OPEN = "<!-- ws:home-news -->"
@@ -617,6 +620,15 @@ def _partial(filename: str) -> str:
     path = os.path.join(STATIC_DIR, "partials", filename)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _partial_body(filename: str) -> str:
+    """A partial without the comment that opens it (its documentation), for
+    one that is written into the page more than once or on every page."""
+    text = _partial(filename).lstrip()
+    if text.startswith("<!--"):
+        text = text[text.index("-->") + 3:]
+    return text.strip()
 
 
 _SLOT_RE = re.compile(r"\{\{\{(\w+)\}\}\}|\{\{(\w+)\}\}")
@@ -714,6 +726,10 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str, 
         "user_name": (user or {}).get("display_name") or (user or {}).get("username") or "",
         "user_role": ("Admin" if is_admin else "User") if user else "",
         "avatar_style": avatar_style,
+        # The server's gauges, the same markup in both headers. Always in the
+        # shell: they show while html[data-netdata] says Netdata is set up
+        # (theme.css), which a soft navigation keeps current.
+        "gauges_html": _partial_body("shell-gauges.html"),
     }
 
 
@@ -1039,6 +1055,20 @@ def _cover_viewport(content: str) -> str:
     return _VIEWPORT_RE.sub(_sub, content, count=1)
 
 
+def event_log_html(flags: dict) -> str:
+    """The event log as this page's first paint shows it: hidden when the
+    feed is off and empty, else with the pinned rows already written, as the
+    script (js/event-log.js) would write them, so it takes them over as they
+    are and nothing under the section moves."""
+    out = _partial_body("shell-event-log.html")
+    if flags.get("feed_off"):
+        return out.replace(EVENT_LOG_OPEN, EVENT_LOG_OPEN + " hidden", 1)
+    pinned = flags.get("event_pinned")
+    if pinned is not None and EVENT_PINNED_EMPTY in out:
+        out = out.replace(EVENT_PINNED_EMPTY, render_pinned(pinned.get("items") or [], int(pinned["now_ms"])), 1)
+    return out
+
+
 def _add_shell_slots(content: str) -> str:
     at = content.lower().rfind("</body>")
     if at == -1:
@@ -1076,18 +1106,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     if name == "login":
         out = _fill_login_name(out, branding)
 
-    if name == "index" and flags.get("feed_off"):
-        # Home's event log: the status feed is off and empty, so the section
-        # is hidden from the first paint and never holds room (index.html).
-        out = out.replace(EVENT_LOG_OPEN, EVENT_LOG_OPEN + " hidden", 1)
-
-    pinned = flags.get("event_pinned") if name == "index" else None
-    if pinned is not None and not flags.get("feed_off") and EVENT_PINNED_EMPTY in out:
-        # Open outages and important notes, above the wheel: written as the
-        # page script would write them, so the section is its real height
-        # from the first paint and the script takes the rows over as they are.
-        out = out.replace(EVENT_PINNED_EMPTY,
-                          render_pinned(pinned.get("items") or [], int(pinned["now_ms"])), 1)
+    if EVENT_LOG_MARKER in out and name != "reader":
+        # The event log at the top of the page's content (event_log_html).
+        # The reader is full-screen and has no marker; it is skipped anyway.
+        out = out.replace(EVENT_LOG_MARKER, event_log_html(flags), 1)
 
     news = flags.get("home_news") if name == "index" else None
     if news is not None and HOME_NEWS_OPEN in out and HOME_NEWS_CLOSE in out:

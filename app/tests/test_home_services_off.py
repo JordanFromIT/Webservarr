@@ -118,20 +118,19 @@ class TwoWorkers(unittest.TestCase):
 
 
 class GaugesFollowNetdata(unittest.TestCase):
-    """The header gauges load whenever Netdata is set up, section on or off
-    (the full guard check is test_pages.home_guard_problems)."""
+    """The header gauges load whenever Netdata is set up, on every page and
+    whatever Home's sections are: they are the shell's (js/gauges.js), keyed
+    on html[data-netdata] alone, and Home has no part in them."""
 
-    def test_the_gauges_are_not_inside_the_section_guard(self):
-        src = open(os.path.join(os.path.dirname(__file__), "..", "static", "js", "pages", "home.js"),
-                   encoding="utf-8").read()
-        self.assertIn("var netdataOn = document.documentElement.hasAttribute('data-netdata');", src)
-        self.assertIn("if (netdataOn) first.push(loadSystemStats());", src)
-        self.assertIn("if (netdataOn) ctx.poll(loadSystemStats, 1000);", src)
-        self.assertNotIn("if (sectionOn('services')) { first.push(loadServices()); first.push(loadSystemStats()); }", src)
-        # The template the gauges are cloned from stays in the page while the
-        # section is hidden (display: none keeps it in the document).
-        page = open(os.path.join(os.path.dirname(__file__), "..", "static", "index.html"), encoding="utf-8").read()
-        self.assertIn('<template id="homeHeaderGauges">', page)
+    def test_the_gauges_follow_netdata_not_a_section(self):
+        static = os.path.join(os.path.dirname(__file__), "..", "static")
+        src = open(os.path.join(static, "js", "gauges.js"), encoding="utf-8").read()
+        self.assertIn("if (busy || !doc.documentElement.hasAttribute('data-netdata')) return;", src)
+        self.assertNotIn("home_sections", src)
+        self.assertNotIn("sectionOn", src)
+        home = open(os.path.join(static, "js", "pages", "home.js"), encoding="utf-8").read()
+        self.assertNotIn("system-stats", home)
+        self.assertNotIn("data-netdata", home)
 
 
 if __name__ == "__main__":

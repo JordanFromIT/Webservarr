@@ -720,8 +720,8 @@ class FeedApi(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class HomeEventLogHint(unittest.TestCase):
-    """Home renders its event log hidden (pages.py feed_off) only when the feed
-    would answer "off" with nothing in it."""
+    """Every page renders the event log hidden (pages.py feed_off) only when
+    the feed would answer "off" with nothing in it."""
 
     def setUp(self):
         self.Session = helpers.make_sessionmaker()

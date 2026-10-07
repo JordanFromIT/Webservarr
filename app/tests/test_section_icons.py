@@ -103,13 +103,14 @@ class WhichIcons(unittest.TestCase):
             self.assertIn("ws-section-icon", m.group(1).split(), icon_id)
 
     def test_the_event_log_icon_carries_the_class(self):
-        page = static_text("index.html")
-        log = page[page.index('<section id="homeEventLog"'):page.index('id="eventLogTitle"')]
+        page = static_text("partials", "shell-event-log.html")
+        log = page[page.index('<section id="wsEventLog"'):page.index('id="eventLogTitle"')]
         self.assertIn('<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>', log)
 
     def test_nothing_else_carries_the_class(self):
         # Nav, tab bar, buttons, pills, empty states and service tiles keep
-        # their icons: the class is on the six heading icons above and nowhere else.
+        # their icons: the class is on the six heading icons above (Home's five
+        # and the event log's, in its shell partial) and nowhere else.
         found = {}
         for root, _dirs, files in os.walk(STATIC):
             for f in files:
@@ -119,7 +120,7 @@ class WhichIcons(unittest.TestCase):
                         n = fh.read().count("ws-section-icon")
                     if n:
                         found[os.path.relpath(path, STATIC)] = n
-        self.assertEqual(found, {"index.html": 6})
+        self.assertEqual(found, {"index.html": 5, os.path.join("partials", "shell-event-log.html"): 1})
 
 
 class SettingsPage(unittest.TestCase):

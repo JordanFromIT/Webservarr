@@ -1,0 +1,29 @@
+<!--
+  The event log: the status feed's newest events (GET /api/status/feed) on a
+  wheel that turns on a horizontal axis, at the top of every shell page's
+  content (each page marks where it goes with a ws:event-log comment; the
+  reader, which is full-screen, has none). The newest line sits flat at the bottom;
+  older ones curl up over the top and dim. theme.css draws the wheel
+  (.ws-wheel), and its height is fixed, so its answer never moves anything
+  below it.
+
+  Rendered by app/pages.py: hidden from the first paint when the feed is off
+  and empty (feed_off), and with the open outages and important notes already
+  in the pinned list (app/home_event_log.py), so no page moves when the script
+  takes over. One shell module (js/event-log.js) owns the section for the
+  whole visit: on a soft navigation it puts its own live section in place of
+  the copy the new page brought, so the wheel, the history someone turned back
+  to and the polling carry on. Until the first answer the front line is a
+  skeleton. The wheel turns back through the history (wheel, drag, arrow
+  keys); "Latest", placed in the gap below so it moves nothing, turns it back.
+-->
+<section id="wsEventLog" aria-labelledby="eventLogTitle" class="relative shrink-0 mb-8">
+<div class="flex items-center gap-3 mb-2">
+<span class="ws-section-icon material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
+<h2 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h2>
+</div>
+<ul class="ws-pinned" data-event-pinned role="list" aria-label="Current problems" hidden></ul>
+<div class="ws-wheel" data-event-wheel tabindex="0" role="group" aria-label="Event log, use arrow keys to see older events"><div class="ws-wheel__line" aria-hidden="true"><span class="skel skel-line inline-block w-2/3 max-w-80"></span></div></div>
+<button type="button" class="ws-wheel-latest" data-event-latest hidden>Latest</button>
+<p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
+</section>

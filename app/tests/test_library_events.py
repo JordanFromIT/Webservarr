@@ -637,11 +637,11 @@ class NeverAnOutage(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class HomeHintMatchesThePage(unittest.TestCase):
-    """Without Uptime Kuma, the hidden attribute Home is served with
-    (main._event_log_off) and home.js's rule on the feed it then reads (hide
-    only an "off" answer with no events) agree, so the section never appears
-    or vanishes after the first paint. home_event_log.mjs runs the page's
-    side on the same answers."""
+    """Without Uptime Kuma, the hidden attribute the event log is served with
+    (main._event_log_off) and event-log.js's rule on the feed it then reads
+    (hide only an "off" answer with no events) agree, so the section never
+    appears or vanishes after the first paint. event_log.mjs runs the
+    script's side on the same answers."""
 
     NOW = T0 + timedelta(hours=1)
 
@@ -664,7 +664,7 @@ class HomeHintMatchesThePage(unittest.TestCase):
         client = helpers.api_client(Session, helpers.MEMBER)
         self.addCleanup(helpers.reset_overrides)
         answer = client.get("/api/status/feed").json()
-        served_hidden = '<section id="homeEventLog" hidden' in page
+        served_hidden = '<section id="wsEventLog" hidden' in page
         page_hides = answer["state"] == "off" and not answer["open"] and not answer["items"]
         return served_hidden, page_hides, answer["state"]
 

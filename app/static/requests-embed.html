@@ -17,6 +17,10 @@
 <!-- The page: pages/requests-embed.js runs it; its iframe leaves with it. -->
 <div id="wsPage" data-ws-module="/static/js/pages/requests-embed.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <h1 class="sr-only">Requests</h1>
+<!-- The event log, above the embed (theme.css drops the slot while it is hidden). -->
+<div class="shrink-0 px-4 pt-4 lg:px-8 lg:pt-8" data-event-log-slot>
+<!-- ws:event-log -->
+</div>
 <!-- Seerr Iframe -->
 <div class="flex-1 overflow-hidden">
 <div id="iframeContainer" class="w-full h-full">

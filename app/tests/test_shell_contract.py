@@ -685,23 +685,25 @@ class PhoneShellContract(unittest.TestCase):
         self.assertIn("size-8", later.group(0), "a 32px target (24px is the floor)")
         self.assertLess(inner.index("data-push-prompt-enable"), inner.index("data-push-prompt-later"))
 
-    def test_home_gauges_fit_a_small_phone(self):
-        # The gauges live in the headers, one copy each from one template:
-        # beside the status pill from lg and between the title and the bell
-        # in the phone's top bar. Service Health has no row of its own.
+    def test_the_gauges_fit_a_small_phone(self):
+        # The gauges live in the headers, one copy each from one partial:
+        # beside the status pill from lg and between the title and the status
+        # chip in the phone's top bar. Service Health has no row of its own.
         page = read("index")
         self.assertNotIn("netdataGauges", page)
         self.assertNotIn("netdataGauges", self.theme)
-        tpl = re.search(r'<template id="homeHeaderGauges">\s*<div data-home-gauges class="([^"]*)">', page)
+        self.assertNotIn("homeHeaderGauges", page)
+        part = (STATIC / "partials" / "shell-gauges.html").read_text(encoding="utf-8")
+        tpl = re.search(r'<div data-ws-gauges data-pending class="([^"]*)">', part)
         self.assertIsNotNone(tpl)
         outer = tpl.group(1).split()
         # Shown wherever its header is (each header hides itself), with no
         # height of its own, so neither header grows. In the top bar it takes
-        # the room up to the bell's padding; in the header it is its own size.
+        # the room up to the chip; in the header it is its own size.
         for c in ("flex", "h-0", "flex-1", "-mr-3", "lg:flex-none", "lg:mx-0"):
             self.assertIn(c, outer)
         self.assertFalse([c for c in outer if c in ("hidden", "xl:flex", "lg:flex")], outer)
-        body = page[page.index('<template id="homeHeaderGauges">'):page.index("</template>")]
+        body = part[part.index("<div data-ws-gauges"):]
         # Below xl a small ring with its reading under it, from xl a larger
         # ring with the reading beside it.
         cell = '<div class="flex flex-col items-center gap-1 xl:flex-row xl:gap-2.5">'
@@ -738,24 +740,107 @@ class PhoneShellContract(unittest.TestCase):
         self.assertRegex(line, r'>arrow_downward</span><span class="sr-only">Download</span><span data-gauge-net="down"')
         self.assertLess(line.index('>Upload<'), line.index('data-gauge-net="up"'))
         self.assertLess(line.index('>Download<'), line.index('data-gauge-net="down"'))
-        # Both headers are the shell's: Home adds one copy to each, after the
-        # pill and after the top bar's title, and takes them out on leave.
-        home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
-        add = home[home.index("function addHeaderGauges() {"):home.index("function eachGauge(")]
-        self.assertIn("hasAttribute('data-netdata')", add)
-        self.assertIn("removeHeaderGauges();", add)
-        self.assertLess(add.index("removeHeaderGauges();"), add.index("cloneNode(true)"))
-        self.assertIn("document.getElementById('systemStatus')", add)
-        self.assertIn("document.getElementById('wsBarTitle')", add)
-        self.assertIn("anchor.parentNode.insertBefore(copy, anchor.nextSibling);", add)
-        self.assertIn("document.querySelectorAll('[data-home-gauges]')", add)
-        self.assertIn("return function () { removeHeaderGauges(); };", home)
-        # The network figures are whole numbers.
-        stats = home[home.index("async function loadSystemStats() {"):home.index("// One delegated listener")]
-        self.assertIn("""setGaugeText('[data-gauge-net="down"]', String(Math.round(dl)));""", stats)
-        self.assertIn("""setGaugeText('[data-gauge-net="up"]', String(Math.round(ul)));""", stats)
-        self.assertNotIn("toFixed", stats)
-        self.assertNotIn("data-gauge-detail", stats)
+        # Both headers are the shell's: each partial has the one copy, after
+        # the pill and after the top bar's title, filled by app/pages.py.
+        header = (STATIC / "partials" / "shell-header.html").read_text(encoding="utf-8")
+        self.assertEqual(header.count("{{{gauges_html}}}"), 1)
+        self.assertLess(header.index('id="systemStatus"'), header.index("{{{gauges_html}}}"))
+        self.assertLess(header.index("{{{gauges_html}}}"), header.index('title="Notifications"', header.index("-->")))
+        self.assertEqual(self.side.count("{{{gauges_html}}}"), 1)
+        self.assertLess(self.side.index('id="wsBarTitle"'), self.side.index("{{{gauges_html}}}"))
+        self.assertLess(self.side.index("{{{gauges_html}}}"), self.side.index('id="wsStatusChip"'))
+        # The network figures are whole numbers; every reading goes to both.
+        gauges = (STATIC / "js" / "gauges.js").read_text(encoding="utf-8")
+        self.assertIn("""setText('[data-gauge-net="down"]', String(Math.round(dl)));""", gauges)
+        self.assertIn("""setText('[data-gauge-net="up"]', String(Math.round(ul)));""", gauges)
+        self.assertIn("doc.querySelectorAll('[data-ws-gauges] ' + selector)", gauges)
+        self.assertNotIn("toFixed", gauges)
+        self.assertNotIn("data-gauge-detail", gauges)
+        # Hidden without Netdata; their room held, nothing painted, until the
+        # first reading.
+        self.assertIn("html:not([data-netdata]) [data-ws-gauges] { display: none; }", self.theme)
+        self.assertIn("[data-ws-gauges][data-pending] { visibility: hidden; }", self.theme)
+        # The top bar's room is made on every page with Netdata, not Home only.
+        self.assertNotIn('html[data-page="index"][data-netdata]', self.theme)
+        self.assertIn("html[data-netdata] .ws-status-chip-word { display: none; }", self.theme)
+        self.assertIn("#mobileTopBar [data-ws-gauges] { column-gap: 12px; }", self.theme)
+
+
+class SharedLiveParts(unittest.TestCase):
+    """The headers' gauges and the event log are the shell's, like the nav:
+    one partial each, rendered into every shell page by app/pages.py, and one
+    shell module each for the life of the document (js/gauges.js,
+    js/event-log.js), so no page builds, mounts or polls its own copy."""
+
+    side = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+
+    def test_every_shell_page_but_the_reader_carries_the_event_log(self):
+        marker = "<!-- ws:event-log -->"
+        for name in SHELL_PAGES:
+            with self.subTest(name):
+                want = 0 if name == "reader" else 1
+                self.assertEqual(read(name).count(marker), want)
+        for name in BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn(marker, read(name))
+                self.assertNotIn("<!-- ws:header -->", read(name))
+                self.assertNotIn("<!-- ws:sidebar -->", read(name))
+
+    def test_the_marker_opens_the_pages_content(self):
+        # Inside #wsPage, the first thing in its content box: nothing but
+        # comments between the box's opening tag and the marker.
+        for name in SHELL_PAGES:
+            if name == "reader":
+                continue
+            with self.subTest(name):
+                page = read(name)
+                at = page.index("<!-- ws:event-log -->")
+                self.assertLess(page.index('id="wsPage"'), at)
+                before = re.sub(r"<!--.*?-->", "", page[:at], flags=re.S).rstrip()
+                self.assertRegex(before, r"<div\b[^>]*>$")
+
+    def test_one_module_each_before_the_router(self):
+        router = self.side.index('src="/static/js/router.js?v=1"')
+        for name in ("event-log.js", "gauges.js"):
+            with self.subTest(name):
+                tag = f'<script type="module" src="/static/js/{name}?v=1"></script>'
+                self.assertEqual(self.side.count(tag), 1)
+                self.assertLess(self.side.index(tag), router)
+                for page in SHELL_PAGES + BARE_PAGES:
+                    self.assertNotIn(f"/static/js/{name}", read(page), page)
+        leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
+        for name in ("SHELL_FILES", "SELF_OWNED_FILES"):
+            m = re.search(rf"export const {name} = \[([^\]]*)\]", leaks)
+            self.assertIn("'event-log.js'", m.group(1), name)
+            self.assertIn("'gauges.js'", m.group(1), name)
+
+    def test_the_modules_start_once_for_the_document(self):
+        log = (STATIC / "js" / "event-log.js").read_text(encoding="utf-8")
+        self.assertIn("if (typeof window !== 'undefined' && window.WS && !window.WS.eventLog) {", log)
+        self.assertEqual(len(re.findall(r"\bWS\.poll\(", js_code_only(log))), 1)
+        self.assertIn("WS.poll(tick, POLL_MS, env.signal);", log)
+        gauges = (STATIC / "js" / "gauges.js").read_text(encoding="utf-8")
+        self.assertIn("if (typeof window !== 'undefined' && window.WS && !window.WS.gauges) {", gauges)
+        self.assertEqual(len(re.findall(r"\bWS\.poll\(", js_code_only(gauges))), 1)
+
+    def test_a_swap_hands_the_new_page_to_the_live_log(self):
+        router = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"), keep_strings=True)
+        swap = router[router.index("function swapDom(doc, page) {"):]
+        swap = swap[:swap.index("\n  }\n")]
+        self.assertRegex(swap, r"old\.replaceWith\(fresh\);\s*"
+                               r"window\.dispatchEvent\(new CustomEvent\('ws:swap', \{ detail: \{ root: fresh \} \}\)\);")
+        log = (STATIC / "js" / "event-log.js").read_text(encoding="utf-8")
+        self.assertIn("env.target.addEventListener('ws:swap', function (e) { adopt(e.detail && e.detail.root); },", log)
+        self.assertIn("if (copy !== section) copy.replaceWith(section);", log)
+
+    def test_no_page_module_owns_them(self):
+        for p in sorted((STATIC / "js" / "pages").glob("*.js")):
+            with self.subTest(p.name):
+                src = p.read_text(encoding="utf-8")
+                for gone in ("system-stats", "status/feed", "createEventLog", "data-ws-gauges", "wsEventLog",
+                             "data-home-gauges", "homeEventLog"):
+                    self.assertNotIn(gone, src)
+
 
 if __name__ == "__main__":
     unittest.main()

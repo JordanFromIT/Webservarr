@@ -1,5 +1,6 @@
 <!--
-  Desktop header: status pill, notification bell, user menu.
+  Desktop header: status pill and the server's gauges, notification bell,
+  user menu.
 
   Server-rendered (app/pages.py) with the user already filled in. The pill
   starts in the "unknown" state, which reserves its width but paints nothing -
@@ -23,6 +24,8 @@
       <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
       <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
     </button>
+    <!-- The server's gauges (shell-gauges.html, js/gauges.js). -->
+{{{gauges_html}}}
   </div>
   <div class="min-w-0 flex items-center gap-4">
     <div id="wsPlayerPill" hidden></div>

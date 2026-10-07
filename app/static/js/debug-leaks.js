@@ -64,7 +64,8 @@
 // findplace.js, safetynet.js and popout.js are the audiobook player's
 // (js/player/), which lives as long as the document.
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js',
-  'install.js', 'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js', 'popout.js'];
+  'install.js', 'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js', 'popout.js',
+  'event-log.js', 'gauges.js'];
 // Shell code whose timers and listeners live as long as the shell's own UI,
 // not the page that called it: ui.js (a toast dismisses itself, a dialog stops
 // listening when it closes) and shell.js's serviceStatus (the one
@@ -74,14 +75,16 @@ export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js'
 // and the audiobook player (engine.js, saves.js, ui.js,
 // features.js, findplace.js, safetynet.js), which owns and ends its own timers, listeners
 // and requests and keeps playing across pages: a book a page's Play button opened, its
-// saves and its sleep timer are the player's, not that page's. 'file' is any
+// saves and its sleep timer are the player's, not that page's. So are the event log
+// (event-log.js) and the headers' gauges (gauges.js): one each for the document, carried
+// from page to page. 'file' is any
 // of the file's functions, 'file#name' one function. When the call that
 // creates an item comes from one of these, through shell frames only, the
 // item is the shell's even though a page asked. Nothing else: WS.poll
 // (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
 // they create stays the page's.
 export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', 'saves.js', 'features.js',
-  'findplace.js', 'safetynet.js', 'popout.js'];
+  'findplace.js', 'safetynet.js', 'popout.js', 'event-log.js', 'gauges.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;

@@ -517,21 +517,27 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-status-chip[data-state="off"] .ws-status-chip-word { color: rgb(var(--color-text) / .75); }
 .ws-status-chip[data-state="warn"] .ws-status-dot::after,
 .ws-status-chip[data-state="err"] .ws-status-dot::after { animation: ws-ping 1.4s cubic-bezier(0, 0, .2, 1) 1; }
-/* Room in the top bar. Below 360px the chip is the dot alone. On Home with
- * Netdata the three gauges share the bar (they arrive after the first paint;
- * html[data-page][data-netdata] is there from the start, so nothing moves
- * when they do): the dot alone below 390px, and below 360px the smallest
- * target (24px wide, 40px tall), so "Home" still fits whole at 320px. */
+/* Room in the top bar. Below 360px the chip is the dot alone. With Netdata
+ * the three gauges share the bar on every page (they hold their room from
+ * the first paint; html[data-netdata] is there from the start, so nothing
+ * moves when they show): the dot alone below 390px, and below 360px the
+ * smallest target (24px wide, 40px tall), so a short title still fits whole
+ * at 320px. */
 @media (max-width: 389px) {
-  html[data-page="index"][data-netdata] .ws-status-chip-word { display: none; }
-  html[data-page="index"][data-netdata] .ws-status-chip-face { padding: 0 9px; }
+  html[data-netdata] .ws-status-chip-word { display: none; }
+  html[data-netdata] .ws-status-chip-face { padding: 0 9px; }
 }
 @media (max-width: 359px) {
   .ws-status-chip-word { display: none; }
   .ws-status-chip-face { padding: 0 9px; }
-  html[data-page="index"][data-netdata] .ws-status-chip { min-width: 24px; padding: 0; margin-inline-end: -12px; }
-  html[data-page="index"][data-netdata] .ws-status-chip-face { width: 24px; height: 24px; padding: 0; justify-content: center; }
+  html[data-netdata] .ws-status-chip { min-width: 24px; padding: 0; margin-inline-end: -12px; }
+  html[data-netdata] .ws-status-chip-face { width: 24px; height: 24px; padding: 0; justify-content: center; }
 }
+/* The server's gauges (partials/shell-gauges.html, js/gauges.js): in both
+ * headers while Netdata is set up, their room held but nothing painted until
+ * the first reading. */
+html:not([data-netdata]) [data-ws-gauges] { display: none; }
+[data-ws-gauges][data-pending] { visibility: hidden; }
 /* Below 375px the top bar's gauges are each a ring over two short lines,
  * so "Home" stays whole from 320px with every reading at its widest (100%,
  * three-figure speeds): CPU and RAM put the name over the reading (as from
@@ -539,7 +545,7 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
  * both. All three are the same height, so the rings stay in line. Nothing
  * is smaller than the gauges' own text. The header copy (lg) is not here. */
 @media (max-width: 374px) {
-  #mobileTopBar [data-home-gauges] { column-gap: 12px; }
+  #mobileTopBar [data-ws-gauges] { column-gap: 12px; }
   #mobileTopBar .ws-gauge-reading { display: block; text-align: center; }
   #mobileTopBar .ws-gauge-reading > p + p { margin-top: 1px; }
   #mobileTopBar .ws-gauge-net {
@@ -1201,10 +1207,10 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  *
  * The server lists them on <html data-home-hide="news streams">, so a section
  * that is off is never painted and index.html never loads it. News, Service
- * Health, Recent Requests and the event log share one grid ([data-home-pair]);
- * from lg Recent Requests and News share a row under Service Health: with one
- * of them off the other takes the full width, and with all three off the grid
- * goes away once the event log is hidden too (the feed off, or nothing in it).
+ * Health and Recent Requests share one grid ([data-home-pair]); from lg
+ * Recent Requests and News share a row under Service Health: with one of them
+ * off the other takes the full width, and with all three off the grid goes.
+ * The event log above them is the shell's (partials/shell-event-log.html).
  */
 html[data-home-hide~="services"] [data-arrive="services"],
 html[data-home-hide~="news"] [data-arrive="news"],
@@ -1213,7 +1219,7 @@ html[data-home-hide~="releases"] [data-arrive="releases"],
 html[data-home-hide~="requests"] [data-arrive="requests"] { display: none; }
 html[data-home-hide~="requests"] [data-home-pair],
 html[data-home-hide~="news"] [data-home-pair] { grid-template-columns: minmax(0, 1fr); }
-html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]:has(> #homeEventLog[hidden]) { display: none; }
+html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair] { display: none; }
 /* space-y-8 spaces every child that follows one without the hidden attribute,
  * and a row hidden by the rules above still counts: with Service Health off,
  * the first section left would open with a stray gap. While
@@ -1221,6 +1227,8 @@ html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="ne
  * skips whatever is not displayed. */
 html[data-home-hide] [data-home-stack] { display: flex; flex-direction: column; row-gap: 2rem; }
 html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
+/* The event log's own gap (mb-8) is the flex gap's there. */
+html[data-home-hide] [data-home-stack] > #wsEventLog { margin-bottom: 0; }
 
 /* ---- Section heading icons (Settings > Pages > Home) ----
  *
@@ -1254,17 +1262,17 @@ html[data-nav-icons-off] .ws-nav-icon { display: none; }
 html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }
 html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 
-/* ---- Home's event log: the status wheel ----
+/* ---- The event log: the status wheel ----
  *
  * Every line sits on the surface of one drum that turns around a horizontal
  * axis. The axis runs through the bottom slot, pushed back by the radius, so
  * slot 0 (the newest, --i: 0) faces the viewer flat and sharp; older slots are
  * turned further over the top, which lifts them, compresses them and dims
- * them. pages/home.js (createEventLog) sets each line's --i and turns the
+ * them. js/event-log.js (createEventLog) sets each line's --i and turns the
  * wheel one notch per new event, or per step when someone turns it back
  * through the history. The look is take B of the approved playground, made
  * compact (28px lines on a 92px drum) and five lines deep. --wheel-duration
- * is also WHEEL_MS in home.js: change both.
+ * is also WHEEL_MS in event-log.js: change both.
  * The height holds five slots from the first paint, whatever the answer.
  */
 .ws-wheel {
@@ -1373,7 +1381,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
    28px), its time in the same column; the icon is a status mark (red for an
    outage, amber for an important note), not a section icon, so the section
    icons setting leaves it on. Its box is fixed, so the icon font arriving
-   moves nothing. pages/home.js and app/home_event_log.py write the rows. */
+   moves nothing. js/event-log.js and app/home_event_log.py write the rows. */
 .ws-pinned {
   margin: 0 0 4px;
   padding: 0;
@@ -1410,6 +1418,10 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
       translateZ(var(--wheel-radius));
   }
 }
+
+/* The event log above the Seerr embed sits in a padded slot of its own,
+   which goes with it while it is hidden. */
+[data-event-log-slot]:has(> #wsEventLog[hidden]) { display: none; }
 
 /* ---- Settings ----
  *

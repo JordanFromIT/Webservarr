@@ -180,7 +180,8 @@ class MoreSheet(unittest.TestCase):
 
 class TopBar(unittest.TestCase):
     def bar(self, out):
-        return re.search(r'<div id="mobileTopBar".*?</div>\s*</div>\s*</div>', out, re.S).group(0)
+        # Up to the tab bar: the gauges in the bar nest divs of their own.
+        return re.search(r'<div id="mobileTopBar".*?(?=<!-- Phone tab bar)', out, re.S).group(0)
 
     def test_page_label_and_bell_only(self):
         out = render(user=ADMIN, name="issues", b=branding(**{"sidebar.label_issues": "Problems & fixes"}))
