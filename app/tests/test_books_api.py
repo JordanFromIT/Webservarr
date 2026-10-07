@@ -819,6 +819,108 @@ class Filtering(BooksBase):
         self.assertEqual(self.get("/api/books", author="x" * 200).status_code, 200)
 
 
+class FilterPanel(BooksBase):
+    """The filters panel: several names per filter (any of them), filters
+    together (all of them), the ungrouped list, and facets that count among
+    what the other filters keep, all within what the caller may see."""
+
+    def facets(self, *kinds, **params):
+        body = self.ok("/api/books/facets", facet=list(kinds), **params)
+        self.assertEqual(body["facet"], kinds[0])
+        self.assertEqual(body["values"], body["facets"][kinds[0]])
+        return {k: [(v["name"], v["count"]) for v in vals] for k, vals in body["facets"].items()}
+
+    def test_several_names_of_one_filter_keep_the_books_of_any_of_them(self):
+        body = self.ok("/api/books", sort="title", author=["Jane Austen", "charlotte  BRONT\u00cb"])
+        self.assertEqual(self.titles(body), ["Emma", "Villette"])
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", narrator=["Rob Inglis", "Nora Reed"])),
+                         ["The Hobbit", "Villette"])
+        self.assertEqual(self.titles(self.ok("/api/books", sort="title", author=["Jane Austen", "", "  "])), ["Emma"])
+
+    def test_filters_of_different_kinds_all_apply_with_the_format(self):
+        body = self.ok("/api/books", sort="title", author=["Frank Herbert", "Jane Austen"], narrator=["Simon Vance"])
+        self.assertEqual([(i["kind"], i.get("series"), i.get("count")) for i in body["items"]], [("series", "Dune", 2)])
+        both = self.ok("/api/books", sort="title", author=["Frank Herbert", "Jane Austen"], series=["Dune"], format="ebook")
+        self.assertEqual(self.titles(both), ["Dune", "Dune Messiah"])
+        self.assertEqual(self.ok("/api/books", author=["Jane Austen"], narrator=["Simon Vance", "Rob Inglis"])["items"], [])
+
+    def test_a_hidden_name_among_several_matches_nothing_hidden(self):
+        # Secret Book (Hidden Author) is in a Kavita library this caller cannot reach.
+        body = self.ok("/api/books", sort="title", author=["Hidden Author", "Jane Austen"])
+        self.assertEqual(self.titles(body), ["Emma"])
+        self.assertEqual(self.ok("/api/books", author=["Hidden Author"])["items"], [])
+        self.assertEqual(self.ok("/api/books/search", q="book", author=["Hidden Author", "A/B Author"])["items"], [])
+        got = self.facets("author", "format", author=["Hidden Author"])
+        self.assertNotIn("Hidden Author", [n for n, _c in got["author"]])
+        self.assertEqual(got["format"], [("all", 0), ("ebook", 0), ("audio", 0)])
+        # Another caller's own reach is theirs: B sees the same, never more.
+        self.as_user(B)
+        self.assertEqual(self.ok("/api/books", author=["Hidden Author"])["items"], [])
+
+    def test_ungrouped_every_book_is_its_own_card_with_its_series_and_number(self):
+        grouped = self.ok("/api/books", sort="title")
+        self.assertIn(("series", "Dune"), [(i["kind"], i.get("series")) for i in grouped["items"]])
+        self.assertNotIn("series_number", [k for i in grouped["items"] for k in i])
+        body = self.ok("/api/books", sort="title", group="false")
+        self.assertTrue(all(i["kind"] == "book" for i in body["items"]))
+        self.assertEqual(self.titles(body), ["Children of Dune", "Dune", "Dune Messiah", "Emma", "Slash Tale",
+                                             "The Hobbit", "Villette"])
+        by_title = {i["title"]: i for i in body["items"]}
+        self.assertEqual((by_title["Dune Messiah"]["series"], by_title["Dune Messiah"]["series_number"]), ("Dune", 2))
+        self.assertEqual((by_title["Children of Dune"]["series"], by_title["Children of Dune"]["series_number"]),
+                         ("Dune", None))
+        self.assertEqual((by_title["Emma"]["series"], by_title["Emma"]["series_number"]), ("", None))
+        self.assertNotIn("Secret Book", by_title)                    # still only what the caller may see
+
+    def test_ungrouped_pages_by_cursor_and_keeps_the_filters(self):
+        seen, cursor = [], None
+        for _round in range(10):
+            params = {"sort": "added", "limit": 2, "group": "false", "author": ["Frank Herbert"]}
+            if cursor:
+                params["cursor"] = cursor
+            body = self.ok("/api/books", **params)
+            seen += self.titles(body)
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        self.assertEqual(seen, ["Children of Dune", "Dune Messiah", "Dune"])
+
+    def test_facets_count_among_what_the_other_filters_keep(self):
+        got = self.facets("format", "author", "series", "narrator", narrator=["Simon Vance"])
+        self.assertEqual(got["format"], [("all", 2), ("ebook", 1), ("audio", 2)])
+        self.assertEqual(got["author"], [("Frank Herbert", 2)])
+        self.assertEqual(got["series"], [("Dune", 2)])
+        # Its own filter is left out: every narrator stays offered.
+        self.assertEqual(got["narrator"], [("Le Guin, Ursula K.", 1), ("Nora Reed", 1), ("Rob Inglis", 1),
+                                           ("Scott Brick", 1), ("Simon Vance", 2)])
+        # The format narrows the names but not its own counts.
+        got = self.facets("format", "series", format="ebook", author=["Frank Herbert", "Jane Austen"])
+        self.assertEqual(got["format"], [("all", 4), ("ebook", 3), ("audio", 2)])
+        self.assertEqual(got["series"], [("Dune", 2)])
+        # Several names of a filter widen the others' counts.
+        got = self.facets("author", "narrator", series=["Dune"], narrator=["Rob Inglis", "Nora Reed"])
+        self.assertEqual(got["author"], [])
+        self.assertEqual(got["narrator"], [("Scott Brick", 1), ("Simon Vance", 2)])
+
+    def test_search_takes_the_format_and_several_names(self):
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="dune", format="audio")["items"]], [1, 3])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="e",
+                                                   author=["Jane Austen", "Charlotte Bront\u00eb"])["items"]], [4, 6])
+
+    def test_validation(self):
+        many = ["n%d" % i for i in range(51)]
+        for path, params in (("/api/books", {"author": many}),
+                             ("/api/books", {"series": ["ok", "x" * 201]}),
+                             ("/api/books", {"group": "maybe"}),
+                             ("/api/books/search", {"q": "a", "format": "video"}),
+                             ("/api/books/facets", {"facet": ["author", "genre"]}),
+                             ("/api/books/facets", {"facet": ["author"] * 5}),
+                             ("/api/books/facets", {"facet": "narrator", "narrator": many})):
+            with self.subTest(path=path, params=params):
+                self.assertEqual(self.get(path, **params).status_code, 422)
+        self.assertEqual(self.get("/api/books", author=many[:50]).status_code, 200)
+
+
 class PeopleAndSeries(BooksBase):
     def test_author_page(self):
         body = self.ok("/api/books/person", role="author", name="Frank Herbert")
