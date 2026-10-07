@@ -30,26 +30,26 @@ class FakeRedis:
     def __init__(self, store):
         self.store = store
 
-    async def get(self, key):
+    def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None):
+    def set(self, key, value, ex=None):
         self.store[key] = value.encode() if isinstance(value, str) else value
 
-    async def delete(self, key):
+    def delete(self, key):
         self.store.pop(key, None)
 
 
 class BrokenRedis:
-    async def get(self, key):
+    def get(self, key):
         from redis.exceptions import ConnectionError
         raise ConnectionError("down")
 
-    async def set(self, key, value, ex=None):
-        await self.get(key)
+    def set(self, key, value, ex=None):
+        self.get(key)
 
-    async def delete(self, key):
-        await self.get(key)
+    def delete(self, key):
+        self.get(key)
 
 
 def strict_csp() -> str:
@@ -95,8 +95,7 @@ class Base(PageRoutesBase):
         self.store = {}
         self.redis = FakeRedis(self.store)
         for p in (mock.patch.object(web_analytics, "SessionLocal", self.Session),
-                  mock.patch.object(web_analytics.session_manager, "get_redis",
-                                    mock.AsyncMock(side_effect=lambda: self.redis))):
+                  mock.patch.object(web_analytics, "_redis", side_effect=lambda: self.redis)):
             p.start()
             self.addCleanup(p.stop)
 
@@ -110,7 +109,7 @@ class Base(PageRoutesBase):
     def html_csps(self):
         """The CSP of each kind of HTML response: a shell page, the login page, static HTML."""
         out = {}
-        for path, session in (("/news", ADMIN_SESSION), ("/login", None), ("/static/login.html", None)):
+        for path, session in (("/news", ADMIN_SESSION), ("/login", None), ("/static/partials/shell-header.html", None)):
             r = self.get(path, session)
             self.assertEqual(r.status_code, 200, path)
             self.assertTrue(r.headers["content-type"].startswith("text/html"), path)
