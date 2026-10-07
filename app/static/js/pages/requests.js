@@ -1392,9 +1392,10 @@ export async function mount(ctx) {
   }
 
   /**
-   * On a phone the bar's home is a row of its own above "Trending" (below md
-   * in requests.html). Once the bar has left for the results panel that row
-   * would stay behind as an empty band, so it folds away; it opens again
+   * On a phone or tablet the bar's home is a row of its own above
+   * "Trending" (below lg in requests.html). Once the bar has left for the
+   * results panel that row would stay behind as an empty band, so it folds
+   * away; it opens again
    * before the bar ever goes back. The row is above the view by then, so
    * the scroll is corrected by whatever the fold moved the bar, which keeps
    * the field still under the user's finger whether or not the browser's own

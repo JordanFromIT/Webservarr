@@ -272,11 +272,12 @@ await run('phone search row: its own reserved row, folded once the bar moves dow
   try {
     const home = t.q('#searchHome');
     const cls = home.className.split(/\s+/);
-    check('below md the home row is in the flow: no unprefixed sticky, h-0 or absolute',
-      cls.indexOf('sticky') === -1 && cls.indexOf('h-0') === -1 && cls.indexOf('md:sticky') !== -1 && cls.indexOf('md:h-0') !== -1, cls);
+    check('below lg (where the phone/tablet top bar is) the home row is in the flow: no unprefixed sticky, h-0 or absolute',
+      cls.indexOf('sticky') === -1 && cls.indexOf('h-0') === -1 && cls.indexOf('lg:sticky') !== -1 && cls.indexOf('lg:h-0') !== -1, cls);
     const slot = t.q('#searchHomeSlot').className.split(/\s+/);
-    check('the slot reserves the field’s height below md and floats from md',
-      slot.indexOf('min-h-[var(--search-bar-h)]') !== -1 && slot.indexOf('absolute') === -1 && slot.indexOf('md:absolute') !== -1, slot);
+    check('the slot reserves the field’s height below lg, left-aligned, and floats centred from lg',
+      slot.indexOf('min-h-[var(--search-bar-h)]') !== -1 && slot.indexOf('absolute') === -1 && slot.indexOf('lg:absolute') !== -1 &&
+      slot.indexOf('mx-auto') === -1 && slot.indexOf('lg:mx-auto') !== -1, slot);
     const style = REQUESTS_HTML.split('</head>')[0];
     check('one height for the field and the reserved row',
       /#wsPage \{ --search-bar-h: [\d.]+rem; \}/.test(style) && style.indexOf('#searchInput { height: var(--search-bar-h); }') !== -1);
