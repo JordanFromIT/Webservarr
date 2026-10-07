@@ -302,7 +302,9 @@ await run('the skeleton holds the grid, then the books replace it', async (make)
   await flush();
   check('the skeleton shows', !t.hidden('#gridSkeleton'));
   check('with the shape of twelve books', t.qa('#gridSkeleton > div').length === 12, t.qa('#gridSkeleton > div').length);
-  check('each skeleton is a cover and two lines', t.qa('#gridSkeleton > div').every((d) => d.children.length === 3));
+  check('each skeleton is a cover, two lines and the room of a series line (shown with Group series off)',
+    t.qa('#gridSkeleton > div').every((d) => d.children.length === 4 && d.children[3].getAttribute('data-skel') === 'series'));
+  check('which is held only while every book is its own card', !t.doc.documentElement.hasAttribute('data-books-flat'));
   check('the grid and every message are away', t.hidden('#libraryGrid') && t.hidden('#errorState') && t.hidden('#emptyState') && t.hidden('#buildingState'));
   slow.resolve();
   await t.clock.advance(1600);
@@ -373,7 +375,7 @@ await run('the chips filter the library and are remembered', async (make) => {
   t.click('[data-format="audio"]');
   await t.clock.advance(50);
   check('Audiobooks asks for audio', t.net.urls('/api/books?').pop() === '/api/books?format=audio&sort=added&limit=36');
-  check('the choice is remembered for this person', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added"}', t.win.localStorage.getItem('webservarr_books_view:sam'));
+  check('the choice is remembered for this person', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added","group":true}', t.win.localStorage.getItem('webservarr_books_view:sam'));
 
   // The next visit starts where this one left off.
   const u = make({ storage: { 'webservarr_books_view:sam': '{"format":"audio","sort":"title"}' }, routes: (net) => {
@@ -384,9 +386,9 @@ await run('the chips filter the library and are remembered', async (make) => {
   check('it asks for the remembered view at once', u.net.urls('/api/books?')[0] === '/api/books?format=audio&sort=title&limit=36', u.net.urls('/api/books?'));
   check('and the controls show it', u.q('[data-format="audio"]').getAttribute('aria-pressed') === 'true' && u.text('#sortValue') === 'Title');
   // Rubbish in storage is ignored.
-  const v = make({ storage: { 'webservarr_books_view:sam': '{"format":"pdf","sort":"nope"}' }, routes: usual() });
+  const v = make({ storage: { 'webservarr_books_view:sam': '{"format":"pdf","sort":"nope","group":"no"}' }, routes: usual() });
   await v.mount();
-  check('an unknown value falls back to the defaults', v.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36');
+  check('an unknown value falls back to the defaults', v.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36' && v.q('#groupSwitch').getAttribute('aria-checked') === 'true');
 });
 
 await run('the sort reloads the list and an older answer cannot overwrite a newer one', async (make) => {
@@ -952,7 +954,7 @@ await run('T3H4: a chip tapped while the catalog is first built shows building a
   building = false;
   t.polls.filter((p) => !p.stopped)[0].fn();
   await t.clock.advance(50);
-  check('when the books arrive they show, and the view is kept then', t.cards('libraryGrid').length === 1 && t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added"}');
+  check('when the books arrive they show, and the view is kept then', t.cards('libraryGrid').length === 1 && t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added","group":true}');
 });
 
 await run('T3H5: the toolbar, notes, connect message and Continue come in one write with the books', async (make) => {
@@ -1781,6 +1783,46 @@ await run('filters: leaving the page takes an open picker with it', async (make)
   check('and gone with the page', !t.q('[role="listbox"]') && !t.doc.body.querySelector('.ws-dialog'));
 });
 
+await run('Group series: a switch beside the sort; off lists every book with its series and number, and is remembered', async (make) => {
+  const FLAT = [ebook(1, 'Dune', 'Frank Herbert', { series: 'Dune', series_number: 1 }),
+    ebook(2, 'Dune Messiah', 'Frank Herbert', { series: 'The Very Long Name of a Collected Saga Edition', series_number: 12.5 }),
+    ebook(4, 'Emma', 'Jane Austen', { series: '', series_number: null })];
+  const routes = (net) => {
+    usual()(net);
+    net.on('/api/books?format=all&sort=added&limit=36&group=false', () => ({ body: { items: FLAT, next_cursor: null, notes: [] } }));
+  };
+  const t = make({ routes });
+  await t.mount();
+  const sw = t.q('#groupSwitch');
+  check('a switch, labelled by its own words, on, just before the sort', sw.getAttribute('role') === 'switch' && sw.textContent.trim() === 'Group series'
+    && sw.getAttribute('aria-checked') === 'true' && sw.nextElementSibling.id === 'sortLabel');
+  check('the format chips are still in the toolbar', t.qa('#formatChips [data-format]').length === 3 && t.qa('#filterButtons [data-filter]').length === 3);
+  check('grouped to begin with: two lines a card', !t.q('#libraryGrid [data-series-line]') && t.qa('#libraryGrid a').some((a) => /Harry Potter/.test(a.textContent)));
+  t.click('#groupSwitch');
+  check('the switch says off at once', sw.getAttribute('aria-checked') === 'false');
+  check('the skeleton holds the third line', t.doc.documentElement.hasAttribute('data-books-flat') && !t.hidden('#gridSkeleton'));
+  await t.clock.advance(50);
+  check('the books are asked for one by one', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&group=false', t.net.urls('/api/books?'));
+  const lines = t.qa('#libraryGrid [data-series-line]');
+  check('every card has the line', lines.length === 3);
+  check('the series and its number', lines[0].children[0].textContent === 'Dune' && lines[0].children[1].textContent === '#1' && lines[1].children[1].textContent === '#12.5');
+  check('the name gives way, the number never does', /truncate/.test(lines[1].children[0].className) && /shrink-0/.test(lines[1].children[1].className) && !/truncate/.test(lines[1].children[1].className));
+  check('a book in no series keeps the room, empty', lines[2].children.length === 0 && /min-h-5/.test(lines[2].className));
+  check('remembered for this person', JSON.parse(t.win.localStorage.getItem('webservarr_books_view:sam')).group === false);
+  check('kept apart from the grouped list', t.WS.cache.has('books:list:all:added:flat'));
+
+  const u = make({ storage: { 'webservarr_books_view:sam': '{"format":"all","sort":"added","group":false}' }, routes });
+  await u.mount();
+  check('the next visit asks for it at once, the switch off', u.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&group=false' && u.q('#groupSwitch').getAttribute('aria-checked') === 'false');
+  u.click('#groupSwitch');
+  await u.clock.advance(50);
+  check('on again: the series are one card each, the line and its room go', u.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36'
+    && !u.doc.documentElement.hasAttribute('data-books-flat') && !u.q('#libraryGrid [data-series-line]'));
+  check('and that is remembered too', JSON.parse(u.win.localStorage.getItem('webservarr_books_view:sam')).group === true);
+  u.ctl.abort();
+  check('leaving the page drops the flag', !u.doc.documentElement.hasAttribute('data-books-flat'));
+});
+
 // ---- The sort menu ----
 
 function sortKey(t, key) {
@@ -1817,7 +1859,7 @@ await run('sort: a button that opens a listbox of the orders, with the one in us
   check('Enter picks it and the list goes', !t.q('#booksSortList') && btn.getAttribute('aria-expanded') === 'false' && !btn.hasAttribute('aria-controls'));
   check('the button says it', t.text('#sortValue') === 'Title');
   check('the books are asked for in that order', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=title&limit=36');
-  check('and it is remembered', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"all","sort":"title"}');
+  check('and it is remembered', t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"all","sort":"title","group":true}');
 
   btn.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
   check('the arrow keys open it from the button too, on the order in use', !!t.q('#booksSortList') && t.q('#booksSortList').getAttribute('aria-activedescendant') === sortOptions(t)[1].id &&

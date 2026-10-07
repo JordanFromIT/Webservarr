@@ -742,6 +742,11 @@ class BooksPage(unittest.TestCase):
         self.assertIn('html[data-books-filtered] #toolbarSkel [data-skel="filters"] { display: block; }', h)
         src = module_source("books")
         self.assertIn("html.removeAttribute('data-books-filtered');", src)
+        # Group series off (remembered) or a series filter holds a third line on every skeleton card.
+        self.assertIn("view = JSON.parse(localStorage.getItem('webservarr_books_view:' + name) || 'null');", loader)
+        self.assertIn("setAttribute('data-books-flat', '')", loader)
+        self.assertIn('html[data-books-flat] #gridSkeleton [data-skel="series"] { display: block; }', h)
+        self.assertIn("html.removeAttribute('data-books-flat');", src)
 
     def test_the_discovery_shelves_are_held_like_the_rows_above(self):
         # Books 3c: Recently added and Popular on the server, after My list and before the toolbar.

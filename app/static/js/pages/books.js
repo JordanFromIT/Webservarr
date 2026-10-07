@@ -50,6 +50,10 @@
  * Back, a refresh and a shared link keep them; a change is drawn here and the
  * router, which this page asks to replace the address, hands it back
  * (ctx.onNavigate). Exported for the tests: filtersFrom(url), filterHref(filters, base).
+ *
+ * Group series, a switch beside the sort: on, a series is one card; off,
+ * every book is its own card with a "Dune #2" line. Remembered with the
+ * format and the sort in the person's view (localStorage).
  */
 
 const PAGE_SIZE = 36;
@@ -168,6 +172,12 @@ export function filterHref(filters, base) {
   });
   const qs = url.searchParams.toString();
   return '/books' + (qs ? '?' + qs : '');
+}
+
+/** "2", "2.5": a number in a series as a shelf writes it. */
+function seriesNumber(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return '';
+  return String(Math.round(n * 100) / 100);
 }
 
 /** Text for matching a name as the person types: no accents, no case, spacing collapsed. */
@@ -302,7 +312,8 @@ function coverMark(text, opts) {
  * A library card: the cover, the title (two lines of room whatever it is, so
  * every row is one height and lands on its skeleton) and one quiet line under
  * it, the author or, for a series, how many books it holds. opts.mark puts a
- * coverMark on the cover ({ text, accent, icon, data }).
+ * coverMark on the cover ({ text, accent, icon, data }); opts.seriesLine adds
+ * a book's series and number ("Dune #2") on a third line.
  */
 export function renderBookCard(card, opts) {
   const signal = opts && opts.signal;
@@ -327,6 +338,19 @@ export function renderBookCard(card, opts) {
   a.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title || 'Untitled'));
   const sub = series ? card.count + (card.count === 1 ? ' book' : ' books') : card.author;
   a.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', sub || ''));
+  if (opts && opts.seriesLine && !series) {
+    // Every book on its own (Group series off): its series and its number in
+    // it. The name gives way to a long title; the number never does. A book in
+    // no series keeps the line's room, so every row is one height.
+    const line = el('span', 'flex min-h-5 min-w-0 items-center gap-1 text-[13px] leading-5 text-frosted-blue/70');
+    line.setAttribute('data-series-line', '');
+    if (card.series) {
+      line.appendChild(el('span', 'min-w-0 truncate', card.series));
+      const n = seriesNumber(card.series_number);
+      if (n) line.appendChild(el('span', 'shrink-0 font-semibold tabular-nums text-frosted-blue', '#' + n));
+    }
+    a.appendChild(line);
+  }
   return a;
 }
 
@@ -479,7 +503,7 @@ export async function mount(ctx) {
   const html = document.documentElement;
 
   const state = {
-    format: 'all', sort: 'added',
+    format: 'all', sort: 'added', group: true,
     // The toolbar's filters, from the address (filtersFrom); '' is no filter.
     filters: filtersFrom(ctx.url),
     // The address a filter change of ours asked the router for (it claims that one).
@@ -520,10 +544,11 @@ export async function mount(ctx) {
       const saved = JSON.parse(storageGet(VIEW_KEY + user) || 'null');
       if (saved && FORMATS.indexOf(saved.format) !== -1) state.format = saved.format;
       if (saved && SORTS.indexOf(saved.sort) !== -1) state.sort = saved.sort;
+      if (saved && saved.group === false) state.group = false;
     } catch (e) { /* an old value: the defaults */ }
   }
   function saveView() {
-    storageSet(VIEW_KEY + user, JSON.stringify({ format: state.format, sort: state.sort }));
+    storageSet(VIEW_KEY + user, JSON.stringify({ format: state.format, sort: state.sort, group: state.group }));
   }
 
   // Up next and My list are each reserved from the first paint for a person
@@ -1101,23 +1126,42 @@ export async function mount(ctx) {
 
   // ---- The library ----
 
-  function skeletonCard() {
+  /** A skeleton card: a cover and the card's lines. withSeries: the series
+      line's room too, shown while every book is its own card (the page style's
+      html[data-books-flat] rule, as on books.html's own skeleton). */
+  function skeletonCard(withSeries) {
     const d = el('div', '');
     d.appendChild(el('div', 'skel aspect-[2/3] rounded-xl'));
     d.appendChild(el('p', 'mt-2 text-[15px] leading-snug min-h-[2.75em]', ' '));
     d.appendChild(el('p', 'text-[13px] leading-5 min-h-5', ' '));
+    if (withSeries) {
+      const line = el('p', 'text-[13px] leading-5 min-h-5', ' ');
+      line.setAttribute('data-skel', 'series');
+      d.appendChild(line);
+    }
     return d;
   }
 
   function showSkeleton(grid, count) {
     grid.textContent = '';
-    for (let i = 0; i < count; i++) grid.appendChild(skeletonCard());
+    for (let i = 0; i < count; i++) grid.appendChild(skeletonCard(grid.id === 'gridSkeleton'));
   }
 
-  function appendCards(grid, items) {
+  /** Every book is its own card: Group series off, or a series filter (the server lists a series' books one by one). */
+  function flat() {
+    return !state.group || !!state.filters.series;
+  }
+
+  /** The grid skeleton's room for a third line on every card (books.html; theme-loader.js on a full load). */
+  function syncFlat() {
+    if (flat()) html.setAttribute('data-books-flat', '');
+    else html.removeAttribute('data-books-flat');
+  }
+
+  function appendCards(grid, items, seriesLine) {
     items.forEach(function (card) {
       const li = el('li', '');
-      li.appendChild(renderBookCard(card, { signal: signal }));
+      li.appendChild(renderBookCard(card, { signal: signal, seriesLine: !!seriesLine }));
       grid.appendChild(li);
     });
   }
@@ -1129,6 +1173,7 @@ export async function mount(ctx) {
       b.className = on ? CHIP_ON : CHIP_OFF;
     });
     $('sortValue').textContent = SORT_LABELS[state.sort];
+    $('groupSwitch').setAttribute('aria-checked', state.group ? 'true' : 'false');
   }
 
   function setMore(cursor) {
@@ -1203,7 +1248,7 @@ export async function mount(ctx) {
     if (items.length) {
       stopBuildingPoll();
       saveView();
-      appendCards($('libraryGrid'), items);
+      appendCards($('libraryGrid'), items, flat());
       showBody('libraryGrid');
       setMore(data.next_cursor);
       offerGuide();
@@ -1227,7 +1272,7 @@ export async function mount(ctx) {
 
   function libraryUrl(cursor) {
     return '/api/books?format=' + state.format + '&sort=' + state.sort + '&limit=' + PAGE_SIZE +
-      filterQuery('') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+      (state.group ? '' : '&group=false') + filterQuery('') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
   }
 
   function failedLibrary(err) {
@@ -1251,7 +1296,7 @@ export async function mount(ctx) {
     }
     showBody('gridSkeleton');
     showSkeleton($('gridSkeleton'), SKELETON_CARDS);
-    return WS.swr('books:list:' + state.format + ':' + state.sort + filterKey(), function () {
+    return WS.swr('books:list:' + state.format + ':' + state.sort + (state.group ? '' : ':flat') + filterKey(), function () {
       return readLive(libraryUrl());
     }, function (data) {
       if (gen !== state.gen || signal.aborted) return;
@@ -1284,7 +1329,7 @@ export async function mount(ctx) {
       // Page 1 was drawn again meanwhile (a fresh answer over the kept copy):
       // this page followed the old one and would repeat or skip books.
       if (gen !== state.gen || page !== state.renderGen || signal.aborted) return;
-      appendCards($('libraryGrid'), (data && Array.isArray(data.items)) ? data.items : []);
+      appendCards($('libraryGrid'), (data && Array.isArray(data.items)) ? data.items : [], flat());
       setMore(data && data.next_cursor);
     }, function (err) {
       if (gen !== state.gen || page !== state.renderGen || quiet(err)) return;
@@ -1300,6 +1345,17 @@ export async function mount(ctx) {
     state.format = format;
     state.sort = sort;
     syncControls();
+    stopBuildingPoll();
+    loadLibrary(false);
+  }
+
+  /** Group series on or off: the books again, every book its own card when off. Remembered at once. */
+  function setGroup(on) {
+    if (on === state.group) return;
+    state.group = on;
+    syncControls();
+    saveView();
+    syncFlat();
     stopBuildingPoll();
     loadLibrary(false);
   }
@@ -1338,6 +1394,7 @@ export async function mount(ctx) {
     // The toolbar skeleton's room for that row (books.html; theme-loader.js on a full load).
     if (anyFilter()) html.setAttribute('data-books-filtered', '');
     else html.removeAttribute('data-books-filtered');
+    syncFlat();
   }
 
   function drawActive(host) {
@@ -2022,6 +2079,7 @@ export async function mount(ctx) {
     // The arrows open the list too, as they open a native one.
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openSort($('sortBtn')); }
   }, { signal: signal });
+  $('groupSwitch').addEventListener('click', function () { setGroup(!state.group); }, { signal: signal });
   $('moreBtn').addEventListener('click', loadMore, { signal: signal });
   $('retryBtn').addEventListener('click', function () { loadLibrary(false); loadContinue(); }, { signal: signal });
   $('emptyReset').addEventListener('click', function () { choose('all', state.sort); }, { signal: signal });
@@ -2114,5 +2172,6 @@ export async function mount(ctx) {
   return function () {
     ROW_ORDER.forEach(function (name) { markRow(name, false); });
     html.removeAttribute('data-books-filtered');
+    html.removeAttribute('data-books-flat');
   };
 }
