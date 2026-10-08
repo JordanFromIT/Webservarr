@@ -679,18 +679,23 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str, 
 
     logo = _safe_url(branding.get("logo_url"))
     logo_icon = html.escape(icons.get("sidebar_logo") or _REGISTRY["icon.sidebar_logo"].default)
-    # branding.show_name off: the logo stands alone, in the room the name and
-    # its gap took (128px against 96 + 12 + the name's line), so the nav below
-    # starts where it always does. The logo then carries the name.
+    # branding.show_name off: the logo stands alone and carries the name. It
+    # takes the room the name and its gap took, and more of the block's own
+    # padding, so it is larger while the nav below starts where it always does.
     named = branding.get("show_name") is not False
     logo_alt = "Logo" if named else html.escape(site_name or "Logo", quote=True)
     if logo:
         # A fixed box: an unsized image would push the whole nav down the
         # moment it arrived on a cold load (the one layout shift the shell had).
-        size = "h-24 mb-3" if named else "h-32"
+        # Named: 96px tall over the name. Alone: the sidebar's width less 12px
+        # a side (the block's 24px padding, less 12) and 144px tall, 8px of it
+        # taken from the padding above and below, so the block stays 176px
+        # tall, as it is named (96 + 12 + the name's line, near enough). A wide
+        # logo fills the width; a tall one stops at 144px (object-contain).
+        box = "w-full h-24 mb-3" if named else "-mx-3 -my-2 w-[calc(100%+1.5rem)] max-w-none h-36"
         logo_html = (
             f'<img src="{html.escape(logo, quote=True)}" alt="{logo_alt}" '
-            f'class="w-full {size} rounded-lg object-contain">'
+            f'class="{box} rounded-lg object-contain">'
         )
     elif named:
         logo_html = (

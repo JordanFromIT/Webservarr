@@ -22,6 +22,8 @@ from app.tests.test_pages import branding, data_of, render, static_text
 
 KEY = "branding.show_name"
 OFF = {KEY: "false"}
+# The lone logo's box (show_name off): the sidebar's width less 12px a side, 144px tall.
+ALONE = "-mx-3 -my-2 w-[calc(100%+1.5rem)] max-w-none h-36"
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 
 
@@ -93,13 +95,29 @@ class Sidebar(unittest.TestCase):
         block = brand_block(render(b=branding(**{"branding.app_name": "A & B <x>", **OFF})))
         self.assertNotIn("A &amp; B", re.sub(r'alt="[^"]*"', "", block))
         self.assertRegex(block, r'<p class="[^"]*\bhidden\b[^"]*"></p>')
-        self.assertIn('alt="A &amp; B &lt;x&gt;" class="w-full h-32 rounded-lg object-contain"', block)
+        self.assertIn(f'alt="A &amp; B &lt;x&gt;" class="{ALONE} rounded-lg object-contain"', block)
         self.assertNotIn("<x>", block)
+
+    def test_off_the_logo_takes_the_sidebar_width_and_the_nav_stays_put(self):
+        # Drawbridge [41]: the lone logo runs to 12px from each side of the
+        # sidebar (the block's 24px padding, less 12) and 144px tall, 8px of
+        # it from the padding above and below: the block stays 24 + 128 + 24.
+        sidebar = re.search(r'<div class="p-6 flex flex-col items-center" data-ws-brand>',
+                            render(b=branding(**OFF)))
+        self.assertIsNotNone(sidebar, "the block's own padding is unchanged")
+        self.assertEqual(ALONE.split(), ["-mx-3", "-my-2", "w-[calc(100%+1.5rem)]", "max-w-none", "h-36"])
+        app_css = open(os.path.join(STATIC, "css", "app.css"), encoding="utf-8").read()
+        # The compiled utilities exist (Tailwind emits only literal classes).
+        for rule in (".-mx-3{margin-left:-.75rem;margin-right:-.75rem}",
+                     ".-my-2{margin-top:-.5rem;margin-bottom:-.5rem}",
+                     ".w-\\[calc\\(100\\%\\+1\\.5rem\\)\\]{width:calc(100% + 1.5rem)}",
+                     ".max-w-none{max-width:none}", ".h-36{height:9rem}"):
+            self.assertIn(rule, app_css, rule)
 
     def test_off_with_the_default_logo(self):
         b = branding(**{"branding.app_name": "My Server", **OFF})
         self.assertEqual(b["logo_url"], "/static/webservarr.svg")
-        self.assertIn('<img src="/static/webservarr.svg" alt="My Server" class="w-full h-32',
+        self.assertIn(f'<img src="/static/webservarr.svg" alt="My Server" class="{ALONE}',
                       brand_block(render(b=b)))
 
     def test_off_with_no_logo_the_icon_box_is_named(self):
