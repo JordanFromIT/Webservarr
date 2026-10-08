@@ -291,10 +291,11 @@ def _activity_at(value: Optional[str]) -> Optional[datetime]:
         return None
     try:
         at = datetime.fromisoformat(value.strip())
-    except ValueError:
+        if at.tzinfo is not None:
+            # Year 1 or 9999 with an offset lands outside datetime's range.
+            at = at.astimezone(timezone.utc).replace(tzinfo=None)
+    except (ValueError, OverflowError):
         raise HTTPException(status_code=422, detail="updated_at is an ISO 8601 time") from None
-    if at.tzinfo is not None:
-        at = at.astimezone(timezone.utc).replace(tzinfo=None)
     return at
 
 

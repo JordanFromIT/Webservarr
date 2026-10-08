@@ -172,7 +172,9 @@ class Hide(HiddenBase):
         self.assertIn(1, self.row_ids())
 
     def test_input_is_checked(self):
-        for bad in ("yesterday", "2026-13-01T00:00:00Z", "x" * 41, 5):
+        # The last two parse, but their offset takes them outside datetime's range.
+        for bad in ("yesterday", "2026-13-01T00:00:00Z", "x" * 41, 5,
+                    "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"):
             with self.subTest(updated_at=bad):
                 self.assertEqual(self.send("PUT", HIDE.format(7), {"updated_at": bad}).status_code, 422)
         self.assertEqual(self.send("PUT", HIDE.format(0), {"updated_at": None}).status_code, 422)
