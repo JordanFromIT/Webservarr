@@ -5,7 +5,8 @@
 // skeleton and the render, top-down arrival, the format chips and the sort
 // (and remembering them), progressive loading, series cards, format badges,
 // search (the debounce, stale answers, the request link), the Continue row
-// (and its notes when Kavita is down), the Kavita hand-off, the building
+// (and its notes when Kavita is down; a book taken out staying out of a
+// late live answer and the kept copy), the Kavita hand-off, the building
 // state, the empty and error states, and that nothing is written as markup.
 // Also mounts the Requests page (requests.js) to show /requests?q= runs its
 // search on arrival.
@@ -911,6 +912,97 @@ await run('Continue: Undo after leaving the page still tells the server, and dra
   await settle();
   check('the server is told', t.net.calls.some((c) => c.url === '/api/books/3/continue-hidden' && c.init.method === 'DELETE'));
   check('the left page is not drawn on', contIds(t).join() === '1,6');
+});
+
+// A visit that paints a kept copy of Continue while the live answer is held.
+async function keptThenLive(make) {
+  const live = deferred();
+  const t = make({ routes: (net) => {
+    hideRoutes()(net);
+    net.on('/api/books/continue', () => live.promise);
+  } });
+  t.WS.cache.set('books:continue', { items: CONT, notes: [] });
+  const m = t.mount();
+  await t.clock.advance(1600);
+  await m;
+  // What the server built before it heard of any removal: every card still
+  // in it, The Hobbit listened to since the copy was kept.
+  const fresh = JSON.parse(JSON.stringify(CONT));
+  fresh[1].updated_at = '2026-10-08T09:00:00Z'; fresh[1].progress_label = '1h 40m left'; fresh[1].percent = 70;
+  t.live = async () => { live.resolve({ body: { items: fresh, notes: [] } }); await flush(); await t.clock.advance(50); };
+  return t;
+}
+const hides = (t) => t.net.calls.filter((c) => c.url === '/api/books/3/continue-hidden' && c.init.method === 'PUT').map((c) => JSON.parse(c.init.body).updated_at);
+
+await run('Continue: a book taken out stays out when a live answer built before it lands, and is not kept', async (make) => {
+  const t = await keptThenLive(make);
+  check('drawn from the kept copy', contIds(t).join() === '1,3,6', contIds(t));
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  check('taken out', contIds(t).join() === '1,6', contIds(t));
+  await t.live();
+  check('the live answer does not bring it back', contIds(t).join() === '1,6', contIds(t));
+  const kept = t.WS.cache.get('books:continue');
+  check('nor does the copy kept for the next visit', !!kept && kept.items.map((i) => i.book_id).join() === '1,6', kept);
+  check('the server is sent the newer time the live answer has, so it stays out next visit too',
+    JSON.stringify(hides(t)) === JSON.stringify(['2026-10-02T10:00:00Z', '2026-10-08T09:00:00Z']), hides(t));
+  t.toasts[0][2].action.run();
+  await settle();
+  check('Undo on the replaced row still brings it back, in its place', contIds(t).join() === '1,3,6', contIds(t));
+  check('and tells the server', t.net.calls.some((c) => c.url === '/api/books/3/continue-hidden' && c.init.method === 'DELETE'));
+});
+
+await run('Continue: a removal sends the newest time seen for the book, not the card\'s', async (make) => {
+  const t = await keptThenLive(make);
+  // The live answer lands with the menu closed; it redraws The Hobbit with the newer time.
+  await t.live();
+  check('redrawn from the live answer', contIds(t).join() === '1,3,6', contIds(t));
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  check('the PUT carries the live time, once', JSON.stringify(hides(t)) === JSON.stringify(['2026-10-08T09:00:00Z']), hides(t));
+});
+
+await run('Continue: a live answer landing while a card\'s menu is open closes it; Remove is never on a row off screen', async (make) => {
+  const t = await keptThenLive(make);
+  const more = t.qa('#continueHost [data-continue-more]')[1];
+  more.click();
+  check('the menu is open', !!t.q('[data-continue-menu]'));
+  await t.live();
+  await settle();
+  check('the redraw closed it', !t.q('[data-continue-menu]'), !!t.q('[data-continue-menu]'));
+  const again = t.q('#continueHost li[data-continue-item="3"] [data-continue-more]');
+  check('the focus is on the same book\'s More button in the new row', !!again && again !== more && t.doc.activeElement === again);
+  again.click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  check('Remove from the new row takes the card off the screen', contIds(t).join() === '1,6', contIds(t));
+  check('with one PUT and one toast', hides(t).length === 1 && t.toasts.length === 1, [hides(t), t.toasts.length]);
+});
+
+await run('Continue: a refused Remove on a replaced row brings the card back', async (make) => {
+  const live = deferred();
+  const put = deferred();
+  const t = make({ routes: (net) => {
+    hideRoutes({ hide: () => put.promise })(net);
+    net.on('/api/books/continue', () => live.promise);
+  } });
+  t.WS.cache.set('books:continue', { items: CONT, notes: [] });
+  const m = t.mount();
+  await t.clock.advance(1600);
+  await m;
+  t.qa('#continueHost [data-continue-more]')[1].click();
+  t.q('[data-continue-menu] [data-continue-remove]').click();
+  await settle();
+  const fresh = JSON.parse(JSON.stringify(CONT));
+  fresh[0].percent = 47;
+  live.resolve({ body: { items: fresh, notes: [] } });
+  await flush(); await t.clock.advance(50);
+  check('out while the PUT is out', contIds(t).join() === '1,6', contIds(t));
+  put.resolve({ status: 503, body: {} });
+  await settle();
+  check('refused: the card is back in the row on screen', contIds(t).join() === '1,3,6', contIds(t));
 });
 
 // ---- The Kavita hand-off ----

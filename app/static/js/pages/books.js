@@ -686,6 +686,12 @@ function openContinueMenu(btn, run, signal) {
  * line); a toast offers Undo, which puts it back where it was. The focus goes
  * to the next card's More button (the previous one's at the end), or to the
  * empty line. opts.onChange(items) hears every change to what the row shows.
+ *
+ * The page's own record of the visit: opts.gone (book id -> the updated_at
+ * the server was sent) is written as a book is taken out and put back, and
+ * opts.newest(item) gives the time to send (the newest the page has seen
+ * for it). An Undo, or a refused Remove or Undo, that finds this row
+ * replaced by a newer one calls opts.redraw() instead.
  */
 export function renderContinueRow(items, opts) {
   const o = opts || {};
@@ -757,8 +763,17 @@ export function renderContinueRow(items, opts) {
 
   function rowNow() { return section.querySelector('[data-continue-row]'); }
 
+  function redraw() {
+    if (typeof o.redraw === 'function' && !(o.signal && o.signal.aborted)) o.redraw();
+  }
+
   /** Take a card out of the row (sent: tell the server, with a toast to undo it). */
   function remove(id, send) {
+    const item = shown[id];
+    const at = typeof o.newest === 'function' ? o.newest(item)
+      : (item && item.updated_at ? item.updated_at : null);
+    if (o.gone) o.gone[id] = at;
+    if (!section.isConnected) redraw();
     const li = liOf(id);
     if (!li) return;
     const ul = li.parentNode;
@@ -798,12 +813,11 @@ export function renderContinueRow(items, opts) {
       changed();
     });
     if (!send) return;
-    const item = shown[id];
     const url = '/api/books/' + encodeURIComponent(id) + '/continue-hidden';
     const toast = window.WSUI && typeof window.WSUI.toast === 'function'
       ? window.WSUI.toast('Removed from Continue.', 'ok', { action: { label: 'Undo', run: function () { undo(id, url); } } })
       : null;
-    sendBooks('PUT', url, { updated_at: item && item.updated_at ? item.updated_at : null }).then(null, function () {
+    sendBooks('PUT', url, { updated_at: at }).then(null, function () {
       if (toast && typeof toast.remove === 'function') toast.remove();
       if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast('Couldn’t remove it from Continue. Try again.', 'err');
       restore(id);
@@ -812,7 +826,9 @@ export function renderContinueRow(items, opts) {
 
   /** Put a card back where it was in the row, the focus on it. */
   function restore(id) {
-    if ((o.signal && o.signal.aborted) || !section.isConnected || !shown[id]) return;
+    if (o.gone) delete o.gone[id];
+    if ((o.signal && o.signal.aborted) || !shown[id]) return;
+    if (!section.isConnected) { redraw(); return; }
     const leaving = liOf(id);
     if (leaving) {
       // Still fading out: it stops and comes back as it was.
@@ -1105,11 +1121,74 @@ export async function mount(ctx) {
     else state.waiting.push(fn);
   }
 
+  // This visit's Continue as the person left it. A book taken out here (gone:
+  // id -> the updated_at the server was sent) stays out of every answer drawn
+  // or kept, however old the answer: one built before the PUT still has it.
+  // newest: the latest activity seen for each book in any answer, which is
+  // what a removal sends. raw: the last answer as it came, for a redraw.
+  const cont = { gone: {}, newest: {}, raw: null };
+
+  function atOf(value) {
+    const n = value ? Date.parse(value) : NaN;
+    return isNaN(n) ? -Infinity : n;
+  }
+
+  function noteNewest(items) {
+    items.forEach(function (item) {
+      const id = String(item.book_id);
+      if (item.updated_at && atOf(item.updated_at) > atOf(cont.newest[id])) cont.newest[id] = item.updated_at;
+    });
+  }
+
+  function newestOf(item) {
+    if (!item) return null;
+    const seen = cont.newest[String(item.book_id)];
+    return seen && atOf(seen) > atOf(item.updated_at) ? seen : (item.updated_at || null);
+  }
+
+  function withoutGone(data) {
+    if (!data || !Array.isArray(data.items)) return data;
+    const items = data.items.filter(function (item) { return !(String(item.book_id) in cont.gone); });
+    return items.length === data.items.length ? data : Object.assign({}, data, { items: items });
+  }
+
+  /** A live answer with newer activity for a book taken out than the server
+      was sent (the PUT went from a kept copy): the server is sent the newer
+      time, or the book would be back on the next visit. */
+  function hideAgain(items) {
+    items.forEach(function (item) {
+      const id = String(item.book_id);
+      if (!(id in cont.gone) || atOf(item.updated_at) <= atOf(cont.gone[id])) return;
+      cont.gone[id] = item.updated_at;
+      sendBooks('PUT', '/api/books/' + encodeURIComponent(id) + '/continue-hidden', { updated_at: item.updated_at })
+        .then(null, function () { /* the row has it out; the next visit may show it again */ });
+    });
+  }
+
   function renderContinue(data, fromCache, failed) {
     if (signal.aborted) return;
-    const items = (data && Array.isArray(data.items)) ? data.items : [];
+    if (fromCache) cont.raw = data;
+    if (data && Array.isArray(data.items)) noteNewest(data.items);
+    const shown = withoutGone(data);
+    const items = (shown && Array.isArray(shown.items)) ? shown.items : [];
     setNotes('continue', data && data.notes);
-    placeRow('continue', renderContinueRow(items, { signal: signal, failed: failed, onChange: continueChanged }), !fromCache && !failed, items.length > 0);
+    const row = renderContinueRow(items, {
+      signal: signal, failed: failed, onChange: continueChanged,
+      gone: cont.gone, newest: newestOf, redraw: redrawContinue
+    });
+    // A card's menu open on the row this one replaces goes with it (its
+    // Remove would act on a row no longer on screen); the focus goes to the
+    // same book's More button in the new row.
+    const from = continueMenu ? continueMenu.btn.closest('li[data-continue-item]') : null;
+    if (continueMenu) continueMenu.close(false);
+    placeRow('continue', row, !fromCache && !failed, items.length > 0);
+    const back = from && row.querySelector('li[data-continue-item="' + from.getAttribute('data-continue-item') + '"] [data-continue-more]');
+    if (back && back.isConnected) back.focus({ preventScroll: true });
+  }
+
+  /** The row again from the last answer, as this visit has it now. */
+  function redrawContinue() {
+    if (cont.raw) renderContinue(cont.raw, true, false);
   }
 
   /** A book taken out of Continue (or put back): the kept copy is out of date,
@@ -1123,7 +1202,15 @@ export async function mount(ctx) {
 
   function loadContinue() {
     return WS.swr('books:continue', function () {
-      return readLive('/api/books/continue');
+      // What swr draws and keeps: never a book taken out this visit.
+      return readLive('/api/books/continue').then(function (data) {
+        cont.raw = data;
+        if (data && Array.isArray(data.items)) {
+          noteNewest(data.items);
+          hideAgain(data.items);
+        }
+        return withoutGone(data);
+      });
     }, function (data, fromCache) {
       if (signal.aborted) return;
       WS.arrive('continue', function () { renderContinue(data, fromCache, false); });
