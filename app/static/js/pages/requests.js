@@ -5,8 +5,9 @@
  * shelves (Seerr's trending and popular lists, books from Chaptarr), the
  * library summary, the Request Status grid, search with Request buttons, the
  * recent requests with their filter tabs, and a detail modal for a discover
- * poster or a book in the search results (a book's detail offers each format,
- * with where it stands, and links its Books entry when it is here).
+ * poster or any search result (a book's detail asks for the book in both
+ * formats with one button, says where each format stands when the two differ,
+ * and links its Books entry when it is here).
  *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
@@ -408,12 +409,16 @@ function getStatusBlock(status, mediaType, typeLabel, item) {
     s.bg + ' ' + s.text + ' ' + s.border + '">' + prefix + s.label + '</div>';
 }
 
-// ---- Books: where each format stands ----
+// ---- Books: where the book stands ----
 //
 // A book card or detail carries `states` from the server (chaptarr
 // _format_state): per format, "available", the Request Status word for a book
 // someone asked for ("searching", "downloading", ...), "requested" for one asked
 // for moments ago, or null when nobody has. Same words as the status grid.
+//
+// A book is asked for once, in every format (Chaptarr keeps the two
+// together), so the page shows ONE Request button and ONE status block for it,
+// with each format's own word in a line of its own where the two differ.
 const BOOK_STATES = {
   available:   { label: 'In Library',  tone: 'ready' },
   downloading: { label: 'Downloading', tone: 'go' },
@@ -424,12 +429,16 @@ const BOOK_STATES = {
   requested:   { label: 'Requested',   tone: 'wait' }
 };
 const BOOK_FORMATS = [
-  { key: 'ebook', mediaType: 'book' },
-  { key: 'audiobook', mediaType: 'audiobook' }
+  { key: 'ebook', name: 'Ebook' },
+  { key: 'audiobook', name: 'Audiobook' }
 ];
+// How far along a format is, so the block names the one furthest from here.
+// Stuck is furthest of all: it is the one that needs looking at.
+const BOOK_PROGRESS = { stuck: 0, unreleased: 1, requested: 1, searching: 1, retrying: 2, downloading: 3, available: 4 };
 
 function isBookType(mediaType) { return mediaType === 'book' || mediaType === 'audiobook'; }
 function bookFormatOf(mediaType) { return mediaType === 'audiobook' ? 'audiobook' : 'ebook'; }
+function bookStateWords(state) { return BOOK_STATES[state] || BOOK_STATES.requested; }
 
 // A format's state. A card cached before `states` existed (a trending shelf
 // is kept for an hour) still has media_status for its own format.
@@ -440,13 +449,68 @@ function bookStateOf(item, format) {
   return legacy === 'available' ? 'available' : legacy ? 'requested' : null;
 }
 
-// The status block for one book format, the same rectangle as its Request
-// button, so a card or detail keeps its shape when one turns into the other.
-function bookStatusBlock(state, mediaType) {
-  var s = BOOK_STATES[state] || BOOK_STATES.requested;
-  var tone = STATUS_TONE_CLASSES[s.tone] || STATUS_TONE_CLASSES.wait;
-  return '<div data-book-state="' + escapeHtml(state) + '" class="w-full py-2 px-1 rounded-btn border text-center text-label font-semibold ' +
-    tone.bg + ' ' + tone.text + ' ' + tone.border + '">' + mediaTypeLabel(mediaType) + ' ' + s.label + '</div>';
+function bookStates(item) {
+  var states = {};
+  BOOK_FORMATS.forEach(function (f) { states[f.key] = bookStateOf(item, f.key); });
+  return states;
+}
+
+function knownFormats(states) {
+  return BOOK_FORMATS.filter(function (f) { return !!states[f.key]; });
+}
+
+// The Request button is offered while there is something to ask for: nobody
+// has asked for the book, or a format is here and the other never was asked
+// for. One press asks for the book; a format already here stays as it is.
+function bookRequestable(states) {
+  var known = knownFormats(states);
+  if (!known.length) return true;
+  return known.length < BOOK_FORMATS.length &&
+    known.every(function (f) { return states[f.key] === 'available'; });
+}
+
+// The status block's state and words. Both formats in one state: "Book" and
+// that state. Otherwise the format furthest from here is named, since that is
+// the one still being waited for ("Audiobook Searching").
+function bookSummary(states) {
+  var known = knownFormats(states);
+  if (!known.length) return { state: 'requested', label: 'Book ' + BOOK_STATES.requested.label };
+  var first = states[known[0].key];
+  var same = known.length === BOOK_FORMATS.length &&
+    known.every(function (f) { return states[f.key] === first; });
+  if (same) return { state: first, label: 'Book ' + bookStateWords(first).label };
+  var behind = known.filter(function (f) { return states[f.key] !== 'available'; });
+  var pick = (behind.length ? behind : known).slice().sort(function (a, b) {
+    return (BOOK_PROGRESS[states[a.key]] || 0) - (BOOK_PROGRESS[states[b.key]] || 0);
+  })[0];
+  return { state: states[pick.key], label: pick.name + ' ' + bookStateWords(states[pick.key]).label };
+}
+
+// Each format's own word, when the block cannot say it alone: the two
+// differ, or one is here ("Ebook in library, audiobook searching"). Empty
+// when the block (or the Request button) already says everything.
+function bookDetail(states) {
+  var known = knownFormats(states);
+  if (!known.length) return '';
+  var same = known.length === BOOK_FORMATS.length &&
+    known.every(function (f) { return states[f.key] === states[known[0].key]; });
+  if (same) return '';
+  if (known.length === 1 && states[known[0].key] !== 'available') return '';
+  return known.map(function (f, i) {
+    return (i ? f.name.toLowerCase() : f.name) + ' ' + bookStateWords(states[f.key]).label.toLowerCase();
+  }).join(', ');
+}
+
+// The book's one status block, the same rectangle as its Request button, so
+// a card or detail keeps its shape when one turns into the other. The
+// per-format line rides in its title (the detail shows it as a line).
+function bookStatusBlock(states) {
+  var s = bookSummary(states);
+  var tone = STATUS_TONE_CLASSES[bookStateWords(s.state).tone] || STATUS_TONE_CLASSES.wait;
+  var detail = bookDetail(states);
+  return '<div data-book-state="' + escapeHtml(s.state) + '"' + (detail ? ' title="' + escapeHtml(detail) + '"' : '') +
+    ' class="w-full py-2 px-1 rounded-btn border text-center text-label font-semibold truncate ' +
+    tone.bg + ' ' + tone.text + ' ' + tone.border + '">' + escapeHtml(s.label) + '</div>';
 }
 
 /** Compact pill, for request cards and the detail modal: the one chip. */
@@ -456,98 +520,74 @@ function getStatusBadge(status, mediaType) {
     s.label + '</span>';
 }
 
-// `index` is the item's place in the search results, for a book's detail
-// (data-action="open-search-book").
+// Where a film or show stands, standard and 4K together: the best of the two,
+// so a title here in 4K only still reads as here.
+function seerrStatusOf(item) {
+  var status = item.media_status ? item.media_status.toLowerCase() : null;
+  var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;
+  if (!status) return status4k;
+  var here = ['available', 'completed'];
+  if (status4k && here.indexOf(status4k) !== -1 && here.indexOf(status) === -1) return status4k;
+  return status;
+}
+
+// A Request button, the same rectangle as the status block it turns into
+// (border-transparent: otherwise the card jumps 2px with its state). Type and
+// id ride in data-* attributes, read by the page's click listener, so a
+// provider id like "gr:3634639" never meets JavaScript source: HTML-escaping
+// would not stop a JS-context breakout. Chaptarr book ids are strings;
+// Seerr's numeric ids coerce back to int server-side. ws-lift on the button,
+// not the card: the button is what is clicked.
+function requestButton(item, mediaType, nounLabel) {
+  return '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" ' +
+      'data-request-id="' + escapeHtml(String(item.id)) + '" data-request-title="' + escapeHtml(item.title || 'Unknown') + '" ' +
+      'class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">' +
+    'Request <span class="' + mediaTypeNounColor(mediaType) + '">' + nounLabel + '</span></button>';
+}
+
+// `index` is the item's place in the search results, for its detail
+// (data-action="open-search").
 function buildSearchCard(item, index) {
   var title = escapeHtml(item.title || 'Unknown');
   var year = item.year ? escapeHtml(String(item.year)) : '';
   var mediaType = item.media_type || 'movie';
-  var typeBadge = mediaTypeLabel(mediaType);
-  var posterUrl = item.poster_url || '';
-  var status = item.media_status ? item.media_status.toLowerCase() : null;
-  var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;
-  var mediaId = item.id;
-  // A book's own state for the card's format; films and shows keep Seerr's.
   var isBook = isBookType(mediaType);
-  var bookState = isBook ? bookStateOf(item, bookFormatOf(mediaType)) : null;
 
-  // The card is not a link, so its poster does not zoom on hover. A book's
-  // poster and title open its detail, which the title names, so the cover's
-  // alt is empty there.
-  var posterHtml = posterMarkup(posterUrl, isBook ? '' : title, 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
+  // The poster and words are one button that opens the detail, which the
+  // title names, so the poster's alt is empty. The card is not a link, so the
+  // poster does not zoom on hover.
+  var posterHtml = posterMarkup(item.poster_url || '', '', 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
 
-  // Request button or status badge (combined standard + 4K: show best available status)
-  var combinedStatus = status;
-  // If standard has a status, use it; also consider 4K status for "available"/"partially_available"
-  if (!combinedStatus && status4k) {
-    combinedStatus = status4k;
-  } else if (combinedStatus && status4k) {
-    // If either is available, show available
-    var availStatuses = ['available', 'completed'];
-    if (availStatuses.indexOf(status4k) !== -1 && availStatuses.indexOf(combinedStatus) === -1) {
-      combinedStatus = status4k;
-    }
-  }
-
-  var stdHtml;
-  if (isBook ? !bookState : !combinedStatus) {
-    // The media type lives on the button rather than a separate pill, so
-    // what is being requested is stated at the moment of committing to it.
-    //
-    // Type and id ride in data-* attributes, read by the page's click
-    // listener (data-action="request-media"), so a provider id like
-    // "gr:3634639" never meets JavaScript source: HTML-escaping would not
-    // stop a JS-context breakout. Chaptarr book ids are strings; Seerr's
-    // numeric ids coerce back to int server-side.
-    // border-transparent so the button matches the status block's height
-    // exactly - otherwise the card jumps 2px depending on its state.
-    // ws-lift on the button, not the card: the button is what is clicked.
-    stdHtml = '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" data-request-title="' + title + '" class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
-  } else if (isBook) {
-    stdHtml = bookStatusBlock(bookState, mediaType);
-  } else {
-    // Same rectangle as the button, so the card keeps its shape. The type
-    // is carried here too, since there is no button to state it.
-    stdHtml = getStatusBlock(combinedStatus, mediaType, typeBadge, item);
-  }
-
+  // The one action: Request (the media type on the button, so what is being
+  // requested is stated at the moment of committing to it), or where the
+  // title stands, in the same rectangle.
+  var action;
   if (isBook) {
-    // The cover and words are one button that opens the book's detail, and
-    // the Request button sits beside it rather than inside (no nested
-    // controls). Same boxes as the card below: 12px above the title, 8px to
-    // the action, 12px under it.
-    return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden flex flex-col">' +
-      '<button type="button" data-action="open-search-book" data-index="' + index + '" class="group flex flex-col flex-1 w-full text-left">' +
-        '<span class="block w-full aspect-[2/3] relative overflow-hidden">' + posterHtml + '</span>' +
-        '<span class="block w-full flex-1 px-3 pt-3">' +
-          // No "block" here: it would override line-clamp's own display and
-          // let a long title run on unclamped.
-          '<span class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2 group-hover:underline">' + title + '</span>' +
-          (item.author ? '<span class="block text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</span>' : '') +
-          (year ? '<span class="block text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</span>' : '') +
-        '</span>' +
-      '</button>' +
-      '<div class="px-3 pt-2 pb-3 space-y-1.5">' + stdHtml + '</div>' +
-    '</div>';
+    var states = bookStates(item);
+    action = bookRequestable(states) ? requestButton(item, 'book', 'Book') : bookStatusBlock(states);
+  } else {
+    var status = seerrStatusOf(item);
+    action = status ? getStatusBlock(status, mediaType, mediaTypeLabel(mediaType), item)
+                    : requestButton(item, mediaType, mediaTypeLabel(mediaType));
   }
 
-  // No type pill on the card: the media type is carried by the action itself
-  // ("Request eBook"), which states it where the decision is made and keeps
-  // the card free of a floating label.
+  // The Request button sits beside the opener rather than inside it (no
+  // nested controls). Same boxes for every kind: 12px above the title, 8px
+  // to the action, 12px under it.
   return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden flex flex-col">' +
-    '<div class="aspect-[2/3] relative overflow-hidden">' +
-      posterHtml +
-    '</div>' +
-    '<div class="p-3 flex flex-col gap-2 flex-1">' +
-      '<div class="flex-1">' +
-        '<p class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2">' + title + '</p>' +
-        // Books have no cover art (Chaptarr's are behind its UI login),
-        // so the author does the work the artwork would have done.
-        (item.author ? '<p class="text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</p>' : '') +
-        (year ? '<p class="text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</p>' : '') +
-      '</div>' +
-      '<div class="space-y-1.5">' + stdHtml + '</div>' +
-    '</div>' +
+    '<button type="button" data-action="open-search" data-index="' + index + '" class="group flex flex-col flex-1 w-full text-left rounded-t-card">' +
+      '<span class="block w-full aspect-[2/3] relative overflow-hidden">' + posterHtml + '</span>' +
+      '<span class="block w-full flex-1 px-3 pt-3">' +
+        // No "block" here: it would override line-clamp's own display and
+        // let a long title run on unclamped.
+        '<span class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2 group-hover:underline">' + title + '</span>' +
+        // Books have their author where a film has nothing: titles repeat
+        // across authors far more than films do.
+        (item.author ? '<span class="block text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</span>' : '') +
+        (year ? '<span class="block text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</span>' : '') +
+      '</span>' +
+    '</button>' +
+    '<div class="px-3 pt-2 pb-3">' + action + '</div>' +
   '</div>';
 }
 
@@ -775,6 +815,8 @@ export async function mount(ctx) {
   var _scrollLockFailsafe = 0;
   var _dialog = null;               // the open media detail (WSUI.modal), or null
   var _detailSeq = 0;               // bumped per opened detail: a late library answer for an older one is dropped
+  var _detailItem = null;           // the title the open detail shows
+  var _detailOpener = null;         // { action, index, row } of the card control that opened it
 
   // -------------------------------------------------------------------------
   // Request Status grid
@@ -1353,8 +1395,9 @@ export async function mount(ctx) {
 
     try {
       // Books go to Chaptarr, films and TV to Seerr. Book ids are strings
-      // such as "gr:3634639", not numbers.
-      var isBook = mediaType === 'book' || mediaType === 'audiobook';
+      // such as "gr:3634639", not numbers. A book is asked for in every
+      // format at once ("both"): the page has one Request button for it.
+      var isBook = isBookType(mediaType);
       var resp = await fetch(
         isBook ? '/api/integrations/chaptarr-request' : '/api/integrations/seerr-request',
         {
@@ -1362,7 +1405,7 @@ export async function mount(ctx) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(
             isBook
-              ? { bookId: String(mediaId), format: mediaType === 'audiobook' ? 'audiobook' : 'ebook' }
+              ? { bookId: String(mediaId), format: 'both' }
               : { mediaType: mediaType, mediaId: mediaId, is4k: is4k }
           ),
           signal: signal
@@ -1377,18 +1420,27 @@ export async function mount(ctx) {
       if (signal.aborted) return;
 
       if (isBook) {
-        // The server says where the format now stands: "requested", or
+        // The server says where each format now stands: "requested", or
         // "available" when it turned out to be here already. Every copy of
         // the book on the page (its card, its detail, a shelf) takes it.
-        var state = answer.state || 'requested';
-        buttonEl.outerHTML = bookStatusBlock(state, mediaType);
-        noteBookState(String(mediaId), bookFormatOf(mediaType), state);
-        showToast(state === 'available' ? 'Already in the library'
+        var states = noteBookStates(String(mediaId), answer);
+        if (bookRequestable(states)) {
+          // Nothing more was taken (a format this server does not take): the
+          // button stays, ready again.
+          buttonEl.disabled = false;
+          buttonEl.innerHTML = origHtml;
+          buttonEl.classList.remove('opacity-60', 'cursor-not-allowed');
+        } else {
+          buttonEl.outerHTML = bookStatusBlock(states);
+        }
+        refreshBookDetail(String(mediaId));
+        showToast(answer.state === 'available' ? 'Already in the library'
           : (title ? 'Requested ' + title : 'Requested'), 'success');
       } else {
         // Swap the button for the matching status block, so the card holds its
         // shape and the click reads as the same element changing state.
         buttonEl.outerHTML = getStatusBlock('pending', mediaType, mediaTypeLabel(mediaType));
+        noteMediaRequested(mediaType, String(mediaId));
 
         // Plain past tense naming the thing: "Requested Dune".
         showToast(title ? 'Requested ' + title : 'Requested', 'success');
@@ -1410,24 +1462,51 @@ export async function mount(ctx) {
     }
   }
 
-  // A book format's new state, onto every copy of that book this visit holds.
-  // Asked for from the detail, the search cards are redrawn so its card says
-  // so too (same boxes, so the redraw moves nothing); asked for from a card,
-  // that card already changed, and a redraw would reset another card's
-  // request still under way.
-  function noteBookState(bookId, format, state) {
+  // Every copy of a title this visit holds: the search results and the
+  // discover shelves. match(item) picks the copies.
+  function eachCopy(match, fn) {
     var lists = [_searchResults];
     Object.keys(_discoverItems).forEach(function (k) { lists.push(_discoverItems[k] || []); });
     var inSearch = false;
     lists.forEach(function (list) {
       list.forEach(function (item) {
-        if (!item || !isBookType(item.media_type) || String(item.id) !== bookId) return;
-        if (!item.states) item.states = { ebook: bookStateOf(item, 'ebook'), audiobook: bookStateOf(item, 'audiobook') };
-        item.states[format] = state;
+        if (!item || !match(item)) return;
+        fn(item);
         if (list === _searchResults) inSearch = true;
       });
     });
+    // Asked for from the detail, the search cards are redrawn so the card
+    // under it says so too (same boxes, so the redraw moves nothing). Asked
+    // for from a card, that card already changed, and a redraw would reset
+    // another card's request still under way.
     if (inSearch && _dialog) renderSearchPage();
+  }
+
+  // A book's new states (the server's answer), onto every copy of it; a
+  // format the answer leaves out keeps what it had. Returns the states.
+  function noteBookStates(bookId, answer) {
+    var told = answer.states || { ebook: answer.state || 'requested', audiobook: answer.state || 'requested' };
+    var merged = null;
+    eachCopy(function (item) { return isBookType(item.media_type) && String(item.id) === bookId; }, function (item) {
+      var states = bookStates(item);
+      BOOK_FORMATS.forEach(function (f) { if (told[f.key]) states[f.key] = told[f.key]; });
+      item.states = states;
+      merged = states;
+    });
+    if (merged) return merged;
+    var fresh = {};
+    BOOK_FORMATS.forEach(function (f) { fresh[f.key] = told[f.key] || null; });
+    return fresh;
+  }
+
+  // A film or show just asked for, onto every copy of it, so a redrawn card
+  // or a reopened detail says Requested rather than offering it again.
+  function noteMediaRequested(mediaType, mediaId) {
+    eachCopy(function (item) {
+      return (item.media_type || 'movie') === mediaType && String(item.id) === mediaId;
+    }, function (item) {
+      if (!item.media_status) item.media_status = 'pending';
+    });
   }
 
   // ---- Search bar motion ----
@@ -1840,30 +1919,33 @@ export async function mount(ctx) {
     return item.series + (n ? ', ' + (n.indexOf('-') !== -1 ? 'books ' : 'book ') + n : '');
   }
 
-  // A book's two formats, each its Request button or where it stands. Card
-  // sized, so a button and the block it turns into are one rectangle.
+  // A book's one action: its Request button (both formats), or where it
+  // stands. Card sized, so the button and the block it turns into are one
+  // rectangle.
   function bookActions(item) {
-    return '<div class="space-y-2">' + BOOK_FORMATS.map(function (f) {
-      var state = bookStateOf(item, f.key);
-      if (state) return bookStatusBlock(state, f.mediaType);
-      return '<button type="button" data-action="request-from-modal" ' +
-          'data-media-type="' + f.mediaType + '" ' +
-          'data-media-id="' + escapeHtml(String(item.id)) + '" ' +
-          'data-request-title="' + escapeHtml(item.title || '') + '" ' +
-          'class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">' +
-          'Request <span class="' + mediaTypeNounColor(f.mediaType) + '">' + mediaTypeLabel(f.mediaType) + '</span>' +
-        '</button>';
-    }).join('') + '</div>';
+    var states = bookStates(item);
+    if (!bookRequestable(states)) return bookStatusBlock(states);
+    return '<button type="button" data-action="request-from-modal" data-media-type="book" ' +
+        'data-media-id="' + escapeHtml(String(item.id)) + '" ' +
+        'data-request-title="' + escapeHtml(item.title || '') + '" ' +
+        'class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">' +
+        'Request <span class="' + mediaTypeNounColor('book') + '">Book</span>' +
+      '</button>';
   }
 
-  // "Already in the library", shown at once when Chaptarr says a format is
-  // here, then made a link to its Books entry when the library finds one this
-  // person can open. The words do not change, so the line never moves.
-  function showLibraryLine(item) {
+  // The line above a book's action: "Already in the library" when both
+  // formats are here, else each format's own word where the two differ
+  // ("Ebook in library, audiobook searching"). With a format here it becomes
+  // a link to the book's Books entry once the library finds one this person
+  // can open; the words do not change, so the line never moves.
+  function showBookLine(item) {
     var line = $('modalLibrary');
-    var here = BOOK_FORMATS.some(function (f) { return bookStateOf(item, f.key) === 'available'; });
-    detailLine(line, here ? 'Already in the library' : '');
-    if (!here) return;
+    var states = bookStates(item);
+    var here = BOOK_FORMATS.some(function (f) { return states[f.key] === 'available'; });
+    var allHere = BOOK_FORMATS.every(function (f) { return states[f.key] === 'available'; });
+    var words = allHere ? 'Already in the library' : bookDetail(states);
+    detailLine(line, words);
+    if (!here || !words) return;
     var seq = _detailSeq;
     var url = '/api/integrations/book-in-library?title=' + encodeURIComponent(item.short_title || item.title || '') +
       '&author=' + encodeURIComponent(item.author || '');
@@ -1874,20 +1956,39 @@ export async function mount(ctx) {
         var a = document.createElement('a');
         a.href = '/books/' + encodeURIComponent(String(found.book_id));
         a.className = 'underline underline-offset-2 hover:decoration-2';
-        a.textContent = 'Already in the library';
+        a.textContent = words;
         line.textContent = '';
         line.appendChild(a);
       })
       .catch(function () { /* the line stays words: nothing to link to */ });
   }
 
-  function openMediaModal(item) {
+  // A book just asked for from its open detail: its line says the new words.
+  // The action area already changed (the button became the block).
+  function refreshBookDetail(bookId) {
+    if (!_dialog || !_detailItem || !isBookType(_detailItem.media_type) || String(_detailItem.id) !== bookId) return;
+    _detailSeq += 1;
+    showBookLine(_detailItem);
+  }
+
+  // opener: the card control that opened it, so focus can find its way back
+  // to that card even when the grid under the detail has been redrawn.
+  function openMediaModal(item, opener) {
     if (!item) return;
     var modal = $('mediaModal');
     var mediaType = item.media_type || 'movie';
-    var status = item.media_status ? item.media_status.toLowerCase() : null;
+    var status = seerrStatusOf(item);
     var book = isBookType(mediaType);
     _detailSeq += 1;
+    _detailItem = item;
+    if (!_dialog) {
+      _detailOpener = opener ? {
+        el: opener,
+        action: opener.getAttribute('data-action'),
+        index: opener.getAttribute('data-index'),
+        row: opener.getAttribute('data-row')
+      } : null;
+    }
 
     // Poster: reset the error fallback each time
     var poster = $('modalPoster');
@@ -1909,7 +2010,7 @@ export async function mount(ctx) {
 
     // Type badge. Driven by the same theme accents as the cards, so a type reads
     // identically here and in the grid - and so books are not labelled "Movie".
-    // A book's detail offers both formats, so it is a Book, not an eBook.
+    // A book's detail asks for both formats, so it is a Book, not an eBook.
     var typeBadge = $('modalTypeBadge');
     typeBadge.textContent = book ? 'Book' : mediaTypeLabel(mediaType);
     typeBadge.className = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + mediaTypeBadgeColor(mediaType);
@@ -1927,7 +2028,7 @@ export async function mount(ctx) {
     // Action area: Request button (the page's click listener sends it,
     // data-action="request-from-modal") or status badge
     var actionArea = $('modalActionArea');
-    if (book) showLibraryLine(item);
+    if (book) showBookLine(item);
     else detailLine($('modalLibrary'), '');
     if (book) {
       actionArea.innerHTML = bookActions(item);
@@ -1957,8 +2058,23 @@ export async function mount(ctx) {
         // Clear action area to prevent stale button state on next open
         $('modalActionArea').innerHTML = '';
         _dialog = null;
+        _detailItem = null;
+        refocusOpener();
       }
     });
+  }
+
+  // The card that opened the detail was redrawn while it was open (a request
+  // made from the detail redraws the search cards): focus goes to the same
+  // card's new control, not nowhere. WSUI.modal hands focus back itself when
+  // the opener is still in the page.
+  function refocusOpener() {
+    var o = _detailOpener;
+    _detailOpener = null;
+    if (!o || !o.action || document.contains(o.el)) return;
+    var again = root.querySelector('[data-action="' + o.action + '"][data-index="' + o.index + '"]' +
+      (o.row ? '[data-row="' + o.row + '"]' : ''));
+    if (again) again.focus({ preventScroll: true });
   }
 
   function closeMediaModal() {
@@ -2029,10 +2145,10 @@ export async function mount(ctx) {
         break;
       }
       case 'open-media':
-        openMediaModal((_discoverItems[el.getAttribute('data-row')] || [])[Number(el.getAttribute('data-index'))]);
+        openMediaModal((_discoverItems[el.getAttribute('data-row')] || [])[Number(el.getAttribute('data-index'))], el);
         break;
-      case 'open-search-book':
-        openMediaModal(_searchResults[Number(el.getAttribute('data-index'))]);
+      case 'open-search':
+        openMediaModal(_searchResults[Number(el.getAttribute('data-index'))], el);
         break;
       case 'request-media':
         requestMedia(el.getAttribute('data-request-type'), el.getAttribute('data-request-id'), false, el,

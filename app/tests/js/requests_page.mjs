@@ -325,46 +325,57 @@ async function searchBooks(t) {
   await t.clock.advance(400);
 }
 
-const cardFor = (t, i) => t.q('[data-action="open-search-book"][data-index="' + i + '"]').parentElement;
+const cardFor = (t, i) => t.q('[data-action="open-search"][data-index="' + i + '"]').parentElement;
 
-await run('book search: each card says where its format stands', async () => {
+await run('book search: each card has one action, and says where the book stands', async () => {
   const t = visit(bookRoutes(() => ({ body: { ok: true, state: 'requested' } })));
   try {
     await searchBooks(t);
-    check('three book cards, each with a detail opener', t.doc.querySelectorAll('[data-action="open-search-book"]').length === 3);
-    const state = (i) => { const el = cardFor(t, i).querySelector('[data-book-state]'); return el ? el.getAttribute('data-book-state') + ':' + el.textContent.trim() : null; };
-    check('in the library', state(0) === 'available:In Library', state(0));
-    check('not asked for: a Request button', !state(1) && !!cardFor(t, 1).querySelector('[data-action="request-media"]'));
-    check('downloading', state(2) === 'downloading:Downloading', state(2));
-    check('the opener holds no control of its own', !t.q('[data-action="open-search-book"] button'));
+    check('three book cards, each with a detail opener', t.doc.querySelectorAll('[data-action="open-search"]').length === 3);
+    const block = (i) => cardFor(t, i).querySelector('[data-book-state]');
+    const state = (i) => { const el = block(i); return el ? el.getAttribute('data-book-state') + ':' + el.textContent.trim() : null; };
+    check('ebook here, audiobook searching: the one still coming is named', state(0) === 'searching:Audiobook Searching', state(0));
+    check('...and each format\'s word is in its title', block(0).getAttribute('title') === 'Ebook in library, audiobook searching', block(0).getAttribute('title'));
+    check('not asked for: one Request button', !state(1) && cardFor(t, 1).querySelectorAll('[data-action="request-media"]').length === 1);
+    check('it asks for the book, not a format', cardFor(t, 1).querySelector('[data-action="request-media"]').getAttribute('data-request-type') === 'book' &&
+      /^Request\s+Book$/.test(cardFor(t, 1).querySelector('[data-action="request-media"]').textContent.trim()));
+    check('only the ebook asked for: named', state(2) === 'downloading:Ebook Downloading' && !block(2).getAttribute('title'), state(2));
+    check('never two actions on a card', [0, 1, 2].every((i) => cardFor(t, i).querySelectorAll('[data-book-state], [data-action="request-media"]').length === 1));
+    check('the opener holds no control of its own', !t.q('[data-action="open-search"] button'));
   } finally { t.release(); }
 });
 
-await run('book detail: series, author, both formats, request from it', async () => {
+await run('book detail: series, author, one Request for the book, request from it', async () => {
   const sent = [];
-  const t = visit(bookRoutes((url, init) => { sent.push(JSON.parse(init.body)); return { body: { ok: true, message: 'Book requested', state: 'requested' } }; }));
+  const t = visit(bookRoutes((url, init) => {
+    sent.push(JSON.parse(init.body));
+    return { body: { ok: true, message: 'Book requested', state: 'requested', states: { ebook: 'requested', audiobook: 'requested' } } };
+  }));
   const toasts = [];
   globalThis.WSUI.toast = (m, k) => toasts.push(k + ':' + m);
   try {
     await searchBooks(t);
-    t.q('[data-action="open-search-book"][data-index="1"]').click();
+    t.q('[data-action="open-search"][data-index="1"]').click();
     await flush();
     check('the detail is open', !t.q('#mediaModal').classList.contains('hidden'));
     check('title without the series', t.q('#modalTitle').textContent === 'Rule of Two', t.q('#modalTitle').textContent);
     check('the series and its number', t.q('#modalSeries').textContent === 'Star Wars: Darth Bane, book 2' && !t.q('#modalSeries').classList.contains('hidden'));
     check('the author', t.q('#modalByline').textContent === 'by Drew Karpyshyn');
     check('year and description', t.q('#modalYear').textContent === '2007' && t.q('#modalOverview').textContent === 'Darth Bane takes an apprentice.');
-    check('no library line for a book not here', t.q('#modalLibrary').classList.contains('hidden'));
-    const buttons = Array.from(t.q('#modalActionArea').querySelectorAll('[data-action="request-from-modal"]'));
-    check('a Request button per format', buttons.map((b) => b.getAttribute('data-media-type')).join(',') === 'book,audiobook');
+    check('no line for a book nobody asked for', t.q('#modalLibrary').classList.contains('hidden'));
+    const buttons = Array.from(t.q('#modalActionArea').querySelectorAll('button'));
+    check('ONE Request button, for the book', buttons.length === 1 && buttons[0].getAttribute('data-action') === 'request-from-modal' &&
+      buttons[0].getAttribute('data-media-type') === 'book' && /^Request\s+Book$/.test(buttons[0].textContent.trim()), buttons.map((b) => b.textContent));
     buttons[0].click();
     await flush();
-    check('the ebook is asked for, as an ebook, by its id', sent.length === 1 && sent[0].bookId === 'gr:3341500' && sent[0].format === 'ebook', sent);
+    check('the book is asked for in both formats, by its id', sent.length === 1 && sent[0].bookId === 'gr:3341500' && sent[0].format === 'both', sent);
     const block = t.q('#modalActionArea [data-book-state]');
-    check('the detail now says Requested', !!block && block.getAttribute('data-book-state') === 'requested' && block.textContent.trim() === 'Requested', block && block.textContent);
-    check('the audiobook can still be asked for', t.q('#modalActionArea [data-media-type="audiobook"]') !== null);
+    check('the detail now says Book Requested, in one block', !!block && block.getAttribute('data-book-state') === 'requested' &&
+      block.textContent.trim() === 'Book Requested' && t.q('#modalActionArea').children.length === 1, block && block.textContent);
+    check('no button left to press', !t.q('#modalActionArea button'));
+    check('both formats alike: no per-format line', t.q('#modalLibrary').classList.contains('hidden'));
     const cardState = cardFor(t, 1).querySelector('[data-book-state]');
-    check('and so does its card', !!cardState && cardState.getAttribute('data-book-state') === 'requested');
+    check('and so does its card', !!cardState && cardState.getAttribute('data-book-state') === 'requested' && cardState.textContent.trim() === 'Book Requested');
     check('a success toast naming it', toasts.indexOf('ok:Requested Rule of Two (Star Wars: Darth Bane, #2)') !== -1, toasts);
   } finally { t.release(); }
 });
@@ -385,22 +396,126 @@ await run('a refused book request is an error, and the button comes back', async
   } finally { t.release(); }
 });
 
-await run('a book already here links its Books entry', async () => {
+await run('a book with one format here links its Books entry, and says where each stands', async () => {
   const t = visit(bookRoutes(() => ({ body: {} })));
   try {
     await searchBooks(t);
-    t.q('[data-action="open-search-book"][data-index="0"]').click();
+    t.q('[data-action="open-search"][data-index="0"]').click();
     await flush();
     const line = t.q('#modalLibrary');
-    check('the line is shown', !line.classList.contains('hidden') && line.textContent === 'Already in the library');
+    check('the line says each format\'s word', !line.classList.contains('hidden') && line.textContent === 'Ebook in library, audiobook searching', line.textContent);
     const asked = t.net.urls('/api/integrations/book-in-library');
     check('asked by title and author', asked.length === 1 && asked[0].indexOf('title=Path%20of%20Destruction') !== -1 && asked[0].indexOf('author=Drew%20Karpyshyn') !== -1, asked);
     const a = line.querySelector('a');
-    check('a link to the Books entry, same words', !!a && a.getAttribute('href') === '/books/24' && a.textContent === 'Already in the library');
-    const states = Array.from(t.q('#modalActionArea').querySelectorAll('[data-book-state]')).map((e) => e.getAttribute('data-book-state'));
-    check('each format says where it stands', states.join(',') === 'available,searching', states);
+    check('a link to the Books entry, same words', !!a && a.getAttribute('href') === '/books/24' && a.textContent === 'Ebook in library, audiobook searching');
+    const blocks = Array.from(t.q('#modalActionArea').querySelectorAll('[data-book-state]'));
+    check('one status block, naming the format still coming', blocks.length === 1 && blocks[0].textContent.trim() === 'Audiobook Searching', blocks.map((b) => b.textContent));
     t.q('[data-action="close-modal"]').click();
     await flush();
+  } finally { t.release(); }
+});
+
+await run('the ebook here, the audiobook never asked for: Request asks for the rest', async () => {
+  const results = [BANE({ states: { ebook: 'available', audiobook: null }, media_status: 'available' })];
+  const sent = [];
+  const t = visit((net) => {
+    bookRoutes((url, init) => {
+      sent.push(JSON.parse(init.body));
+      return { body: { ok: true, message: 'Book requested', state: 'requested', states: { ebook: 'available', audiobook: 'requested' } } };
+    })(net);
+    net.on('/api/integrations/chaptarr-search', () => ({ body: { results } }));
+  });
+  try {
+    await searchBooks(t);
+    check('the card offers the request', !!cardFor(t, 0).querySelector('[data-action="request-media"]'));
+    t.q('[data-action="open-search"][data-index="0"]').click();
+    await flush();
+    check('the line says the ebook is here', t.q('#modalLibrary').textContent === 'Ebook in library', t.q('#modalLibrary').textContent);
+    t.q('#modalActionArea [data-action="request-from-modal"]').click();
+    await flush();
+    check('sent for the book', sent.length === 1 && sent[0].format === 'both');
+    const block = t.q('#modalActionArea [data-book-state]');
+    check('the block names the audiobook', !!block && block.textContent.trim() === 'Audiobook Requested', block && block.textContent);
+    check('the line has both words', t.q('#modalLibrary').textContent === 'Ebook in library, audiobook requested', t.q('#modalLibrary').textContent);
+  } finally { t.release(); }
+});
+
+// ---- Film and show search results open the same detail as the discover posters ----
+
+const FILM_RESULTS = [
+  { id: 438631, media_type: 'movie', title: 'Dune', year: 2021, poster_url: '', overview: 'A desert planet.', media_status: null, vote_average: 7.8 },
+  { id: 1399, media_type: 'tv', title: 'Dune: Prophecy', year: 2024, poster_url: '', overview: 'The sisterhood.', media_status: 'AVAILABLE' },
+  { id: 693134, media_type: 'movie', title: 'Dune: Part Two', year: 2024, poster_url: '', overview: 'Paul unites.', media_status: null, media_status_4k: 'AVAILABLE' }
+];
+
+const filmRoutes = (requestAnswer) => (net) => {
+  routes({ body: FILMS }, { body: BOOKS })(net);
+  net.on('/api/integrations/seerr-search', () => ({ body: { results: FILM_RESULTS.map((b) => Object.assign({}, b)), totalResults: 3, totalPages: 1 } }));
+  net.on('/api/integrations/chaptarr-search', () => ({ body: { results: [] } }));
+  net.on('/api/integrations/seerr-request', requestAnswer);
+};
+
+async function searchFilms(t) {
+  await t.mount();
+  const input = t.q('#searchInput');
+  input.value = 'dune';
+  input.dispatchEvent(new t.win.Event('input'));
+  await t.clock.advance(400);
+}
+
+await run('film and show search results: each opens its detail', async () => {
+  const t = visit(filmRoutes(() => ({ body: { id: 1 } })));
+  try {
+    await searchFilms(t);
+    const openers = Array.from(t.doc.querySelectorAll('#searchResultsGrid [data-action="open-search"]'));
+    check('every card has a detail opener', openers.length === 3, openers.length);
+    check('each is a button named by its title', openers.every((b) => b.tagName === 'BUTTON' && b.getAttribute('type') === 'button') &&
+      openers[0].textContent.indexOf('Dune') !== -1);
+    check('the poster adds nothing to the name (empty alt or a glyph)', !t.q('#searchResultsGrid [data-action="open-search"] img[alt]:not([alt=""])'));
+    check('the Request button is beside the opener, not inside it', !t.q('[data-action="open-search"] button') &&
+      !!cardFor(t, 0).querySelector(':scope > div [data-action="request-media"]'));
+    check('a title here in 4K only reads as here', !cardFor(t, 2).querySelector('[data-action="request-media"]'));
+    openers[1].click();
+    await flush();
+    check('the show\'s detail is open', !t.q('#mediaModal').classList.contains('hidden') && t.q('#modalTitle').textContent === 'Dune: Prophecy');
+    check('its description', t.q('#modalOverview').textContent === 'The sisterhood.');
+    check('no Request for a show already here', !t.q('#modalActionArea button'));
+    check('no book line on a show', t.q('#modalLibrary').classList.contains('hidden'));
+  } finally { t.release(); }
+});
+
+await run('a film requested from its detail: the card under it says so, and focus finds the card again', async () => {
+  const sent = [];
+  const t = visit(filmRoutes((url, init) => { sent.push(JSON.parse(init.body)); return { body: { id: 1 } }; }));
+  // WSUI.modal as ui.js has it: close runs onClose, then hands focus back to
+  // the opener only if it is still in the page.
+  let closeIt = null;
+  globalThis.WSUI.modal = (overlay, opts) => {
+    const previous = t.doc.activeElement;
+    closeIt = () => { opts.onClose(); if (previous && t.doc.contains(previous)) previous.focus(); };
+    return { close: () => closeIt() };
+  };
+  try {
+    await searchFilms(t);
+    const opener = t.q('[data-action="open-search"][data-index="0"]');
+    opener.focus();
+    opener.click();
+    await flush();
+    check('the film\'s detail is open', t.q('#modalTitle').textContent === 'Dune');
+    const ask = t.q('#modalActionArea [data-action="request-from-modal"]');
+    check('a Request button for the film', !!ask && ask.getAttribute('data-media-type') === 'movie');
+    ask.click();
+    await flush();
+    check('asked of Seerr for that film', sent.length === 1 && sent[0].mediaType === 'movie' && String(sent[0].mediaId) === '438631', sent);
+    check('the card under the detail no longer offers it', !cardFor(t, 0).querySelector('[data-action="request-media"]'));
+    t.q('[data-action="close-modal"]').click();
+    await flush();
+    const again = t.q('[data-action="open-search"][data-index="0"]');
+    check('closed', t.q('#mediaModal').classList.contains('hidden'));
+    check('focus is on the redrawn card\'s opener', t.doc.activeElement === again && again !== opener);
+    again.click();
+    await flush();
+    check('reopened, it says where the film stands rather than offering it again', !t.q('#modalActionArea [data-action="request-from-modal"]'));
   } finally { t.release(); }
 });
 
