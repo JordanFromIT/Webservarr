@@ -700,6 +700,33 @@ await run('from lg a shorter answer above the visible pagination still holds the
   } finally { t.release(); }
 });
 
+await run('searches started before the last one answered top up to one page, never more', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'dune');
+    h.out[0].resolve({ body: { results: filmPage(4, 'Dune'), totalResults: 24, totalPages: 2 } });
+    await t.clock.advance(50);
+    const grid = t.q('#searchResultsGrid');
+    // From lg: three columns, 300px a row, the pagination on screen.
+    grid.getBoundingClientRect = () => {
+      const n = grid.querySelectorAll('[data-action="open-search"], :scope > .skel').length;
+      return { top: 0, height: Math.ceil(n / 3) * 300 };
+    };
+    t.q('#searchPagination').getBoundingClientRect = () => ({ top: 300 });
+    Object.defineProperty(t.win, 'innerWidth', { value: 1280, configurable: true });
+    await typeQuery(t, 'dunes');
+    await typeQuery(t, 'dunesx');
+    await typeQuery(t, 'dunesxy');
+    check('four held cards and five skeletons, however many searches are out', grid.querySelectorAll('[data-action="open-search"]').length === 4 &&
+      grid.querySelectorAll(':scope > .skel').length === 5 && grid.children.length === 9, grid.children.length);
+    h.out[3].resolve({ body: { results: filmPage(9, 'X'), totalResults: 18, totalPages: 2 } });
+    await t.clock.advance(50);
+    check('a full page answer is held no taller than a page', grid.style.minHeight === '' || parseInt(grid.style.minHeight, 10) <= 900, grid.style.minHeight);
+  } finally { t.release(); }
+});
+
 await run('the search bar flies with a transform: its box is in the results slot from the first keystroke', async () => {
   const h = heldSearch();
   const t = visit(h.routes);

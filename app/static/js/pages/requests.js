@@ -1357,6 +1357,9 @@ export async function mount(ctx) {
   function holdSearchGrid(grid) {
     endSearchCollapse(grid);
     grid.style.minHeight = '';
+    // A search started before the last one answered finds that one's
+    // skeletons still there: they go, so the top-up is to one page.
+    Array.prototype.forEach.call(grid.querySelectorAll(':scope > .skel'), function (el) { grid.removeChild(el); });
     var have = grid.querySelectorAll('[data-action="open-search"]').length;
     if (have) grid.setAttribute('data-stale', '');
     else grid.textContent = '';
