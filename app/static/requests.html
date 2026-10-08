@@ -181,6 +181,10 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
    which moved everything below it up (O2). RS.load drops the mark if rows
    have appeared since. */
 html[data-rs-empty] #rsSection { display: none; }
+/* Search results while a newer search is out: the old cards hold the grid's
+   size, dimmed (pages/requests.js holdSearchGrid). */
+#searchResultsGrid[data-stale] { opacity: 0.5; transition: opacity 0.2s; }
+@media (prefers-reduced-motion: reduce) { #searchResultsGrid[data-stale] { transition: none; } }
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
@@ -576,7 +580,7 @@ html[data-rs-empty] #rsSection { display: none; }
 <p class="mb-5 text-label leading-relaxed text-frosted-blue/70">Requests are handled automatically and usually arrive within an hour, though not everything can be found.</p>
 <div class="flex items-baseline gap-2 mb-4">
 <h2 id="searchTitle" class="text-h3 font-bold text-frosted-blue">Search results</h2>
-<span id="searchResultCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
+<span id="searchResultCount" class="text-body text-frosted-blue/70 tabular-nums" aria-live="polite"></span>
 </div>
 <!-- Search Results Section (hidden by default) -->
 <section id="searchResultsSection" class="hidden">

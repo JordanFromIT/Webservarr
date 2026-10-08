@@ -3,9 +3,11 @@
 // a fake clock. Covers "Where requests stand" with book requests in it (the
 // rows, their words, the Kind filter, Chaptarr down with the films still
 // listed, the films down with the books still listed, the text-only
-// rendering of a hostile title), the queue figures, and the phone search
-// row (its own reserved row above "Trending", which folds away once the bar
-// has gone down to the results).
+// rendering of a hostile title), the queue figures, the phone search row
+// (its own reserved row above "Trending", which folds away once the bar has
+// gone down to the results), the search results holding their size while a
+// search is out, the bar's transform-only flight, and the detail's year and
+// rating leaving no gap when empty.
 //
 // REQUESTS_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/requests_page.mjs (npm run test:js; CI js-checks).
@@ -519,6 +521,147 @@ await run('a film requested from its detail: the card under it says so, and focu
     again.click();
     await flush();
     check('reopened, it says where the film stands rather than offering it again', !t.q('#modalActionArea [data-action="request-from-modal"]'));
+  } finally { t.release(); }
+});
+
+// ---- Zero layout shift while searching: the results hold their size ----
+
+// A search whose answer waits until the test lets it go.
+function heldSearch() {
+  const out = [];
+  return {
+    out,
+    routes: (net) => {
+      routes({ body: FILMS }, { body: BOOKS })(net);
+      net.on('/api/integrations/chaptarr-search', () => ({ body: { results: [] } }));
+      net.on('/api/integrations/seerr-search', (url) => new Promise((resolve) => out.push({ url, resolve })));
+    },
+    answer(i, results) { out[i].resolve({ body: { results, totalResults: results.length, totalPages: 1 } }); }
+  };
+}
+const filmPage = (n, tag) => Array.from({ length: n }, (_, i) => ({ id: 1000 + i, media_type: 'movie', title: tag + ' ' + i, year: 2020, poster_url: '', media_status: null }));
+
+async function typeQuery(t, text) {
+  const input = t.q('#searchInput');
+  input.value = text;
+  input.dispatchEvent(new t.win.Event('input'));
+  await t.clock.advance(400);
+}
+
+await run('the first search holds a page of skeleton cards, not a one-line "Searching"', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'dune');
+    const grid = t.q('#searchResultsGrid');
+    check('nine skeleton cards, hidden from screen readers', grid.querySelectorAll(':scope > .skel[aria-hidden="true"]').length === 9, grid.children.length);
+    check('no "Searching" line in the grid', grid.textContent.indexOf('Searching') === -1);
+    check('busy and out of reach', grid.getAttribute('aria-busy') === 'true' && grid.inert === true);
+    check('skeletons are not dimmed as stale', !grid.hasAttribute('data-stale'));
+    check('the count says it is searching, as a live region',
+      t.q('#searchResultCount').textContent === 'Searching…' && t.q('#searchResultCount').getAttribute('aria-live') === 'polite');
+    h.answer(0, filmPage(9, 'Dune'));
+    await t.clock.advance(50);
+    check('the answer replaces them', grid.querySelectorAll('[data-action="open-search"]').length === 9 && !grid.querySelector('.skel'));
+    check('no longer busy', !grid.hasAttribute('aria-busy') && grid.inert === false);
+    check('the count', t.q('#searchResultCount').textContent === '9 results');
+  } finally { t.release(); }
+});
+
+await run('a second search keeps the first one\'s cards, dimmed, until its answer is drawn', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'dune');
+    h.answer(0, filmPage(9, 'Dune'));
+    await t.clock.advance(50);
+    await typeQuery(t, 'star');
+    const grid = t.q('#searchResultsGrid');
+    const titles = () => Array.from(grid.querySelectorAll('[data-action="open-search"]')).map((b) => b.textContent.trim().replace(/\s+/g, ' '));
+    check('the old cards stay while the answer is out', titles().length === 9 && titles()[0].indexOf('Dune 0') === 0, titles());
+    check('...dimmed as stale, busy and inert', grid.hasAttribute('data-stale') && grid.getAttribute('aria-busy') === 'true' && grid.inert === true);
+    h.answer(1, filmPage(9, 'Star'));
+    await t.clock.advance(50);
+    check('the new answer replaces them', titles()[0].indexOf('Star 0') === 0, titles());
+    check('not dimmed any more', !grid.hasAttribute('data-stale') && !grid.hasAttribute('aria-busy') && grid.inert === false);
+    check('the dimming is a style of the page, not a palette class', /#searchResultsGrid\[data-stale\] \{ opacity: [\d.]+;/.test(REQUESTS_HTML));
+  } finally { t.release(); }
+});
+
+await run('a short page held while the next one is fetched is topped up to a full page', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'dune');
+    h.answer(0, filmPage(4, 'Dune'));
+    await t.clock.advance(50);
+    await typeQuery(t, 'dunes');
+    const grid = t.q('#searchResultsGrid');
+    check('four held cards and five skeletons', grid.querySelectorAll('[data-action="open-search"]').length === 4 &&
+      grid.querySelectorAll(':scope > .skel').length === 5, grid.children.length);
+    h.answer(1, []);
+    await t.clock.advance(50);
+    check('nothing found: said in words, skeletons gone', grid.textContent.indexOf('Nothing matches') !== -1 && !grid.querySelector('.skel'));
+  } finally { t.release(); }
+});
+
+await run('the search bar flies with a transform: its box is in the results slot from the first keystroke', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    t.win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    // Frames with a timestamp, as the browser gives them.
+    let frameAt = 0;
+    globalThis.requestAnimationFrame = (fn) => t.clock.setTimeout(() => { frameAt += 16; fn(frameAt); }, 16);
+    const bar = t.q('#searchBar');
+    const input = t.q('#searchInput');
+    input.focus();
+    input.value = 'd';
+    input.dispatchEvent(new t.win.Event('input'));
+    check('already in the dock', bar.parentElement === t.q('#searchDock'));
+    check('focus kept', t.doc.activeElement === input);
+    check('painted where it was by a transform', /^translate\(/.test(bar.style.transform));
+    check('never moved by top, left or position:fixed', !bar.style.top && !bar.style.left && bar.style.position !== 'fixed');
+    await t.clock.advance(1000);
+    check('mid-flight: still only a transform', /^translate\(/.test(bar.style.transform) && !bar.style.top && bar.style.position !== 'fixed');
+    await t.clock.advance(2500);
+    check('landed: no flight styles left', bar.style.cssText === '', bar.style.cssText);
+    check('the phone home row folded once landed', t.q('#searchHome').classList.contains('hidden'));
+  } finally { t.release(); }
+});
+
+await run('the detail leaves no gap where an empty year or rating would be', async () => {
+  const t = visit((net) => {
+    routes({ body: FILMS }, { body: BOOKS })(net);
+    net.on('/api/integrations/seerr-search', () => ({ body: { results: [
+      { id: 1, media_type: 'movie', title: 'No Year', year: null, poster_url: '', overview: 'x', media_status: null },
+      { id: 2, media_type: 'tv', title: 'With Year', year: 2024, poster_url: '', overview: 'y', media_status: null, vote_average: 7.1 }
+    ], totalResults: 2, totalPages: 1 } }));
+    net.on('/api/integrations/chaptarr-search', () => ({ body: { results: [BANE({ year: null, rating: 0 })] } }));
+    net.on('/api/integrations/book-in-library', () => ({ body: {} }));
+  });
+  try {
+    await t.mount();
+    await typeQuery(t, 'x');
+    const open = (title) => {
+      const b = Array.from(t.doc.querySelectorAll('[data-action="open-search"]')).find((x) => x.textContent.indexOf(title) !== -1);
+      b.click();
+    };
+    open('No Year');
+    await flush();
+    check('a film with no year: the year is out of the row', t.q('#modalYear').classList.contains('hidden') && t.q('#modalYear').textContent === '');
+    check('...and so is the empty rating', t.q('#modalRating').classList.contains('hidden'));
+    open('With Year');
+    await flush();
+    check('a show with a year shows it', !t.q('#modalYear').classList.contains('hidden') && t.q('#modalYear').textContent === '2024');
+    check('...and its rating', !t.q('#modalRating').classList.contains('hidden') && t.q('#modalRating').textContent === 'Rated 7.1 of 10');
+    open('Rule of Two');
+    await flush();
+    check('a book with no year: no gap before the Book badge', t.q('#modalYear').classList.contains('hidden') && t.q('#modalTypeBadge').textContent === 'Book');
   } finally { t.release(); }
 });
 

@@ -598,6 +598,20 @@ function buildSearchCard(item, index) {
   '</div>';
 }
 
+// A search card with nothing in it, for the first search while its answer is
+// out: the poster box, a title and a year line and the action button at their
+// real sizes (the text invisible), so the grid is already the height of a
+// page of results when they land.
+const SEARCH_SKELETON_CARD =
+  '<div class="skel rounded-card flex flex-col" aria-hidden="true">' +
+    '<span class="block w-full aspect-[2/3]"></span>' +
+    '<span class="invisible block w-full flex-1 px-3 pt-3">' +
+      '<span class="block text-body font-semibold leading-tight">&nbsp;</span>' +
+      '<span class="block text-label mt-0.5">&nbsp;</span>' +
+    '</span>' +
+    '<span class="invisible block px-3 pt-2 pb-3"><span class="block py-2 px-1 border text-label font-semibold">&nbsp;</span></span>' +
+  '</div>';
+
 function buildRequestCard(req) {
   var title = escapeHtml(req.media_title || 'Unknown');
   var mediaType = req.media_type || 'movie';
@@ -813,6 +827,7 @@ export async function mount(ctx) {
   var _totalSearchPages = 1;
   var _searchResults = [];
   var _searchDisplayPage = 1;
+  var _searchHeldHeight = 0;        // the results grid's height while a search is out (holdSearchGrid)
   var _allRequests = [];
   var _currentFilter = 'all';
   var _requestsDisplayPage = 1;
@@ -1230,13 +1245,7 @@ export async function mount(ctx) {
     // Show section, hide empty state
     section.classList.remove('hidden');
     emptyState.classList.add('hidden');
-
-    // Show loading
-    grid.textContent = '';
-    var loadingP = document.createElement('p');
-    loadingP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
-    loadingP.textContent = 'Searching\u2026';
-    grid.appendChild(loadingP);
+    holdSearchGrid(grid);
 
     try {
       // Films/TV and books are searched together. Books are a separate
@@ -1270,6 +1279,7 @@ export async function mount(ctx) {
 
       var found = data.totalResults || 0;
       $('searchResultCount').textContent = found === 1 ? '1 result' : found + ' results';
+      var held = releaseSearchGrid(grid);
 
       if (screenResults.length) {
         renderSearchPage();
@@ -1283,6 +1293,7 @@ export async function mount(ctx) {
         grid.appendChild(emptyP);
       }
       updateSearchPagination();
+      keepSearchHeight(grid, held);
 
       // Books arrive late and are merged in place. The query is re-checked
       // because a slow book search can outlive the search that started it.
@@ -1305,20 +1316,81 @@ export async function mount(ctx) {
         _searchResults = screenResults.slice(0, LEAD_SCREEN_RESULTS)
           .concat(bookResults)
           .concat(screenResults.slice(LEAD_SCREEN_RESULTS));
+        var before = grid.getBoundingClientRect().height;
         renderSearchPage();
         updateSearchPagination();
+        keepSearchHeight(grid, before);
       });
 
     } catch (error) {
       if (signal.aborted || isAbort(error)) return;   // left the page: nothing to say
       if (searchCtl !== ctl) return;                   // a newer search owns the grid
       console.error('Search error:', error);
+      var heldBefore = releaseSearchGrid(grid);
+      $('searchResultCount').textContent = '';
       grid.textContent = '';
       var errP = document.createElement('p');
       errP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
       errP.textContent = 'Search isn\u2019t working right now. Try again in a minute.';
       grid.appendChild(errP);
+      keepSearchHeight(grid, heldBefore);
     }
+  }
+
+  // While a search is out the results keep their size. The cards already
+  // there stay, dimmed and out of reach (inert), topped up with skeleton
+  // cards to a full page, or, with none there yet, a page of skeleton cards
+  // stands in; the pagination under them stays where it is. Swapping the
+  // grid for a one-line "Searching..." collapsed it, and the answer then
+  // pushed the pagination and everything below back down, the largest layout
+  // shift on the page. The count beside "Search results" says it is
+  // searching instead, and is a polite live region.
+  //
+  // This runs inside the keystroke or click that asked (the typing wait is
+  // shorter than the browser's half second of input grace), so the hold
+  // itself may change the grid's size; the answer, arriving later, may not.
+  function holdSearchGrid(grid) {
+    grid.style.minHeight = '';
+    var have = grid.querySelectorAll('[data-action="open-search"]').length;
+    if (have) grid.setAttribute('data-stale', '');
+    else grid.textContent = '';
+    var cards = '';
+    for (var i = have; i < CARDS_PER_PAGE; i++) cards += SEARCH_SKELETON_CARD;
+    grid.insertAdjacentHTML('beforeend', cards);
+    grid.setAttribute('aria-busy', 'true');
+    grid.inert = true;
+    $('searchResultCount').textContent = 'Searching\u2026';
+    _searchHeldHeight = grid.getBoundingClientRect().height;
+  }
+
+  // Ends the hold, before the answer is drawn; returns the height held.
+  function releaseSearchGrid(grid) {
+    grid.removeAttribute('aria-busy');
+    grid.removeAttribute('data-stale');
+    grid.inert = false;
+    var held = _searchHeldHeight;
+    _searchHeldHeight = 0;
+    return held;
+  }
+
+  // After an answer the user did not just ask for (a search or a page coming
+  // back, books joining late) is drawn: a shorter grid would pull up what is
+  // under it (the pagination, and below lg the recent requests), so if that
+  // would come into view the grid keeps the height it had until the next
+  // thing the user does. When nothing under it is on screen, or there is
+  // nothing under it (from lg the column ends there), it takes its own height.
+  function keepSearchHeight(grid, before) {
+    if (!before || grid.getBoundingClientRect().height >= before - 0.5) return;
+    var pager = $('searchPagination');
+    var next = !pager.classList.contains('hidden') ? pager
+      : window.innerWidth < 1024 ? $('recentTitle').closest('section') : null;
+    if (next && next.getBoundingClientRect().top < window.innerHeight) grid.style.minHeight = before + 'px';
+  }
+
+  // A page turned without a fetch, or a search cleared: the user's own action,
+  // so any height kept from the last answer goes.
+  function freeSearchHeight() {
+    $('searchResultsGrid').style.minHeight = '';
   }
 
   // The grid is rebuilt on every render; its Request buttons are answered by
@@ -1338,6 +1410,8 @@ export async function mount(ctx) {
     _searchDisplayPage = 1;
     $('searchResultsSection').classList.add('hidden');
     $('searchEmptyState').classList.remove('hidden');
+    releaseSearchGrid($('searchResultsGrid'));
+    freeSearchHeight();
     $('searchResultsGrid').textContent = '';
     $('searchResultCount').textContent = '';
     $('searchPagination').classList.add('hidden');
@@ -1368,6 +1442,7 @@ export async function mount(ctx) {
   function searchPrevPage() {
     if (_searchDisplayPage > 1) {
       _searchDisplayPage--;
+      freeSearchHeight();
       renderSearchPage();
       updateSearchPagination();
     } else if (_currentSearchPage > 1) {
@@ -1382,6 +1457,7 @@ export async function mount(ctx) {
     var totalDisplayPages = getSearchTotalDisplayPages();
     if (_searchDisplayPage < totalDisplayPages) {
       _searchDisplayPage++;
+      freeSearchHeight();
       renderSearchPage();
       updateSearchPagination();
     } else if (_currentSearchPage < _totalSearchPages) {
@@ -1562,10 +1638,10 @@ export async function mount(ctx) {
     // Hold the dock open at the height the bar occupies, before lifting the bar
     // out of it.
     //
-    // The bar spends the whole visit somewhere else - floated at the trending
-    // heading, then in flight - and an empty dock collapses to nothing, so
-    // everything below it sits a bar's height too high until the moment the bar
-    // lands, at which point the copy underneath drops. Measuring the dock while
+    // Until the first search the bar is floated at the trending heading, and
+    // an empty dock collapses to nothing, so everything below it would sit a
+    // bar's height too high until the bar dropped in, at which point the copy
+    // underneath would drop with it. Measuring the dock while
     // the bar is still inside it reserves exactly the right space, so the
     // returning bar displaces nothing.
     //
@@ -1610,11 +1686,19 @@ export async function mount(ctx) {
    * Move the search bar between the trending heading and the results panel.
    *
    * The two slots are roughly 1700px apart, so no animation can show that whole
-   * journey - the bar would spend it off screen. Instead the bar is lifted out of
-   * the flow and pinned to its current screen position while the page scrolls
-   * beneath it, then glides the short remaining distance into its slot. What the
-   * user sees is the bar travelling to its new home, rather than the page moving
-   * under a stationary bar.
+   * journey - the bar would spend it off screen. Instead the bar is held at its
+   * current screen position while the page scrolls beneath it, then glides the
+   * short remaining distance into its slot. What the user sees is the bar
+   * travelling to its new home, rather than the page moving under a stationary
+   * bar.
+   *
+   * The box moves at once and only the picture travels. The bar is dropped into
+   * its new slot straight away, inside the keystroke that started the move
+   * (the slot already holds the bar's height, so nothing around it moves), and
+   * a transform paints it back where it was, easing to none as it arrives.
+   * Driving the flight with top and left instead moved the bar's box on every
+   * frame, which the browser counts as layout shift for every frame after the
+   * first half second; a transform is not.
    */
   function moveSearchBar(position) {
     if (position === _searchBarPosition) return;
@@ -1634,26 +1718,25 @@ export async function mount(ctx) {
     }
 
     var input = $('searchInput');
+    // Where the bar is painted now, flight transform included, read before
+    // the bar leaves for its slot.
+    var start = bar.getBoundingClientRect();
+
+    // Into the slot now, while the keystroke is current. Reparenting blurs a
+    // focused descendant, so focus and the caret go back, read at this moment.
+    var hadFocus = document.activeElement === input;
+    var selStart = hadFocus ? input.selectionStart : null;
+    var selEnd = hadFocus ? input.selectionEnd : null;
+    bar.style.cssText = '';
+    target.appendChild(bar);
+    if (hadFocus) {
+      input.focus({preventScroll: true});
+      try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
+    }
 
     function settle() {
-      // The caret is read here, immediately before the move - NOT when the
-      // move was scheduled. The animation runs for seconds and the user keeps
-      // typing throughout; restoring a caret captured back then drops it into
-      // the middle of what they have since written, so "Test" comes out
-      // "Tste".
-      var hadFocus = document.activeElement === input;
-      var selStart = hadFocus ? input.selectionStart : null;
-      var selEnd = hadFocus ? input.selectionEnd : null;
-
-      target.appendChild(bar);
       bar.style.cssText = '';
       foldHomeRow(position);
-
-      // Reparenting blurs a focused descendant, so focus and caret go back.
-      if (hadFocus) {
-        input.focus({preventScroll: true});
-        try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
-      }
     }
 
     if (reducedMotion()) {
@@ -1662,16 +1745,12 @@ export async function mount(ctx) {
       return;
     }
 
-    // 1. Pin the bar where it currently appears, so the scroll cannot drag it.
-    var start = bar.getBoundingClientRect();
-    bar.style.position = 'fixed';
-    bar.style.top = start.top + 'px';
-    bar.style.left = start.left + 'px';
-    bar.style.width = start.width + 'px';
-    bar.style.maxWidth = 'none';
-    bar.style.margin = '0';
+    // 1. Paint the bar where it was, above the page it is about to cross.
     bar.style.zIndex = '50';
-    bar.style.transition = 'none';
+    bar.style.width = start.width + 'px';
+    bar.style.willChange = 'transform';
+    var first = target.getBoundingClientRect();
+    bar.style.transform = 'translate(' + (start.left - first.left) + 'px,' + (start.top - first.top) + 'px)';
 
     // 2. Work out how far to scroll. The bar's destination is deliberately NOT
     //    precomputed - see the frame loop.
@@ -1685,8 +1764,8 @@ export async function mount(ctx) {
     // glide, which read as two separate events - a lurch, then a slide. Moving
     // both together at the same rate means the page slides beneath a bar that
     // is itself travelling, and the whole thing reads as one movement. A CSS
-    // transition cannot do this: the bar is position:fixed, so its viewport
-    // coordinates have to be recomputed against the scroll on every frame.
+    // transition cannot do this: the bar's offset from its slot has to be
+    // recomputed against the scroll on every frame.
     var DURATION = coarsePointer() ? SEARCH_MOVE_DURATION_TOUCH : SEARCH_MOVE_DURATION;
     var started = null;
 
@@ -1718,20 +1797,14 @@ export async function mount(ctx) {
       applyScroll(live, progress < 1 ? scrollFrom + (live.to - scrollFrom) * eased : live.to);
 
       // The destination is re-read every frame, after the scroll for that
-      // frame has been applied, rather than computed once up front.
-      //
-      // A precomputed coordinate goes stale: the page reflows underneath the
-      // animation as results render and discover rows resolve, so by the time
-      // the bar arrives, the slot is no longer where it was predicted to be -
-      // and the bar visibly snaps into place when it is finally reparented.
-      // Tracking the live slot means the last frame and the reparented
-      // position are the same position, so there is nothing left to snap.
-      //
-      // The slot is empty while the bar is in flight, so its box is exactly
-      // where the bar will sit once dropped back in.
+      // frame has been applied, rather than computed once up front: the page
+      // reflows underneath the animation as results render and discover rows
+      // resolve, and a stale coordinate made the bar snap at the end. The
+      // slot's box is the bar's own untransformed box, so the last frame
+      // (no offset) is exactly where the bar rests.
       var dest = target.getBoundingClientRect();
-      bar.style.top = (start.top + (dest.top - start.top) * eased) + 'px';
-      bar.style.left = (start.left + (dest.left - start.left) * eased) + 'px';
+      var rest = 1 - eased;
+      bar.style.transform = 'translate(' + ((start.left - dest.left) * rest) + 'px,' + ((start.top - dest.top) * rest) + 'px)';
       bar.style.width = (start.width + (dest.width - start.width) * eased) + 'px';
 
       if (progress < 1) {
@@ -2012,7 +2085,9 @@ export async function mount(ctx) {
     $('modalTitle').textContent = (book && item.short_title) || item.title || 'Unknown';
     detailLine($('modalByline'), book && item.author ? 'by ' + item.author : '');
     detailLine($('modalSeries'), book ? seriesLine(item) : '');
-    $('modalYear').textContent = item.year || '';
+    // Hidden when empty: an empty span is still a flex item, so the row's gap
+    // would sit before the type badge as a stray indent.
+    detailLine($('modalYear'), item.year ? String(item.year) : '');
     $('modalOverview').textContent = item.overview || 'No description available.';
 
     // Type badge. Driven by the same theme accents as the cards, so a type reads
@@ -2025,11 +2100,11 @@ export async function mount(ctx) {
     // Rating: Seerr's out of 10, a book's Goodreads average out of 5.
     var ratingEl = $('modalRating');
     if (book) {
-      ratingEl.textContent = item.rating > 0 ? 'Rated ' + Number(item.rating).toFixed(1) + ' of 5' : '';
+      detailLine(ratingEl, item.rating > 0 ? 'Rated ' + Number(item.rating).toFixed(1) + ' of 5' : '');
     } else {
-      ratingEl.textContent = (item.vote_average && item.vote_average > 0)
+      detailLine(ratingEl, (item.vote_average && item.vote_average > 0)
         ? 'Rated ' + item.vote_average.toFixed(1) + ' of 10'
-        : '';
+        : '');
     }
 
     // Action area: Request button (the page's click listener sends it,
