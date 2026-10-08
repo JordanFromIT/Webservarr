@@ -47,11 +47,13 @@ class ModalRequestPassesTheIdThrough(unittest.TestCase):
             self.modal, r"\brequestMedia\(\s*mediaType\s*,\s*mediaId\s*,\s*false\s*,\s*buttonEl\s*,"))
 
     def test_the_modal_button_reaches_request_from_modal(self):
-        # Built with the id in data-media-id and handed, as itself, to
-        # requestFromModal by the page's one click listener.
-        open_modal = body_of(REQUESTS, "openMediaModal")
-        self.assertIn('''<button type="button" id="modalRequestBtn" data-action="request-from-modal" ''', open_modal)
-        self.assertIn('''data-media-id="' + escapeHtml(String(item.id)) + '" ''', open_modal)
+        # Built with the id in data-media-id (the detail's action area, drawn
+        # when it opens and again when a request settles) and handed, as
+        # itself, to requestFromModal by the page's one click listener.
+        self.assertTrue(live_matches(body_of(REQUESTS, "openMediaModal"), r"\bfillDetailActions\(\s*item\s*\)\s*;"))
+        actions = body_of(REQUESTS, "fillDetailActions")
+        self.assertIn('''<button type="button" id="modalRequestBtn" data-action="request-from-modal" ''', actions)
+        self.assertIn('''data-media-id="' + escapeHtml(String(item.id)) + '" ''', actions)
         self.assertTrue(live_matches(REQUESTS, r"case 'request-from-modal': requestFromModal\(el\); break;"))
 
     def test_request_media_sends_book_ids_as_strings(self):
