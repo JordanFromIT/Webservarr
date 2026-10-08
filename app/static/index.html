@@ -162,6 +162,28 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 </section>
 </div>
+<!-- Upcoming Releases, above Active Streams on every width: its height is
+     known from the first paint on a wide screen, while streams come and go,
+     so nothing under it moves when it lands. -->
+<section id="upcomingReleasesSection" data-arrive="releases">
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span id="iconSectionReleases" class="ws-section-icon material-symbols-outlined text-steel-blue">calendar_month</span>
+<h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
+</div>
+<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
+View Calendar
+<span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<!-- From lg the skeleton is buildReleases' week: the day-name row and seven
+     130px days, so the week lands without moving Active Streams under it.
+     Change one, change both. A phone's list is as long as the week is busy. -->
+<div id="releasesContainer">
+<div class="hidden lg:block" aria-hidden="true"><div class="grid grid-cols-7 gap-1 mb-1"><div class="text-[10px] font-bold uppercase tracking-wider">&nbsp;</div></div><div class="grid grid-cols-7 gap-1"><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div><div class="skel rounded-lg min-h-[130px]"></div></div></div>
+<div class="skel rounded-lg h-40 lg:hidden" aria-hidden="true"></div>
+</div>
+</section>
 <!-- Now Playing Section -->
 <section data-arrive="streams">
 <div class="flex items-center justify-between mb-6">
@@ -187,22 +209,6 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 <div class="skel rounded-xl overflow-hidden border border-transparent" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
 <div class="skel rounded-xl overflow-hidden border border-transparent hidden md:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
 <div class="skel rounded-xl overflow-hidden border border-transparent hidden lg:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
-</div>
-</section>
-<!-- Upcoming Releases -->
-<section id="upcomingReleasesSection" data-arrive="releases">
-<div class="flex items-center justify-between mb-6">
-<div class="flex items-center gap-3">
-<span id="iconSectionReleases" class="ws-section-icon material-symbols-outlined text-steel-blue">calendar_month</span>
-<h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
-</div>
-<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Calendar
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
-</div>
-<div id="releasesContainer">
-<div class="skel rounded-lg h-40" aria-hidden="true"></div>
 </div>
 </section>
 </div>

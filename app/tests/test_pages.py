@@ -545,14 +545,17 @@ class ShellRendering(unittest.TestCase):
         pair_tag = re.search(r'<div class="([^"]*)" data-home-pair>', page)
         self.assertIsNotNone(pair_tag)
         pair = pair_tag.end()
-        services, requests, news, streams = (page.index(f'data-arrive="{sid}"')
-                                             for sid in ("services", "requests", "news", "streams"))
+        services, requests, news, releases, streams = (page.index(f'data-arrive="{sid}"')
+                                                       for sid in ("services", "requests", "news", "releases",
+                                                                   "streams"))
         log = page.index("<!-- ws:event-log -->")
         push = page.index('<section id="pushPrompt"')
         # The event log first, on every width, as on every page; then the push
         # offer; then, in the phone's order, News, Recent Requests, Service
         # Health, one column below lg (so Tab follows what is seen there).
-        self.assertTrue(stack.end() < log < push < pair < news < requests < services < streams)
+        # Upcoming Releases then Active Streams (Drawbridge [40]), on every
+        # width: no grid order moves them, so Tab and the arrive order follow.
+        self.assertTrue(stack.end() < log < push < pair < news < requests < services < releases < streams)
         self.assertNotIn("data-arrive=\"feed\"", page)
         # From lg the grid order makes Service Health a strip across the top,
         # with Recent Requests and News sharing the row under it, as before.
@@ -563,9 +566,31 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('<section data-arrive="news" class="lg:order-3">', page)
         self.assertIn('<section data-arrive="services" class="lg:order-1 lg:col-span-full">', page)
         self.assertIn('<section data-arrive="requests" class="lg:order-2">', page)
-        # The grid closes before Active Streams: all three sections sit inside it.
-        between = page[pair:streams]
+        # The grid closes before Upcoming Releases: all three sections sit inside it.
+        between = page[pair:releases]
         self.assertEqual(between.count("<div") + 1, between.count("</div>"))
+        for sid in ("releases", "streams"):
+            tag = re.search(rf'<section [^>]*data-arrive="{sid}"[^>]*>', page).group(0)
+            self.assertNotIn("order-", tag, sid)
+
+    def test_the_releases_skeleton_is_the_week_from_lg(self):
+        # From lg buildReleases (pages/home.js) draws a day-name row over seven
+        # 130px days; the skeleton is the same, so Active Streams under it
+        # never moves when the week lands. Below lg the one block stays.
+        page = static_text("index.html")
+        box = page[page.index('<div id="releasesContainer">'):page.index('<!-- Now Playing Section -->')]
+        self.assertEqual(box.count('<div class="skel rounded-lg min-h-[130px]"></div>'), 7)
+        self.assertIn('<div class="grid grid-cols-7 gap-1 mb-1"><div class="text-[10px] font-bold uppercase '
+                      'tracking-wider">&nbsp;</div></div>', box)
+        self.assertIn('<div class="hidden lg:block" aria-hidden="true">', box)
+        self.assertIn('<div class="skel rounded-lg h-40 lg:hidden" aria-hidden="true"></div>', box)
+        home = static_text("js", "pages", "home.js")
+        for real in ("headerRow.className = 'grid grid-cols-7 gap-1 mb-1';",
+                     "hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider",
+                     "grid.className = 'grid grid-cols-7 gap-1';",
+                     "var cellCls = 'rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col",
+                     "var isMobile = window.innerWidth < 1024;"):
+            self.assertIn(real, home)
 
     def test_empty_site_name_shows_logo_only_and_page_titles(self):
         out = render(b=branding(**{"branding.app_name": ""}))

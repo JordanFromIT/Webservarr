@@ -68,11 +68,11 @@ function arrivalOrder(sections, calls) {
     section('news', { top: 237, left: 16 }),
     section('services', { top: 477, left: 16 }),
     section('requests', { top: 695, left: 16 }),
-    section('streams', { top: 1494, left: 16 }),
-    section('releases', { top: 1849, left: 16 })
+    section('releases', { top: 1494, left: 16 }),
+    section('streams', { top: 1702, left: 16 })
   ]);
-  check('a phone: News, then Service Health, then Recent Requests',
-    ran.join() === 'continue,feed,news,services,requests,streams,releases', ran);
+  check('a phone: News, then Service Health, then Recent Requests, then the week, then streams',
+    ran.join() === 'continue,feed,news,services,requests,releases,streams', ran);
 }
 
 // Home from lg: the same document, Service Health first, then the row.
@@ -83,11 +83,11 @@ function arrivalOrder(sections, calls) {
     section('news', { top: 401, left: 861 }),
     section('services', { top: 260, left: 288 }),
     section('requests', { top: 401, left: 288 }),
-    section('streams', { top: 1044, left: 288 }),
-    section('releases', { top: 1436, left: 288 })
+    section('releases', { top: 1044, left: 288 }),
+    section('streams', { top: 1269, left: 288 })
   ]);
-  check('from lg: Service Health, then Recent Requests and News left to right',
-    ran.join() === 'continue,feed,services,requests,news,streams,releases', ran);
+  check('from lg: Service Health, then Recent Requests and News left to right, then the week, then streams',
+    ran.join() === 'continue,feed,services,requests,news,releases,streams', ran);
 }
 
 // A rounding difference of under half a pixel is the same row.
