@@ -512,7 +512,7 @@ function bookStatusBlock(states) {
   var tone = STATUS_TONE_CLASSES[bookStateWords(s.state).tone] || STATUS_TONE_CLASSES.wait;
   var detail = bookDetail(states);
   var words = s.format
-    ? '<span class="material-symbols-outlined shrink-0 text-[16px] leading-none" aria-hidden="true">' + mediaTypeIcon(s.format.mediaType) + '</span>' +
+    ? '<span class="material-symbols-outlined shrink-0 text-body leading-none" aria-hidden="true">' + mediaTypeIcon(s.format.mediaType) + '</span>' +
       '<span class="min-w-0 truncate"><span class="sr-only">' + s.format.name + ' </span>' + escapeHtml(bookStateWords(s.state).label) + '</span>'
     : '<span class="min-w-0 truncate">' + escapeHtml(s.label) + '</span>';
   return '<div data-book-state="' + escapeHtml(s.state) + '"' + (detail ? ' title="' + escapeHtml(detail) + '"' : '') +
