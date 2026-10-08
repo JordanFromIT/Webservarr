@@ -275,13 +275,15 @@ def seerr_request(rid, tmdb, kind="movie", status=2):
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
 class SeerrRequests(unittest.TestCase):
-    TITLES = {101: {"title": "Dune Messiah", "year": 2026}, 102: {"title": "Severance", "year": 2022},
-              103: {"title": "Sinners", "year": 2025}}
+    # As seerr.lookup_titles answers: keyed by (media type, TMDB id).
+    TITLES = {("movie", 101): {"title": "Dune Messiah", "year": 2026}, ("tv", 102): {"title": "Severance", "year": 2022},
+              ("movie", 103): {"title": "Sinners", "year": 2025}}
 
     def setUp(self):
         self.Session = helpers.make_sessionmaker()
-        self.lookup = mock.AsyncMock(side_effect=lambda items: {i["tmdb_id"]: self.TITLES[i["tmdb_id"]]
-                                                                 for i in items if i["tmdb_id"] in self.TITLES})
+        self.lookup = mock.AsyncMock(side_effect=lambda items: {
+            (i["media_type"], i["tmdb_id"]): self.TITLES[(i["media_type"], i["tmdb_id"])]
+            for i in items if (i["media_type"], i["tmdb_id"]) in self.TITLES})
         for p in (mock.patch.object(poller, "SessionLocal", self.Session),
                   mock.patch("app.integrations.seerr.lookup_titles", self.lookup),
                   mock.patch.object(status_feed, "now_utc", lambda: T0)):
@@ -334,7 +336,7 @@ class SeerrRequests(unittest.TestCase):
         run(poller.record_new_requests([seerr_request(1, 101)]))
         self.assertEqual((self.shown(), self.seen()), ([], "0"))
         self.lookup.side_effect = None
-        self.lookup.return_value = {101: self.TITLES[101]}
+        self.lookup.return_value = {("movie", 101): self.TITLES[("movie", 101)]}
         run(poller.record_new_requests([seerr_request(1, 101)]))
         self.assertEqual(self.shown(), ["Requested: Dune Messiah (2026)"])
 

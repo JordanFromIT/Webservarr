@@ -985,8 +985,10 @@ async def lookup_titles(items: list) -> dict:
     a service that is also serving the requests page.
 
     ``items`` is [{"tmdb_id": int, "media_type": "movie"|"tv"}].
-    Returns {tmdb_id: {"title": str, "year": int|None}} for whatever resolved;
-    anything that fails is simply absent and the row keeps its fallback.
+    Returns {(media_type, tmdb_id): {"title": str, "year": int|None}}, keyed by
+    the item's own two values, for whatever resolved; anything that fails is
+    simply absent and the row keeps its fallback. TMDB numbers films and shows
+    separately, so the same tmdb_id can name a film and a show in one batch.
     """
     config = _get_config()
     if not config["url"] or not config["api_key"] or not items:
@@ -1013,7 +1015,7 @@ async def lookup_titles(items: list) -> dict:
                 year = None
                 if len(date) >= 4 and date[:4].isdigit():
                     year = int(date[:4])
-                resolved[tmdb_id] = {"title": title, "year": year}
+                resolved[(media_type, tmdb_id)] = {"title": title, "year": year}
             except Exception:  # noqa: BLE001
                 # A dead TMDB id 500s here. One unresolvable title must not cost
                 # the batch; that row keeps its fallback label.

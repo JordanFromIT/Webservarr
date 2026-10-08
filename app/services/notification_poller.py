@@ -527,7 +527,7 @@ async def record_new_requests(results: list) -> int:
             if not titles:
                 return 0                # Seerr named none of them: try again next cycle
             for r in new:
-                found = titles.get(r["media"]["tmdbId"]) or {}
+                found = titles.get((r.get("type"), r["media"]["tmdbId"])) or {}
                 text = activity_lines.request_line(found.get("title"),
                                                    found.get("year") if r.get("type") == "movie" else None)
                 if text is None:

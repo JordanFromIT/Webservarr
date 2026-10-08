@@ -444,7 +444,8 @@ async def build_snapshot() -> dict:
     if unnamed:
         looked_up = await seerr.lookup_titles(unnamed)
         for row in rows:
-            found = looked_up.get(row.get("tmdb_id")) if not row["title"] else None
+            found = looked_up.get((row["media_type"], int(row["tmdb_id"]))) \
+                if not row["title"] and row.get("tmdb_id") else None
             if found:
                 row["title"] = found["title"]
                 row["year"] = row.get("year") or found.get("year")
