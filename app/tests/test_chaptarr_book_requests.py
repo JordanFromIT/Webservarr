@@ -415,6 +415,19 @@ class Routes(unittest.TestCase):
         # A subtitle on either side does not matter.
         self.assertEqual(self.find([self._row(3, "Dune: Deluxe Edition", "Frank Herbert")], "Dune", "Frank Herbert").json()["book_id"], 3)
 
+    def test_the_whole_title_wins_over_the_part_before_the_colon(self):
+        # Both rows fold to "dune" before the colon; whichever came first used to win.
+        rows = [self._row(3, "Dune", "Frank Herbert"), self._row(8, "Dune: The Graphic Novel, Book 1", "Frank Herbert")]
+        for order in (rows, rows[::-1]):
+            with self.subTest(first=order[0].title):
+                self.assertEqual(self.find(order, "Dune: The Graphic Novel, Book 1", "Frank Herbert").json()["book_id"], 8)
+                self.assertEqual(self.find(order, "dune", "Frank Herbert").json()["book_id"], 3)
+        # No whole-title match: before the subtitle still finds the book.
+        self.assertEqual(self.find(rows[:1], "Dune: Deluxe Edition", "Frank Herbert").json()["book_id"], 3)
+        # A whole-title match by another author does not count.
+        rows = [self._row(3, "Dune", "Frank Herbert"), self._row(8, "Dune: The Graphic Novel, Book 1", "Someone Else")]
+        self.assertEqual(self.find(rows, "Dune: The Graphic Novel, Book 1", "Frank Herbert").json()["book_id"], 3)
+
     def test_another_author_or_nothing_visible_is_no_line(self):
         rows = [self._row(24, "Path of Destruction", "Someone Else")]
         self.assertEqual(self.find(rows, "Path of Destruction").json(), {})

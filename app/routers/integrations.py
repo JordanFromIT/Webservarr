@@ -613,13 +613,14 @@ async def book_in_library(
         logger.warning("Book library lookup failed: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="The library could not be read right now.") from None
     want_author = book_catalog.fold(author)
-    for row in rows:
-        if _title_key(row.title) != wanted:
-            continue
-        if want_author and row.author and book_catalog.fold(row.author) != want_author:
-            continue
-        return {"book_id": row.id, "formats": row.formats}
-    return {}
+    rows = [row for row in rows
+            if not (want_author and row.author and book_catalog.fold(row.author) != want_author)]
+    # The whole title first, so "Dune: The Graphic Novel, Book 1" finds itself
+    # rather than "Dune"; before the subtitle only when nothing matches whole.
+    exact = book_catalog.fold(title)
+    found = next((row for row in rows if book_catalog.fold(row.title) == exact), None) \
+        or next((row for row in rows if _title_key(row.title) == wanted), None)
+    return {"book_id": found.id, "formats": found.formats} if found else {}
 
 
 @router.get("/book-cover")
