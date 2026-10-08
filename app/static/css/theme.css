@@ -1335,6 +1335,14 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 .ws-wheel-latest:hover { color: rgb(var(--color-text)); text-decoration: underline; }
 .ws-wheel-latest:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 2px; border-radius: 4px; }
 .ws-wheel-latest[hidden] { display: none; }
+/* Held at an end (js/event-log.js nudge): a scroll or drag that turned the
+   wheel to its newest or oldest line keeps going, and the wheel gives a 3px
+   nudge the way it would have turned, then settles. Under reduced motion it
+   does not move. */
+.ws-wheel[data-held="newest"] { animation: ws-wheel-held-newest 240ms var(--wheel-ease); }
+.ws-wheel[data-held="oldest"] { animation: ws-wheel-held-oldest 240ms var(--wheel-ease); }
+@keyframes ws-wheel-held-newest { 35% { translate: 0 -3px; } }
+@keyframes ws-wheel-held-oldest { 35% { translate: 0 3px; } }
 .ws-wheel__line {
   --i: 0;
   position: absolute;
@@ -1434,6 +1442,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 .ws-pinned__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; letter-spacing: -0.005em; }
 /* Reduced motion: lines crossfade in place, nothing turns. */
 @media (prefers-reduced-motion: reduce) {
+  .ws-wheel[data-held] { animation: none; }
   .ws-wheel__line { transition: opacity var(--wheel-duration) linear; }
   .ws-wheel__line.is-entering {
     transform:

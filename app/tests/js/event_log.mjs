@@ -17,7 +17,10 @@
 // of library lines, and the server's rows (event_pinned_vectors.json) taken
 // over without a change; turning back through the history by wheel, keys and
 // drag, with the page scrolling at either end, no yank from new events,
-// "Latest" and the 15 s return; and soft navigation: one live section put in
+// "Latest" and the 15 s return; the ends holding a scroll or drag that turned
+// the wheel (a fast spin, its momentum, both ends, touch, a 3px nudge or none
+// under reduced motion) while a gesture that starts at an end is the page's;
+// and soft navigation: one live section put in
 // place of each new page's copy (ws:swap), its state, listeners and single
 // poll carried over, left out on a page without one (the reader), read again
 // only when its answer is old.
@@ -731,7 +734,8 @@ await run('the mouse wheel turns one notch per step, back and forward, and lets 
   check('a line-mode step turns a notch', t.texts()[0] === ORDER[2], t.texts());
   for (let i = 0; i < 10; i++) scroll(t, -100);
   check('at the oldest the oldest event is at the front', t.texts()[0] === ORDER[7], t.texts());
-  check('and scrolling further up is the page\'s again', scroll(t, -100) === false);
+  await t.clock.advance(300);
+  check('and a new scroll further up is the page\'s again', scroll(t, -100) === false);
   check('a pinch (ctrl + wheel) is never taken', (() => { const e = new t.win.WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }); Object.defineProperty(e, 'ctrlKey', { value: true }); t.wheel.dispatchEvent(e); return !e.defaultPrevented; })());
 });
 
@@ -768,6 +772,130 @@ await run('a drag turns it, and passes to the page at either end', async (make) 
   check('dragging back up turns forward', t.texts()[0] === ORDER[1], t.texts());
   touch(t, 'touchend');
   check('a move with no touch begun does nothing', touch(t, 'touchmove', 400) === false && t.texts()[0] === ORDER[1]);
+});
+
+// ---- The ends hold: a gesture that turned the wheel never runs on into the page ----
+
+// Every nudge the wheel gives at an end (its data-held), in order.
+function nudges(t) {
+  const seen = [];
+  const set = t.wheel.setAttribute.bind(t.wheel);
+  t.wheel.setAttribute = (k, v) => { if (k === 'data-held') seen.push(v); set(k, v); };
+  return seen;
+}
+// Wheel events `gap` ms apart (a gesture while gap < 250); how many the page got.
+async function burst(t, deltas, gap) {
+  let passed = 0;
+  for (const d of deltas) {
+    if (!scroll(t, d)) passed += 1;
+    await t.clock.advance(gap);
+  }
+  return passed;
+}
+
+await run('a fast scroll down to the newest is held to the end of the gesture, momentum and all', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  scroll(t, -100); scroll(t, -100); scroll(t, -100);
+  await t.clock.advance(300);
+  check('turned back three notches first', t.texts()[0] === ORDER[3], t.texts());
+  const n = nudges(t);
+  check('a long spin down: every event is the wheel\'s, none the page\'s', await burst(t, new Array(12).fill(100), 40) === 0);
+  check('it stopped at the newest', t.texts()[0] === ORDER[0] && latestBtn(t).hidden === true, t.texts());
+  check('the wheel nudged towards the newest, once', JSON.stringify(n) === JSON.stringify(['newest']), n);
+  check('a trackpad\'s momentum tail is held too', await burst(t, [60, 40, 25, 15, 8, 4, 2, 1, 1], 16) === 0);
+  check('and nudges no more', n.length === 1, n);
+  await t.clock.advance(300);
+  check('the nudge settles', !t.wheel.hasAttribute('data-held'));
+  check('after a pause, a new scroll down is the page\'s from its first event', scroll(t, 100) === false);
+  check('and all of it', await burst(t, new Array(6).fill(100), 40) === 6);
+  check('no nudge for a gesture that starts at the end', n.length === 1, n);
+});
+
+await run('the gesture ends after 250 ms without a wheel event, not before', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  scroll(t, -100);
+  await t.clock.advance(200);
+  check('back down to the newest in the same gesture', scroll(t, 100) === true && t.texts()[0] === ORDER[0]);
+  await t.clock.advance(200);
+  check('200 ms later it is still that gesture: held', scroll(t, 100) === true);
+  await t.clock.advance(240);
+  check('240 ms later still held', scroll(t, 100) === true);
+  await t.clock.advance(260);
+  check('260 ms later it is a new gesture: the page\'s', scroll(t, 100) === false);
+});
+
+await run('the oldest end holds the same way', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  const n = nudges(t);
+  check('a long spin up from the newest: none of it the page\'s', await burst(t, new Array(14).fill(-100), 40) === 0);
+  check('it stopped at the oldest', t.texts()[0] === ORDER[7], t.texts());
+  check('the wheel nudged towards the oldest, once', JSON.stringify(n) === JSON.stringify(['oldest']), n);
+  await t.clock.advance(300);
+  check('after a pause, a new scroll up is the page\'s', scroll(t, -100) === false && n.length === 1);
+  await t.clock.advance(300);
+  check('a scroll down from the oldest turns it, as ever', scroll(t, 100) === true && t.texts()[0] === ORDER[6], t.texts());
+});
+
+await run('no trap: a gesture that starts at an end is the page\'s, and a turn mid-gesture holds only from then', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  const n = nudges(t);
+  check('at the newest, a whole spin down is the page\'s', await burst(t, new Array(8).fill(100), 40) === 8 && n.length === 0);
+  const q = make({ answer: answer('ok', [], []) });
+  await q.open();
+  check('nothing to turn (the quiet line): never held', await burst(q, [-100, -100, 100, 100], 40) === 4);
+  const one = make({ answer: answer('ok', [], [note(1, 'Only line', 5)]) });
+  await one.open();
+  check('one event: never held either way', await burst(one, [-100, 100, -100, 100], 40) === 4);
+});
+
+await run('a drag that turns the wheel to an end is held until the finger lifts; the next drag is the page\'s', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  const n = nudges(t);
+  touch(t, 'touchstart', 100);
+  touch(t, 'touchmove', 126);
+  touch(t, 'touchmove', 152);
+  check('turned back two notches', t.texts()[0] === ORDER[2], t.texts());
+  touch(t, 'touchmove', 126);
+  touch(t, 'touchmove', 100);
+  check('and forward to the newest', t.texts()[0] === ORDER[0], t.texts());
+  check('dragging on up is held, not the page\'s', touch(t, 'touchmove', 60) === true && touch(t, 'touchmove', 20) === true && touch(t, 'touchmove', -40) === true);
+  check('the wheel nudged towards the newest, once', JSON.stringify(n) === JSON.stringify(['newest']), n);
+  check('held, a turn back counts from where the finger is', touch(t, 'touchmove', -14) === true && t.texts()[0] === ORDER[1], t.texts());
+  touch(t, 'touchmove', -40);
+  check('and back to the newest, nudging again', t.texts()[0] === ORDER[0] && touch(t, 'touchmove', -80) === true && n.length === 2, n);
+  touch(t, 'touchend');
+  touch(t, 'touchstart', 300);
+  check('the next drag up at the newest is the page\'s', touch(t, 'touchmove', 280) === false && touch(t, 'touchmove', 200) === false && n.length === 2);
+  touch(t, 'touchend');
+  touch(t, 'touchstart', 0);
+  for (let y = 25; y <= 250; y += 25) touch(t, 'touchmove', y);
+  check('a long drag down stops at the oldest', t.texts()[0] === ORDER[7], t.texts());
+  check('and is held there', touch(t, 'touchmove', 300) === true && n[n.length - 1] === 'oldest', n);
+  touch(t, 'touchcancel');
+  touch(t, 'touchstart', 0);
+  check('the next drag down at the oldest is the page\'s', touch(t, 'touchmove', 40) === false);
+});
+
+await run('reduced motion: the ends hold the same, with no nudge', async (make) => {
+  const t = make({ answer: HISTORY, reduced: true });
+  await t.open();
+  const n = nudges(t);
+  scroll(t, -100);
+  await t.clock.advance(300);
+  check('a spin down to the newest is held', await burst(t, new Array(6).fill(100), 40) === 0 && t.texts()[0] === ORDER[0]);
+  touch(t, 'touchstart', 100);
+  touch(t, 'touchmove', 126);
+  touch(t, 'touchmove', 100);
+  check('a drag too', touch(t, 'touchmove', 40) === true);
+  check('and the wheel never moves to say so', n.length === 0 && !t.wheel.hasAttribute('data-held'), n);
+  const media = THEME_CSS.slice(THEME_CSS.indexOf('/* Reduced motion: lines crossfade'));
+  check('the nudge is off under reduced motion in the CSS as well', /\.ws-wheel\[data-held\] \{ animation: none; \}/.test(media));
+  check('the nudge is 3px, the way it would have turned', /@keyframes ws-wheel-held-newest \{ 35% \{ translate: 0 -3px; \} \}/.test(THEME_CSS) && /@keyframes ws-wheel-held-oldest \{ 35% \{ translate: 0 3px; \} \}/.test(THEME_CSS));
 });
 
 await run('turned back, a new event never moves the view; "Latest" brings it back', async (make) => {

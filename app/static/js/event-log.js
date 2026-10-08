@@ -40,12 +40,22 @@
 // scroll while there is more history that way, so the page still scrolls at
 // either end. Turned back, new events don't move it: "Latest" (and
 // WHEEL_IDLE_MS without a turn) brings it back to the newest.
+//
+// The ends hold: a scroll or drag that turned the wheel and reaches the
+// newest or the oldest keeps the rest of that gesture (the wheel nudges, a
+// few px, to say so), so a fast spin back to the newest does not run on down
+// the page. A scroll ends after WHEEL_GESTURE_GAP_MS without a wheel event
+// (a trackpad's momentum keeps firing until it stops, so it is held too), a
+// drag when the finger lifts. Only a gesture that starts at the end goes to
+// the page, so the wheel never traps the page's scroll. Keys are not held.
 
 const WHEEL_LINES = 5;
 const WHEEL_MS = 650;   // theme.css --wheel-duration
 const WHEEL_IDLE_MS = 15000;    // turned back, it goes back to the newest after this long untouched
 const WHEEL_STEP_PX = 40;       // scroll (or less, added up) that turns one notch
 const WHEEL_DRAG_PX = 24;       // a drag this far turns one notch
+const WHEEL_GESTURE_GAP_MS = 250;   // this long without a wheel event ends a scroll gesture
+const WHEEL_HELD_MS = 260;      // theme.css .ws-wheel[data-held] nudge, and a little over
 const WHEEL_QUIET = {
     empty: 'No outages or notes this month',
     unavailable: 'Status unavailable right now'
@@ -166,6 +176,13 @@ export function createEventLog(section, env) {
     var idleTimer = null;
     var scrolled = 0;    // scroll added up towards one notch
     var dragY = null;
+    // The scroll gesture and the drag under way: took, it turned (or tried to
+    // turn) the wheel, so an end holds it; held, it is being held at an end
+    // now (nudged once until it turns again). null: none.
+    var gesture = null;
+    var gestureTimer = null;
+    var drag = null;
+    var heldTimer = null;
 
     // What the wheel shows of `list`: following the newest, onWheel (an open
     // outage held); turned back, the WHEEL_LINES events from the front one.
@@ -440,13 +457,58 @@ export function createEventLog(section, env) {
         return true;
     }
 
+    // The wheel nudges towards the end it is held at (theme.css
+    // .ws-wheel[data-held]). Under reduced motion it does not.
+    function nudge(end) {
+        if (env.reducedMotion()) return;
+        if (heldTimer !== null) env.clearTimeout(heldTimer);
+        wheel.removeAttribute('data-held');
+        void wheel.offsetHeight;    // restart the nudge
+        wheel.setAttribute('data-held', end);
+        heldTimer = env.setTimeout(function () { heldTimer = null; wheel.removeAttribute('data-held'); }, WHEEL_HELD_MS);
+    }
+
+    // Input in `dir` with nothing more that way. True: the gesture turned
+    // the wheel, so the end holds it (and the wheel nudges, once per arrival).
+    // False: it started at the end, and the page has it.
+    function holds(g, dir) {
+        if (!g || !g.took) return false;
+        if (!g.held) {
+            g.held = true;
+            nudge(dir > 0 ? 'oldest' : 'newest');
+        }
+        return true;
+    }
+
+    // Input in `dir` that can turn the wheel: the gesture is the wheel's now.
+    function takes(g) {
+        if (!g) return;
+        g.took = true;
+        g.held = false;
+    }
+
+    function endGesture() {
+        gestureTimer = null;
+        gesture = null;
+    }
+
     function onScroll(e) {
         if (e.ctrlKey) return;                  // a pinch: the page zooms
+        // Every wheel event keeps the gesture going, momentum included.
+        if (gestureTimer !== null) env.clearTimeout(gestureTimer);
+        if (!gesture) gesture = { took: false, held: false };
+        gestureTimer = env.setTimeout(endGesture, WHEEL_GESTURE_GAP_MS);
         var dy = e.deltaY * (e.deltaMode === 1 ? WHEEL_STEP_PX : e.deltaMode === 2 ? WHEEL_STEP_PX * 10 : 1);
         if (!dy) return;
         var dir = dy < 0 ? 1 : -1;              // up the page is back in time
-        if (!canTurn(dir)) { scrolled = 0; return; }    // the end: the page scrolls
+        if (!canTurn(dir)) {
+            // The end: held if this gesture turned the wheel, else the page scrolls.
+            scrolled = 0;
+            if (holds(gesture, dir)) e.preventDefault();
+            return;
+        }
         e.preventDefault();
+        takes(gesture);
         if (scrolled && (scrolled < 0) !== (dy < 0)) scrolled = 0;
         scrolled += dy;
         if (Math.abs(scrolled) >= WHEEL_STEP_PX) {
@@ -457,6 +519,7 @@ export function createEventLog(section, env) {
 
     function onDragStart(e) {
         dragY = e.touches && e.touches.length === 1 ? e.touches[0].clientY : null;
+        drag = dragY === null ? null : { took: false, held: false };
     }
 
     function onDrag(e) {
@@ -465,15 +528,25 @@ export function createEventLog(section, env) {
         var dy = y - dragY;
         if (!dy) return;
         var dir = dy > 0 ? 1 : -1;              // pulling down brings older lines down
-        if (!canTurn(dir)) { dragY = null; return; }    // the end: the page scrolls
+        if (!canTurn(dir)) {
+            if (holds(drag, dir)) {
+                // Held to the end of the drag; a turn back counts from here.
+                if (e.cancelable) e.preventDefault();
+                dragY = y;
+            } else {
+                dragY = null;                   // started at the end: the page scrolls
+            }
+            return;
+        }
         if (e.cancelable) e.preventDefault();
+        takes(drag);
         if (Math.abs(dy) >= WHEEL_DRAG_PX) {
             dragY = y;
             turnTo(offset + dir);
         }
     }
 
-    function onDragEnd() { dragY = null; }
+    function onDragEnd() { dragY = null; drag = null; }
 
     function onKey(e) {
         var to = null;
