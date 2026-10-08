@@ -6,8 +6,9 @@
 // rendering of a hostile title), the queue figures, the phone search row
 // (its own reserved row above "Trending", which folds away once the bar has
 // gone down to the results), the search results holding their size while a
-// search is out, the bar's transform-only flight, and the detail's year and
-// rating leaving no gap when empty.
+// search is out, a shorter answer closing that space below lg (eased, or at
+// once with reduced motion) while from lg it holds, the bar's transform-only
+// flight, and the detail's year and rating leaving no gap when empty.
 //
 // REQUESTS_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/requests_page.mjs (npm run test:js; CI js-checks).
@@ -605,6 +606,97 @@ await run('a short page held while the next one is fetched is topped up to a ful
     h.answer(1, []);
     await t.clock.advance(50);
     check('nothing found: said in words, skeletons gone', grid.textContent.indexOf('Nothing matches') !== -1 && !grid.querySelector('.skel'));
+  } finally { t.release(); }
+});
+
+// ---- A shorter answer: below lg the held space closes, from lg it holds ----
+
+// happy-dom has no layout: the grid is a page tall with a page of cards or
+// skeletons, shorter with a few, a line tall with none, and what is under it
+// is on screen.
+function fakeLayout(t, { width = 412, reduce = false } = {}) {
+  const grid = t.q('#searchResultsGrid');
+  grid.getBoundingClientRect = () => {
+    const n = grid.querySelectorAll('[data-action="open-search"], :scope > .skel').length;
+    return { top: 0, height: n >= 9 ? 1900 : n ? 400 : 60 };
+  };
+  t.q('#searchPagination').getBoundingClientRect = () => ({ top: 300 });
+  t.q('#recentTitle').closest('section').getBoundingClientRect = () => ({ top: 300 });
+  Object.defineProperty(t.win, 'innerWidth', { value: width, configurable: true });
+  t.win.matchMedia = (q) => ({ matches: reduce && q.indexOf('reduced-motion') !== -1, addEventListener() {}, removeEventListener() {} });
+  // The grid's set height and transition each time its layout is flushed
+  // (the flush is what fixes where a transition starts).
+  const heights = [];
+  Object.defineProperty(grid, 'offsetHeight', { configurable: true, get() { heights.push(grid.style.height + '|' + grid.style.transition); return 0; } });
+  return { grid, heights };
+}
+
+async function fullPageThen(t, h, layout) {
+  await t.mount();
+  await typeQuery(t, 'dune');       // the bar docks at once (reduced motion until fakeLayout)
+  h.answer(0, filmPage(9, 'Dune'));
+  await t.clock.advance(50);
+  const l = fakeLayout(t, layout);
+  await typeQuery(t, 'zzz');
+  return l;
+}
+
+await run('below lg, a full page then nothing found: the held space closes over 250 ms, eased', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    const { grid, heights } = await fullPageThen(t, h, {});
+    check('held while the answer is out', grid.querySelectorAll('[data-action="open-search"]').length === 9 && grid.hasAttribute('data-stale'));
+    h.answer(1, []);
+    await t.clock.advance(50);
+    check('nothing found, in words', grid.textContent.indexOf('Nothing matches') !== -1);
+    check('no blank held under it', grid.style.minHeight === '', grid.style.minHeight);
+    check('starts from the held height, with no transition yet', heights.join() === '1900px|', heights);
+    check('...and closes to its own', grid.style.height === '60px', grid.style.height);
+    check('...by a 250 ms ease-out height transition', grid.style.transition === 'height 250ms ease-out', grid.style.transition);
+    check('...its rows not stretched meanwhile', grid.style.alignContent === 'start');
+    await t.clock.advance(300);
+    check('closed: no height, transition or alignment left', grid.style.height === '' && grid.style.transition === '' && grid.style.alignContent === '', grid.style.cssText);
+  } finally { t.release(); }
+});
+
+await run('below lg with reduced motion: a shorter answer takes its own height at once', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    const { grid, heights } = await fullPageThen(t, h, { reduce: true });
+    h.answer(1, filmPage(2, 'Zzz'));
+    await t.clock.advance(50);
+    check('two cards', grid.querySelectorAll('[data-action="open-search"]').length === 2);
+    check('no held height and no animation', grid.style.minHeight === '' && grid.style.height === '' && grid.style.transition === '' && heights.length === 0, grid.style.cssText);
+  } finally { t.release(); }
+});
+
+await run('clearing the box while the space closes ends it at once', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    const { grid } = await fullPageThen(t, h, {});
+    h.answer(1, []);
+    await t.clock.advance(50);
+    check('closing', grid.style.transition !== '');
+    const input = t.q('#searchInput');
+    input.value = '';
+    input.dispatchEvent(new t.win.Event('input'));
+    check('ended with the clear', grid.style.height === '' && grid.style.transition === '' && grid.style.minHeight === '', grid.style.cssText);
+  } finally { t.release(); }
+});
+
+await run('from lg a shorter answer above the visible pagination still holds the height (unchanged)', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    const { grid, heights } = await fullPageThen(t, h, { width: 1280 });
+    h.out[1].resolve({ body: { results: filmPage(2, 'Zzz'), totalResults: 22, totalPages: 2 } });
+    await t.clock.advance(50);
+    check('the pagination shows', !t.q('#searchPagination').classList.contains('hidden'));
+    check('held by min-height', grid.style.minHeight === '1900px', grid.style.minHeight);
+    check('no animation', grid.style.transition === '' && heights.length === 0, heights);
   } finally { t.release(); }
 });
 

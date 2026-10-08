@@ -735,6 +735,10 @@ const SEARCH_MOVE_DURATION = 3000;
 // responding.
 const SEARCH_MOVE_DURATION_TOUCH = 1800;
 
+// How long the search results take to close up to a shorter answer below lg
+// (collapseSearchGrid). Short: it answers the search the user just made.
+const SEARCH_COLLAPSE_MS = 250;
+
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
  *
@@ -828,6 +832,7 @@ export async function mount(ctx) {
   var _searchResults = [];
   var _searchDisplayPage = 1;
   var _searchHeldHeight = 0;        // the results grid's height while a search is out (holdSearchGrid)
+  var _searchCollapseTimer = null;  // ends the grid's close-up to a shorter answer (collapseSearchGrid)
   var _allRequests = [];
   var _currentFilter = 'all';
   var _requestsDisplayPage = 1;
@@ -1350,6 +1355,7 @@ export async function mount(ctx) {
   // shorter than the browser's half second of input grace), so the hold
   // itself may change the grid's size; the answer, arriving later, may not.
   function holdSearchGrid(grid) {
+    endSearchCollapse(grid);
     grid.style.minHeight = '';
     var have = grid.querySelectorAll('[data-action="open-search"]').length;
     if (have) grid.setAttribute('data-stale', '');
@@ -1375,22 +1381,61 @@ export async function mount(ctx) {
 
   // After an answer the user did not just ask for (a search or a page coming
   // back, books joining late) is drawn: a shorter grid would pull up what is
-  // under it (the pagination, and below lg the recent requests), so if that
-  // would come into view the grid keeps the height it had until the next
-  // thing the user does. When nothing under it is on screen, or there is
+  // under it (the pagination, and below lg the recent requests). When that
+  // would come into view: from lg the grid keeps the height it had until the
+  // next thing the user does; below lg it closes up to its own height
+  // (collapseSearchGrid). When nothing under it is on screen, or there is
   // nothing under it (from lg the column ends there), it takes its own height.
   function keepSearchHeight(grid, before) {
+    endSearchCollapse(grid);
     if (!before || grid.getBoundingClientRect().height >= before - 0.5) return;
+    var phone = window.innerWidth < 1024;
     var pager = $('searchPagination');
     var next = !pager.classList.contains('hidden') ? pager
-      : window.innerWidth < 1024 ? $('recentTitle').closest('section') : null;
-    if (next && next.getBoundingClientRect().top < window.innerHeight) grid.style.minHeight = before + 'px';
+      : phone ? $('recentTitle').closest('section') : null;
+    if (!next || next.getBoundingClientRect().top >= window.innerHeight) return;
+    if (phone) collapseSearchGrid(grid, before);
+    else grid.style.minHeight = before + 'px';
+  }
+
+  // Below lg the recent requests come next, and holding a page of height over
+  // a short answer left "Nothing matches" above a screen of blank. Instead the
+  // grid eases from the height it held to its own, so what is under it glides
+  // up rather than jumping. The grid is already drawn at its own height when
+  // this runs and nothing is painted in between, so the held height is put
+  // back first and the transition starts from there. Its rows are kept to
+  // their own height while it closes (a grid stretches auto rows to fill a set
+  // height). With reduced motion it just takes its own height.
+  //
+  // Moving what is under the grid counts as layout shift, frame by frame,
+  // when the answer lands more than half a second after the last keystroke.
+  function collapseSearchGrid(grid, from) {
+    if (reducedMotion()) return;
+    var to = grid.getBoundingClientRect().height;
+    grid.style.alignContent = 'start';
+    grid.style.height = from + 'px';
+    void grid.offsetHeight;   // the held height is where the transition starts
+    grid.style.transition = 'height ' + SEARCH_COLLAPSE_MS + 'ms ease-out';
+    grid.style.height = to + 'px';
+    _searchCollapseTimer = ctx.setTimeout(function () { endSearchCollapse(grid); }, SEARCH_COLLAPSE_MS + 50);
+  }
+
+  // Ends a close-up now (it has run, or the grid is about to change again).
+  function endSearchCollapse(grid) {
+    if (!_searchCollapseTimer) return;
+    ctx.clearTimeout(_searchCollapseTimer);
+    _searchCollapseTimer = null;
+    grid.style.transition = '';
+    grid.style.height = '';
+    grid.style.alignContent = '';
   }
 
   // A page turned without a fetch, or a search cleared: the user's own action,
   // so any height kept from the last answer goes.
   function freeSearchHeight() {
-    $('searchResultsGrid').style.minHeight = '';
+    var grid = $('searchResultsGrid');
+    endSearchCollapse(grid);
+    grid.style.minHeight = '';
   }
 
   // The grid is rebuilt on every render; its Request buttons are answered by
