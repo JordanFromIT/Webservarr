@@ -68,10 +68,23 @@
   // Status colour only on deviation: an error's words, never a success's.
   var TONE_TEXT = { ok: 'text-frosted-blue', err: 'text-status-err-text', info: 'text-frosted-blue' };
   var toastBox = null;
+  // Its focus ring is the text colour, the site's one ring: the primary blue
+  // on the frost is under 3:1.
   var ACTION_BTN = 'shrink-0 -my-1 ml-1 px-3 py-1.5 rounded-lg bg-frosted-blue/[0.08] text-frosted-blue text-xs ' +
     'font-bold hover:bg-frosted-blue/15 focus-visible:outline focus-visible:outline-2 ' +
-    'focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors';
+    'focus-visible:outline-offset-2 focus-visible:outline-frosted-blue transition-colors';
 
+  // The toasts on screen, oldest first. Past TOAST_MAX the oldest leaves, so
+  // a burst never runs the stack down the screen.
+  var shown = [];
+  var TOAST_MAX = 3;
+  // How long .ws-toast.is-leaving runs (theme.css, Toasts).
+  var TOAST_OUT_MS = 200;
+
+  // A notification in the top right, under the account name in the header
+  // (under the top bar on a phone): it slides in, stays a few seconds and
+  // slides out again; theme.css .ws-toasts and .ws-toast place and move it.
+  // Under the pointer or holding the focus it stays, and leaves 2 s after.
   // opts.action: { label, run } adds one button (Retry after a page failed to
   // open, router.js). Pressing it closes the toast, then runs run(). A toast
   // with a button stays 4 s longer, so there is time to reach it. Returns
@@ -81,24 +94,43 @@
     var fresh = !toastBox || !toastBox.parentNode;
     if (fresh) {
       // A polite live region; an error toast is itself an alert.
-      toastBox = el('div', 'fixed z-[90] top-4 inset-x-4 sm:inset-x-auto sm:right-6 flex flex-col ' +
-        'items-stretch sm:items-end gap-2 pointer-events-none');
+      toastBox = el('div', 'ws-toasts');
       toastBox.id = 'wsToasts';
       toastBox.setAttribute('aria-live', 'polite');
       document.body.appendChild(toastBox);
+      shown = [];
     }
     // On the site's one frosted surface (theme.css .ws-frost).
-    var t = el('div', 'pointer-events-auto flex items-center gap-3 max-w-md px-4 py-3 rounded-2xl border ' +
-      'ws-frost text-sm font-semibold ws-panel-in ' + TONE_TEXT[tone]);
+    var t = el('div', 'ws-toast pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border ' +
+      'ws-frost text-sm font-semibold ' + TONE_TEXT[tone]);
     if (tone === 'err') t.setAttribute('role', 'alert');
     t.appendChild(el('span', 'ws-light ' + TONE_LIGHT[tone]));
-    t.appendChild(el('span', 'min-w-0', message));
+    t.appendChild(el('span', 'min-w-0 flex-1', message));
     var action = opts && opts.action && opts.action.label ? opts.action : null;
     var gone = false;
-    function remove() {
+    var timer = null;
+    function unlist() {
       gone = true;
+      clearTimeout(timer);
+      var i = shown.indexOf(entry);
+      if (i !== -1) shown.splice(i, 1);
+    }
+    function remove() {
+      unlist();
       if (t.parentNode) t.parentNode.removeChild(t);
     }
+    // Slides (or, with reduced motion, fades) out, then goes.
+    function leave() {
+      if (gone) return;
+      unlist();
+      t.classList.add('is-leaving');
+      setTimeout(remove, TOAST_OUT_MS);
+    }
+    function arm(ms) {
+      clearTimeout(timer);
+      if (!gone) timer = setTimeout(leave, ms);
+    }
+    var entry = { leave: leave };
     if (action) {
       var btn = el('button', ACTION_BTN, action.label);
       btn.type = 'button';
@@ -108,17 +140,22 @@
       });
       t.appendChild(btn);
     }
+    t.addEventListener('mouseenter', function () { clearTimeout(timer); });
+    t.addEventListener('mouseleave', function () { arm(2000); });
+    t.addEventListener('focusin', function () { clearTimeout(timer); });
+    t.addEventListener('focusout', function (e) { if (!t.contains(e.relatedTarget)) arm(2000); });
     var box = toastBox;
+    function show() {
+      if (gone) return;
+      box.appendChild(t);
+      shown.push(entry);
+      if (shown.length > TOAST_MAX) shown[0].leave();
+    }
     // A live region created in the same moment as its content is often not
     // announced, so the first toast lands a beat after its region exists.
-    if (fresh) setTimeout(function () { if (!gone) box.appendChild(t); }, 50);
-    else box.appendChild(t);
-    setTimeout(function () {
-      if (reducedMotion()) { remove(); return; }
-      t.style.transition = 'opacity 200ms ease-out';
-      t.style.opacity = '0';
-      setTimeout(remove, 220);
-    }, (tone === 'err' ? 6000 : 4000) + (action ? 4000 : 0));
+    if (fresh) setTimeout(show, 50);
+    else show();
+    arm((tone === 'err' ? 6000 : 4000) + (action ? 4000 : 0));
     // The caller may take it down early (the router replaces its Retry
     // toast rather than stacking one per failed attempt).
     return { remove: remove };

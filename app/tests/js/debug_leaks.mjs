@@ -344,6 +344,7 @@ const UI = 'https://host.example/static/js/ui.js?v=abc';
   const made = [];
   const node = (tag) => ({
     tagName: tag.toUpperCase(), style: {}, parentNode: null, className: '', textContent: '',
+    classList: { add() {} }, addEventListener() {},
     setAttribute() {}, appendChild(c) { c.parentNode = this; made.push(c); return c; },
     removeChild(c) { c.parentNode = null; }
   });

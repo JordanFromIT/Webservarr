@@ -884,6 +884,46 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
   .ws-dialog > .ws-dialog-box { animation: none; }
 }
 
+/* ---- Toasts (ui.js WSUI.toast) ----
+ *
+ * A notification arrives where a desktop's does: top right, 8px under the
+ * header, its right edge on the account name's (the header's 32px gutter).
+ * It slides in from past the screen's edge as it fades up, settles, and
+ * after a few seconds slides back out the way it came. More than one stack
+ * downward, the newest last. On a phone they sit 8px under the top bar
+ * (56px and its 1px edge), 16px from each side, and drop down into place. With the shell hidden (the
+ * reader) they take the top of the screen. They never reach the bottom, so
+ * the player bar and the tab bar stay clear (ui.js keeps three at most).
+ * The arrival is slower than a popover's (320ms, not 220ms): it travels its
+ * own width, and the long ease-out tail is what keeps that soft; it leaves
+ * in 200ms (ui.js TOAST_OUT_MS waits that out). Reduced motion: a fade.
+ */
+.ws-toasts {
+  position: fixed; z-index: 90; pointer-events: none;
+  inset-block-start: calc(3.5rem + 1px + env(safe-area-inset-top) + 8px);
+  inset-inline: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+html[data-shell="hidden"] .ws-toasts { inset-block-start: calc(env(safe-area-inset-top) + 16px); }
+.ws-toast { animation: ws-toast-drop 320ms cubic-bezier(.16, 1, .3, 1) both; }
+.ws-toast.is-leaving { pointer-events: none; animation: ws-toast-lift 200ms ease-in both; }
+@keyframes ws-toast-drop { from { opacity: 0; transform: translateY(-16px); } }
+@keyframes ws-toast-lift { to { opacity: 0; transform: translateY(-16px); } }
+@media (min-width: 1024px) {
+  .ws-toasts { inset-block-start: calc(4rem + 8px); inset-inline: auto 32px; width: 24rem; }
+  html[data-shell="hidden"] .ws-toasts { inset-block-start: 16px; }
+  .ws-toast { animation-name: ws-toast-in; }
+  .ws-toast.is-leaving { animation-name: ws-toast-out; }
+}
+@keyframes ws-toast-in { from { opacity: 0; transform: translateX(calc(100% + 32px)); } }
+@keyframes ws-toast-out { to { opacity: 0; transform: translateX(calc(100% + 32px)); } }
+@keyframes ws-toast-fade-in { from { opacity: 0; } }
+@keyframes ws-toast-fade-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ws-toast { animation-name: ws-toast-fade-in; animation-duration: 200ms; animation-timing-function: ease-out; }
+  .ws-toast.is-leaving { animation-name: ws-toast-fade-out; }
+}
+
 /* ---- Phone navigation (below lg) ----
  *
  * The bottom tab bar, the More sheet and the top bar's safe area
