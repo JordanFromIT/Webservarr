@@ -7,8 +7,12 @@
 // (its own reserved row above "Trending", which folds away once the bar has
 // gone down to the results), the search results holding their size while a
 // search is out, a shorter answer closing that space below lg (eased, or at
-// once with reduced motion) while from lg it holds, the bar's transform-only
-// flight, and the detail's year and rating leaving no gap when empty.
+// once with reduced motion) while from lg it holds (until the window narrows
+// below lg), searches out back to back topping up to one page, a page turn
+// waiting for the fetch it started, one request per title in flight with
+// every copy of its button (redrawn cards, the detail) saying so, the bar's
+// transform-only flight, and the detail's year and rating leaving no gap
+// when empty.
 //
 // REQUESTS_JS=<path> runs the same cases against another copy of the module.
 // Run: node app/tests/js/requests_page.mjs (npm run test:js; CI js-checks).
@@ -768,6 +772,93 @@ await run('from lg a held height goes when the window narrows below lg (a tablet
     Object.defineProperty(t.win, 'innerWidth', { value: 820, configurable: true });
     t.win.dispatchEvent(new t.win.Event('resize'));
     check('below lg it goes', grid.style.minHeight === '', grid.style.minHeight);
+  } finally { t.release(); }
+});
+
+// ---- A request in flight: one per title, and every copy of its button says so ----
+
+// Films searched, with the books and the request answers held until the test lets them go.
+function heldRequest(over = {}) {
+  const r = { sent: [], books: null, answers: [] };
+  r.routes = (net) => {
+    routes({ body: FILMS }, { body: BOOKS })(net);
+    net.on('/api/integrations/seerr-search', () => ({ body: { results: FILM_RESULTS.map((b) => Object.assign({}, b)), totalResults: 3, totalPages: 1 } }));
+    net.on('/api/integrations/chaptarr-search', () => over.books ? new Promise((res) => { r.books = () => res({ body: { results: over.books } }); }) : ({ body: { results: [] } }));
+    net.on('/api/integrations/seerr-request', (url, init) => { r.sent.push(JSON.parse(init.body)); return new Promise((res) => r.answers.push(res)); });
+  };
+  return r;
+}
+const cardAction = (t, i) => cardFor(t, i).querySelector('[data-action="request-media"]');
+
+await run('books landing while a film request is out: the redrawn card says Requesting, then where the film stands', async () => {
+  const r = heldRequest({ books: [BANE()] });
+  const t = visit(r.routes);
+  try {
+    await searchFilms(t);
+    const btn = cardAction(t, 0);
+    btn.click();
+    await flush();
+    check('the pressed button says it is out', btn.disabled && btn.textContent === 'Requesting…');
+    r.books();
+    await flush();
+    // The books join after the first three: Dune keeps its place, its card redrawn.
+    const dune = () => Array.from(t.doc.querySelectorAll('[data-action="open-search"]')).find((b) => b.querySelector('.line-clamp-2').textContent === 'Dune').parentElement;
+    const redrawn = dune().querySelector('[data-action="request-media"]');
+    check('the books merge redrew the card: its copy is disabled, saying Requesting', !!redrawn && redrawn !== btn && redrawn.disabled && redrawn.textContent === 'Requesting…');
+    redrawn.click();
+    await flush();
+    check('pressing it sends nothing more', r.sent.length === 1, r.sent.length);
+    r.answers[0]({ body: { id: 1 } });
+    await flush();
+    check('after success the card no longer offers Request', !dune().querySelector('[data-action="request-media"]'));
+  } finally { t.release(); }
+});
+
+await run('the detail closed while its request is out: the card under it says Requesting, then where the film stands', async () => {
+  const r = heldRequest();
+  const t = visit(r.routes);
+  let closeIt = null;
+  globalThis.WSUI.modal = (overlay, opts) => { closeIt = () => opts.onClose(); return { close: () => closeIt() }; };
+  try {
+    await searchFilms(t);
+    t.q('[data-action="open-search"][data-index="0"]').click();
+    await flush();
+    t.q('#modalActionArea [data-action="request-from-modal"]').click();
+    await flush();
+    check('the card under the detail says it is out', cardAction(t, 0).disabled && cardAction(t, 0).textContent === 'Requesting…');
+    t.q('[data-action="close-modal"]').click();
+    await flush();
+    cardAction(t, 0).click();
+    await flush();
+    check('pressing the card meanwhile sends nothing more', r.sent.length === 1, r.sent.length);
+    t.q('[data-action="open-search"][data-index="0"]').click();
+    await flush();
+    const inDetail = t.q('#modalActionArea [data-action="request-from-modal"]');
+    check('reopened while it is out, the detail says Requesting too', !!inDetail && inDetail.disabled && inDetail.textContent === 'Requesting…');
+    r.answers[0]({ body: { id: 1 } });
+    await flush();
+    check('after success the card no longer offers Request', !cardAction(t, 0));
+    check('the open detail shows where it stands instead', !t.q('#modalActionArea button') && t.q('#modalActionArea').children.length === 1);
+  } finally { t.release(); }
+});
+
+await run('a refused request from the detail gives the card under it its Request back', async () => {
+  const r = heldRequest();
+  const t = visit(r.routes);
+  try {
+    await searchFilms(t);
+    t.q('[data-action="open-search"][data-index="0"]').click();
+    await flush();
+    t.q('#modalActionArea [data-action="request-from-modal"]').click();
+    await flush();
+    r.answers[0]({ status: 500, body: { detail: 'Seerr is down' } });
+    await flush();
+    const again = cardAction(t, 0);
+    check('the card offers Request again, enabled', !!again && !again.disabled && /^Request\b/.test(again.textContent.trim()), again && again.textContent);
+    check('so does the detail', !t.q('#modalActionArea [data-action="request-from-modal"]').disabled);
+    again.click();
+    await flush();
+    check('and a new press sends a new request', r.sent.length === 2, r.sent.length);
   } finally { t.release(); }
 });
 

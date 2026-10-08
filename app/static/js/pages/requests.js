@@ -844,6 +844,7 @@ export async function mount(ctx) {
   var _detailSeq = 0;               // bumped per opened detail: a late library answer for an older one is dropped
   var _detailItem = null;           // the title the open detail shows
   var _detailOpener = null;         // { action, index, row } of the card control that opened it
+  var _requesting = {};             // requestKey -> true while that title's request is out
 
   // -------------------------------------------------------------------------
   // Request Status grid
@@ -1448,6 +1449,7 @@ export async function mount(ctx) {
     var start = (_searchDisplayPage - 1) * CARDS_PER_PAGE;
     var pageItems = _searchResults.slice(start, start + CARDS_PER_PAGE);
     grid.innerHTML = pageItems.map(function (item, i) { return buildSearchCard(item, start + i); }).join('');
+    markRequesting(grid);
   }
 
   function clearSearch() {
@@ -1526,11 +1528,15 @@ export async function mount(ctx) {
   // ---- Request Media ----
 
   async function requestMedia(mediaType, mediaId, is4k, buttonEl, title) {
-    // Disable button immediately
-    buttonEl.disabled = true;
+    // One request per title at a time, whichever copy of its button is
+    // pressed. Every copy on the page says it is out, and so does any copy
+    // drawn while it is (renderSearchPage, the detail).
+    var key = requestKey(mediaType, mediaId);
+    if (_requesting[key]) return;
+    _requesting[key] = true;
     var origHtml = buttonEl.innerHTML;
-    buttonEl.textContent = 'Requesting\u2026';
-    buttonEl.classList.add('opacity-60', 'cursor-not-allowed');
+    showRequesting(buttonEl);
+    markRequesting(root);
 
     try {
       // Books go to Chaptarr, films and TV to Seerr. Book ids are strings
@@ -1557,6 +1563,7 @@ export async function mount(ctx) {
       }
       var answer = isBook ? await resp.json().catch(function () { return {}; }) : {};
       if (signal.aborted) return;
+      delete _requesting[key];
 
       if (isBook) {
         // The server says where each format now stands: "requested", or
@@ -1584,6 +1591,7 @@ export async function mount(ctx) {
         // Plain past tense naming the thing: "Requested Dune".
         showToast(title ? 'Requested ' + title : 'Requested', 'success');
       }
+      refreshCopies(key, buttonEl);
 
       // Refresh existing requests after a short delay
       ctx.setTimeout(function () {
@@ -1594,9 +1602,11 @@ export async function mount(ctx) {
     } catch (error) {
       if (signal.aborted || isAbort(error)) return;   // left the page: nothing to say
       console.error('Request error:', error);
+      delete _requesting[key];
       buttonEl.disabled = false;
       buttonEl.innerHTML = origHtml;
       buttonEl.classList.remove('opacity-60', 'cursor-not-allowed');
+      refreshCopies(key, buttonEl);
       showToast(error.message || 'The request didn\u2019t go through. Try again.', 'error');
     }
   }
@@ -1606,19 +1616,54 @@ export async function mount(ctx) {
   function eachCopy(match, fn) {
     var lists = [_searchResults];
     Object.keys(_discoverItems).forEach(function (k) { lists.push(_discoverItems[k] || []); });
-    var inSearch = false;
     lists.forEach(function (list) {
       list.forEach(function (item) {
-        if (!item || !match(item)) return;
-        fn(item);
-        if (list === _searchResults) inSearch = true;
+        if (item && match(item)) fn(item);
       });
     });
-    // Asked for from the detail, the search cards are redrawn so the card
-    // under it says so too (same boxes, so the redraw moves nothing). Asked
-    // for from a card, that card already changed, and a redraw would reset
-    // another card's request still under way.
-    if (inSearch && _dialog) renderSearchPage();
+  }
+
+  // A request goes by the title, not by which copy of its button was pressed.
+  // Books are asked for as a book, whatever format the card is.
+  function requestKey(mediaType, id) {
+    return (isBookType(mediaType) ? 'book' : mediaType || 'movie') + ':' + id;
+  }
+  function buttonKey(el) {
+    return requestKey(el.getAttribute('data-request-type') || el.getAttribute('data-media-type'),
+      el.getAttribute('data-request-id') || el.getAttribute('data-media-id'));
+  }
+
+  function showRequesting(el) {
+    el.disabled = true;
+    el.textContent = 'Requesting\u2026';
+    el.classList.add('opacity-60', 'cursor-not-allowed');
+  }
+
+  // Every Request button in `scope` for a title whose request is out.
+  function markRequesting(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-action="request-media"], [data-action="request-from-modal"]'), function (el) {
+      if (_requesting[buttonKey(el)]) showRequesting(el);
+    });
+  }
+
+  // A request settled (the pressed button already shows it): any other copy
+  // of the title's button still saying "Requesting" is drawn again from the
+  // title's new state. That is the card under the detail, a card the books
+  // merge redrew while the request was out, or a detail opened meanwhile. A
+  // grid held for a search is left to that search's answer. The pressed card
+  // is not redrawn, so focus elsewhere in the grid stays put; the redraw
+  // keeps every card's box, so it moves nothing.
+  function refreshCopies(key, buttonEl) {
+    var grid = $('searchResultsGrid');
+    var stale = Array.prototype.some.call(grid.querySelectorAll('[data-action="request-media"]'), function (el) {
+      return el !== buttonEl && buttonKey(el) === key;
+    });
+    if (stale && !grid.hasAttribute('aria-busy')) renderSearchPage();
+    var area = $('modalActionArea');
+    if (_dialog && _detailItem && !area.contains(buttonEl) &&
+        requestKey(_detailItem.media_type, _detailItem.id) === key) {
+      fillDetailActions(_detailItem);
+    }
   }
 
   // A book's new states (the server's answer), onto every copy of it; a
@@ -2113,7 +2158,6 @@ export async function mount(ctx) {
     if (!item) return;
     var modal = $('mediaModal');
     var mediaType = item.media_type || 'movie';
-    var status = seerrStatusOf(item);
     var book = isBookType(mediaType);
     _detailSeq += 1;
     _detailItem = item;
@@ -2163,12 +2207,33 @@ export async function mount(ctx) {
         : '');
     }
 
-    // Action area: Request button (the page's click listener sends it,
-    // data-action="request-from-modal") or status badge
-    var actionArea = $('modalActionArea');
     if (book) showBookLine(item);
     else detailLine($('modalLibrary'), '');
-    if (book) {
+    fillDetailActions(item);
+
+    if (_dialog) return;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    _dialog = WSUI.modal(modal, {
+      onClose: function () {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        // Clear action area to prevent stale button state on next open
+        $('modalActionArea').innerHTML = '';
+        _dialog = null;
+        _detailItem = null;
+        refocusOpener();
+      }
+    });
+  }
+
+  // The detail's action area: Request button (the page's click listener
+  // sends it, data-action="request-from-modal") or status badge.
+  function fillDetailActions(item) {
+    var actionArea = $('modalActionArea');
+    var mediaType = item.media_type || 'movie';
+    var status = seerrStatusOf(item);
+    if (isBookType(mediaType)) {
       actionArea.innerHTML = bookActions(item);
     } else if (!status) {
       actionArea.innerHTML =
@@ -2185,21 +2250,7 @@ export async function mount(ctx) {
           getStatusBadge(status, mediaType) +
         '</div>';
     }
-
-    if (_dialog) return;
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-    _dialog = WSUI.modal(modal, {
-      onClose: function () {
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-        // Clear action area to prevent stale button state on next open
-        $('modalActionArea').innerHTML = '';
-        _dialog = null;
-        _detailItem = null;
-        refocusOpener();
-      }
-    });
+    markRequesting(actionArea);
   }
 
   // The card that opened the detail was redrawn while it was open (a request
