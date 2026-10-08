@@ -68,7 +68,7 @@ class WhichBooksAreRequests(unittest.TestCase):
         self.assertEqual(r["request_id"], "book-7362")
         self.assertEqual(r["media_type"], "audiobook")
         self.assertEqual(r["author"], "An Author")
-        self.assertEqual(r["requested_at"], "2026-10-05T02:22:30Z")
+        self.assertEqual(r["requested_at"], "2026-10-05T02:22:30.000Z")
         self.assertEqual(r["reason_code"], "NO_RELEASE_FOUND")
         self.assertEqual(r["state_code"], request_status.REASON_TO_STATE["NO_RELEASE_FOUND"])
         self.assertIn(r["group"], set(request_status.STATE_TO_GROUP.values()))
@@ -151,6 +151,91 @@ class SummaryCounts(unittest.TestCase):
             book(6, "Never asked for", monitored=False, added="2026-10-01T00:00:00Z"),
         ], [queued(2), queued(2, size=5)], NOW)
         self.assertEqual(s, {"in_progress": 2, "unreleased": 1, "added_recently": 4})
+
+
+IMPORTED = "2026-08-01T10:00:00Z"   # an author import brought the row in, unmonitored
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class AskedForLaterThanAdded(unittest.TestCase):
+    """A row Chaptarr already held is requested by monitoring it, which
+    leaves `added` at the author import: a request made today read as
+    waiting two months, sorted as the oldest and was not counted this month.
+    The time it was asked for here wins over an older `added`."""
+
+    def test_a_recorded_request_wins_over_an_older_added(self):
+        asked = {1: datetime(2026, 10, 6, 11, 0)}          # naive UTC, as stored
+        rows, s = book_requests.build_rows([book(1, "Rule of Two", added=IMPORTED),
+                                            book(2, "Older request", added="2026-09-01T00:00:00Z")],
+                                           [], NOW, requested=asked)
+        self.assertEqual([(r["title"], r["requested_at"]) for r in rows],
+                         [("Older request", "2026-09-01T00:00:00.000Z"), ("Rule of Two", "2026-10-06T11:00:00.000Z")])
+        self.assertEqual(s["added_recently"], 1, "asked for this month; the other was not")
+
+    def test_a_later_added_wins_over_an_older_record(self):
+        # Asked for here once, then (file removed) added again in Chaptarr.
+        rows, _ = book_requests.build_rows([book(1, "A", added="2026-10-01T00:00:00Z")], [], NOW,
+                                           requested={1: datetime(2026, 1, 1)})
+        self.assertEqual(rows[0]["requested_at"], "2026-10-01T00:00:00.000Z")
+
+    def test_recording_keeps_the_newest_time_per_row(self):
+        from app.models import BookRequestTime
+        Session = helpers.make_sessionmaker()
+        db = Session()
+        try:
+            book_requests.record_requested(db, [8059, 8075, 8059], datetime(2026, 10, 1))
+            book_requests.record_requested(db, [8059], datetime(2026, 10, 6))
+            self.assertEqual(sorted(db.query(BookRequestTime.book_id, BookRequestTime.requested_at).all()),
+                             [(8059, datetime(2026, 10, 6)), (8075, datetime(2026, 10, 1))])
+        finally:
+            db.close()
+
+    def test_a_request_through_the_page_is_dated_by_the_request(self):
+        from app.tests.test_chaptarr_book_requests import CONFIG, _book, _Chaptarr, _Resp
+        from app.services import status_feed
+
+        today = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        Session = helpers.make_sessionmaker()
+        fake = _Chaptarr([{"foreignId": "gr:3341500",
+                           "book": _book([{"id": 8059, "monitored": False, "hasFiles": False}],
+                                         [{"id": 8075, "monitored": False, "hasFiles": False}])}],
+                         {("PUT", "/book/monitor"): _Resp(202, []), ("POST", "/command"): _Resp(201, {"id": 1})})
+        patches = (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                   mock.patch("app.routers.integrations._enforce_daily_book_cap", mock.AsyncMock()),
+                   mock.patch.object(status_feed, "now_utc", lambda: today),
+                   mock.patch.object(chaptarr, "_get_config", return_value=dict(CONFIG)),
+                   mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=_book())),
+                   mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()),
+                   mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client),
+                   mock.patch.object(book_requests, "SessionLocal", Session))
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        client = helpers.api_client(Session, user=helpers.MEMBER, headers=helpers.SAME_ORIGIN)
+        self.addCleanup(helpers.reset_overrides)
+        r = client.post("/api/integrations/chaptarr-request", json={"bookId": "gr:3341500", "format": "both"})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("book_ids", r.json())
+
+        # All Chaptarr changed is monitored: `added` is still the import.
+        rows = [dict(book(i, "Rule of Two", fmt=fmt, added=IMPORTED), authorId=1)
+                for i, fmt in ((8059, "ebook"), (8075, "audiobook"))]
+        with mock.patch.object(chaptarr, "wanted_books",
+                               mock.AsyncMock(return_value={"books": rows, "queue": [], "authors": {}})):
+            snap = asyncio.run(book_requests.build_snapshot())
+        stamp = today.isoformat(timespec="milliseconds") + "Z"
+        self.assertEqual([i["requested_at"] for i in snap["items"]], [stamp, stamp])
+        self.assertEqual(snap["summary"]["added_recently"], 2)
+
+    def test_an_unreadable_table_falls_back_to_added(self):
+        from sqlalchemy.exc import OperationalError
+        session = mock.Mock(spec=["query", "close"])
+        session.query.side_effect = OperationalError("SELECT", {}, Exception("no such table"))
+        with mock.patch.object(book_requests, "SessionLocal", mock.Mock(return_value=session)), \
+             mock.patch.object(chaptarr, "wanted_books", mock.AsyncMock(
+                 return_value={"books": [book(1, "A", added=IMPORTED)], "queue": [], "authors": {}})):
+            snap = asyncio.run(book_requests.build_snapshot())
+        self.assertEqual(snap["items"][0]["requested_at"], "2026-08-01T10:00:00.000Z")
 
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")

@@ -595,7 +595,7 @@ async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str
     except httpx.RequestError as exc:
         logger.warning("Chaptarr monitor/search failed for %s: %s", book_ids, exc)
         return {"ok": False, "message": "Could not reach Chaptarr"}
-    return {"ok": True, "message": "Book requested", "title": title, "state": "requested"}
+    return {"ok": True, "message": "Book requested", "title": title, "state": "requested", "book_ids": list(book_ids)}
 
 
 # The two formats a book comes in, each with its own library rows, root
@@ -631,8 +631,10 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     folder would download the wrong edition.
 
     Returns {"ok": bool, "message": str}; on success also "state" (what the
-    page shows now) and, for a real new request, the book's "title". "both"
-    also returns "states": each format's state, as search results carry them.
+    page shows now) and, for a real new request, the book's "title" and
+    "book_ids", the Chaptarr book rows asked for (for when it was asked, as
+    `added` on a row Chaptarr already held is older). "both" also returns
+    "states": each format's state, as search results carry them.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
@@ -724,6 +726,7 @@ async def _request_formats(cfg: dict, foreign_id: str, book: Dict[str, Any], tit
     if any(r["ok"] for r in results):
         # The title is for the event log's "Requested:" line (the router takes it out).
         answer["title"] = title
+        answer["book_ids"] = [i for r in results if r["ok"] for i in r["book_ids"]]
     return answer
 
 
@@ -790,7 +793,9 @@ async def _add_book(cfg: dict, foreign_id: str, book: Dict[str, Any], fmt: str, 
                 and added.get("monitored") is False:
             return await _want_existing(cfg, [added["id"]], title)
         # The title is for the event log's "Requested:" line (the router takes it out).
-        return {"ok": True, "message": "Book requested", "title": title, "state": "requested"}
+        new_id = added.get("id") if isinstance(added, dict) else None
+        return {"ok": True, "message": "Book requested", "title": title, "state": "requested",
+                "book_ids": [new_id] if isinstance(new_id, int) and new_id > 0 else []}
 
     detail = _error_detail(resp)
     logger.warning("Chaptarr add returned HTTP %d: %s", resp.status_code, detail)

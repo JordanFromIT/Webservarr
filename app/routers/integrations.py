@@ -735,6 +735,7 @@ async def create_chaptarr_request(
         # so the real reason (e.g. "Could not find that book in Chaptarr")
         # never reaches the browser. 400 matches the Seerr request path below.
         raise HTTPException(status_code=400, detail=result["message"])
+    _book_request_time(db, result.pop("book_ids", []))
     title = result.pop("title", "")
     if title:
         # "both" is no format of its own: a line for each format the states
@@ -744,6 +745,21 @@ async def create_chaptarr_request(
         for one in formats:
             _book_request_line(db, body.bookId.strip(), one, title)
     return result
+
+
+def _book_request_time(db: Session, book_ids: list) -> None:
+    """When these Chaptarr book rows were asked for, for "where requests
+    stand" (Chaptarr's `added` on a row it already held is older). Never
+    fails the request."""
+    from app.services import book_requests
+
+    if not book_ids:
+        return
+    try:
+        book_requests.record_requested(db, book_ids, status_feed.now_utc())
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("A book request's time could not be written: %s", type(exc).__name__)
 
 
 def _book_request_line(db: Session, book_id: str, fmt: str, title: str) -> None:

@@ -122,7 +122,8 @@ class RequestBook(unittest.TestCase):
                                                        [{"id": 8075, "monitored": False, "hasFiles": False}])}],
             {("PUT", "/book/monitor"): _Resp(202, []), ("POST", "/command"): _Resp(201, {"id": 1})})
         result = self._request(fake, cached=_book())
-        self.assertEqual(result, {"ok": True, "message": "Book requested", "title": TITLE, "state": "requested"})
+        self.assertEqual(result, {"ok": True, "message": "Book requested", "title": TITLE, "state": "requested",
+                                  "book_ids": [8059]})
         self.assertEqual(fake.writes(), [
             ("PUT", "/book/monitor", {"bookIds": [8059], "monitored": True}),
             ("POST", "/command", {"name": "BookSearch", "bookIds": [8059]}),
@@ -155,6 +156,7 @@ class RequestBook(unittest.TestCase):
         fake = _Chaptarr([], {("POST", "/book"): _Resp(201, {"id": 9000, "monitored": True})})
         result = self._request(fake, cached=_book())
         self.assertEqual(result["state"], "requested")
+        self.assertEqual(result["book_ids"], [9000])
         self.assertEqual([w[:2] for w in fake.writes()], [("POST", "/book")])
         self.assertEqual(fake.writes()[0][2]["mediaType"], "ebook")
 
@@ -219,7 +221,8 @@ class RequestBothFormats(unittest.TestCase):
                          dict(_MONITOR_AND_SEARCH))
         result = self._request(fake, cached=_book())
         self.assertEqual(result, {"ok": True, "message": "Book requested", "state": "requested", "title": TITLE,
-                                  "states": {"ebook": "requested", "audiobook": "requested"}})
+                                  "states": {"ebook": "requested", "audiobook": "requested"},
+                                  "book_ids": [8059, 8075]})
         self.assertEqual(fake.writes(), [
             ("PUT", "/book/monitor", {"bookIds": [8059, 8075], "monitored": True}),
             ("POST", "/command", {"name": "BookSearch", "bookIds": [8059, 8075]}),
@@ -272,6 +275,7 @@ class RequestBothFormats(unittest.TestCase):
         self.assertEqual([w[:2] for w in fake.writes()], [("POST", "/book"), ("PUT", "/book/monitor"), ("POST", "/command")])
         self.assertEqual(fake.writes()[1][2]["bookIds"], [9001])
         self.assertEqual(result["states"]["audiobook"], "requested")
+        self.assertEqual(result["book_ids"], [9000, 9001])
 
     def test_a_format_without_a_root_folder_is_not_asked_for(self):
         config = dict(CONFIG, audiobook_root_folder="")

@@ -735,3 +735,17 @@ class BookCatalogMeta(Base):
 
     def __repr__(self):
         return f"<BookCatalogMeta(last_rebuild_at={self.last_rebuild_at})>"
+
+
+class BookRequestTime(Base):
+    """When a Chaptarr book row was last asked for through the Requests page
+    (app/services/book_requests.py). Chaptarr's own `added` is when the row
+    arrived, which for a book an author import brought in unmonitored can be
+    months before anyone asked for it."""
+    __tablename__ = "book_request_times"
+
+    book_id = Column(Integer, primary_key=True)                     # Chaptarr's book row id
+    requested_at = Column(DateTime, nullable=False)                 # naive UTC
+
+    def __repr__(self):
+        return f"<BookRequestTime(book_id={self.book_id})>"
