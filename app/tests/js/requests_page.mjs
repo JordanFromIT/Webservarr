@@ -727,6 +727,32 @@ await run('searches started before the last one answered top up to one page, nev
   } finally { t.release(); }
 });
 
+await run('a double click on Next while the next page is fetched turns one page', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'dune');
+    h.out[0].resolve({ body: { results: filmPage(9, 'P1'), totalResults: 27, totalPages: 3 } });
+    await t.clock.advance(50);
+    const next = t.q('#searchNextBtn');
+    check('Next offered', !t.q('#searchPagination').classList.contains('hidden') && !next.disabled);
+    next.click();
+    next.click();
+    await flush();
+    const pages = t.net.urls('/api/integrations/seerr-search').map((u) => new URL(u, 'https://x').searchParams.get('page'));
+    check('one fetch, for page 2', JSON.stringify(pages) === JSON.stringify(['1', '2']), pages);
+    h.out[1].resolve({ body: { results: filmPage(9, 'P2'), totalResults: 27, totalPages: 3 } });
+    await t.clock.advance(50);
+    check('on page 2', t.q('[data-action="open-search"]').textContent.indexOf('P2 0') !== -1);
+    t.q('#searchPrevBtn').click();
+    t.q('#searchPrevBtn').click();
+    await flush();
+    const after = t.net.urls('/api/integrations/seerr-search').map((u) => new URL(u, 'https://x').searchParams.get('page'));
+    check('Prev the same: one fetch, for page 1', JSON.stringify(after) === JSON.stringify(['1', '2', '1']), after);
+  } finally { t.release(); }
+});
+
 await run('the search bar flies with a transform: its box is in the results slot from the first keystroke', async () => {
   const h = heldSearch();
   const t = visit(h.routes);

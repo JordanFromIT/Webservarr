@@ -1487,7 +1487,14 @@ export async function mount(ctx) {
     $('searchNextBtn').disabled = (_searchDisplayPage >= totalDisplayPages && _currentSearchPage >= _totalSearchPages);
   }
 
+  // A search out (the grid held): a page turn waits for it, so a double
+  // click on Next or Prev cannot run past the page the first click asked for.
+  function searchHeld() {
+    return $('searchResultsGrid').hasAttribute('aria-busy');
+  }
+
   function searchPrevPage() {
+    if (searchHeld()) return;
     if (_searchDisplayPage > 1) {
       _searchDisplayPage--;
       freeSearchHeight();
@@ -1502,6 +1509,7 @@ export async function mount(ctx) {
   }
 
   function searchNextPage() {
+    if (searchHeld()) return;
     var totalDisplayPages = getSearchTotalDisplayPages();
     if (_searchDisplayPage < totalDisplayPages) {
       _searchDisplayPage++;
