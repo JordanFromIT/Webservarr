@@ -36,9 +36,11 @@
  * bookDialog for each book it opens, as the router runs a page: each book has
  * its own state, and every listener, fetch and timer ends with ctx.signal (a
  * write the person made is let finish: books.js sendBooks). In the pop-up
- * ctx also has close() (the not-found state's way out is Close) and
- * onChange(kind), told of a change the page under it shows ('list', 'queue',
- * 'listen'). Markup is built with textContent only.
+ * ctx also has close() (the not-found state's way out is Close),
+ * closeForPlay() (Listen, a resumed Listen or Try a sample pressed: the
+ * pop-up steps aside for the player as it starts) and onChange(kind), told of
+ * a change the page under it shows ('list', 'queue', 'listen'). Markup is
+ * built with textContent only.
  *
  * bookDialog(page) runs the pop-up for a Books page (books.js withBookDialog
  * calls it, with the page's ctx). A click on a book is claimed from the router:
@@ -149,8 +151,10 @@ export async function mount(ctx) {
   const $ = function (id) { return root.querySelector('#' + id); };
   const { coverBox, rememberContinue, rememberRow, sendBooks } = await import(root.getAttribute('data-ws-dep') || './books.js');
   const who = ((ctx.data || {}).user || {}).username || '';
-  // In the pop-up: its Close, and what the page under it is told.
+  // In the pop-up: its Close, its way out when playback starts, and what the
+  // page under it is told.
   const closeView = typeof ctx.close === 'function' ? ctx.close : null;
+  const closeForPlay = typeof ctx.closeForPlay === 'function' ? ctx.closeForPlay : null;
   function told(kind) {
     if (typeof ctx.onChange === 'function') ctx.onChange(kind);
   }
@@ -276,7 +280,11 @@ export async function mount(ctx) {
     watch();
     const st = typeof p.state === 'function' ? p.state() : null;
     if (st && String(st.book) === edition.plex_book_key && !st.error) {
+      // Pause keeps the pop-up open; picking the book up again plays it, so
+      // the pop-up steps aside as for a start.
+      const resuming = !st.playing;
       p.toggle();
+      if (resuming) stepAside();
       return;
     }
     // Where the listener left off. A failure is the player's to show (its
@@ -296,6 +304,17 @@ export async function mount(ctx) {
       syncListen();
     });
     syncListen();
+    // The player has the book (open() was called above, in this press, so
+    // the press still counts as the gesture that lets it play): the pop-up
+    // steps aside. Its closing ends this visit, never the player's start;
+    // what is left of the chain above tells the page itself.
+    stepAside();
+  }
+
+  /** In the pop-up, the player starting closes it, by the same way out as
+      Close (a step back to the page under it). On the full page, nothing. */
+  function stepAside() {
+    if (closeForPlay && !signal.aborted) closeForPlay();
   }
 
   // ---- Samples ----
@@ -364,6 +383,9 @@ export async function mount(ctx) {
       state.sampleFailed = true;
       syncSample();
     });
+    // A sample that cannot play says so in the player's own corner
+    // (features.js), which stays on screen after the pop-up has gone.
+    stepAside();
   }
 
   /** The quiet button under Listen: the first 5 minutes of the picked narrator, nothing saved. */
@@ -1118,6 +1140,7 @@ export function bookDialog(page) {
   let keep = false;         // the router closes every dialog after a claim; not this one
   let leaving = '';         // the address this pop-up asked the router for on closing
   let opener = null;        // the link that opened it (focus goes back to it)
+  let toPlayer = false;     // closed because playback started: focus goes to the player
   let pageTitle = '';
   let hideTimer = 0;
   let listened = false;
@@ -1179,6 +1202,14 @@ export function bookDialog(page) {
     refocus();
   }
 
+  /** Listen or a sample started: the same way out as Close, with the focus
+      going to the player rather than back to the card. */
+  function closeForPlay() {
+    if (!visit) return;
+    toPlayer = true;
+    close();
+  }
+
   /** Closed for a navigation (Back, or the page's own claim): no address change here. */
   function closeForNav() {
     if (!visit) return;
@@ -1188,11 +1219,25 @@ export function bookDialog(page) {
   }
 
   function refocus() {
-    const to = opener && document.contains(opener) ? opener : page.root.querySelector('h1');
+    const forPlay = toPlayer;
+    toPlayer = false;
+    const to = forPlay ? playerControl() || page.root.querySelector('h1')
+      : opener && document.contains(opener) ? opener : page.root.querySelector('h1');
     opener = null;
     if (!to) return;
     if (to.tagName === 'H1' && !to.hasAttribute('tabindex')) to.setAttribute('tabindex', '-1');
     try { to.focus({ preventScroll: true }); } catch (e) { /* nothing to focus */ }
+  }
+
+  /** The player's play/pause on screen now: the top bar's pill on a wide
+      screen, else the bar at the bottom. Null while it shows neither yet. */
+  function playerControl() {
+    const all = document.querySelectorAll('.wsp-pill .wsp-play, .wsp-bar .wsp-play');
+    for (let i = 0; i < all.length; i++) {
+      const b = all[i];
+      if (!b.closest('[hidden], [inert]') && b.getClientRects().length > 0) return b;
+    }
+    return null;
   }
 
   /** The address back to the page's: one step back when the entry before is
@@ -1296,9 +1341,12 @@ export function bookDialog(page) {
         done(name);
       },
       close: close,
+      closeForPlay: closeForPlay,
       onChange: function (kind) {
-        if (kind === 'listen') listened = true;
-        else tell(kind);
+        // Held while the pop-up is open, told as it closes. A start that
+        // settles after the pop-up stepped aside for it is told at once.
+        if (kind === 'listen' && !signal.aborted) listened = true;
+        else if (!page.signal.aborted) tell(kind);
       }
     }).then(function () {
       // On screen (or its skeleton) without a title yet: the view is not

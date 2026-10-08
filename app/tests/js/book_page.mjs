@@ -182,6 +182,39 @@ function fakeShell(doc, clock, net) {
   return WS;
 }
 
+// The player: which book it holds and whether it plays; change listeners as the engine has them.
+// Samples as engine.js boot has them: sample(key), stopSample(), sampleState()
+// and 'sample-change' events (sampleChange() sends one).
+function fakePlayer() {
+  return {
+    opened: [], toggled: 0, listeners: [], st: { book: null, playing: false, loading: false, error: null },
+    sampled: [], stops: 0, sampleListeners: [], ss: null, sampleAnswer: true,
+    open(key, opts) { this.opened.push([key, opts]); return Promise.resolve(); },
+    toggle() { this.toggled += 1; },
+    state() { return this.st; },
+    on(name, fn) {
+      if (name === 'sample-change') {
+        this.sampleListeners.push(fn);
+        return () => { this.sampleListeners = this.sampleListeners.filter((x) => x !== fn); };
+      }
+      this.listeners.push(fn);
+      return () => { this.listeners = this.listeners.filter((x) => x !== fn); };
+    },
+    change(st) { this.st = Object.assign({}, this.st, st); this.listeners.slice().forEach((fn) => fn()); },
+    sample(key) {
+      this.sampled.push(key);
+      this.sampleChange('start', { book: key, title: '', playing: false, loading: true, bookMs: 0, leftMs: 300000 });
+      return Promise.resolve(this.sampleAnswer);
+    },
+    stopSample() { this.stops += 1; const had = !!this.ss; if (had) this.sampleChange('stop', null); return had; },
+    sampleState() { return this.ss; },
+    sampleChange(reason, ss, error) {
+      this.ss = ss;
+      this.sampleListeners.slice().forEach((fn) => fn({ reason, sample: ss, error: error || null }));
+    }
+  };
+}
+
 // ---- One window, one visit ----
 
 const NAV = /<div id="wsPage"[\s\S]*<\/main>/;
@@ -222,36 +255,7 @@ function visit(kind, o = {}) {
       arrivedFromFailedConnect() { kav.failedChecks += 1; return false; }
     };
   }
-  // The player: which book it holds and whether it plays; change listeners as the engine has them.
-  // Samples as engine.js boot has them: sample(key), stopSample(), sampleState()
-  // and 'sample-change' events (sampleChange() sends one).
-  const player = {
-    opened: [], toggled: 0, listeners: [], st: { book: null, playing: false, loading: false, error: null },
-    sampled: [], stops: 0, sampleListeners: [], ss: null, sampleAnswer: true,
-    open(key, opts) { this.opened.push([key, opts]); return Promise.resolve(); },
-    toggle() { this.toggled += 1; },
-    state() { return this.st; },
-    on(name, fn) {
-      if (name === 'sample-change') {
-        this.sampleListeners.push(fn);
-        return () => { this.sampleListeners = this.sampleListeners.filter((x) => x !== fn); };
-      }
-      this.listeners.push(fn);
-      return () => { this.listeners = this.listeners.filter((x) => x !== fn); };
-    },
-    change(st) { this.st = Object.assign({}, this.st, st); this.listeners.slice().forEach((fn) => fn()); },
-    sample(key) {
-      this.sampled.push(key);
-      this.sampleChange('start', { book: key, title: '', playing: false, loading: true, bookMs: 0, leftMs: 300000 });
-      return Promise.resolve(this.sampleAnswer);
-    },
-    stopSample() { this.stops += 1; const had = !!this.ss; if (had) this.sampleChange('stop', null); return had; },
-    sampleState() { return this.ss; },
-    sampleChange(reason, ss, error) {
-      this.ss = ss;
-      this.sampleListeners.slice().forEach((fn) => fn({ reason, sample: ss, error: error || null }));
-    }
-  };
+  const player = fakePlayer();
   if (o.player !== false) win.WS.player = player;
   if (o.routes) o.routes(net);
   const ctx = {
@@ -1604,6 +1608,8 @@ function popupPage(o = {}) {
   win.WSUI = UI;
   set('WSUI', UI);
   win.fetch = (u, init) => net.fetch(u, init);
+  const player = fakePlayer();
+  WS.player = player;
   const changed = [];
   let claim = null;
   let claims = null;
@@ -1617,7 +1623,7 @@ function popupPage(o = {}) {
   win.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a[href]')) e.preventDefault(); });
   WS.arriveReset();
   return {
-    win, doc, clock, net, ctl, WS, UI, stack, modals, hist, navs, changed, ctx,
+    win, doc, clock, net, ctl, WS, UI, stack, modals, hist, navs, changed, ctx, player,
     get claim() { return claim; }, get claims() { return claims; },
     entry(i) { st = { ws: 1, i }; },
     q: (sel) => doc.querySelector(sel),
@@ -1756,6 +1762,100 @@ await popupRun('the pop-up: not found says so, and its button closes', { answer:
   btn.click();
   await flush();
   check('it closes as Close does', t.hist.backs === 1 && t.stack.length === 0, t.hist);
+});
+
+// Playback starting in the pop-up closes it, by the same step back as Close,
+// and never at the player's expense: open() is called in the press, before the
+// pop-up goes, and its settling still reaches the page.
+async function openPopup(t) {
+  booksModule.withBookDialog(t.ctx, null, (k) => t.changed.push(k));
+  t.q('#card').click();
+  const p = t.claim(new URL('https://ws.test/books/2'), { pop: false });
+  t.UI.closeDialogs();
+  t.entry(4);                      // the router pushed the book's entry after the page's (3)
+  await p;
+  await t.clock.advance(1600);
+}
+
+await popupRun('the pop-up: Listen starts the player, then the pop-up steps aside by one step back', {}, async (t) => {
+  const slow = deferred();
+  t.player.open = function (key, opts) { this.opened.push([key, opts]); return slow.promise; };
+  await openPopup(t);
+  check('open, with Listen', t.open() && !!t.q('#bookDialog [data-action="listen"]'));
+  t.q('#bookDialog [data-action="listen"]').click();
+  check('the player was asked for the book, playing, in the press', t.player.opened.length === 1 && t.player.opened[0][0] === '100:2' && t.player.opened[0][1].autoplay === true, t.player.opened);
+  check('the pop-up is off the modal stack at once', t.stack.length === 0);
+  await flush();
+  check('one step back to the page\'s own entry, as Close does (no new entry for Back to find)', t.hist.backs === 1 && t.navs.length === 0, t.hist);
+  check('which the pop-up takes as its own', t.claim(new URL('https://ws.test/books?author=J.K.%20Rowling'), { pop: true }) === true);
+  check('the page\'s title is back', t.doc.title === 'WebServarr - Books');
+  check('focus is on the page\'s heading (the player shows nothing yet), not in the closed pop-up', t.doc.activeElement === t.q('h1'));
+  check('the page is not told before the player has the book', t.changed.indexOf('listen') === -1, t.changed);
+  slow.resolve();
+  await flush();
+  check('the start settling after the pop-up has gone is still told to the page', t.changed.indexOf('listen') !== -1, t.changed);
+  check('the player was asked once only', t.player.opened.length === 1);
+  await t.clock.advance(200);
+  check('gone after its fade', !t.open());
+});
+
+await popupRun('the pop-up: focus goes to the player\'s play button when it is on screen', {}, async (t) => {
+  const bar = t.doc.createElement('section');
+  bar.className = 'wsp-bar';
+  const play = t.doc.createElement('button');
+  play.className = 'wsp-play wsp-play-sm';
+  play.getClientRects = () => [{ width: 40, height: 40 }];
+  bar.appendChild(play);
+  const hiddenPill = t.doc.createElement('div');
+  hiddenPill.className = 'wsp-pill';
+  hiddenPill.hidden = true;
+  const pillPlay = t.doc.createElement('button');
+  pillPlay.className = 'wsp-play wsp-pill-play';
+  pillPlay.getClientRects = () => [{ width: 40, height: 40 }];
+  hiddenPill.appendChild(pillPlay);
+  t.doc.body.appendChild(hiddenPill);
+  t.doc.body.appendChild(bar);
+  await openPopup(t);
+  t.q('#bookDialog [data-action="listen"]').click();
+  await flush();
+  check('the bar\'s play button has the focus (not the hidden pill\'s)', t.doc.activeElement === play);
+});
+
+await popupRun('the pop-up: Pause leaves it open; picking the book up again closes it', {}, async (t) => {
+  await openPopup(t);
+  t.player.change({ book: '100:2', playing: true });
+  t.q('#bookDialog [data-action="listen"]').click();
+  await flush();
+  check('Pause toggled the player', t.player.toggled === 1);
+  check('and the pop-up stays', t.stack.length === 1 && t.hist.backs === 0);
+  t.player.change({ playing: false });
+  t.q('#bookDialog [data-action="listen"]').click();
+  await flush();
+  check('Listen again toggles the player back on', t.player.toggled === 2 && t.player.opened.length === 0);
+  check('and steps aside', t.stack.length === 0 && t.hist.backs === 1, t.hist);
+});
+
+await popupRun('the pop-up: Try a sample closes it; Stop sample does not', {}, async (t) => {
+  await openPopup(t);
+  t.player.ss = { book: '100:2', playing: true, leftMs: 200000 };
+  t.q('#bookDialog [data-action="sample"]').click();
+  await flush();
+  check('Stop sample stopped it', t.player.stops === 1);
+  check('and the pop-up stays', t.stack.length === 1 && t.hist.backs === 0);
+  t.player.ss = null;
+  t.q('#bookDialog [data-action="sample"]').click();
+  await flush();
+  check('the sample was asked for', t.player.sampled.length === 1 && t.player.sampled[0] === '100:2', t.player.sampled);
+  check('and the pop-up stepped aside', t.stack.length === 0 && t.hist.backs === 1, t.hist);
+});
+
+await popupRun('the pop-up: a full load of /books/<id> stepping aside for Listen goes to Books in place', { url: 'https://ws.test/books/2', loaded: true, i: 0 }, async (t) => {
+  booksModule.withBookDialog(t.ctx, null, null);
+  await t.clock.advance(1600);
+  t.q('#bookDialog [data-action="listen"]').click();
+  await flush();
+  check('the player has the book', t.player.opened.length === 1);
+  check('the address is replaced with the Books page\'s, never a step off the site', t.hist.backs === 0 && t.navs.length === 1 && t.navs[0][1].replace === true, t.navs);
 });
 
 // The leak checker (debug-leaks.js) watching the pop-up as the soak does: the
