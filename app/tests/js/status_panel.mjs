@@ -551,15 +551,15 @@ function onward(list, newest = {}) {
     return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
   };
   const frost = rule('.ws-frost');
-  check('the shared frost is the sign-in card\'s glass: 10% secondary over a 4px blur, an accent edge',
-    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.10\)/.test(css) && /--ws-frost-blur: blur\(4px\)/.test(css) &&
+  check('the shared frost is the search bar\'s first glass: 25% secondary over a 4px blur, an accent edge',
+    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.25\)/.test(css) && /--ws-frost-blur: blur\(4px\)/.test(css) &&
     /--ws-frost-edge: rgb\(var\(--color-accent\) \/ \.2\)/.test(css) &&
     /-webkit-backdrop-filter: var\(--ws-frost-blur\)/.test(frost) && /\bbackdrop-filter: var\(--ws-frost-blur\)/.test(frost) &&
     /rgb\(var\(--color-background\) \/ var\(--ws-frost-floor\)\)/.test(frost), frost);
   // The floor keeps the panel's words at 4.5:1 over a white poster; a
   // sheet's scrim has dimmed the page by .7 already (app/tests/test_frost.py).
-  check('every frosted surface sits on a .73 floor', /--ws-frost-floor: \.73;/.test(css));
-  check('a frosted sheet on a .1 floor over its scrim', /--ws-frost-floor-on-scrim: \.1;/.test(css) &&
+  check('every frosted surface sits on a .76 floor', /--ws-frost-floor: \.76;/.test(css));
+  check('a frosted sheet on a .2 floor over its scrim', /--ws-frost-floor-on-scrim: \.2;/.test(css) &&
     /:is\(\.ws-sheet-panel, \.ws-dialog-box, \[data-dialog-box\]\)\.ws-frost \{ --ws-frost-floor: var\(--ws-frost-floor-on-scrim\); \}/.test(css));
   check('popovers, menus, dialogs and sheets share one themed scrollbar',
     /:is\(\.ws-pop, \.ws-dialog-box, \[data-dialog-box\], \.ws-sheet-panel, \.ws-frost\) \* \{\s*scrollbar-width: thin;\s*scrollbar-color: rgb\(var\(--color-accent\) \/ \.5\) transparent;/.test(css) &&

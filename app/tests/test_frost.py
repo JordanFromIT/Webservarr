@@ -1,9 +1,11 @@
 """
 One frosted surface and one popover motion for everything that floats.
 
-The frost (theme.css .ws-frost and its --ws-frost-* tokens) is the sign-in
-card's glass, measured from login.html: the secondary colour at 10% over a
-4px blur, an accent edge at 20% and Tailwind's shadow-2xl. Every menu,
+The frost (theme.css .ws-frost and its --ws-frost-* tokens) is the Requests
+search bar's first glass, the blue the owner asked to have back: the
+secondary colour at 25% (bg-cornflower-ocean/25 before eabcaf9) over the
+blur setting (4px by default), an accent edge at 20% and Tailwind's
+shadow-2xl. The sign-in card wears the same tokens. Every menu,
 popover, panel, sheet, dialog and toast wears it, and none carries a recipe of
 its own. A floor of the page colour under the tint keeps text readable over a
 white poster (the sign-in card gets the same from its page's dark overlay);
@@ -122,11 +124,12 @@ def surface_classes(name: str) -> list:
 
 
 class OneFrost(unittest.TestCase):
-    def test_the_tokens_are_the_sign_in_cards_glass(self):
+    def test_the_tokens_are_the_search_bars_first_glass(self):
         # The card wears the tokens themselves, so its blur follows the setting.
         card = re.search(r"\.login-glass-card \{([^}]*)\}", LOGIN).group(1)
         self.assertIn("background: var(--ws-frost-tint);", card)
-        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .10)")
+        # The bar's first tint: the secondary colour at 25%, so it reads blue.
+        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .25)")
         self.assertIn("-webkit-backdrop-filter: var(--ws-frost-blur);", card)
         self.assertIn("\n      backdrop-filter: var(--ws-frost-blur);", card)
         self.assertEqual(token("--ws-frost-blur"), "blur(4px)")
@@ -201,6 +204,15 @@ class FrostContrast(unittest.TestCase):
         bg = frosted(WHITE, floor)
         self.assertLess(ratio(over(default_rgb("text"), 0.7, bg), bg), 4.5)
 
+    def test_on_the_page_colour_a_light_palette_reads_too(self):
+        # The bluer tint darkens a light theme's panes: over its own page
+        # colour, 70% text still keeps 4.5:1 (a white page, navy text, the
+        # shipped secondary), as it does on the shipped dark palette.
+        tint = alpha_of(token("--ws-frost-tint"))
+        for page, text in (((255, 255, 255), (15, 40, 70)), (default_rgb("background"), default_rgb("text"))):
+            bg = over(default_rgb("secondary"), tint, page)
+            self.assertGreaterEqual(ratio(over(text, 0.7, bg), bg), 4.5, (page, text))
+
     def test_the_bare_glass_would_not(self):
         # Why the floor exists: the sign-in card's glass alone over white.
         bg = frosted(WHITE, 0)
@@ -214,7 +226,7 @@ class FrostContrast(unittest.TestCase):
             on = float(token("--ws-frost-floor-on-scrim"))
             behind = over(default_rgb("background"), scrim, WHITE)
             bg = frosted(behind, on)
-            self.assertGreaterEqual(1 - (1 - scrim) * (1 - on), float(token("--ws-frost-floor")))
+            self.assertGreaterEqual(round(1 - (1 - scrim) * (1 - on), 6), float(token("--ws-frost-floor")))
             self.assertGreaterEqual(ratio(over(default_rgb("text"), 0.7, bg), bg), 4.5)
 
     def test_frosted_text_is_never_dimmer_than_70_percent(self):

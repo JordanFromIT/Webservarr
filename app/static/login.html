@@ -12,14 +12,13 @@
     .cinematic-overlay {
       background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);
     }
-    /* Light glass over the rotating artwork. The hues are the search bar's
-       (#searchInput on the requests page: the secondary tint and the
-       steel-blue/20 border), but both the tint and the blur are much lighter
-       than the bar's: the owner asked for the card to be clearly see-through,
-       so the art behind it stays recognisable rather than frosted away. No
-       dark underlay: that was judged too solid. The values are the site's
-       frost tokens (theme.css), so the blur follows Settings > Appearance
-       with every other frosted surface. */
+    /* Light glass over the rotating artwork: the site's frost tokens
+       (theme.css), the Requests search bar's blue tint and the accent edge,
+       with the blur from Settings > Appearance like every other frosted
+       surface. The owner asked for the card to be clearly see-through, so
+       the art behind it stays recognisable rather than frosted away: no
+       dark underlay (that was judged too solid), only the page's own
+       overlay under it. */
     .login-glass-card {
       background: var(--ws-frost-tint);
       -webkit-backdrop-filter: var(--ws-frost-blur);

@@ -1070,11 +1070,14 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
 /* ---- Frosted surfaces ----
  *
  * One recipe for everything that floats over the page (menus, popovers,
- * panels, sheets, dialogs, toasts, the Requests search bar), and it is the
- * sign-in card's glass (login.html .login-glass-card): the secondary colour
- * at 10% over a 4px blur of what is behind, an edge in the accent at 20%
- * and the card's deep shadow (Tailwind's shadow-2xl). The card wears these
- * tokens too.
+ * panels, sheets, dialogs, toasts, the Requests search bar, the sign-in
+ * card): the secondary colour at 25% over a blur of what is behind, an edge
+ * in the accent at 20% and a deep shadow (Tailwind's shadow-2xl). The 25% is
+ * the Requests search bar's first glass (bg-cornflower-ocean/25), the blue
+ * the owner asked to have back everywhere; at 10% the panes read as grey.
+ * It is the operator's secondary colour, so another palette's frost takes
+ * that palette's hue. The sign-in card (login.html .login-glass-card) wears
+ * these tokens too.
  *
  * The blur is a setting (Settings > Appearance, theme.frost_blur): the page
  * renderer writes --ws-frost-blur into #ws-theme, which comes before this
@@ -1084,23 +1087,23 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  * The floor. The sign-in card sits on that page's dark overlay (the page
  * colour at .4 to .9), so the art behind it is always dimmed first; menus
  * float straight over posters, and the bare glass over a white poster is
- * 1.1:1 for the text. So every frosted surface has a floor, a dim of the page
- * colour under the tint: .73 is the least that keeps text at 70% of the text
+ * 1.2:1 for the text. So every frosted surface has a floor, a dim of the page
+ * colour under the tint: .76 is the least that keeps text at 70% of the text
  * colour (the dimmest any of them uses) at 4.5:1 over white, the brightest
- * thing that can be behind it. Over the page colour the floor changes
- * nothing, so there every surface is exactly the sign-in card's glass.
+ * thing that can be behind it, whatever the blur. Over the page colour the
+ * floor changes nothing, so there every surface is the bar's first glass.
  * A sheet or a dialog sits on a scrim that has dimmed the page by .7
- * already, so it needs only .1 more to come level: the same depth, not a
+ * already, so it needs only .2 more to come level: the same depth, not a
  * second recipe. A frosted sheet's head paints nothing of its own, so it is
  * one pane with the rest. After .ws-sheet-panel and .ws-sheet-head, so a
  * frosted sheet takes the frost.
  */
 :root {
-  --ws-frost-tint: rgb(var(--color-secondary) / .10);
+  --ws-frost-tint: rgb(var(--color-secondary) / .25);
   --ws-frost-edge: rgb(var(--color-accent) / .2);
   --ws-frost-shadow: 0 25px 50px -12px rgb(0 0 0 / .25);
-  --ws-frost-floor: .73;
-  --ws-frost-floor-on-scrim: .1;
+  --ws-frost-floor: .76;
+  --ws-frost-floor-on-scrim: .2;
 }
 .ws-frost {
   background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
