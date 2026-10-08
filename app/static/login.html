@@ -17,12 +17,14 @@
        steel-blue/20 border), but both the tint and the blur are much lighter
        than the bar's: the owner asked for the card to be clearly see-through,
        so the art behind it stays recognisable rather than frosted away. No
-       dark underlay: that was judged too solid. */
+       dark underlay: that was judged too solid. The values are the site's
+       frost tokens (theme.css), so the blur follows Settings > Appearance
+       with every other frosted surface. */
     .login-glass-card {
-      background: rgb(var(--color-secondary) / 0.10);
-      -webkit-backdrop-filter: blur(4px);
-      backdrop-filter: blur(4px);
-      border: 1px solid rgb(var(--color-accent) / 0.2);
+      background: var(--ws-frost-tint);
+      -webkit-backdrop-filter: var(--ws-frost-blur);
+      backdrop-filter: var(--ws-frost-blur);
+      border: 1px solid var(--ws-frost-edge);
     }
     /* Small text on the glass. The card is this translucent on purpose, so
        over bright or busy artwork it is the text that has to carry itself:

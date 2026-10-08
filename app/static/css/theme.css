@@ -66,6 +66,11 @@
   --hex-gauge-net: #F97316;
 
   --font-display: "Spline Sans", sans-serif;
+
+  /* How much every frosted surface blurs what is behind it (Settings >
+     Appearance > Frosted glass); the rest of the frost is under "Frosted
+     surfaces" below. 4px is the sign-in card's original glass. */
+  --ws-frost-blur: blur(4px);
 }
 
 /* ---- Base ---- */
@@ -1068,7 +1073,13 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  * panels, sheets, dialogs, toasts, the Requests search bar), and it is the
  * sign-in card's glass (login.html .login-glass-card): the secondary colour
  * at 10% over a 4px blur of what is behind, an edge in the accent at 20%
- * and the card's deep shadow (Tailwind's shadow-2xl).
+ * and the card's deep shadow (Tailwind's shadow-2xl). The card wears these
+ * tokens too.
+ *
+ * The blur is a setting (Settings > Appearance, theme.frost_blur): the page
+ * renderer writes --ws-frost-blur into #ws-theme, which comes before this
+ * file, so its default (4px) is with the colours' in :where(:root) at the
+ * top, and loses to it.
  *
  * The floor. The sign-in card sits on that page's dark overlay (the page
  * colour at .4 to .9), so the art behind it is always dimmed first; menus
@@ -1086,7 +1097,6 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  */
 :root {
   --ws-frost-tint: rgb(var(--color-secondary) / .10);
-  --ws-frost-blur: blur(4px);
   --ws-frost-edge: rgb(var(--color-accent) / .2);
   --ws-frost-shadow: 0 25px 50px -12px rgb(0 0 0 / .25);
   --ws-frost-floor: .73;

@@ -59,6 +59,13 @@
         data.gauges_colourful === true ? 'var(--color-gauge-' + g + ')' : 'var(--color-accent)');
     });
 
+    // Every frosted surface's blur (--ws-frost-blur), as the server's
+    // #ws-theme writes it: a whole number of px from 0 to 32.
+    var blur = data.frost_blur;
+    if (typeof blur === 'number' && blur % 1 === 0 && blur >= 0 && blur <= 32) {
+      root.style.setProperty('--ws-frost-blur', 'blur(' + blur + 'px)');
+    }
+
     // Favicon follows the configured logo, so a rebranded install is branded
     // in the browser tab too. The pages ship a static icon link as well.
     if (data.logo_url) {

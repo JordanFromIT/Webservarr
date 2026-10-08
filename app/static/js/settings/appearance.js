@@ -1,6 +1,11 @@
 /**
  * Settings > Appearance: colours (with a live preview), the top bar's meter colours,
- * status colours, font, custom CSS.
+ * status colours, font, the frosted glass's blur, custom CSS.
+ *
+ * The blur slider restyles every frosted surface on the page as it moves
+ * (--ws-frost-blur on <html>, as theme-loader.js sets it) and shows it on a
+ * sample pane over a row of posters; Discard and leaving put the saved
+ * blur back as they do the colours.
  *
  * Contrast guard: as colours change, the pairs the site leans on (PAIRS) are
  * measured with WCAG 2's formula and any that fall short get a plain warning
@@ -67,10 +72,12 @@
     'Raleway', 'Source Sans 3', 'Ubuntu', 'Outfit', 'Space Grotesk', 'DM Sans', 'Manrope', 'Plus Jakarta Sans',
     'Sora', 'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow', 'Red Hat Display', 'Rubik',
     'Nunito Sans', 'Cabin', 'Karla', 'Quicksand', 'Exo 2'];
+  // How much every frosted surface blurs what is behind it, in px (--ws-frost-blur).
+  var BLUR = 'theme.frost_blur';
   var KEYS = COLORS.map(function (c) { return c[0]; })
     .concat(MEDIA.map(function (m) { return m[0]; }), [NEW_FLAG[0]], [GAUGES_ON],
       GAUGES.map(function (g) { return g[0]; }), STATUS.map(function (x) { return x[0]; }),
-      ['theme.font', 'theme.custom_css']);
+      ['theme.font', BLUR, 'theme.custom_css']);
   var OTHER = '__other__';
   var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
 
@@ -334,6 +341,93 @@
     return wrap;
   }
 
+  // ---- Frosted glass ----
+
+  // The blur the site paints for a value, by the server's rule
+  // (branding._registry_int): a whole number, held inside the registry's
+  // bounds; anything else is the default.
+  function blurPx(v) {
+    var m = WSSettings.metaFor(BLUR) || {};
+    var lo = m.min != null ? Number(m.min) : 0, hi = m.max != null ? Number(m.max) : 32;
+    var def = parseInt(m.default, 10);
+    if (isNaN(def)) def = 4;
+    var s = String(v == null ? '' : v).trim();
+    if (!/^[+-]?\d+$/.test(s)) return def;
+    return Math.max(lo, Math.min(hi, parseInt(s, 10)));
+  }
+
+  function blurControl(api) {
+    var m = WSSettings.metaFor(BLUR) || {};
+    var wrap = el('div', 'min-w-0 ' + cls.fieldWidth);
+    var range = el('input', 'wsp-range');
+    range.type = 'range';
+    range.id = 'ws-f-theme-frost-blur';
+    range.min = String(m.min != null ? m.min : 0);
+    range.max = String(m.max != null ? m.max : 32);
+    range.step = '1';
+    var top = el('div', 'flex items-baseline justify-between gap-4');
+    var label = el('label', cls.label, 'Blur');
+    label.htmlFor = range.id;
+    // The number for sighted readers; the slider says it itself (aria-valuetext).
+    var shown = el('span', 'text-[13px] font-semibold text-frosted-blue tabular-nums');
+    shown.setAttribute('aria-hidden', 'true');
+    top.appendChild(label);
+    top.appendChild(shown);
+    var help = el('p', cls.help, '0 px is clear glass. The original is 4 px.');
+    help.id = range.id + '-help';
+    var err = el('p', cls.error + ' hidden');
+    err.id = range.id + '-error';
+    err.setAttribute('role', 'alert');
+    range.setAttribute('aria-describedby', help.id + ' ' + err.id);
+    wrap.appendChild(top);
+    wrap.appendChild(range);
+    wrap.appendChild(help);
+    wrap.appendChild(err);
+
+    function paint(v) {
+      var px = blurPx(v);
+      var lo = Number(range.min), hi = Number(range.max);
+      range.value = String(px);
+      // The player's slider fills to --wsp-p (theme.css .wsp-range).
+      range.style.setProperty('--wsp-p', (hi > lo ? (px - lo) / (hi - lo) * 100 : 0) + '%');
+      range.setAttribute('aria-valuetext', px === 0 ? 'No blur' : px + ' pixels');
+      shown.textContent = px + ' px';
+      root.style.setProperty('--ws-frost-blur', 'blur(' + px + 'px)');
+    }
+    range.addEventListener('input', function () { api.set(BLUR, range.value); }, { signal: signal });
+    api.track(BLUR, { get: function () { return range.value; }, set: paint, el: range, errorEl: err });
+    return wrap;
+  }
+
+  // A frosted pane (the real .ws-frost) over a row of posters in the theme's
+  // colours, so the blur shows on the edges behind it.
+  function blurSample() {
+    var stage = el('div', 'relative h-44 overflow-hidden rounded-2xl border border-frosted-blue/10 ' +
+      'bg-frosted-blue/[0.04] ' + cls.fieldWidth);
+    stage.setAttribute('role', 'group');
+    stage.setAttribute('aria-label', 'Blur preview');
+    var behind = el('div', 'absolute inset-0 p-4');
+    behind.setAttribute('aria-hidden', 'true');
+    behind.appendChild(el('p', 'text-[20px] font-bold tracking-tight text-frosted-blue whitespace-nowrap',
+      'Tonight’s picks'));
+    var row = el('div', 'mt-3 flex gap-3');
+    ['bg-primary', 'bg-media-movie', 'bg-cornflower-ocean', 'bg-media-tv', 'bg-steel-blue', 'bg-media-book',
+      'bg-primary', 'bg-media-movie'].forEach(function (fill) {
+      var poster = el('div', fill + ' relative w-16 h-24 shrink-0 rounded-lg overflow-hidden');
+      poster.appendChild(el('span', 'absolute inset-x-2 bottom-2 h-1.5 rounded-full bg-background-dark/60'));
+      poster.appendChild(el('span', 'absolute left-2 right-5 bottom-5 h-1.5 rounded-full bg-background-dark/60'));
+      row.appendChild(poster);
+    });
+    behind.appendChild(row);
+    stage.appendChild(behind);
+    var pane = el('div', 'ws-frost absolute top-8 bottom-4 right-4 left-[38%] rounded-xl border p-4 ' +
+      'flex flex-col justify-center');
+    pane.appendChild(el('p', 'text-[15px] font-semibold text-frosted-blue', 'Menus and pop-ups look like this.'));
+    pane.appendChild(el('p', 'text-[13px] text-frosted-blue/80 mt-1', 'What’s behind shows through, blurred.'));
+    stage.appendChild(pane);
+    return stage;
+  }
+
   // ---- Preview card ----
 
   function previewCard() {
@@ -478,6 +572,12 @@
       type.body.appendChild(fontControl(api));
       form.appendChild(type.root);
 
+      var glass = WSSettings.card('Frosted glass',
+        'Menus, pop-ups, dialogs and the sign-in card are frosted glass. Choose how much they blur what is behind them.');
+      glass.body.appendChild(blurControl(api));
+      glass.body.appendChild(blurSample());
+      form.appendChild(glass.root);
+
       var adv = el('details', 'mb-12 group');
       if (api.get('theme.custom_css')) adv.open = true;       // CSS in use is never tucked away
       var summary = el('summary', 'cursor-pointer list-none [&::-webkit-details-marker]:hidden inline-flex ' +
@@ -499,7 +599,7 @@
       reset.addEventListener('click', function () {
         WSSettings.confirm({
           title: 'Reset appearance?',
-          body: 'Colours, font and custom CSS go back to the originals. You can review the changes; nothing is saved until you press Save.',
+          body: 'Colours, font, blur and custom CSS go back to the originals. You can review the changes; nothing is saved until you press Save.',
           confirmLabel: 'Reset', cancelLabel: 'Cancel'
         }).then(function (ok) { if (ok) api.stageDefaults(KEYS); });
       }, { signal: signal });

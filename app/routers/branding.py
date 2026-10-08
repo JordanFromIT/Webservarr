@@ -180,6 +180,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # from it, and the Appearance skeleton shows the gauge pickers by it.
         "gauges_colourful": get("theme.gauges_colourful") == "true",
         "font": safe_font(get("theme.font")),
+        # The frosted surfaces' blur in px, inside the registry's bounds; the
+        # page renderer and theme-loader.js write it as --ws-frost-blur.
+        "frost_blur": _registry_int("theme.frost_blur", get("theme.frost_blur")),
         "custom_css": get("theme.custom_css"),
         "features": {
             "show_simple_auth": get("features.show_simple_auth") == "true",

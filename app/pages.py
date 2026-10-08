@@ -145,7 +145,21 @@ def theme_css(branding: dict) -> str:
     for g in GAUGE_IDS:
         decls.append(f"--ws-gauge-{g}:var(--color-{'gauge-' + g if colourful else 'accent'})")
     decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')
+    # Every frosted surface's blur (theme.css .ws-frost and the sign-in card).
+    decls.append(f"--ws-frost-blur:blur({frost_blur(branding)}px)")
     return ":root{" + ";".join(decls) + "}"
+
+
+_FROST = _REGISTRY["theme.frost_blur"]
+
+
+def frost_blur(branding: dict) -> int:
+    """The frosted surfaces' blur in px: the payload's whole number inside the
+    registry's bounds, else the registry default (the sign-in card's 4)."""
+    v = branding.get("frost_blur")
+    if isinstance(v, bool) or not isinstance(v, int):
+        return int(_FROST.default)
+    return max(_FROST.min, min(_FROST.max, v))
 
 
 def custom_css_style(branding: dict) -> str:

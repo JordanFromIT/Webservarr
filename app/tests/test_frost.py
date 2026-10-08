@@ -123,13 +123,16 @@ def surface_classes(name: str) -> list:
 
 class OneFrost(unittest.TestCase):
     def test_the_tokens_are_the_sign_in_cards_glass(self):
+        # The card wears the tokens themselves, so its blur follows the setting.
         card = re.search(r"\.login-glass-card \{([^}]*)\}", LOGIN).group(1)
-        self.assertIn("background: rgb(var(--color-secondary) / 0.10);", card)
+        self.assertIn("background: var(--ws-frost-tint);", card)
         self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .10)")
-        self.assertIn("backdrop-filter: blur(4px);", card)
+        self.assertIn("-webkit-backdrop-filter: var(--ws-frost-blur);", card)
+        self.assertIn("\n      backdrop-filter: var(--ws-frost-blur);", card)
         self.assertEqual(token("--ws-frost-blur"), "blur(4px)")
-        self.assertIn("border: 1px solid rgb(var(--color-accent) / 0.2);", card)
+        self.assertIn("border: 1px solid var(--ws-frost-edge);", card)
         self.assertEqual(token("--ws-frost-edge"), "rgb(var(--color-accent) / .2)")
+        self.assertNotRegex(card, r"blur\(\d")
         # The card's shadow is Tailwind's shadow-2xl (its class in login.html).
         self.assertRegex(LOGIN, r'class="[^"]*\blogin-glass-card\b[^"]*\bshadow-2xl\b')
         self.assertIn(".shadow-2xl{--tw-shadow:0 25px 50px -12px rgba(0,0,0,.25)", APP_CSS)
