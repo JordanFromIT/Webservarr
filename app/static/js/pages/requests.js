@@ -429,8 +429,8 @@ const BOOK_STATES = {
   requested:   { label: 'Requested',   tone: 'wait' }
 };
 const BOOK_FORMATS = [
-  { key: 'ebook', name: 'Ebook' },
-  { key: 'audiobook', name: 'Audiobook' }
+  { key: 'ebook', name: 'Ebook', mediaType: 'book' },
+  { key: 'audiobook', name: 'Audiobook', mediaType: 'audiobook' }
 ];
 // How far along a format is, so the block names the one furthest from here.
 // Stuck is furthest of all: it is the one that needs looking at.
@@ -470,20 +470,20 @@ function bookRequestable(states) {
 }
 
 // The status block's state and words. Both formats in one state: "Book" and
-// that state. Otherwise the format furthest from here is named, since that is
-// the one still being waited for ("Audiobook Searching").
+// that state. Otherwise the format furthest from here, since that is the one
+// still being waited for ("Audiobook Searching"); `format` is that format.
 function bookSummary(states) {
   var known = knownFormats(states);
-  if (!known.length) return { state: 'requested', label: 'Book ' + BOOK_STATES.requested.label };
+  if (!known.length) return { state: 'requested', label: 'Book ' + BOOK_STATES.requested.label, format: null };
   var first = states[known[0].key];
   var same = known.length === BOOK_FORMATS.length &&
     known.every(function (f) { return states[f.key] === first; });
-  if (same) return { state: first, label: 'Book ' + bookStateWords(first).label };
+  if (same) return { state: first, label: 'Book ' + bookStateWords(first).label, format: null };
   var behind = known.filter(function (f) { return states[f.key] !== 'available'; });
   var pick = (behind.length ? behind : known).slice().sort(function (a, b) {
     return (BOOK_PROGRESS[states[a.key]] || 0) - (BOOK_PROGRESS[states[b.key]] || 0);
   })[0];
-  return { state: states[pick.key], label: pick.name + ' ' + bookStateWords(states[pick.key]).label };
+  return { state: states[pick.key], label: pick.name + ' ' + bookStateWords(states[pick.key]).label, format: pick };
 }
 
 // Each format's own word, when the block cannot say it alone: the two
@@ -502,15 +502,22 @@ function bookDetail(states) {
 }
 
 // The book's one status block, the same rectangle as its Request button, so
-// a card or detail keeps its shape when one turns into the other. The
-// per-format line rides in its title (the detail shows it as a line).
+// a card or detail keeps its shape when one turns into the other. A format
+// named on it shows as its icon (the site's headphones or book), with the
+// name for a screen reader: "Audiobook Searching" in words ran past a phone
+// card. The per-format line rides in its title (the detail shows it as a
+// line).
 function bookStatusBlock(states) {
   var s = bookSummary(states);
   var tone = STATUS_TONE_CLASSES[bookStateWords(s.state).tone] || STATUS_TONE_CLASSES.wait;
   var detail = bookDetail(states);
+  var words = s.format
+    ? '<span class="material-symbols-outlined shrink-0 text-[16px] leading-none" aria-hidden="true">' + mediaTypeIcon(s.format.mediaType) + '</span>' +
+      '<span class="min-w-0 truncate"><span class="sr-only">' + s.format.name + ' </span>' + escapeHtml(bookStateWords(s.state).label) + '</span>'
+    : '<span class="min-w-0 truncate">' + escapeHtml(s.label) + '</span>';
   return '<div data-book-state="' + escapeHtml(s.state) + '"' + (detail ? ' title="' + escapeHtml(detail) + '"' : '') +
-    ' class="w-full py-2 px-1 rounded-btn border text-center text-label font-semibold truncate ' +
-    tone.bg + ' ' + tone.text + ' ' + tone.border + '">' + escapeHtml(s.label) + '</div>';
+    ' class="w-full py-2 px-1 rounded-btn border flex items-center justify-center gap-1 text-label font-semibold ' +
+    tone.bg + ' ' + tone.text + ' ' + tone.border + '">' + words + '</div>';
 }
 
 /** Compact pill, for request cards and the detail modal: the one chip. */

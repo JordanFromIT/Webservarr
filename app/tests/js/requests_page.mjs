@@ -336,6 +336,8 @@ await run('book search: each card has one action, and says where the book stands
     const state = (i) => { const el = block(i); return el ? el.getAttribute('data-book-state') + ':' + el.textContent.trim() : null; };
     check('ebook here, audiobook searching: the one still coming is named', state(0) === 'searching:Audiobook Searching', state(0));
     check('...and each format\'s word is in its title', block(0).getAttribute('title') === 'Ebook in library, audiobook searching', block(0).getAttribute('title'));
+    check('...the format named by its icon on screen, by its name for a screen reader',
+      !!block(0).querySelector('.material-symbols-outlined[aria-hidden="true"]') && block(0).querySelector('.sr-only').textContent === 'Audiobook ');
     check('not asked for: one Request button', !state(1) && cardFor(t, 1).querySelectorAll('[data-action="request-media"]').length === 1);
     check('it asks for the book, not a format', cardFor(t, 1).querySelector('[data-action="request-media"]').getAttribute('data-request-type') === 'book' &&
       /^Request\s+Book$/.test(cardFor(t, 1).querySelector('[data-action="request-media"]').textContent.trim()));
@@ -373,6 +375,7 @@ await run('book detail: series, author, one Request for the book, request from i
     check('the detail now says Book Requested, in one block', !!block && block.getAttribute('data-book-state') === 'requested' &&
       block.textContent.trim() === 'Book Requested' && t.q('#modalActionArea').children.length === 1, block && block.textContent);
     check('no button left to press', !t.q('#modalActionArea button'));
+    check('both formats alike: no format icon, the words say Book', !block.querySelector('.material-symbols-outlined'));
     check('both formats alike: no per-format line', t.q('#modalLibrary').classList.contains('hidden'));
     const cardState = cardFor(t, 1).querySelector('[data-book-state]');
     check('and so does its card', !!cardState && cardState.getAttribute('data-book-state') === 'requested' && cardState.textContent.trim() === 'Book Requested');
