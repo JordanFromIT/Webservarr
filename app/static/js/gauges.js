@@ -12,7 +12,9 @@
  * and the router brings the mark in step on every swap, so a poll with the
  * mark gone reads nothing (theme.css hides the gauges then). They hold their
  * room from the first paint but stay hidden (data-pending) until the first
- * answer, so they arrive whole and nothing beside them moves.
+ * answer, so they arrive whole and nothing beside them moves. A full-screen
+ * view (html[data-shell="hidden"], the reader) hides both headers, so the
+ * poll reads nothing there either.
  *
  * Pure part (no DOM at import time, so Node can import it): startGauges.
  */
@@ -73,6 +75,7 @@ export function startGauges(env) {
     // readings, as before the first one.
     function tick() {
         if (busy || !doc.documentElement.hasAttribute('data-netdata')) return;
+        if (doc.documentElement.getAttribute('data-shell') === 'hidden' || !doc.querySelector('[data-ws-gauges]')) return;
         if (env.signal && env.signal.aborted) return;
         busy = true;
         env.fetch('/api/integrations/system-stats').then(function (r) {

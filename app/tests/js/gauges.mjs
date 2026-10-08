@@ -6,7 +6,8 @@
 // Covers: one poll for the whole app, every reading written to both copies,
 // the gauges hidden (data-pending) until the first answer and shown by any
 // answer, nothing read while Netdata is not set up (html[data-netdata]) and
-// reading again once it is, one reading at a time, whole numbers and the
+// reading again once it is, nothing read on a full-screen view (the reader)
+// or with no gauges in the document, one reading at a time, whole numbers and the
 // unit, the rings' dash offsets, and the network ring held at full.
 //
 // Run: node app/tests/js/gauges.mjs (npm run test:js; CI js-checks).
@@ -111,6 +112,22 @@ await run('without Netdata nothing is read; once it is set up, the poll reads', 
   t.doc.documentElement.setAttribute('data-netdata', '');
   await t.tick();
   check('read and shown', t.reads === 1 && t.copies().every((c) => !c.hasAttribute('data-pending')));
+});
+
+await run('a full-screen view (the reader) reads nothing; back on a page with the shell, the poll reads', async () => {
+  const t = make();
+  t.doc.documentElement.setAttribute('data-shell', 'hidden');
+  t.start();
+  await flush();
+  for (let i = 0; i < 5; i++) await t.tick();
+  check('nothing read with the shell hidden', t.reads === 0, t.reads);
+  // The router brings the flag in step on every swap (router.js syncHtmlFlags).
+  t.doc.documentElement.removeAttribute('data-shell');
+  await t.tick();
+  check('read once the shell is back', t.reads === 1 && t.copies().every((c) => !c.hasAttribute('data-pending')));
+  t.copies().forEach((c) => c.remove());
+  await t.tick();
+  check('nothing read with no gauges on the page', t.reads === 1, t.reads);
 });
 
 await run('one reading at a time', async () => {
