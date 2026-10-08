@@ -405,6 +405,36 @@ class BookRequests(unittest.TestCase):
         self.assertEqual(self.shown(), ["Requested: Dune Messiah (ebook)", "Requested: Dune Messiah (audiobook)"])
         self.assertNotIn("Sam", "\n".join(self.shown()))
 
+    def refs(self):
+        db = self.Session()
+        try:
+            return sorted(r.key for r in db.query(StatusEventRef))
+        finally:
+            db.close()
+
+    def test_both_formats_name_each_format_asked_for(self):
+        # The Requests page always sends "both": the line names the format
+        # each one went to, never a bare "Requested: <title>".
+        answer = {"ok": True, "message": "Book requested", "state": "requested", "title": "Dune Messiah",
+                  "states": {"ebook": "requested", "audiobook": "requested"}}
+        r = self.ask(answer, fmt="both")
+        self.assertEqual(r.json(), {"ok": True, "message": "Book requested", "state": "requested",
+                                    "states": {"ebook": "requested", "audiobook": "requested"}})
+        self.ask(answer, fmt="both")
+        self.assertEqual(sorted(self.shown()), ["Requested: Dune Messiah (audiobook)",
+                                                "Requested: Dune Messiah (ebook)"])
+        self.assertEqual(self.refs(), ["book-request:814330:audiobook", "book-request:814330:ebook"])
+
+    def test_both_with_one_format_asked_for_names_that_one(self):
+        # The ebook is here already (or has no root folder): only the
+        # audiobook went to "requested".
+        for states in ({"ebook": "available", "audiobook": "requested"}, {"ebook": None, "audiobook": "requested"}):
+            with self.subTest(states=states):
+                self.ask({"ok": True, "message": "Book requested", "state": "requested", "title": "Dune",
+                          "states": states}, fmt="both")
+        self.assertEqual(self.shown(), ["Requested: Dune (audiobook)"])
+        self.assertEqual(self.refs(), ["book-request:814330:audiobook"])
+
     def test_already_there_or_refused_makes_none(self):
         self.assertEqual(self.ask({"ok": True, "message": "Already in your library"}).status_code, 200)
         self.assertEqual(self.ask({"ok": False, "message": "Could not reach Chaptarr"}).status_code, 400)

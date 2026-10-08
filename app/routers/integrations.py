@@ -736,13 +736,19 @@ async def create_chaptarr_request(
         raise HTTPException(status_code=400, detail=result["message"])
     title = result.pop("title", "")
     if title:
-        _book_request_line(db, body.bookId.strip(), fmt, title)
+        # "both" is no format of its own: a line for each format the states
+        # say this request asked for.
+        formats = [fmt] if fmt != "both" else \
+            [f for f in ("ebook", "audiobook") if (result.get("states") or {}).get(f) == "requested"]
+        for one in formats:
+            _book_request_line(db, body.bookId.strip(), one, title)
     return result
 
 
 def _book_request_line(db: Session, book_id: str, fmt: str, title: str) -> None:
-    """The event log's line for a new book request (spec section 11.1),
-    once per book and format. Never fails the request; never names who asked."""
+    """The event log's line for a new book request in one format, "ebook" or
+    "audiobook" (spec section 11.1), once per book and format. Never fails
+    the request; never names who asked."""
     text = activity_lines.request_line(title, fmt=fmt)
     if text is None:
         return
