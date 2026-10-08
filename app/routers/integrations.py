@@ -655,9 +655,10 @@ async def book_cover(
 class BookRequestCreate(BaseModel):
     # A Chaptarr foreign id such as "gr:3634639" - a string, not an int.
     bookId: str
-    # "ebook" or "audiobook"; picks which Chaptarr root folder and profiles the
-    # request lands in. Anything else is treated as an ebook rather than
-    # rejected, so an older client keeps working.
+    # "ebook" or "audiobook" picks which Chaptarr root folder and profiles the
+    # request lands in; "both" (the Requests page's one Request button) asks
+    # for every format the server takes. Anything else is treated as an ebook
+    # rather than rejected, so an older client keeps working.
     format: str = "ebook"
 
 
@@ -714,7 +715,7 @@ async def create_chaptarr_request(
     added (not one already there) makes the event log's "Requested:" line."""
     if not body.bookId.strip():
         raise HTTPException(status_code=400, detail="bookId is required")
-    fmt = "audiobook" if body.format == "audiobook" else "ebook"
+    fmt = body.format if body.format in ("audiobook", "both") else "ebook"
 
     await _enforce_daily_book_cap(current_user)
     # Attribute the request: it spends the operator's Chaptarr key and starts a

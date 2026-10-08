@@ -598,29 +598,52 @@ async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str
     return {"ok": True, "message": "Book requested", "title": title, "state": "requested"}
 
 
+# The two formats a book comes in, each with its own library rows, root
+# folder and profiles in Chaptarr.
+BOOK_FORMATS = ("ebook", "audiobook")
+
+
+def _rows_for(book: Dict[str, Any], fmt: str) -> List[Dict[str, Any]]:
+    return _local_rows(book.get("localAudiobookBooks" if fmt == "audiobook" else "localEbookBooks"))
+
+
+def _row_ids(book: Dict[str, Any], fmt: str) -> List[int]:
+    return [r["id"] for r in _rows_for(book, fmt) if isinstance(r.get("id"), int)]
+
+
+def _here(book: Dict[str, Any], fmt: str) -> bool:
+    return any(r.get("hasFiles") for r in _rows_for(book, fmt))
+
+
+def _root_folder(cfg: dict, fmt: str) -> Optional[str]:
+    return cfg["audiobook_root_folder" if fmt == "audiobook" else "root_folder"]
+
+
 async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     """
-    Request a book in one format: add it to Chaptarr and start searching, or,
-    when Chaptarr already holds the book unmonitored, monitor and search it.
+    Request a book: add it to Chaptarr and start searching, or, when Chaptarr
+    already holds the book unmonitored, monitor and search it.
 
-    `fmt` is "ebook" or "audiobook" and selects which root folder and profile
-    pair the request lands in - Chaptarr keeps the two apart, so requesting an
-    audiobook into the ebook folder would download the wrong edition.
+    `fmt` is "ebook" or "audiobook" for one format, or "both" for the book as
+    the Requests page asks for it: every format this server takes (a root
+    folder configured) and does not have yet. Chaptarr keeps the two apart
+    (root folder and profile pair), so requesting an audiobook into the ebook
+    folder would download the wrong edition.
 
     Returns {"ok": bool, "message": str}; on success also "state" (what the
-    page shows for that format now) and, for a real new request, the book's
-    "title".
+    page shows now) and, for a real new request, the book's "title". "both"
+    also returns "states": each format's state, as search results carry them.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
         return {"ok": False, "message": "Chaptarr is not configured"}
 
-    audiobook = fmt == "audiobook"
-    prefix = "audiobook_" if audiobook else ""
-    root_folder = cfg[f"{prefix}root_folder"]
-    if not root_folder:
-        label = "audiobook" if audiobook else "book"
-        return {"ok": False, "message": f"No Chaptarr {label} root folder configured"}
+    both = fmt == "both"
+    fmt = fmt if fmt in BOOK_FORMATS or both else "ebook"
+    usable = [f for f in BOOK_FORMATS if _root_folder(cfg, f)] if both else [fmt] if _root_folder(cfg, fmt) else []
+    if not usable:
+        label = "" if both else "audiobook " if fmt == "audiobook" else "book "
+        return {"ok": False, "message": f"No Chaptarr {label}root folder configured"}
 
     # The cached copy is what the search showed, up to an hour old: it names
     # the title to search for, but its library rows are re-read, since a
@@ -632,12 +655,81 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         return {"ok": False, "message": "Could not find that book in Chaptarr"}
     title = book.get("title") or ""
 
-    rows = _local_rows(book.get("localAudiobookBooks" if audiobook else "localEbookBooks"))
-    if any(r.get("hasFiles") for r in rows):
+    if both:
+        return await _request_formats(cfg, foreign_id, book, title, usable)
+
+    if _here(book, fmt):
         return {"ok": True, "message": "Already in the library", "state": "available"}
-    row_ids = [r["id"] for r in rows if isinstance(r.get("id"), int)]
+    row_ids = _row_ids(book, fmt)
     if row_ids:
         return await _want_existing(cfg, row_ids, title)
+    return await _add_book(cfg, foreign_id, book, fmt, title)
+
+
+async def _request_formats(cfg: dict, foreign_id: str, book: Dict[str, Any], title: str,
+                           usable: List[str]) -> Dict[str, Any]:
+    """
+    The book in every usable format it is not here in yet. The rows Chaptarr
+    already holds (adding an author imports their whole back catalogue
+    unmonitored) are monitored and searched in one go; a format with no row
+    is added. An add can bring the other format's row with it (Chaptarr can
+    keep both formats of a book together), so the book is read again before
+    each add that follows a write: a row that came with it is taken as it is,
+    never added a second time.
+    """
+    states = {f: _format_state(_rows_for(book, f)) for f in BOOK_FORMATS}
+    wanted = [f for f in usable if states[f] != "available"]
+    if not wanted:
+        return {"ok": True, "message": "Already in the library", "state": "available", "states": states}
+
+    results: List[Dict[str, Any]] = []
+    held = [f for f in wanted if _row_ids(book, f)]
+    if held:
+        result = await _want_existing(cfg, [i for f in held for i in _row_ids(book, f)], title)
+        results.append(result)
+        if result["ok"]:
+            for f in held:
+                states[f] = "requested"
+
+    for f in [f for f in wanted if f not in held]:
+        if results:
+            fresh = await _lookup_book(cfg, foreign_id, title)
+            if fresh:
+                book = fresh
+                if _here(book, f):
+                    states[f] = "available"
+                    continue
+                if any(r.get("monitored") for r in _rows_for(book, f)):
+                    states[f] = "requested"
+                    continue
+                if _row_ids(book, f):
+                    result = await _want_existing(cfg, _row_ids(book, f), title)
+                    results.append(result)
+                    if result["ok"]:
+                        states[f] = "requested"
+                    continue
+        result = await _add_book(cfg, foreign_id, book, f, title)
+        results.append(result)
+        if result["ok"]:
+            states[f] = result.get("state") or "requested"
+
+    if results and not any(r["ok"] for r in results):
+        return {"ok": False, "message": results[0]["message"]}
+    refused = [r["message"] for r in results if not r["ok"]]
+    if refused:
+        logger.warning("Chaptarr took only part of the request for %s: %s", foreign_id, refused[0])
+    asked = any(states[f] == "requested" for f in wanted)
+    answer = {"ok": True, "message": "Book requested" if asked else "Already in the library",
+              "state": "requested" if asked else "available", "states": states}
+    if any(r["ok"] for r in results):
+        # The title is for the event log's "Requested:" line (the router takes it out).
+        answer["title"] = title
+    return answer
+
+
+async def _add_book(cfg: dict, foreign_id: str, book: Dict[str, Any], fmt: str, title: str) -> Dict[str, Any]:
+    """Add a book Chaptarr holds no row for, in one format, and search for it."""
+    root_folder = _root_folder(cfg, fmt)
 
     # A book from a brand-new author arrives with an author record that has
     # no profiles or root folders of its own (it isn't tracked yet), and

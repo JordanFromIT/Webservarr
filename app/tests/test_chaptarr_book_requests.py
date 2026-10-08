@@ -83,7 +83,8 @@ class _Chaptarr:
 
             async def get(self, url, params=None, headers=None):
                 outer.calls.append(("GET", url.split("/api/v1")[1], params))
-                return _Resp(200, outer.search)
+                # A callable search answers by what has been written so far.
+                return _Resp(200, outer.search(outer) if callable(outer.search) else outer.search)
 
             async def post(self, url, headers=None, json=None):
                 return outer._write("POST", url, json)
@@ -194,6 +195,119 @@ class RequestBook(unittest.TestCase):
         self.assertEqual(result, {"ok": False, "message": "Could not find that book in Chaptarr"})
 
 
+def _found(ebook_rows=None, audio_rows=None):
+    return [{"foreignId": "gr:3341500", "book": _book(ebook_rows, audio_rows)}]
+
+
+_MONITOR_AND_SEARCH = {("PUT", "/book/monitor"): _Resp(202, []), ("POST", "/command"): _Resp(201, {"id": 1})}
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class RequestBothFormats(unittest.TestCase):
+    """The Requests page's one Request button: the book, in every format the
+    server takes and does not have yet, in as few writes as Chaptarr allows."""
+
+    def _request(self, fake, cached=None, config=None):
+        with mock.patch.object(chaptarr, "_get_config", return_value=dict(config or CONFIG)), \
+             mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=cached)), \
+             mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()), \
+             mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
+            return asyncio.run(chaptarr.request_book("gr:3341500", fmt="both"))
+
+    def test_both_rows_held_are_monitored_and_searched_together(self):
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": False}], [{"id": 8075, "monitored": False}]),
+                         dict(_MONITOR_AND_SEARCH))
+        result = self._request(fake, cached=_book())
+        self.assertEqual(result, {"ok": True, "message": "Book requested", "state": "requested", "title": TITLE,
+                                  "states": {"ebook": "requested", "audiobook": "requested"}})
+        self.assertEqual(fake.writes(), [
+            ("PUT", "/book/monitor", {"bookIds": [8059, 8075], "monitored": True}),
+            ("POST", "/command", {"name": "BookSearch", "bookIds": [8059, 8075]}),
+        ])
+
+    def test_a_format_already_here_is_left_alone(self):
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True, "hasFiles": True}], [{"id": 8075, "monitored": False}]),
+                         dict(_MONITOR_AND_SEARCH))
+        result = self._request(fake, cached=_book())
+        self.assertEqual(result["states"], {"ebook": "available", "audiobook": "requested"})
+        self.assertEqual(fake.writes()[0][2], {"bookIds": [8075], "monitored": True})
+
+    def test_both_here_needs_no_write(self):
+        fake = _Chaptarr(_found([{"id": 8059, "hasFiles": True}], [{"id": 8075, "hasFiles": True}]))
+        result = self._request(fake, cached=_book())
+        self.assertEqual(result, {"ok": True, "message": "Already in the library", "state": "available",
+                                  "states": {"ebook": "available", "audiobook": "available"}})
+        self.assertEqual(fake.writes(), [])
+
+    def test_one_add_that_brings_the_other_format_is_not_added_twice(self):
+        # Chaptarr keeps both: adding the ebook makes the audiobook's row too,
+        # monitored. The book is read again, and the audiobook is taken as is.
+        def search(fake):
+            if not fake.writes():
+                return []
+            return _found([{"id": 9000, "monitored": True}], [{"id": 9001, "monitored": True}])
+        fake = _Chaptarr(search, {("POST", "/book"): _Resp(201, {"id": 9000, "monitored": True})})
+        result = self._request(fake, cached=_book())
+        self.assertEqual([w[:2] for w in fake.writes()], [("POST", "/book")])
+        self.assertEqual(fake.writes()[0][2]["mediaType"], "ebook")
+        self.assertEqual(result["states"], {"ebook": "requested", "audiobook": "requested"})
+        self.assertEqual(result["title"], TITLE)
+
+    def test_an_add_that_brings_nothing_more_adds_the_other_format(self):
+        fake = _Chaptarr([], {("POST", "/book"): _Resp(201, {"id": 9000, "monitored": True})})
+        result = self._request(fake, cached=_book())
+        self.assertEqual([w[2]["mediaType"] for w in fake.writes()], ["ebook", "audiobook"])
+        self.assertEqual(fake.writes()[1][2]["rootFolderPath"], "/audiobooks")
+        self.assertEqual(result["states"], {"ebook": "requested", "audiobook": "requested"})
+
+    def test_an_unmonitored_row_the_add_brought_is_monitored_and_searched(self):
+        def search(fake):
+            if not fake.writes():
+                return []
+            return _found([{"id": 9000, "monitored": True}], [{"id": 9001, "monitored": False}])
+        answers = dict(_MONITOR_AND_SEARCH)
+        answers[("POST", "/book")] = _Resp(201, {"id": 9000, "monitored": True})
+        fake = _Chaptarr(search, answers)
+        result = self._request(fake, cached=_book())
+        self.assertEqual([w[:2] for w in fake.writes()], [("POST", "/book"), ("PUT", "/book/monitor"), ("POST", "/command")])
+        self.assertEqual(fake.writes()[1][2]["bookIds"], [9001])
+        self.assertEqual(result["states"]["audiobook"], "requested")
+
+    def test_a_format_without_a_root_folder_is_not_asked_for(self):
+        config = dict(CONFIG, audiobook_root_folder="")
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": False}], [{"id": 8075, "monitored": False}]),
+                         dict(_MONITOR_AND_SEARCH))
+        result = self._request(fake, cached=_book(), config=config)
+        self.assertEqual(fake.writes()[0][2]["bookIds"], [8059])
+        self.assertEqual(result["states"], {"ebook": "requested", "audiobook": None})
+
+    def test_no_root_folder_at_all_is_an_error(self):
+        config = dict(CONFIG, root_folder="", audiobook_root_folder="")
+        result = self._request(_Chaptarr([]), cached=_book(), config=config)
+        self.assertEqual(result, {"ok": False, "message": "No Chaptarr root folder configured"})
+
+    def test_one_format_refused_is_still_the_other_requested(self):
+        answers = {("POST", "/book"): _Resp(201, {"id": 9000, "monitored": True})}
+
+        class _Picky(_Chaptarr):
+            def _write(self, method, url, body):
+                if method == "POST" and url.endswith("/book") and body.get("mediaType") == "audiobook":
+                    self.calls.append((method, "/book", body))
+                    return _Resp(400, [{"errorMessage": "No audiobook edition"}])
+                return super()._write(method, url, body)
+
+        fake = _Picky([], answers)
+        result = self._request(fake, cached=_book())
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["states"], {"ebook": "requested", "audiobook": None})
+
+    def test_everything_refused_is_an_error(self):
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": False}], [{"id": 8075, "monitored": False}]),
+                         {("PUT", "/book/monitor"): _Resp(400, [{"errorMessage": "Book does not exist"}])})
+        result = self._request(fake, cached=_book())
+        self.assertEqual(result, {"ok": False, "message": "Book does not exist"})
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class FormatStates(unittest.TestCase):
     def test_states_from_rows_and_the_request_snapshot(self):
@@ -264,6 +378,15 @@ class Routes(unittest.TestCase):
         self.assertEqual((r.status_code, r.json()), (200, {"ok": True, "message": "Book requested", "state": "requested"}))
         r = self.ask({"ok": True, "message": "Already in the library", "state": "available"})
         self.assertEqual(r.json()["state"], "available")
+
+    def test_both_formats_reach_chaptarr_as_one_request(self):
+        answer = {"ok": True, "message": "Book requested", "title": TITLE, "state": "requested",
+                  "states": {"ebook": "requested", "audiobook": "requested"}}
+        with mock.patch("app.integrations.chaptarr.request_book", mock.AsyncMock(return_value=dict(answer))) as asked:
+            r = self.client.post("/api/integrations/chaptarr-request", json={"bookId": "gr:3341500", "format": "both"})
+        self.assertEqual(asked.await_args.kwargs.get("fmt"), "both")
+        self.assertEqual(r.json()["states"], {"ebook": "requested", "audiobook": "requested"})
+        self.assertNotIn("title", r.json())
 
     def test_a_refusal_is_a_400_with_the_reason(self):
         r = self.ask({"ok": False, "message": "This book has already been added."})
