@@ -352,8 +352,9 @@
     var def = parseInt(m.default, 10);
     if (isNaN(def)) def = 4;
     var s = String(v == null ? '' : v).trim();
-    if (!/^[+-]?\d+$/.test(s)) return def;
-    return Math.max(lo, Math.min(hi, parseInt(s, 10)));
+    var n = parseInt(s, 10);
+    if (isNaN(n) || String(Number(s)) !== String(n)) return def;      // "4.5", "4px", "1e1"
+    return Math.max(lo, Math.min(hi, n));
   }
 
   function blurControl(api) {
