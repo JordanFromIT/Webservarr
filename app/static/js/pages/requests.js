@@ -2306,8 +2306,16 @@ export async function mount(ctx) {
   // input method is composing).
 
   // Widening the window can make a row fit entirely, which retires both arrows.
+  // Crossing lg (a tablet turned) frees a height kept from lg: below lg the
+  // recent requests come next, and it would hold a screen of blank over them.
+  var wasPhone = window.innerWidth < 1024;
   window.addEventListener('resize', function () {
     DISCOVER_ROWS.forEach(function (r) { updateDiscoverArrows(discoverRow(r.id)); });
+    var phone = window.innerWidth < 1024;
+    if (phone !== wasPhone) {
+      wasPhone = phone;
+      freeSearchHeight();
+    }
   }, { signal: signal });
 
   // Search with a short wait after the last keystroke; the wait is the

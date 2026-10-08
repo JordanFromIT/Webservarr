@@ -753,6 +753,24 @@ await run('a double click on Next while the next page is fetched turns one page'
   } finally { t.release(); }
 });
 
+await run('from lg a held height goes when the window narrows below lg (a tablet turned)', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    Object.defineProperty(t.win, 'innerWidth', { value: 1280, configurable: true });
+    const { grid } = await fullPageThen(t, h, { width: 1280 });
+    h.out[1].resolve({ body: { results: filmPage(2, 'Zzz'), totalResults: 22, totalPages: 2 } });
+    await t.clock.advance(50);
+    check('held from lg', grid.style.minHeight === '1900px', grid.style.minHeight);
+    Object.defineProperty(t.win, 'innerWidth', { value: 1100, configurable: true });
+    t.win.dispatchEvent(new t.win.Event('resize'));
+    check('a resize that stays at lg keeps it', grid.style.minHeight === '1900px', grid.style.minHeight);
+    Object.defineProperty(t.win, 'innerWidth', { value: 820, configurable: true });
+    t.win.dispatchEvent(new t.win.Event('resize'));
+    check('below lg it goes', grid.style.minHeight === '', grid.style.minHeight);
+  } finally { t.release(); }
+});
+
 await run('the search bar flies with a transform: its box is in the results slot from the first keystroke', async () => {
   const h = heldSearch();
   const t = visit(h.routes);
