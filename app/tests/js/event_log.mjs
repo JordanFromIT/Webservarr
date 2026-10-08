@@ -19,7 +19,8 @@
 // drag, with the page scrolling at either end, no yank from new events,
 // "Latest" and the 15 s return; the ends holding a scroll or drag that turned
 // the wheel (a fast spin, its momentum, both ends, touch, a 3px nudge or none
-// under reduced motion) while a gesture that starts at an end is the page's;
+// under reduced motion) while a gesture that starts at an end, or only
+// moved under a notch, is the page's;
 // and soft navigation: one live section put in
 // place of each new page's copy (ws:swap), its state, listeners and single
 // poll carried over, left out on a page without one (the reader), read again
@@ -850,6 +851,25 @@ await run('no trap: a gesture that starts at an end is the page\'s, and a turn m
   const one = make({ answer: answer('ok', [], [note(1, 'Only line', 5)]) });
   await one.open();
   check('one event: never held either way', await burst(one, [-100, 100, -100, 100], 40) === 4);
+});
+
+await run('input under a notch turns nothing, so the end does not hold the rest of that gesture', async (make) => {
+  const t = make({ answer: HISTORY });
+  await t.open();
+  const n = nudges(t);
+  check('a ~30px trackpad nudge up is the wheel\'s and turns nothing', await burst(t, [-12, -10, -8], 16) === 0 && t.texts()[0] === ORDER[0], t.texts());
+  check('then a scroll down in the same gesture is the page\'s, all of it', await burst(t, new Array(8).fill(40), 16) === 8 && n.length === 0, n);
+  const p = make({ answer: HISTORY });
+  await p.open();
+  check('a 2px reversal first does not take a page scroll either', await burst(p, [-2, 40, 40, 40, 40, 40], 16) === 5 && p.texts()[0] === ORDER[0]);
+  const d = make({ answer: HISTORY });
+  await d.open();
+  touch(d, 'touchstart', 300);
+  check('1px of finger jitter down is the wheel\'s', touch(d, 'touchmove', 301) === true && d.texts()[0] === ORDER[0]);
+  const moves = [280, 240, 180, 100].map((y) => touch(d, 'touchmove', y));
+  check('then a swipe up is the page\'s, every move', JSON.stringify(moves) === JSON.stringify([false, false, false, false]), moves);
+  touch(d, 'touchend');
+  check('the gesture that does turn is still held at the end', (touch(d, 'touchstart', 100), touch(d, 'touchmove', 126)) === true && d.texts()[0] === ORDER[1] && touch(d, 'touchmove', 100) === true && touch(d, 'touchmove', 40) === true, d.texts());
 });
 
 await run('a drag that turns the wheel to an end is held until the finger lifts; the next drag is the page\'s', async (make) => {

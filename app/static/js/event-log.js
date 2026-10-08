@@ -480,7 +480,8 @@ export function createEventLog(section, env) {
         return true;
     }
 
-    // Input in `dir` that can turn the wheel: the gesture is the wheel's now.
+    // The gesture turned the wheel: it is the wheel's now. Input that could
+    // turn it but did not (less than a notch) leaves the gesture the page's.
     function takes(g) {
         if (!g) return;
         g.took = true;
@@ -508,12 +509,11 @@ export function createEventLog(section, env) {
             return;
         }
         e.preventDefault();
-        takes(gesture);
         if (scrolled && (scrolled < 0) !== (dy < 0)) scrolled = 0;
         scrolled += dy;
         if (Math.abs(scrolled) >= WHEEL_STEP_PX) {
             scrolled = 0;
-            turnTo(offset + dir);
+            if (turnTo(offset + dir)) takes(gesture);
         }
     }
 
@@ -539,10 +539,9 @@ export function createEventLog(section, env) {
             return;
         }
         if (e.cancelable) e.preventDefault();
-        takes(drag);
         if (Math.abs(dy) >= WHEEL_DRAG_PX) {
             dragY = y;
-            turnTo(offset + dir);
+            if (turnTo(offset + dir)) takes(drag);
         }
     }
 
