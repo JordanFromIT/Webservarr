@@ -388,7 +388,7 @@ class HoverLift(unittest.TestCase):
         # requests discover poster is itself the click target and keeps it,
         # the search card's own Request button takes it, and so do a collapsed
         # integration card (its header button fills it) and the WSUI buttons.
-        # A book's detail has one Request button per format, which lift too.
+        # A book's detail has its one Request button (both formats), which lifts too.
         index = (STATIC / "index.html").read_text(encoding="utf-8") + \
             (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
         news = (STATIC / "news.html").read_text(encoding="utf-8") + \
@@ -401,7 +401,7 @@ class HoverLift(unittest.TestCase):
         self.assertIn('<button type="button" class="shrink-0 w-32 text-left rounded-inner ws-lift group"', requests)  # discover poster
         self.assertRegex(requests, r'data-request-title="[^"]*" class="ws-lift w-full')       # search card button
         self.assertIn("'class=\"ws-lift w-full py-2.5 rounded-btn bg-primary", requests)     # the detail's Request button
-        self.assertIn("'class=\"ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary", requests)  # a book format's
+        self.assertIn("'class=\"ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary", requests)  # a book's
         self.assertNotRegex(requests, r'<div class="[^"]*\bws-lift')                           # no inert card
         self.assertIn("'ws-lift scroll-mt-6 rounded-2xl", INTEGRATIONS_JS)
         self.assertTrue(live_matches(INTEGRATIONS_JS, r"""root\.classList\.toggle\(\s*['"]ws-lift['"]\s*,\s*!open\s*\)"""))

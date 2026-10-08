@@ -540,8 +540,8 @@ function seerrStatusOf(item) {
 // not the card: the button is what is clicked.
 function requestButton(item, mediaType, nounLabel) {
   return '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" ' +
-      'data-request-id="' + escapeHtml(String(item.id)) + '" data-request-title="' + escapeHtml(item.title || 'Unknown') + '" ' +
-      'class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">' +
+      'data-request-id="' + escapeHtml(String(item.id)) + '" ' +
+      'data-request-title="' + escapeHtml(item.title || 'Unknown') + '" class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">' +
     'Request <span class="' + mediaTypeNounColor(mediaType) + '">' + nounLabel + '</span></button>';
 }
 
