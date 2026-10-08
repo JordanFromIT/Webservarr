@@ -553,6 +553,13 @@ class Webhooks(unittest.TestCase):
         for word in PRIVATE:
             self.assertNotIn(word, "\n".join(self.lines()))
 
+    def test_kometa_an_odd_library_is_never_a_500(self):
+        # A list or object is unhashable: it is passed over, not a TypeError.
+        body = self.run_end("Movies")
+        body["names"] += [{"name": "X", "library": []}, {"name": "Y", "library": {}}, {"name": "Z", "library": 3}]
+        self.assertEqual(self.kometa(body).status_code, 204)
+        self.assertEqual(self.lines(), ["Movie posters updated"])
+
     def test_kometa_falls_back_to_one_plain_line(self):
         self.types.return_value = {}
         self.assertEqual(self.kometa(self.run_end("Movies")).status_code, 204)

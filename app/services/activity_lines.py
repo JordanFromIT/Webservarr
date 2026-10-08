@@ -146,8 +146,10 @@ def poster_kinds(body, library_types: Dict[str, str]) -> List[str]:
     `library_types` ({Plex library title: type}). [""] when no library can
     be typed; [] when the typed ones are neither movies nor shows."""
     names = body.get("names") if isinstance(body, dict) else None
-    libraries = {n.get("library") for n in names if isinstance(n, dict)} if isinstance(names, list) else set()
-    typed = {library_types[lib] for lib in libraries if isinstance(lib, str) and lib in library_types}
+    # Only string libraries: a list or object there is unhashable in the set.
+    libraries = {n["library"] for n in names if isinstance(n, dict) and isinstance(n.get("library"), str)} \
+        if isinstance(names, list) else set()
+    typed = {library_types[lib] for lib in libraries if lib in library_types}
     if not typed:
         return [""]
     return [kind for kind in ("movie", "show") if kind in typed]
