@@ -9,7 +9,8 @@
 // search is out, a shorter answer closing that space below lg (eased, or at
 // once with reduced motion) while from lg it holds (until the window narrows
 // below lg), searches out back to back topping up to one page, a page turn
-// waiting for the fetch it started, one request per title in flight with
+// waiting for the fetch it started, a double click or a held Enter on Next or
+// Prev turning one page, one request per title in flight with
 // every copy of its button (redrawn cards, the detail) saying so, the bar's
 // transform-only flight, and the detail's year and rating leaving no gap
 // when empty.
@@ -754,6 +755,47 @@ await run('a double click on Next while the next page is fetched turns one page'
     await flush();
     const after = t.net.urls('/api/integrations/seerr-search').map((u) => new URL(u, 'https://x').searchParams.get('page'));
     check('Prev the same: one fetch, for page 1', JSON.stringify(after) === JSON.stringify(['1', '2', '1']), after);
+  } finally { t.release(); }
+});
+
+await run('a double click on Next or Prev over pages already here turns one page', async () => {
+  const h = heldSearch();
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'star wars');
+    h.out[0].resolve({ body: { results: filmPage(36, 'S'), totalResults: 36, totalPages: 1 } });
+    await t.clock.advance(50);
+    const info = () => t.q('#searchPageInfo').textContent;
+    const next = t.q('#searchNextBtn');
+    const prev = t.q('#searchPrevBtn');
+    const press = (btn, detail) => btn.dispatchEvent(new t.win.MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+    check('page 1 of 4', info() === 'Page 1 of 4', info());
+    // Two plain clicks 80 ms apart (how a double tap or a scripted double
+    // click arrives): the second is inside the turn's lock.
+    press(next, 1);
+    await t.clock.advance(80);
+    press(next, 1);
+    check('two quick presses of Next: page 2', info() === 'Page 2 of 4', info());
+    // A real double click says so on its second click, however slow.
+    await t.clock.advance(400);
+    press(next, 1);
+    await t.clock.advance(450);
+    press(next, 2);
+    check('a slow double click on Next: one more page, page 3', info() === 'Page 3 of 4', info());
+    await t.clock.advance(400);
+    press(prev, 1);
+    await t.clock.advance(80);
+    press(prev, 1);
+    check('two quick presses of Prev: page 2', info() === 'Page 2 of 4', info());
+    // A held Enter repeats the click: one page per lock, not one per repeat.
+    await t.clock.advance(400);
+    for (let i = 0; i < 10; i++) { press(next, 0); await t.clock.advance(33); }
+    check('Enter held for a third of a second: one page, page 3', info() === 'Page 3 of 4', info());
+    await t.clock.advance(400);
+    press(prev, 0);
+    check('the lock lets go: the next press turns again, page 2', info() === 'Page 2 of 4', info());
+    check('every turn was from pages already here', t.net.urls('/api/integrations/seerr-search').length === 1);
   } finally { t.release(); }
 });
 

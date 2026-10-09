@@ -739,6 +739,12 @@ const SEARCH_MOVE_DURATION_TOUCH = 1800;
 // (collapseSearchGrid). Short: it answers the search the user just made.
 const SEARCH_COLLAPSE_MS = 250;
 
+// After a search page turn, how long a second press of the same button is
+// taken as the same press (searchTurnLocked): a double click sent as two
+// plain clicks, a double tap, a held Enter's repeats. Inside the usual
+// double-click window; Next then Prev is never held up by it.
+const SEARCH_TURN_LOCK_MS = 400;
+
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
  *
@@ -833,6 +839,8 @@ export async function mount(ctx) {
   var _searchDisplayPage = 1;
   var _searchHeldHeight = 0;        // the results grid's height while a search is out (holdSearchGrid)
   var _searchCollapseTimer = null;  // ends the grid's close-up to a shorter answer (collapseSearchGrid)
+  var _searchTurnDir = '';          // 'next' or 'prev' for SEARCH_TURN_LOCK_MS after that page turn
+  var _searchTurnTimer = null;
   var _allRequests = [];
   var _currentFilter = 'all';
   var _requestsDisplayPage = 1;
@@ -1495,31 +1503,50 @@ export async function mount(ctx) {
     return $('searchResultsGrid').hasAttribute('aria-busy');
   }
 
-  function searchPrevPage() {
-    if (searchHeld()) return;
+  // One press, one page. A page already here turns at once, so without this
+  // the second click of a double click turned a second page. The second
+  // click of a real double click says so (detail 2 and up), however slow;
+  // any press of the same button within SEARCH_TURN_LOCK_MS of a turn is the
+  // same press too. A press of the other button is not held up.
+  function searchTurnLocked(dir, e) {
+    return (e && e.detail > 1) || _searchTurnDir === dir;
+  }
+
+  function lockSearchTurn(dir) {
+    if (_searchTurnTimer) ctx.clearTimeout(_searchTurnTimer);
+    _searchTurnDir = dir;
+    _searchTurnTimer = ctx.setTimeout(function () { _searchTurnDir = ''; _searchTurnTimer = null; }, SEARCH_TURN_LOCK_MS);
+  }
+
+  function searchPrevPage(e) {
+    if (searchHeld() || searchTurnLocked('prev', e)) return;
     if (_searchDisplayPage > 1) {
+      lockSearchTurn('prev');
       _searchDisplayPage--;
       freeSearchHeight();
       renderSearchPage();
       updateSearchPagination();
     } else if (_currentSearchPage > 1) {
       // Go to previous API page, start at the last display page
+      lockSearchTurn('prev');
       _currentSearchPage--;
       _searchDisplayPage = -1; // signal to go to last page after fetch
       performSearch(_currentSearchQuery);
     }
   }
 
-  function searchNextPage() {
-    if (searchHeld()) return;
+  function searchNextPage(e) {
+    if (searchHeld() || searchTurnLocked('next', e)) return;
     var totalDisplayPages = getSearchTotalDisplayPages();
     if (_searchDisplayPage < totalDisplayPages) {
+      lockSearchTurn('next');
       _searchDisplayPage++;
       freeSearchHeight();
       renderSearchPage();
       updateSearchPagination();
     } else if (_currentSearchPage < _totalSearchPages) {
       // Fetch next API page
+      lockSearchTurn('next');
       _currentSearchPage++;
       performSearch(_currentSearchQuery);
     }
@@ -2346,8 +2373,8 @@ export async function mount(ctx) {
       case 'request-from-modal': requestFromModal(el); break;
       case 'close-modal': closeMediaModal(); break;
       case 'filter': setFilter(el.getAttribute('data-filter')); break;
-      case 'search-prev': searchPrevPage(); break;
-      case 'search-next': searchNextPage(); break;
+      case 'search-prev': searchPrevPage(e); break;
+      case 'search-next': searchNextPage(e); break;
       case 'requests-prev': requestsPrevPage(); break;
       case 'requests-next': requestsNextPage(); break;
     }
