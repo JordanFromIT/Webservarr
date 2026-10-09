@@ -263,7 +263,7 @@ class NavHighlight(unittest.TestCase):
     # transition runs (ShellNamesOnlyDuringATransition below).
     SHELL_NAMES = {"html.ws-vt #desktopSidebar": "ws-sidebar", "html.ws-vt #appHeader": "ws-header",
                    "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content",
-                   "html.ws-vt #wsPlayer": "ws-player"}
+                   "html.ws-vt #wsPlayer": "ws-player", "html.ws-vt #wsTabBar": "ws-tabbar"}
 
     def test_only_the_shell_carries_a_transition_name(self):
         named = {sel.strip(): name for sel, name in
@@ -291,6 +291,16 @@ class NavHighlight(unittest.TestCase):
         self.assertRegex(THEME, r"::view-transition-old\([^{}]*ws-player\)[^{}]*\{\s*display: none;")
         self.assertRegex(THEME, r"::view-transition-new\([^{}]*ws-player\)[^{}]*\{\s*animation: none;")
 
+    def test_the_tab_bar_stays_above_the_crossfading_page(self):
+        # Unnamed, the phone's tab bar was part of the root snapshot, which
+        # paints under <main>'s, so during every soft swap from a tab the old
+        # and new pages' posters and cards drew over the bar and showed
+        # through it. Named, it is its own group above <main>, still, and
+        # drawn once (no old snapshot to blend into it).
+        self.assertIn("view-transition-name: ws-tabbar", css_rule(THEME, "html.ws-vt #wsTabBar"))
+        self.assertRegex(THEME, r"::view-transition-old\([^{}]*ws-tabbar\)[^{}]*\{\s*display: none;")
+        self.assertRegex(THEME, r"::view-transition-new\([^{}]*ws-tabbar\)[^{}]*\{\s*animation: none;")
+
     def test_no_cross_document_transition(self):
         # Every shell page is a soft-navigation page; a full navigation (sign
         # in, setup, a fallback) opts into no transition, under any motion
@@ -307,7 +317,7 @@ class ShellNamesOnlyDuringATransition(unittest.TestCase):
     (through theme-loader.js's WSViewTransition) for the length of a soft
     swap's transition. app/tests/js/view_transition.mjs runs the hold/release."""
 
-    SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main", "#wsPlayer")
+    SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main", "#wsPlayer", "#wsTabBar")
     LOADER = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
     ROUTER = (STATIC / "js" / "router.js").read_text(encoding="utf-8")
 
