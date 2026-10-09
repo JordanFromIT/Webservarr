@@ -22,7 +22,8 @@ import asyncio
 from itertools import zip_longest
 import re
 import logging
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import httpx
 
@@ -63,11 +64,38 @@ _MAX_CACHE = 500
 _id_cache: Dict[Tuple[str, str], Optional[int]] = {}
 _image_cache: Dict[int, Tuple[bytes, str]] = {}
 
+# Covers Open Library has no image for here: it answers some ids with a
+# redirect (refused, M10) or a tiny placeholder, and an answer can be the
+# wrong type or too big. Each is remembered for a while, so it is neither
+# fetched again nor offered to a browser as a cover URL (every such URL was a
+# failed image request on the Requests page). A network failure is not a
+# miss: the cover may well be there next time. Bounded and per process, like
+# the caches above; a miss forgotten is only looked at once more.
+_MISS_TTL = 6 * 3600.0
+_missing: Dict[int, float] = {}
+
 
 def _trim(cache: dict) -> None:
     """Keep a cache bounded without pulling in an LRU dependency."""
     while len(cache) > _MAX_CACHE:
         cache.pop(next(iter(cache)))
+
+
+def known_missing(cover_id) -> bool:
+    """True when Open Library recently had no usable image for this id."""
+    at = _missing.get(cover_id)
+    if at is None:
+        return False
+    if time.monotonic() - at >= _MISS_TTL:
+        _missing.pop(cover_id, None)
+        return False
+    return True
+
+
+def _miss(cover_id: int) -> None:
+    _missing.pop(cover_id, None)
+    _missing[cover_id] = time.monotonic()
+    _trim(_missing)
 
 
 def clean_title(title: str) -> str:
@@ -235,8 +263,6 @@ async def trending(period: str = "weekly", limit: int = 24) -> List[Dict[str, st
     Open Library is the one trending source that needs no key and no
     registration, which is why it goes first; other sources merge in beside it.
     """
-    import time
-
     if period not in ("daily", "weekly", "monthly", "yearly"):
         period = "weekly"
 
@@ -307,9 +333,16 @@ def merge_trending(*sources: List[Dict[str, str]]) -> List[Dict[str, str]]:
 
 
 async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
-    """Fetch a cover image by id. Returns (bytes, content_type) or None."""
+    """
+    Fetch a cover image by id. Returns (bytes, content_type) or None.
+
+    A None that is Open Library's answer (not a network failure) is
+    remembered (known_missing), and a remembered miss is not asked again.
+    """
     if cover_id in _image_cache:
         return _image_cache[cover_id]
+    if known_missing(cover_id):
+        return None
 
     try:
         # follow_redirects=False: a redirect from the cover CDN must not be
@@ -317,6 +350,7 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
         async with httpx.AsyncClient(timeout=IMAGE_TIMEOUT, follow_redirects=False) as client:
             async with client.stream("GET", COVER_URL.format(cover_id=cover_id)) as resp:
                 if resp.status_code != 200:
+                    _miss(cover_id)
                     return None
                 content_type = (resp.headers.get("content-type", "") or "").split(";")[0].strip().lower()
                 if content_type not in ALLOWED_IMAGE_TYPES:
@@ -324,6 +358,7 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
                         "Open Library cover %s served unexpected content-type %r",
                         cover_id, content_type,
                     )
+                    _miss(cover_id)
                     return None
                 chunks = []
                 total = 0
@@ -331,6 +366,7 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
                     total += len(chunk)
                     if total > MAX_COVER_BYTES:
                         logger.warning("Open Library cover %s exceeded byte cap", cover_id)
+                        _miss(cover_id)
                         return None
                     chunks.append(chunk)
                 content = b"".join(chunks)
@@ -341,9 +377,39 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
     # Open Library answers with a tiny 1x1 placeholder for unknown ids rather
     # than a 404, so treat a suspiciously small body as "no cover".
     if len(content) < 1000:
+        _miss(cover_id)
         return None
 
     result = (content, content_type)
     _image_cache[cover_id] = result
     _trim(_image_cache)
     return result
+
+
+async def missing_covers(cover_ids: Iterable[int], budget: float = TRENDING_COVER_BUDGET) -> Set[int]:
+    """
+    Fetch each cover once and return the ids Open Library has no image for.
+
+    For a shelf built in the background: it can afford to look, and a card
+    it keeps then never sends a browser to a miss. The fetched images are
+    cached (fetch_cover), so this costs a visit nothing. Whatever has not
+    answered within the budget, or failed on the network, is not called
+    missing: its card keeps the cover and the proxy answers for it later.
+    """
+    ids = list(dict.fromkeys(i for i in cover_ids if isinstance(i, int)))
+    if not ids:
+        return set()
+    gate = asyncio.Semaphore(_COVER_CONCURRENCY)
+
+    async def _one(cover_id):
+        async with gate:
+            await fetch_cover(cover_id)
+
+    tasks = [asyncio.ensure_future(_one(i)) for i in ids]
+    done, pending = await asyncio.wait(tasks, timeout=budget)
+    for task in pending:
+        task.cancel()
+    for task in done:
+        if not task.cancelled():
+            task.exception()   # read, so a failed fetch is never "never retrieved"
+    return {i for i in ids if known_missing(i)}

@@ -356,12 +356,45 @@ async def search(term: str, limit: int = 20) -> List[Dict[str, Any]]:
     return items
 
 
+_COVER_URL = "/api/integrations/book-cover?coverId={}"
+
+
+def _cover_url(cover_id) -> Optional[str]:
+    """The proxy URL for an Open Library cover, or None for one it lacks."""
+    if not isinstance(cover_id, int) or openlibrary.known_missing(cover_id):
+        return None
+    return _COVER_URL.format(cover_id)
+
+
+def _cover_id_of(card: Dict[str, Any]) -> Optional[int]:
+    m = re.fullmatch(r"/api/integrations/book-cover\?coverId=(\d+)", card.get("poster_url") or "")
+    return int(m.group(1)) if m else None
+
+
+async def _drop_missing_covers(cards: List[Dict[str, Any]], budget: float) -> None:
+    """
+    Take the cover off any card Open Library has no image for.
+
+    For the trending shelves, built in the background and kept for an hour:
+    each cover is fetched once (and cached), and a card whose cover is
+    missing loses it here instead of sending every visitor's browser to a
+    failed image (the covers-only shelves then leave it out, as before).
+    """
+    missing = await openlibrary.missing_covers(
+        [i for i in (_cover_id_of(c) for c in cards) if i is not None], budget=budget
+    )
+    for card in cards:
+        if _cover_id_of(card) in missing:
+            card["poster_url"] = None
+
+
 async def _attach_covers(items: List[Dict[str, Any]], budget: float = None) -> None:
     """
     Fill in cover art from Open Library for books that have none.
 
     Chaptarr's own covers are unreachable (see _poster_from). Failure here is
-    silent by design: a book card without art is still perfectly usable.
+    silent by design: a book card without art is still perfectly usable. A
+    cover Open Library is known to lack is not offered (_cover_url).
     """
     needed = [(b["title"], b.get("author") or "") for b in items if not b.get("poster_url")]
     if not needed:
@@ -373,9 +406,9 @@ async def _attach_covers(items: List[Dict[str, Any]], budget: float = None) -> N
     for book in items:
         if book.get("poster_url"):
             continue
-        cover_id = found.get((book["title"], book.get("author") or ""))
-        if cover_id:
-            book["poster_url"] = f"/api/integrations/book-cover?coverId={cover_id}"
+        url = _cover_url(found.get((book["title"], book.get("author") or "")))
+        if url:
+            book["poster_url"] = url
 
 
 def _main_title(title: str) -> str:
@@ -481,8 +514,9 @@ async def resolve_trending(
 
         # Prefer the trending source's cover; it is already known good and
         # skips a per-book Open Library match.
-        if entry.get("cover_id"):
-            best["poster_url"] = f"/api/integrations/book-cover?coverId={entry['cover_id']}"
+        url = _cover_url(entry.get("cover_id"))
+        if url:
+            best["poster_url"] = url
         return best
 
     # Chaptarr proxies each of these to Goodreads, and firing the whole shelf at
@@ -506,6 +540,7 @@ async def resolve_trending(
     # the same way search results do. Without this the audiobook shelf, which
     # is entirely NYT, renders as a row of placeholder glyphs.
     await _attach_covers(cards, budget=openlibrary.TRENDING_COVER_BUDGET)
+    await _drop_missing_covers(cards, budget=openlibrary.TRENDING_COVER_BUDGET)
     return cards
 
 

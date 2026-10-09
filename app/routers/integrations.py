@@ -639,9 +639,13 @@ async def book_cover(
     """
     # fetch_cover does not follow redirects, enforces the image content-type
     # allowlist and caps the bytes read, returning None on anything else (M10).
+    # No cover is 204, not 404: the card's <img> fails just the same and shows
+    # its placeholder, but the browser logs no error for it (a Requests visit
+    # logged one per missing cover). The shelves and search leave out covers
+    # known to be missing (openlibrary.known_missing); this is the first miss.
     result = await openlibrary.fetch_cover(coverId)
     if result is None:
-        raise HTTPException(status_code=404, detail="Cover not found")
+        return Response(status_code=204, headers={"Cache-Control": "private, max-age=3600"})
     content, content_type = result
     return Response(
         content=content,
