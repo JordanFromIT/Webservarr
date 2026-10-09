@@ -126,6 +126,7 @@ jobs:
           node app/tests/js/toast.mjs
           node app/tests/js/notifications_poll.mjs
           node app/tests/js/focus_ring.mjs
+          node app/tests/js/marquee.mjs
 
   build-and-push:
     needs: [test, js-checks]

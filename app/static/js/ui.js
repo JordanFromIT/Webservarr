@@ -3,7 +3,8 @@
  *
  * One toast, one dialog and the shared class strings, so every page that
  * needs them (Settings, the news archive, the wiki) looks and behaves the
- * same, and nothing uses the browser's alert/confirm/prompt.
+ * same, and nothing uses the browser's alert/confirm/prompt. Also the one
+ * marquee for words cut off with an ellipsis (the event log, Books' search).
  *
  * Loaded once by the shell (partials/shell-sidebar.html) on every shell page,
  * before any page script and before router.js, so no page loads it itself.
@@ -369,6 +370,183 @@
     }
   }
 
+  // ---- Marquee ----
+  //
+  // Words cut off with an ellipsis slide slowly to their end and back,
+  // resting at each end, so all of them can be read: the event log's lines
+  // (event-log.js) and the Books search's placeholder (marqueePlaceholder).
+  // Only words that really are cut off move. Under reduced motion nothing
+  // moves and the ellipsis stays. The motion is CSS (theme.css, Marquee):
+  // this measures how far the words run past their box and writes that
+  // distance and the timing as custom properties on the box. It holds still
+  // while the box is off screen or the tab is hidden, and goes on from there.
+  //
+  // marquee(box, opts): box clips its words (overflow hidden, an ellipsis).
+  // Its contents are moved into one span.ws-marquee__track, the part that
+  // slides: the same nodes, so a screen reader hears the words once.
+  // opts.onChange(moving) hears it start and stop. Returns
+  // { refresh(), enable(on), destroy() }: refresh after the words change
+  // (new words start from the beginning), enable(false) holds it still with
+  // the ellipsis back, destroy when the box is done with.
+
+  var MARQUEE_PX_S = 32;      // the slide's speed, px a second
+  var MARQUEE_REST_S = 1.75;  // the rest at each end, seconds
+  var MARQUEE_MIN_PX = 2;     // cut off by less is rounding, not words missing
+  var marquees = [];
+  var marqueeRO = null;
+  var marqueeIO = null;
+  var marqueeMotion = null;
+
+  function marqueeOf(node) {
+    for (var i = 0; i < marquees.length; i++) if (marquees[i].box === node) return marquees[i];
+    return null;
+  }
+
+  function marqueeAll() { marquees.slice().forEach(marqueeApply); }
+  function marqueeShowAll() { marquees.slice().forEach(marqueePaint); }
+
+  // One of each for every marquee on the page, made with the first and
+  // ended with the last.
+  function marqueeWatch() {
+    if (typeof ResizeObserver === 'function') {
+      marqueeRO = new ResizeObserver(function (rows) {
+        rows.forEach(function (r) { var m = marqueeOf(r.target); if (m) marqueeApply(m); });
+      });
+    }
+    if (typeof IntersectionObserver === 'function') {
+      marqueeIO = new IntersectionObserver(function (rows) {
+        rows.forEach(function (r) {
+          var m = marqueeOf(r.target);
+          if (m) { m.inView = r.isIntersecting; marqueePaint(m); }
+        });
+      });
+    }
+    document.addEventListener('visibilitychange', marqueeShowAll);
+    marqueeMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    if (marqueeMotion && marqueeMotion.addEventListener) marqueeMotion.addEventListener('change', marqueeAll);
+    // The web font arriving changes how wide the words are.
+    if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', marqueeAll);
+  }
+
+  function marqueeUnwatch() {
+    if (marqueeRO) marqueeRO.disconnect();
+    if (marqueeIO) marqueeIO.disconnect();
+    marqueeRO = marqueeIO = null;
+    document.removeEventListener('visibilitychange', marqueeShowAll);
+    if (marqueeMotion && marqueeMotion.removeEventListener) marqueeMotion.removeEventListener('change', marqueeAll);
+    marqueeMotion = null;
+    if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', marqueeAll);
+  }
+
+  // The box's contents as its one track. New contents get a new track, so
+  // their slide starts from the beginning. True when the track is new.
+  function marqueeTrack(m) {
+    var box = m.box;
+    if (m.track && box.childNodes.length === 1 && box.firstChild === m.track) return false;
+    var track = el('span', 'ws-marquee__track');
+    while (box.firstChild) track.appendChild(box.firstChild);
+    box.appendChild(track);
+    m.track = track;
+    return true;
+  }
+
+  // Moving, or held (off screen, the tab hidden), or still.
+  function marqueePaint(m) {
+    var want = !m.dist ? null : m.inView && document.visibilityState !== 'hidden' ? 'run' : 'held';
+    if (want === null) m.box.removeAttribute('data-marquee');
+    else if (m.box.getAttribute('data-marquee') !== want) m.box.setAttribute('data-marquee', want);
+  }
+
+  function marqueeStill(m) {
+    var was = m.dist > 0;
+    m.dist = 0;
+    ['--marquee-shift', '--marquee-time', '--marquee-delay', '--marquee-ease'].forEach(function (p) { m.box.style.removeProperty(p); });
+    marqueePaint(m);
+    if (was && m.onChange) m.onChange(false);
+  }
+
+  // How far the words run past the box, and the slide that shows them.
+  function marqueeApply(m) {
+    var fresh = marqueeTrack(m);
+    if (!m.on || !m.box.isConnected || reducedMotion()) { marqueeStill(m); return; }
+    // The track's own width (a slide under way does not change it) or,
+    // at rest, the box's scroll width: whichever is wider.
+    var d = Math.max(m.box.scrollWidth, m.track.offsetWidth) - m.box.clientWidth;
+    if (!(d >= MARQUEE_MIN_PX)) { marqueeStill(m); return; }
+    if (fresh || Math.abs(d - m.dist) >= 1) {
+      var was = m.dist > 0;
+      var travel = d / MARQUEE_PX_S;
+      var half = travel + MARQUEE_REST_S;             // one way, with a rest at both ends
+      var rest = (MARQUEE_REST_S / 2) / half * 100;   // each end's half of a rest, in %
+      var rtl = window.getComputedStyle && window.getComputedStyle(m.box).direction === 'rtl';
+      m.dist = d;
+      m.box.style.setProperty('--marquee-shift', (rtl ? d : -d) + 'px');
+      m.box.style.setProperty('--marquee-time', half.toFixed(3) + 's');
+      // The first rest is a whole one: half before the slide starts, half in it.
+      m.box.style.setProperty('--marquee-delay', (MARQUEE_REST_S / 2).toFixed(3) + 's');
+      m.box.style.setProperty('--marquee-ease', 'linear(0, 0 ' + rest.toFixed(2) + '%, 1 ' + (100 - rest).toFixed(2) + '%, 1)');
+      if (!was && m.onChange) m.onChange(true);
+    }
+    marqueePaint(m);
+  }
+
+  function marquee(box, opts) {
+    var m = marqueeOf(box);
+    if (m) { marqueeApply(m); return m.handle; }
+    if (!marquees.length) marqueeWatch();
+    m = { box: box, track: null, on: true, inView: true, dist: 0, onChange: opts && opts.onChange };
+    marquees.push(m);
+    m.handle = {
+      refresh: function () { if (marquees.indexOf(m) !== -1) marqueeApply(m); },
+      enable: function (on) {
+        m.on = !!on;
+        if (marquees.indexOf(m) !== -1) marqueeApply(m);
+      },
+      destroy: function () {
+        var i = marquees.indexOf(m);
+        if (i === -1) return;
+        marquees.splice(i, 1);
+        if (marqueeRO) marqueeRO.unobserve(box);
+        if (marqueeIO) marqueeIO.unobserve(box);
+        marqueeStill(m);
+        if (!marquees.length) marqueeUnwatch();
+      }
+    };
+    if (marqueeRO) marqueeRO.observe(box);
+    if (marqueeIO) marqueeIO.observe(box);
+    marqueeApply(m);
+    return m.handle;
+  }
+
+  // An input's placeholder, cut off: its words slide in `overlay` (an
+  // aria-hidden box over the input's text, the page's markup) while the
+  // input's own placeholder turns transparent, so it is read once and seen
+  // once. It stops, and the input's own placeholder is back, as soon as the
+  // input has the focus or any text, and starts again when it has neither.
+  // Ends with `signal`.
+  function marqueePlaceholder(input, overlay, signal) {
+    overlay.textContent = input.placeholder || '';
+    var m = marquee(overlay, {
+      onChange: function (moving) {
+        if (moving) input.setAttribute('data-marquee-ph', '');
+        else input.removeAttribute('data-marquee-ph');
+      }
+    });
+    function sync() { m.enable(!input.value && document.activeElement !== input); }
+    ['focus', 'blur', 'input', 'change'].forEach(function (type) {
+      input.addEventListener(type, sync, signal ? { signal: signal } : undefined);
+    });
+    if (signal) {
+      signal.addEventListener('abort', function () {
+        m.destroy();
+        input.removeAttribute('data-marquee-ph');
+      }, { once: true });
+    }
+    sync();
+    return m;
+  }
+
   window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, modal: modal, cls: cls,
-                  isDialogOpen: isDialogOpen, closeDialogs: closeDialogs };
+                  isDialogOpen: isDialogOpen, closeDialogs: closeDialogs,
+                  marquee: marquee, marqueePlaceholder: marqueePlaceholder };
 })();

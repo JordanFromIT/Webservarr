@@ -1540,6 +1540,35 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
    which goes with it while it is hidden. */
 [data-event-log-slot]:has(> #wsEventLog[hidden]) { display: none; }
 
+/* ---- Marquee: words cut off slide to their end and back ----
+ *
+ * js/ui.js (WSUI.marquee) marks a box whose words are cut off with
+ * data-marquee ("run", or "held" while it is off screen or the tab is
+ * hidden) and writes the slide on it: --marquee-shift (how far),
+ * --marquee-time (one way, rests included), --marquee-delay and
+ * --marquee-ease (a linear() that rests at each end). The words are its one
+ * .ws-marquee__track. At rest, and under reduced motion (ui.js marks
+ * nothing then), the box keeps its ellipsis; sliding, the words are clipped
+ * at the box's edge instead. After the event log's rules, so this clip wins
+ * over their ellipsis.
+ */
+[data-marquee] { text-overflow: clip; }
+[data-marquee] > .ws-marquee__track {
+  display: inline-block;
+  white-space: nowrap;
+  animation: ws-marquee var(--marquee-time, 0s) var(--marquee-ease, linear) var(--marquee-delay, 0s) infinite alternate both;
+}
+[data-marquee="held"] > .ws-marquee__track { animation-play-state: paused; }
+@keyframes ws-marquee { to { transform: translateX(var(--marquee-shift, 0px)); } }
+/* A placeholder's overlay (WSUI.marqueePlaceholder): seen only while it
+   slides, and the input's own placeholder steps aside for it meanwhile. */
+.ws-marquee-ph { visibility: hidden; }
+.ws-marquee-ph[data-marquee] { visibility: visible; }
+input[data-marquee-ph]::placeholder { color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  [data-marquee] > .ws-marquee__track { animation: none; }
+}
+
 /* ---- Settings ----
  *
  * The --ws-status-* tokens are for NON-TEXT marks (lights, rings, invalid-field

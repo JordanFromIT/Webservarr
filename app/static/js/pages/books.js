@@ -2544,6 +2544,12 @@ export async function mount(ctx) {
 
   let searchTimer = 0;
   const input = $('booksSearch');
+  // Its placeholder, cut off on a narrow phone, slides to its end and back
+  // until the search has the focus or any text (ui.js; nothing moves under
+  // reduced motion). Ends with the visit.
+  if (window.WSUI && typeof window.WSUI.marqueePlaceholder === 'function' && $('booksSearchMarquee')) {
+    window.WSUI.marqueePlaceholder(input, $('booksSearchMarquee'), signal);
+  }
   input.addEventListener('input', function () {
     ctx.clearTimeout(searchTimer);
     const query = input.value.trim();

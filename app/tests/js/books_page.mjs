@@ -2560,6 +2560,26 @@ await run('CLS: the toolbar\'s skeleton is its controls, word for word and size 
   check('and a pill is that height', Array.from(f.qa('#activeFilters button')).every((b) => /\bh-9\b/.test(b.className)) && f.qa('#activeFilters button').length === 2);
 });
 
+await run('the search\'s placeholder: the shared marquee runs it for the visit (ui.js; its behaviour in marquee.mjs)', async (make) => {
+  const t = make({ routes: usual() });
+  const calls = [];
+  t.win.WSUI.marqueePlaceholder = (input, overlay, signal) => { calls.push({ input, overlay, signal }); return {}; };
+  await t.mount();
+  const c = calls[0] || {};
+  check('once, on the search and its overlay', calls.length === 1 && c.input === t.q('#booksSearch') && c.overlay === t.q('#booksSearchMarquee'));
+  check('for the visit: the page\'s own signal, which a soft navigation ends', c.signal === t.ctx.signal && !c.signal.aborted);
+  t.ctl.abort();
+  check('ended with the visit', c.signal.aborted);
+  check('the overlay is in the page beside the input, hidden from screen readers',
+    t.q('#booksSearchMarquee').parentElement === t.q('#booksSearch').parentElement && t.q('#booksSearchMarquee').getAttribute('aria-hidden') === 'true');
+  // Without the helper (an older cached ui.js), the page still mounts and searches.
+  const u = make({ routes: usual() });
+  await u.mount();
+  u.type('dune');
+  await u.clock.advance(1000);
+  check('without it, the search still works', u.net.urls('/api/books/search').length === 1);
+});
+
 await run('CLS: a remembered row is waited for too, so a wrong memory never moves the books', async (make) => {
   // Remembered as having books in progress, but the last one was finished: the
   // answer is the empty line, and it comes slower than the books.
