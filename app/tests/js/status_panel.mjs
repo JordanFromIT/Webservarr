@@ -1,6 +1,7 @@
 // The service status panel (status-panel.js) with the real shell.js, run in
 // happy-dom over both shell partials (the header's pill, the top bar's chip).
-// Covers: the pill and chip words for every state; hover opens after a pause
+// Covers: the pill and chip words for every state; the pill's slot holding
+// the room of its longest words from the first paint; hover opens after a pause
 // and leaving closes it; a click pins it (Close shows, leaving does not
 // close); Escape, a press outside and focus leaving close it and Escape
 // gives focus back to the pill; the panel follows the pill in tab order;
@@ -146,6 +147,34 @@ const text = (n) => (n ? n.textContent : '');
   check('chip says Online', t.chip.getAttribute('data-state') === 'ok' && text(t.chip.querySelector('[data-status-word]')) === 'Online');
   check('chip names it for screen readers', /Everything is running/.test(t.chip.getAttribute('aria-label')), t.chip.getAttribute('aria-label'));
   check('the pill is a button that controls the panel', t.pill.tagName === 'BUTTON' && t.pill.getAttribute('aria-controls') === 'wsStatusPop');
+  await t.done();
+}
+
+{
+  current = 'the pill holds the room of its longest words';
+  // A first visit has no state yet for about the time the status takes: the
+  // room the pill takes then is what it takes for every state, so neither the
+  // status landing nor a turn to longer words moves the gauges beside it.
+  const t = await boot();
+  const said = (SHELL.match(/var PILL_LABEL = \{([\s\S]*?)\};/) || ['', ''])[1].match(/'[^']+'/g).map((s) => s.slice(1, -1));
+  const slot = t.pill.parentElement;
+  const ghost = slot.querySelector(':scope > .ws-pill-ghost');
+  const held = ghost ? Array.from(ghost.querySelectorAll('.ws-pill-words > span')).map(text) : [];
+  check('the pill sits in a slot', slot.classList.contains('ws-pill-slot'));
+  check('beside it, every word the pill can say', held.length === said.length && said.every((s) => held.indexOf(s) !== -1), { said, held });
+  check('...hidden from screen readers, with no id or focus', !!ghost && ghost.getAttribute('aria-hidden') === 'true' &&
+    !ghost.id && !ghost.querySelector('[id], button, a, [tabindex], [data-status-text]'));
+  const classes = (el) => (el ? el.className.split(/\s+/) : []);
+  check('...in the pill\'s own box', classes(t.pill).every((c) => classes(ghost).indexOf(c) !== -1), classes(ghost));
+  const words = ghost && ghost.querySelector('.ws-pill-words');
+  const label = t.pill.querySelector('[data-status-text]');
+  check('...and its words\' type', classes(label).filter((c) => /^(text-xs|font-|uppercase|tracking-)/.test(c))
+    .every((c) => classes(words).indexOf(c) !== -1), classes(words));
+  const css = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
+  check('the slot stacks the pill on the words it holds room for', /\.ws-pill-slot \{ display: grid;[^}]*\}/.test(css) &&
+    /\.ws-pill-slot > \* \{ grid-area: 1 \/ 1; \}/.test(css));
+  check('the held words share one cell and paint nothing', /\.ws-pill-words \{ display: grid; \}/.test(css) &&
+    /\.ws-pill-words > span \{ grid-area: 1 \/ 1; \}/.test(css) && /\.ws-pill-ghost \{ visibility: hidden; \}/.test(css));
   await t.done();
 }
 

@@ -3,10 +3,14 @@
   user menu.
 
   Server-rendered (app/pages.py) with the user already filled in. The pill
-  starts in the "unknown" state, which reserves its width but paints nothing -
-  it never says "Loading". shell.js sets data-state and the words from the
-  last known state at once and revalidates in the background; every colour
-  the pill takes is in theme.css (.ws-pill), keyed on that state.
+  starts in the "unknown" state, which paints nothing - it never says
+  "Loading". shell.js sets data-state and the words from the last known state
+  at once and revalidates in the background; every colour the pill takes is
+  in theme.css (.ws-pill), keyed on that state. The pill sits in a slot
+  (.ws-pill-slot) over a hidden copy of its box holding every word it can say
+  (shell.js PILL_LABEL), stacked: the slot is as wide as the longest, in
+  whichever font the page got, from the first paint, so the gauges never
+  move when the status lands or changes.
 
   notifications.js finds the bells here and in the mobile top bar by
   title="Notifications" and opens its dropdown in the tapped bell's parent -
@@ -20,10 +24,16 @@
   <div class="relative shrink-0 flex items-center gap-6">
     <!-- The status pill opens the status panel (status-panel.js): on hover
          after a short pause, or pinned open by a click. -->
-    <button type="button" id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-expanded="false" aria-controls="wsStatusPop">
-      <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
-      <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
-    </button>
+    <div class="ws-pill-slot">
+      <span class="ws-pill-ghost ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-hidden="true">
+        <span class="ws-status-dot"></span>
+        <span class="ws-pill-words text-xs font-bold uppercase tracking-widest"><span>All Systems Online</span><span>Degraded Performance</span><span>System Issues Detected</span><span>Status Unavailable</span></span>
+      </span>
+      <button type="button" id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-expanded="false" aria-controls="wsStatusPop">
+        <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
+        <span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
+      </button>
+    </div>
     <!-- The server's gauges (shell-gauges.html, js/gauges.js). -->
 {{{gauges_html}}}
   </div>

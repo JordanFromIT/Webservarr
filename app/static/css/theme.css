@@ -433,8 +433,11 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 
 /* ---- Page shell ----
  *
- * The status pill starts in the "unknown" state: it keeps its box (so the
- * header never reflows) but paints nothing. shell.js sets data-state from the
+ * The status pill starts in the "unknown" state: it paints nothing. The room
+ * it takes is its slot's, set from the first paint by a hidden copy of its
+ * box holding every word it can say, stacked in one cell (the longest wins,
+ * in whichever font the page got), so the header never reflows when the
+ * status lands or turns to longer words. shell.js sets data-state from the
  * last known state in sessionStorage and revalidates in the background; the
  * colours are all here, keyed on that state. They are the status tokens,
  * never palette classes: the tint, the border and the dot take the state's
@@ -451,6 +454,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
  * nothing at all.
  */
 #systemStatus[data-state="unknown"] { visibility: hidden; }
+.ws-pill-slot { display: grid; justify-items: start; align-items: center; }
+/* The status panel is put in the slot too; it is absolute, so this leaves it be. */
+.ws-pill-slot > * { grid-area: 1 / 1; }
+.ws-pill-ghost { visibility: hidden; }
+.ws-pill-words { display: grid; }
+.ws-pill-words > span { grid-area: 1 / 1; }
 .ws-pill { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
 .ws-pill[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
 .ws-pill[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
