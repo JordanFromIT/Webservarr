@@ -80,10 +80,12 @@
     return h < 48 ? h + ' h' : Math.round(h / 24) + ' days';
   }
   function fmtMs(v) { return v >= 1000 ? (v / 1000).toFixed(1) + ' s' : v + ' ms'; }
+  // One place, rounded, unless that would read 100: then two, cut rather than
+  // rounded (99.97, and 99.9999 is 99.99), so only a true 100 says 100.
   function fmtUp(v) {
     if (v === 100) return '100%';
     var s = v.toFixed(1);
-    if (s === '100.0') s = v.toFixed(2);   // 99.97 is not 100
+    if (s === '100.0') s = (Math.min(Math.floor(v * 100 + 1e-6), 9999) / 100).toFixed(2);
     return s + '%';
   }
   // How long the current run has lasted: from its first check, or "over"

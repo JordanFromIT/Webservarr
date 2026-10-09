@@ -312,6 +312,17 @@ const text = (n) => (n ? n.textContent : '');
   await wait(10);
   check('a stored value it does not know is 24 hours', t3.pop().querySelector('input[value="24h"]').checked);
   await t3.done();
+
+  // Only a true 100 reads 100: near it the figure is cut at two places, never rounded up.
+  const near = [100, 99.995, 99.9999, 99.97, 99.949].map((v, i) => svc(10 + i, 'Near ' + i, { uptime: { '24h': v, '30d': v, all: v } }));
+  const t4 = await boot({ answer: near });
+  t4.pill.click();
+  await wait(10);
+  const got = rows(t4.pop()).map((r) => text(r.querySelector('.ws-sp-pct'))).sort();
+  check('100 is 100%, 99.995 and 99.9999 are 99.99%, 99.97 stays, 99.949 is 99.9%',
+    got.join('|') === ['100%', '99.99%', '99.99%', '99.97%', '99.9%'].sort().join('|'), got);
+  check('never 100.00%', !got.includes('100.00%') && !got.includes('100.0%'), got);
+  await t4.done();
 }
 
 // ---- Uptime Kuma not answering ----
