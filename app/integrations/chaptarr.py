@@ -549,17 +549,33 @@ async def _lookup_book(cfg: dict, foreign_id: str, term: Optional[str] = None) -
 
 
 def _error_detail(resp: httpx.Response) -> str:
-    """Chaptarr's reason for refusing a write: a list of validation errors, or
-    one message."""
+    """Chaptarr's reason for refusing a write, for the server log only: a
+    list of validation errors, or one message. A key in a URL it quotes is
+    masked."""
     try:
         body = resp.json()
     except ValueError:
-        return resp.text[:160]
-    if isinstance(body, list) and body and isinstance(body[0], dict):
-        return body[0].get("errorMessage") or body[0].get("message") or ""
-    if isinstance(body, dict):
-        return body.get("message") or body.get("errorMessage") or ""
-    return ""
+        detail = resp.text[:160]
+    else:
+        detail = ""
+        if isinstance(body, list) and body and isinstance(body[0], dict):
+            detail = body[0].get("errorMessage") or body[0].get("message") or ""
+        elif isinstance(body, dict):
+            detail = body.get("message") or body.get("errorMessage") or ""
+    return re.sub(r"(?i)(api_?key=)[^&\s\"'<>]+", r"\1***", str(detail))
+
+
+def _refusal_message(detail: str) -> str:
+    """What the person who asked is told when Chaptarr refuses a write.
+    Chaptarr's own words go to the log (see _error_detail), never to the
+    browser: they are written for an admin, and a non-JSON answer can be a
+    page of anything."""
+    said = detail.lower()
+    if "already" in said:
+        return "Chaptarr already has this book. Refresh the page to see where it stands."
+    if "root folder" in said:
+        return "Chaptarr has no folder set up for this kind of book. Ask the admin."
+    return "Chaptarr couldn't add this book. Try again later, or ask the admin."
 
 
 # A BookSearch sent for a row is remembered this long. Asking again for a
@@ -619,7 +635,7 @@ async def _want_existing(cfg: dict, book_ids: List[int], title: str, monitored: 
             if resp.status_code not in (200, 202):
                 detail = _error_detail(resp)
                 logger.warning("Chaptarr monitor returned HTTP %d for %s: %s", resp.status_code, book_ids, detail)
-                return {"ok": False, "message": detail or f"Chaptarr refused the request ({resp.status_code})"}
+                return {"ok": False, "message": _refusal_message(detail)}
             resp = await client.post(
                 f"{cfg['url']}/api/v1/command",
                 headers=_headers(cfg),
@@ -857,7 +873,7 @@ async def _add_book(cfg: dict, foreign_id: str, book: Dict[str, Any], fmt: str, 
     # "Already added" used to be answered as success, which is how a book
     # Chaptarr held unmonitored kept its Request button forever. The rows
     # were read just above, so this is a copy the lookup could not see.
-    return {"ok": False, "message": detail or f"Chaptarr rejected the request ({resp.status_code})"}
+    return {"ok": False, "message": _refusal_message(detail)}
 
 
 async def library_summary() -> dict:

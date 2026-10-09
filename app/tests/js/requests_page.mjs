@@ -394,7 +394,8 @@ await run('book detail: series, author, one Request for the book, request from i
 });
 
 await run('a refused book request is an error, and the button comes back', async () => {
-  const t = visit(bookRoutes(() => ({ status: 400, body: { detail: 'This book has already been added.' } })));
+  const refused = 'Chaptarr couldn\'t add this book. Try again later, or ask the admin.';
+  const t = visit(bookRoutes(() => ({ status: 400, body: { detail: refused } })));
   const toasts = [];
   globalThis.WSUI.toast = (m, k) => toasts.push(k + ':' + m);
   try {
@@ -402,7 +403,7 @@ await run('a refused book request is an error, and the button comes back', async
     const btn = cardFor(t, 1).querySelector('[data-action="request-media"]');
     btn.click();
     await flush();
-    check('Chaptarr’s reason is shown', toasts.indexOf('err:This book has already been added.') !== -1, toasts);
+    check('the server’s reason is shown', toasts.indexOf('err:' + refused) !== -1, toasts);
     const again = cardFor(t, 1).querySelector('[data-action="request-media"]');
     check('the Request button is back, enabled', !!again && !again.disabled && again.textContent.indexOf('Request') === 0);
     check('no status claimed', !cardFor(t, 1).querySelector('[data-book-state]'));

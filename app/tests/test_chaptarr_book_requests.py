@@ -37,6 +37,11 @@ CONFIG = {
 
 TITLE = "Rule of Two (Star Wars: Darth Bane, #2)"
 
+# What the person asking is told when Chaptarr refuses.
+REFUSED = "Chaptarr couldn't add this book. Try again later, or ask the admin."
+ALREADY = "Chaptarr already has this book. Refresh the page to see where it stands."
+NO_FOLDER = "Chaptarr has no folder set up for this kind of book. Ask the admin."
+
 
 def _book(ebook_rows=None, audio_rows=None):
     return {
@@ -215,14 +220,14 @@ class RequestBook(unittest.TestCase):
     def test_already_added_is_an_error_not_a_success(self):
         fake = _Chaptarr([], {("POST", "/book"): _Resp(400, [{"errorMessage": "This book has already been added."}])})
         result = self._request(fake, cached=_book())
-        self.assertEqual(result, {"ok": False, "message": "This book has already been added."})
+        self.assertEqual(result, {"ok": False, "message": ALREADY})
 
     def test_a_refused_monitor_is_an_error_and_no_search_starts(self):
         fake = _Chaptarr(
             [{"foreignId": "gr:3341500", "book": _book([{"id": 8059, "monitored": False}])}],
             {("PUT", "/book/monitor"): _Resp(400, [{"errorMessage": "Book does not exist"}])})
         result = self._request(fake, cached=_book())
-        self.assertEqual(result, {"ok": False, "message": "Book does not exist"})
+        self.assertEqual(result, {"ok": False, "message": REFUSED})
         self.assertEqual([w[:2] for w in fake.writes()], [("PUT", "/book/monitor")])
 
     def test_a_search_that_does_not_start_is_an_error(self):
@@ -352,7 +357,76 @@ class RequestBothFormats(unittest.TestCase):
         fake = _Chaptarr(_found([{"id": 8059, "monitored": False}], [{"id": 8075, "monitored": False}]),
                          {("PUT", "/book/monitor"): _Resp(400, [{"errorMessage": "Book does not exist"}])})
         result = self._request(fake, cached=_book())
-        self.assertEqual(result, {"ok": False, "message": "Book does not exist"})
+        self.assertEqual(result, {"ok": False, "message": REFUSED})
+
+
+class _Page(_Resp):
+    """An answer that is not JSON: a proxy's error page, say."""
+
+    def __init__(self, status, text):
+        super().__init__(status)
+        self.text = text
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class Refusals(unittest.TestCase):
+    """Chaptarr's own words for a refusal (or the start of a non-JSON
+    answer) went straight to the browser as the error. The person asking is
+    told in plain words; Chaptarr's words go to the server log at warning,
+    with any key in a URL it quotes masked."""
+
+    def _refused(self, answer, fmt="ebook", held=False):
+        rows = [{"id": 8059, "monitored": False}] if held else None
+        path = ("PUT", "/book/monitor") if held else ("POST", "/book")
+        fake = _Chaptarr(_found(rows) if held else [], {path: answer})
+        with self.assertLogs(chaptarr.logger, level="WARNING") as logs:
+            result = RequestBook._request(self, fake, fmt=fmt, cached=_book())
+        self.assertFalse(result["ok"])
+        return result["message"], "\n".join(logs.output)
+
+    def test_a_validation_error_is_plain_words_and_logged(self):
+        said, log = self._refused(_Resp(400, [{"errorMessage": "Quality profile 7 does not exist"}]))
+        self.assertEqual(said, REFUSED)
+        self.assertIn("Quality profile 7 does not exist", log)
+
+    def test_the_monitor_path_is_plain_words_too(self):
+        said, log = self._refused(_Resp(400, {"message": "Book does not exist"}), held=True)
+        self.assertEqual(said, REFUSED)
+        self.assertIn("Book does not exist", log)
+
+    def test_a_page_that_is_not_json_never_reaches_the_browser(self):
+        page = "<html><body>502 Bad Gateway from http://chaptarr.invalid/api/v1/book?apikey=s3cret</body></html>"
+        said, log = self._refused(_Page(502, page))
+        self.assertEqual(said, REFUSED)
+        self.assertIn("502 Bad Gateway", log)
+        self.assertNotIn("s3cret", log)
+        self.assertIn("apikey=***", log)
+
+    def test_already_there_and_no_root_folder_keep_their_own_words(self):
+        said, _ = self._refused(_Resp(400, [{"errorMessage": "This book has already been added."}]))
+        self.assertEqual(said, ALREADY)
+        said, _ = self._refused(_Resp(400, [{"errorMessage": "Root folder '/audiobooks' does not exist"}]),
+                                fmt="audiobook")
+        self.assertEqual(said, NO_FOLDER)
+
+    def test_none_of_chaptarrs_words_reach_the_400(self):
+        from app.tests import helpers
+        Session = helpers.make_sessionmaker()
+        for p in (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                  mock.patch("app.routers.integrations._enforce_daily_book_cap", mock.AsyncMock())):
+            p.start()
+            self.addCleanup(p.stop)
+        client = helpers.api_client(Session, user=helpers.MEMBER, headers=helpers.SAME_ORIGIN)
+        self.addCleanup(helpers.reset_overrides)
+        fake = _Chaptarr([], {("POST", "/book"): _Page(500, "System.NullReferenceException at Chaptarr.Core")})
+        with mock.patch.object(chaptarr, "_get_config", return_value=dict(CONFIG)), \
+             mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=_book())), \
+             mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()), \
+             mock.patch.object(chaptarr, "_redis", lambda: _Markers()), \
+             mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client), \
+             self.assertLogs(chaptarr.logger, level="WARNING"):
+            r = client.post("/api/integrations/chaptarr-request", json={"bookId": "gr:3341500", "format": "ebook"})
+        self.assertEqual((r.status_code, r.json()["detail"]), (400, REFUSED))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -463,8 +537,8 @@ class FormatStates(unittest.TestCase):
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Routes(unittest.TestCase):
     """The request route passes the state through and a refusal is a 400 with
-    Chaptarr's reason; the detail's library line finds only what the caller
-    can open."""
+    the reason in plain words; the detail's library line finds only what the
+    caller can open."""
 
     def setUp(self):
         from app.tests import helpers
@@ -497,8 +571,8 @@ class Routes(unittest.TestCase):
         self.assertNotIn("title", r.json())
 
     def test_a_refusal_is_a_400_with_the_reason(self):
-        r = self.ask({"ok": False, "message": "This book has already been added."})
-        self.assertEqual((r.status_code, r.json()["detail"]), (400, "This book has already been added."))
+        r = self.ask({"ok": False, "message": ALREADY})
+        self.assertEqual((r.status_code, r.json()["detail"]), (400, ALREADY))
 
     def _row(self, book_id, title, author, ebook=True):
         from datetime import datetime
