@@ -649,8 +649,17 @@ function onward(list, newest = {}) {
   const words = ['.ws-sp-sub', '.ws-sp-checked', '.ws-sp-range-label', '.ws-sp-state', '.ws-sp-na', '.ws-sp-window', '.ws-sp-ms', '.ws-sp-foot']
     .map((sel) => [sel, (rule(sel).match(/color: rgb\(var\(--color-text\) \/ (\.\d+)\)/) || [])[1]]);
   check('no word in the panel is fainter than .8 of the text colour', words.every(([, a]) => a && +a >= 0.8), words);
-  check('the header lets go of its own blur while the panel is open',
-    /#appHeader:has\(\.ws-sp-pop\.is-open\) \{[^}]*backdrop-filter: none/.test(css));
+  // Every panel that drops from a bar is a .ws-pop on the frost: this one, the
+  // account menu and the bell's (notifications.js). An ancestor's backdrop
+  // filter would stop their blur at the bar, so the bar lets go of its own.
+  check('the header and the phone top bar let go of their blur while a panel is open',
+    /#appHeader:has\(\.ws-pop\.is-open\),\s*#mobileTopBar:has\(\.ws-pop\.is-open\) \{ -webkit-backdrop-filter: none; backdrop-filter: none; \}/.test(css));
+  const NOTIFY = readFileSync(join(STATIC, 'js/notifications.js'), 'utf8');
+  check('those panels are .ws-pop on the frost: the status panel, the account menu and the bell\'s',
+    /'ws-pop ws-sp-pop ws-frost/.test(PANEL) && /id="userMenuDropdown" class="ws-pop [^"]*\bws-frost\b/.test(HEADER) &&
+    /'ws-pop hidden absolute[^']*\bws-frost\b/.test(NOTIFY));
+  check('and both bars blur what is under them', /id="appHeader" class="[^"]*\bbackdrop-blur-md\b/.test(HEADER) &&
+    /id="mobileTopBar" class="[^"]*\bbackdrop-blur-md\b/.test(SIDEBAR));
   check('two services or more sit in two columns',
     /\.ws-sp-pop \.ws-sp-list:has\(\.ws-sp-row \+ \.ws-sp-row\) \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css));
   check('at most 760px wide and never past the room', /\.ws-sp-pop:has\(\.ws-sp-row \+ \.ws-sp-row\) \{ width: min\(760px, var\(--ws-sp-room/.test(css));
