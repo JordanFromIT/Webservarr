@@ -792,15 +792,22 @@ async def _add_book(cfg: dict, foreign_id: str, book: Dict[str, Any], fmt: str, 
     # the pair is missing, even when only one format is being requested.
     # "none"/False in addOptions so the add pulls in just this book, not
     # the author's whole back catalogue.
+    #
+    # A server that takes one format has one root folder, and an empty path
+    # is no root folder Chaptarr knows, so the requested format's folder
+    # stands in for the missing half. That is the safe reading of the rule
+    # above, not one tested against a single-folder Chaptarr. Nothing is
+    # asked for into the stand-in: request_book only asks for formats with
+    # their own folder.
     author = dict(book.get("author") or {})
     author.update({
         "monitored": True,
         "ebookQualityProfileId": int(cfg["quality_profile_id"]),
         "ebookMetadataProfileId": int(cfg["metadata_profile_id"]),
-        "ebookRootFolderPath": cfg["root_folder"],
+        "ebookRootFolderPath": cfg["root_folder"] or root_folder,
         "audiobookQualityProfileId": int(cfg["audiobook_quality_profile_id"]),
         "audiobookMetadataProfileId": int(cfg["audiobook_metadata_profile_id"]),
-        "audiobookRootFolderPath": cfg["audiobook_root_folder"],
+        "audiobookRootFolderPath": cfg["audiobook_root_folder"] or root_folder,
         "addOptions": {"monitor": "none", "searchForMissingBooks": False},
     })
 

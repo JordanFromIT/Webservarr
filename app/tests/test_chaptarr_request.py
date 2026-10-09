@@ -9,6 +9,7 @@ audiobook row and the user never gets the book they asked for. These tests pin
 the override.
 """
 import asyncio
+import json
 import unittest
 from unittest import mock
 
@@ -79,9 +80,9 @@ class _Listing:
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class RequestBookMediaType(unittest.TestCase):
-    def _request(self, fmt):
+    def _request(self, fmt, config=None):
         sent = []
-        with mock.patch.object(chaptarr, "_get_config", return_value=dict(CONFIG)), \
+        with mock.patch.object(chaptarr, "_get_config", return_value=dict(config or CONFIG)), \
              mock.patch.object(chaptarr, "_get_cached_book",
                                mock.AsyncMock(return_value=dict(SEARCH_RESULT))), \
              mock.patch.object(chaptarr.httpx, "AsyncClient",
@@ -100,6 +101,55 @@ class RequestBookMediaType(unittest.TestCase):
         payload = self._request("audiobook")
         self.assertEqual(payload["mediaType"], "audiobook")
         self.assertEqual(payload["rootFolderPath"], "/audiobooks")
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class RequestBookRootFolders(unittest.TestCase):
+    """A new author's record needs both halves of the root folder pair (see
+    _add_book). A server with one root folder sent an empty path for the
+    other half, which is no root folder Chaptarr knows; the one folder now
+    stands in for both. Two folders go through exactly as before."""
+
+    _request = RequestBookMediaType._request
+
+    def test_two_root_folders_go_through_unchanged(self):
+        expected = dict(SEARCH_RESULT)
+        expected.update({
+            "monitored": True,
+            "mediaType": "ebook",
+            "rootFolderPath": "/ebooks",
+            "author": {
+                "foreignAuthorId": "3167", "authorName": "Joseph Heller", "monitored": True,
+                "ebookQualityProfileId": 1, "ebookMetadataProfileId": 1, "ebookRootFolderPath": "/ebooks",
+                "audiobookQualityProfileId": 2, "audiobookMetadataProfileId": 2,
+                "audiobookRootFolderPath": "/audiobooks",
+                "addOptions": {"monitor": "none", "searchForMissingBooks": False},
+            },
+            "addOptions": {"searchForNewBook": True},
+        })
+        # Key order too: the body Chaptarr receives is byte for byte the same.
+        self.assertEqual(json.dumps(self._request("ebook")), json.dumps(expected))
+        self.assertEqual(self._request("audiobook")["author"], expected["author"])
+
+    def test_only_an_ebook_folder_stands_in_for_both(self):
+        config = dict(CONFIG, audiobook_root_folder="")
+        for fmt in ("ebook", "both"):
+            with self.subTest(fmt=fmt):
+                payload = self._request(fmt, config)
+                self.assertEqual(payload["mediaType"], "ebook")
+                self.assertEqual(payload["rootFolderPath"], "/ebooks")
+                self.assertEqual((payload["author"]["ebookRootFolderPath"],
+                                  payload["author"]["audiobookRootFolderPath"]), ("/ebooks", "/ebooks"))
+
+    def test_only_an_audiobook_folder_stands_in_for_both(self):
+        config = dict(CONFIG, root_folder="")
+        for fmt in ("audiobook", "both"):
+            with self.subTest(fmt=fmt):
+                payload = self._request(fmt, config)
+                self.assertEqual(payload["mediaType"], "audiobook")
+                self.assertEqual(payload["rootFolderPath"], "/audiobooks")
+                self.assertEqual((payload["author"]["ebookRootFolderPath"],
+                                  payload["author"]["audiobookRootFolderPath"]), ("/audiobooks", "/audiobooks"))
 
 
 if __name__ == "__main__":
