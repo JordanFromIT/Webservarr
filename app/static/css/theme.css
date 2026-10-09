@@ -977,8 +977,11 @@ html[data-shell="hidden"] .ws-toasts { inset-block-start: calc(env(safe-area-ins
  * player bar (--ws-safe-bottom). Pages run edge to edge (viewport-fit=cover),
  * so a phone held sideways keeps its content clear of the notch.
  *
- * The tab bar matches the player bar's surface, so the two read as one dock.
- * The active tab (aria-current) has a filled icon on a primary pill and a
+ * The tab bar wears the shared frost (Frosted surfaces, below: the
+ * secondary colour at 25% over the floor, the blur setting, the accent
+ * edge), on trial. Its floor holds the 70% labels at 4.5:1 over a white
+ * poster at any blur. It drops the frost's drop shadow: the bar is docked to
+ * the bottom edge, not floating. The active tab (aria-current) has a filled icon on a primary pill and a
  * bolder label: shape and weight as well as colour. Tabs are a full 64px
  * tall. Text from the theme only: the text colour at 100 and 70%, and the
  * bright text on primary.
@@ -1004,10 +1007,10 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
 .ws-tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
   color: rgb(var(--color-text) / .7);
-  background: linear-gradient(rgb(var(--color-text) / .05), rgb(var(--color-text) / .05)), rgb(var(--color-background) / .92);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  backdrop-filter: blur(16px) saturate(1.2);
-  border-top: 1px solid rgb(var(--color-text) / .08);
+  background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur);
+  backdrop-filter: var(--ws-frost-blur);
+  border-top: 1px solid var(--ws-frost-edge);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 .ws-tabbar-list {

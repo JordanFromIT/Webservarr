@@ -587,6 +587,17 @@ class PhoneShellContract(unittest.TestCase):
         # A full-screen view (the reader) has no tab bar.
         self.assertTrue(css_rules(t, 'html[data-shell="hidden"] #wsTabBar'))
 
+    def test_the_tab_bar_wears_the_shared_frost(self):
+        # On trial: the frost's own tokens, so the blur setting and the
+        # palette move it with every other frosted surface, and its floor keeps
+        # the 70% labels at 4.5:1 over a white poster.
+        bar = "".join(css_rules(self.theme, ".ws-tabbar"))
+        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
+                      "rgb(var(--color-background) / var(--ws-frost-floor));", bar)
+        self.assertIn("backdrop-filter: var(--ws-frost-blur);", bar)
+        self.assertIn("border-top: 1px solid var(--ws-frost-edge);", bar)
+        self.assertIn("color: rgb(var(--color-text) / .7);", bar)
+
     def test_sheet_motion_respects_reduced_motion(self):
         m = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(?P<body>(?:[^{}]*\{[^{}]*\})*)\s*\}", self.theme[
             self.theme.index("/* ---- Phone navigation"):])
