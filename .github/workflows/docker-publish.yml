@@ -120,6 +120,7 @@ jobs:
           node app/tests/js/phone_nav.mjs
           node app/tests/js/install.mjs
           node app/tests/js/home_push_banner.mjs
+          node app/tests/js/welcome_tour.mjs
           node app/tests/js/requests_page.mjs
           node app/tests/js/login_status.mjs
           node app/tests/js/script_icons.mjs

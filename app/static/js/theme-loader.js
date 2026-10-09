@@ -156,6 +156,54 @@
 })();
 
 /*
+ * Asking for things: turning on push and adding the site to the home screen.
+ * One record, shared by Home's push banner (below) and Home's welcome tour
+ * (js/welcome.js), so the two never ask in the same visit and one "Don't ask
+ * me again" silences both.
+ *
+ * WSAsk.get(kind) / set(kind, value), kind 'push' or 'install', in
+ * localStorage (ws-push-ask, ws-install-ask):
+ *   ''       never asked by the tour (the banner may ask about push)
+ *   'later'  "Not now", or the tour closed before it was answered: the tour's
+ *            own small prompt asks again on the next visit (a full load or a
+ *            sign-in, never a soft navigation)
+ *   'never'  "Don't ask me again", confirmed: nothing asks again
+ *   'done'   (install only) added, or the steps to add it were shown
+ * WSAsk.welcomeSeen(): the welcome tour has been shown here (unreadable
+ * storage counts as seen, so a browser that cannot remember is not toured on
+ * every visit). WSAsk.asked() / markAsked(by): what has already asked during
+ * this load of the document ('welcome' or 'banner'), at most one per visit.
+ */
+(function () {
+  'use strict';
+  var KEYS = { push: 'ws-push-ask', install: 'ws-install-ask' };
+  var WELCOME_SEEN = 'webservarr_welcome_v2_seen';
+  var askedBy = '';
+
+  function get(kind) {
+    try { return localStorage.getItem(KEYS[kind]) || ''; } catch (e) { return ''; }
+  }
+  function set(kind, value) {
+    try {
+      if (value) localStorage.setItem(KEYS[kind], value);
+      else localStorage.removeItem(KEYS[kind]);
+    } catch (e) { /* private mode: asked again next time */ }
+  }
+  function welcomeSeen() {
+    try { return localStorage.getItem(WELCOME_SEEN) === '1'; } catch (e) { return true; }
+  }
+
+  window.WSAsk = {
+    WELCOME_SEEN: WELCOME_SEEN,
+    get: get,
+    set: set,
+    welcomeSeen: welcomeSeen,
+    asked: function () { return askedBy; },
+    markAsked: function (by) { if (!askedBy) askedBy = by || 'welcome'; }
+  };
+})();
+
+/*
  * Home's offer to turn on push (#pushPrompt, index.html, a slim banner at
  * the top), decided before the first paint so it never pushes the page down
  * after load.
@@ -169,17 +217,29 @@
  * every visit, soft ones included, sets the banner's hidden attribute and
  * takes the mark off. The key and days are the banner's data-dismiss-key and
  * data-dismiss-days.
+ *
+ * The welcome tour asks first (WSAsk above): no banner while the tour has not
+ * been shown, while the tour's own prompt is waiting to ask again ('later'),
+ * after "Don't ask me again" ('never'), or once the tour has asked this visit.
  */
 (function () {
   'use strict';
   var DISMISS_KEY = 'ws-push-prompt-dismissed';
   var DISMISS_DAYS = 30;
 
+  function welcomeAsks() {
+    var ask = window.WSAsk;
+    if (!ask) return false;
+    var state = ask.get('push');
+    return state === 'never' || state === 'later' || !ask.welcomeSeen() || ask.asked() === 'welcome';
+  }
+
   function offer(key, days) {
     var user = (window.WS_DATA || {}).user || {};
     if (!user.has_email || !(window.WEBSERVARR_THEME || {}).vapid_public_key) return false;
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
     if (Notification.permission !== 'default') return false;
+    if (welcomeAsks()) return false;
     try {
       var at = parseInt(localStorage.getItem(key) || '', 10);
       if (at && Date.now() - at < days * 86400000) return false;

@@ -676,7 +676,14 @@ export async function mount(ctx) {
                         window.WSPushOffer(card.dataset.dismissKey, Number(card.dataset.dismissDays)));
         document.documentElement.removeAttribute('data-push-offer');
         if (!card.hidden && typeof window.initPushPrompt === 'function') window.initPushPrompt(card, signal);
+        // The banner is this visit's one ask: the welcome tour's own prompt
+        // stays away (theme-loader.js WSAsk).
+        if (!card.hidden && window.WSAsk) window.WSAsk.markAsked('banner');
     }
+
+    // The welcome tour (js/welcome.js, on js/tour.js): once per device after
+    // version 2, again from "Welcome tour" in the account menu and More.
+    if (window.WSWelcome && typeof window.WSWelcome.mount === 'function') window.WSWelcome.mount(ctx);
 
     // Apply configurable section icons from branding
     var icons = branding.icons || {};

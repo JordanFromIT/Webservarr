@@ -95,7 +95,10 @@ function browser({ width = 390, ua = 'android', user = { username: 'sam', has_em
   if (storage === 'throw') {
     Object.defineProperty(w, 'localStorage', { get() { throw new Error('storage blocked'); }, configurable: true });
   } else {
-    Object.keys(store).forEach((k) => w.localStorage.setItem(k, store[k]));
+    // Someone who has had the welcome tour (js/welcome.js): until then the
+    // tour, not the banner, asks (welcome_tour.mjs covers the hand-over).
+    const all = Object.assign({ webservarr_welcome_v2_seen: '1' }, store);
+    Object.keys(all).forEach((k) => w.localStorage.setItem(k, all[k]));
   }
   const data = { branding: { app_name: 'WebServarr', vapid_public_key: vapid }, user, page };
   w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';

@@ -396,6 +396,43 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   .tour-spotlight, .tour-bubble { transition: none; }
 }
 
+/* A quiet prompt (tour.js quiet: true, the welcome tour's "ask again"): the
+   ring marks what it is about, with no fog over the page around it. */
+.tour-quiet .tour-spotlight { box-shadow: none; }
+
+/* The bubble is a dialog that takes focus; as a box it is not a control, so
+   it draws no ring of its own (its buttons do). */
+.tour-bubble:focus { outline: none; }
+
+/* A step's short instructions (adding the site to the home screen). */
+.tour-list {
+  margin-top: .5rem;
+  padding-inline-start: 1.25rem;
+  list-style: decimal;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgb(var(--color-text-secondary) / .9);
+}
+.tour-list li + li { margin-top: .25rem; }
+.tour-glyph { font-size: 16px; vertical-align: -3px; margin-inline: .2em; }
+
+/* A step's own buttons: the answer and Not now side by side, the small
+   "Don't ask me again" on a line of its own beneath them. */
+.tour-actions { margin-top: .75rem; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; }
+.tour-actions[hidden] { display: none; }
+.tour-actions-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.tour-link {
+  /* Small words, a 24px target (WCAG 2.5.8). */
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: rgb(var(--color-text-secondary) / .8);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tour-link:hover { color: rgb(var(--color-text-secondary)); }
+
 /* ---- Glass Card ---- */
 .glass-card {
   background: rgba(var(--color-primary) / 0.15);

@@ -1177,5 +1177,9 @@
   // Expose
   window.initNotifications = init;
   window.initPushPrompt = initPushPrompt;
+  // The same subscribe path for Home's welcome tour (js/welcome.js), which
+  // asks from its own bubble: subscribe(onGranted) straight from the tap,
+  // failureKind(err) and messages[kind] to explain a failure.
+  window.WSPush = { subscribe: subscribePush, failureKind: pushFailureKind, messages: PUSH_MESSAGES };
 
 })();

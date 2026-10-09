@@ -14,12 +14,35 @@
  *     helpBtn: 'helpBtn',      // optional: re-runs the tour on click
  *     autoStart: true,         // first visit only
  *     startDelay: 1200,        // let the page render before measuring
- *     signal: ctx.signal       // the page's visit: the tour ends with it
+ *     signal: ctx.signal,      // the page's visit: the tour ends with it
+ *     onFinish: function (how) {}   // 'done' (the last step) or 'skip'
  *   });
  *   tour.start();              // or call it yourself once the page is ready
  *
  * A step names its target by selector. `fallback` is used when the primary
  * element is absent or hidden, so a tour never breaks on an empty page.
+ *
+ * More a step can carry (the welcome tour, js/welcome.js, uses them):
+ *   list      short numbered instructions under the body: each a string, or
+ *             [before, icon, after] to picture a browser button in the words
+ *   actions   buttons of its own in place of Continue:
+ *             { label, kind: 'primary' | 'quiet' | 'link', run(ctl),
+ *               busyLabel, focus }. run gets the step's controls (below); a
+ *             promise it returns keeps the buttons disabled until it settles.
+ *   view(ctl) a function returning any of the fields above, read each time
+ *             the step is drawn, so a step can depend on what was answered
+ * The controls, live only while that step is on screen:
+ *   ctl.next(), ctl.back(), ctl.finish()
+ *   ctl.update(fields)  redraw this step in place with fields laid over it
+ *                       (a confirmation), or update(null) to put it back
+ * The steps option may itself be a function, called each time the tour starts.
+ *
+ * quiet: true is a single prompt rather than a tour: no fog, no Skip, no dots,
+ * no Back. Escape still closes it.
+ *
+ * The bubble is a dialog: focus moves into it when it shows, stays in it
+ * while a tour runs (Tab wraps), and goes back where it was when it ends. A
+ * tour never starts over an open dialog or sheet: it waits for it to close.
  *
  * Soft navigation: this is a page helper (data-ws-page-script), loaded once
  * per document; init() is called from the page module's mount with the
@@ -63,7 +86,7 @@
     layer.className = 'hidden';
     layer.innerHTML =
       '<div id="tourSpotlight" class="tour-spotlight"></div>' +
-      '<div id="tourBubble" class="tour-bubble">' +
+      '<div id="tourBubble" class="tour-bubble" role="dialog" aria-labelledby="tourTitle" aria-describedby="tourBody" tabindex="-1">' +
         '<div id="tourArrow" class="tour-arrow" data-side="top"></div>' +
         '<div class="p-4">' +
           '<div class="flex items-start gap-2">' +
@@ -72,13 +95,16 @@
             '<button id="tourSkip" type="button" class="text-label text-bright/80 hover:text-bright shrink-0">Skip</button>' +
           '</div>' +
           '<p id="tourBody" class="mt-2 text-[13px] text-bright/90 leading-relaxed"></p>' +
-          '<div class="mt-3 flex items-center gap-3">' +
+          '<ol id="tourList" class="tour-list" hidden></ol>' +
+          '<div id="tourActions" class="tour-actions" hidden></div>' +
+          '<div id="tourFoot" class="mt-3 flex items-center gap-3">' +
             '<div id="tourDots" class="flex items-center gap-1.5"></div>' +
             '<div class="ml-auto flex items-center gap-2">' +
               '<button id="tourBack" type="button" class="px-2.5 py-1 rounded-lg text-label text-bright/80 hover:text-bright hover:bg-bright/10">Back</button>' +
               '<button id="tourNext" type="button" class="px-3 py-1.5 rounded-lg bg-bright text-primary text-label font-bold hover:bg-bright/90">Continue</button>' +
             '</div>' +
           '</div>' +
+          '<p id="tourSay" class="sr-only" aria-live="polite"></p>' +
         '</div>' +
       '</div>';
     document.body.appendChild(layer);
@@ -87,18 +113,56 @@
 
   function q(id) { return document.getElementById(id); }
 
+  // A step's own buttons, by kind. Literal class lists, so Tailwind compiles them.
+  var ACTION_CLASS = {
+    primary: 'px-3 py-1.5 rounded-lg bg-bright text-primary text-label font-bold hover:bg-bright/90 disabled:opacity-60',
+    quiet: 'px-2.5 py-1.5 rounded-lg text-label text-bright/80 hover:text-bright hover:bg-bright/10 disabled:opacity-60',
+    link: 'tour-link disabled:opacity-60'
+  };
+
+  /* An open dialog or sheet (a native <dialog>, or a box marked aria-modal)
+     that is not the tour's own bubble. */
+  function modalOpen() {
+    var layer = q('tourLayer');
+    var list = document.querySelectorAll('dialog[open], [aria-modal="true"]');
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (layer && layer.contains(el)) continue;
+      if (el.tagName !== 'DIALOG' && (el.hidden || el.closest('[hidden], .hidden'))) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function focusables(root) {
+    var all = root.querySelectorAll('button, a[href]');
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.disabled || el.hidden || el.closest('[hidden]')) continue;
+      if (el.style.display === 'none' || el.style.visibility === 'hidden') continue;
+      out.push(el);
+    }
+    return out;
+  }
+
   function create(opts) {
-    var STEPS = opts.steps || [];
+    var STEPS = [];
     var SEEN_KEY = opts.seenKey;
+    var QUIET = !!opts.quiet;
     var signal = opts.signal || null;
     var step = 0;
     var active = false;
     var placeTimer = 0;      // render's wait for the scroll to settle
-    var startTimer = 0;      // autoStart's delay
+    var startTimer = 0;      // autoStart's delay, and the wait for a dialog to close
     // False until this run's first placement: the layer stays invisible and
     // untransitioned until then, so the bubble never shows at a stale spot
     // and slides from it.
     var placed = false;
+    var override = null;     // ctl.update()'s fields over the current step
+    var drawn = 0;           // which drawing of a step a ctl belongs to
+    var focusAfter = null;   // the button to focus once the bubble is placed
+    var returnTo = null;     // what had focus before the run
 
     /* Measured rather than asked, because offsetParent is null for any
        position:fixed element - which silently rejected the reader's page-turn
@@ -128,6 +192,7 @@
     function place() {
       position();
       if (active && !placed) reveal();
+      else if (active) landFocus();
     }
 
     // The first placement of a run lands with no transition, then shows.
@@ -137,6 +202,18 @@
       void layer.offsetWidth;   // commit the first position before transitions return
       layer.classList.remove('tour-placing');
       layer.style.visibility = '';
+      landFocus();
+    }
+
+    /* Focus goes into the bubble once it can be seen (a hidden element takes
+       no focus): to the button the step asked for, else the bubble itself,
+       which reads out its title and words. */
+    function landFocus() {
+      if (!focusAfter) return;
+      var el = focusAfter;
+      focusAfter = null;
+      if (!el.isConnected) el = q('tourBubble');
+      try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
     }
 
     function position() {
@@ -215,24 +292,144 @@
       }
     }
 
-    function render() {
+    /* The step as it is drawn now: its own fields, what view() says, and
+       anything ctl.update() laid over them. */
+    function current() {
       var s = STEPS[step];
+      var v = s;
+      if (typeof s.view === 'function') {
+        try { v = Object.assign({}, s, s.view() || {}); } catch (e) { v = s; }
+      }
+      if (override) v = Object.assign({}, v, override);
+      return v;
+    }
+
+    function fillList(items) {
+      var ol = q('tourList');
+      ol.innerHTML = '';
+      ol.hidden = !(items && items.length);
+      (items || []).forEach(function (item) {
+        var li = document.createElement('li');
+        var parts = Array.isArray(item) ? item : [item];
+        li.appendChild(document.createTextNode(parts[0] || ''));
+        if (parts[1]) {
+          var glyph = document.createElement('span');
+          glyph.className = 'material-symbols-outlined tour-glyph';
+          glyph.setAttribute('aria-hidden', 'true');
+          glyph.textContent = parts[1];
+          li.appendChild(glyph);
+        }
+        if (parts[2]) li.appendChild(document.createTextNode(parts[2]));
+        ol.appendChild(li);
+      });
+    }
+
+    /* The controls a step's buttons act through. Each drawing of a step gets
+       its own set, and a set from a step that has since moved on does
+       nothing: a slow answer never turns a page someone already turned. */
+    function controls() {
+      var mine = drawn;
+      function live(fn) {
+        return function () {
+          if (!active || mine !== drawn) return;
+          return fn.apply(null, arguments);
+        };
+      }
+      return {
+        next: live(next),
+        back: live(back),
+        finish: live(function () { finish('skip'); }),
+        update: live(function (fields) { override = fields || null; paint(true); place(); })
+      };
+    }
+
+    function fillActions(actions) {
+      var box = q('tourActions');
+      box.innerHTML = '';
+      box.hidden = !(actions && actions.length);
+      if (box.hidden) return null;
+      var ctl = controls();
+      var row = document.createElement('div');
+      row.className = 'tour-actions-row';
+      var wanted = null;
+      var buttons = [];
+      actions.forEach(function (a) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = ACTION_CLASS[a.kind] || ACTION_CLASS.quiet;
+        b.textContent = a.label;
+        b.addEventListener('click', function () {
+          if (b.disabled) return;
+          var out;
+          try { out = a.run(ctl); } catch (e) { out = null; }
+          if (!out || typeof out.then !== 'function') return;
+          var mine = drawn;
+          buttons.forEach(function (x) { x.disabled = true; });
+          box.setAttribute('aria-busy', 'true');
+          if (a.busyLabel) b.textContent = a.busyLabel;
+          var settle = function () {
+            if (mine !== drawn) return;
+            buttons.forEach(function (x) { x.disabled = false; });
+            box.removeAttribute('aria-busy');
+            b.textContent = a.label;
+          };
+          out.then(settle, settle);
+        });
+        buttons.push(b);
+        // The small link sits on a line of its own under the buttons.
+        if (a.kind === 'link') box.appendChild(b);
+        else row.appendChild(b);
+        if (a.focus && !wanted) wanted = b;
+      });
+      box.insertBefore(row, box.firstChild);
+      return wanted;
+    }
+
+    /* Writes the step into the bubble. inPlace: an update of the step on
+       screen (a confirmation), said aloud since the words changed under the
+       person's focus. */
+    function paint(inPlace) {
+      var s = current();
+      drawn += 1;
       q('tourIcon').textContent = s.icon;
       q('tourTitle').textContent = s.title;
       // Plain text by design. Emphasis inside a step body fights the bold
       // title above it and makes a short blurb look busy.
       q('tourBody').textContent = s.body;
+      fillList(s.list);
+      var wanted = fillActions(s.actions);
 
       var dots = q('tourDots');
       dots.innerHTML = '';
-      STEPS.forEach(function (_, i) {
-        var d = document.createElement('span');
-        d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-bright' : 'bg-bright/30');
-        dots.appendChild(d);
-      });
+      if (!QUIET) {
+        STEPS.forEach(function (_, i) {
+          var d = document.createElement('span');
+          d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-bright' : 'bg-bright/30');
+          dots.appendChild(d);
+        });
+      }
 
+      var own = !!(s.actions && s.actions.length);
       q('tourBack').style.visibility = step === 0 ? 'hidden' : 'visible';
       q('tourNext').textContent = step === STEPS.length - 1 ? 'Got it' : 'Continue';
+      q('tourNext').style.display = own ? 'none' : '';
+      q('tourFoot').style.display = QUIET ? 'none' : '';
+      q('tourSkip').hidden = QUIET;
+
+      // Where focus goes once the bubble is placed: the step's chosen button,
+      // else its first, else Continue. The first step lands on the bubble
+      // itself, which a screen reader reads out as the dialog it is.
+      if (!placed) focusAfter = q('tourBubble');
+      else focusAfter = wanted || (own ? q('tourActions').querySelector('button') : q('tourNext'));
+
+      var say = q('tourSay');
+      say.textContent = placed ? (inPlace ? '' : s.title + '. ') + s.body : '';
+    }
+
+    function render() {
+      override = null;
+      paint(false);
+      var s = STEPS[step];
 
       // A step may need the page put into a particular state first - a panel
       // opened, a menu expanded - or its target does not exist to point at.
@@ -281,13 +478,30 @@
     }
 
     function start() {
-      if (active || !STEPS.length || (signal && signal.aborted)) return;
+      clearTimeout(startTimer);
+      if (active || (signal && signal.aborted)) return;
       if (playerOpen()) { afterPlayer(); return; }
+      // An open dialog or sheet (the More sheet, a book, a confirm): wait for
+      // it to close rather than fog over it.
+      if (modalOpen()) { startTimer = setTimeout(start, 600); return; }
+      STEPS = (typeof opts.steps === 'function' ? opts.steps() : opts.steps) || [];
+      if (!STEPS.length) return;
       collapsePlayer();
+      // The buttons are shared by every tour on the page: this run claims them.
+      q('tourNext').onclick = next;
+      q('tourBack').onclick = back;
+      q('tourSkip').onclick = finish;
       active = true;
       step = 0;
       placed = false;
+      var ae = document.activeElement;
+      returnTo = ae && ae !== document.body ? ae : null;
       var layer = q('tourLayer');
+      layer.classList.toggle('tour-quiet', QUIET);
+      // A tour holds the page (Tab stays in the bubble); a quiet prompt
+      // leaves it usable around it.
+      if (QUIET) q('tourBubble').removeAttribute('aria-modal');
+      else q('tourBubble').setAttribute('aria-modal', 'true');
       layer.classList.add('tour-placing');
       layer.style.visibility = 'hidden';
       layer.classList.remove('hidden');
@@ -298,19 +512,30 @@
 
     // Stops a run: the layer hides, the listeners and the pending placement go.
     function stop() {
+      var was = active;
       active = false;
       clearTimeout(placeTimer);
+      clearTimeout(startTimer);
+      focusAfter = null;
       var layer = q('tourLayer');
+      var inLayer = !!(layer && layer.contains(document.activeElement));
       if (layer) layer.classList.add('hidden');
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
+      // Focus goes back where it was, unless the person has moved it on.
+      if (was && (inLayer || document.activeElement === document.body) && returnTo && returnTo.isConnected) {
+        try { returnTo.focus({ preventScroll: true }); } catch (e) { /* gone */ }
+      }
+      returnTo = null;
     }
 
-    function finish() {
+    // how: 'done' from the last step's button, anything else is a skip
+    // (Skip, Escape, a Not now on a quiet prompt).
+    function finish(how) {
       if (!active) return;
       stop();
       if (typeof opts.onFinish === 'function') {
-        try { opts.onFinish(); } catch (e) { /* cleanup is best effort */ }
+        try { opts.onFinish(how === 'done' ? 'done' : 'skip'); } catch (e) { /* cleanup is best effort */ }
       }
       if (!devAlways() && SEEN_KEY) {
         try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) { /* private mode */ }
@@ -318,7 +543,7 @@
     }
 
     function next() {
-      if (step < STEPS.length - 1) { step++; render(); } else { finish(); }
+      if (step < STEPS.length - 1) { step++; render(); } else { finish('done'); }
     }
     function back() {
       if (step > 0) { step--; render(); }
@@ -328,19 +553,27 @@
       try { return localStorage.getItem(SEEN_KEY) === '1'; } catch (e) { return false; }
     }
 
-    /* Buttons are shared across tours on a page, so each tour claims them when
-       it starts rather than binding once at init. In practice a page has one
-       tour; this keeps that from being an assumption. */
-    q('tourNext').onclick = next;
-    q('tourBack').onclick = back;
-    q('tourSkip').onclick = finish;
+    // Tab and Shift+Tab go round the bubble's buttons while a tour runs.
+    function trapTab(e) {
+      var bubble = q('tourBubble');
+      var list = focusables(bubble);
+      if (!list.length) { e.preventDefault(); bubble.focus(); return; }
+      var first = list[0];
+      var last = list[list.length - 1];
+      var at = document.activeElement;
+      if (!bubble.contains(at)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && (at === first || at === bubble)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
+    }
 
     // capture: the reader turns pages on the arrow keys too
     document.addEventListener('keydown', function (e) {
       if (!active || playerOpen()) return;
+      if (e.key === 'Tab' && !QUIET) { trapTab(e); return; }
       // Typing is the person's: the arrow keys move the caret in a field, they do not turn a step.
-      if (inField(e.target)) { if (e.key === 'Escape') finish(); return; }
-      if (e.key === 'Escape') { finish(); }
+      if (inField(e.target)) { if (e.key === 'Escape') finish('skip'); return; }
+      if (e.key === 'Escape') { finish('skip'); }
+      else if (QUIET) { return; }
       else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); next(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); back(); }
     }, signal ? { capture: true, signal: signal } : true);
