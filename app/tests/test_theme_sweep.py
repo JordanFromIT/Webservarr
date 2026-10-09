@@ -426,6 +426,7 @@ BRIGHT_ON_PRIMARY = {
     ("tour.js", 'id="tourSkip"', "the tour bubble"),
     ("tour.js", 'id="tourBody"', "the tour bubble"),
     ("tour.js", 'id="tourBack"', "the tour bubble"),
+    ("tour.js", "quiet: 'px-2.5 py-1.5", "a step's quiet button (Not now), in the tour bubble"),
     ("pages.py", 'subcls="text-bright/80" if active', "the active nav pill (_LINK_ACTIVE, bg-primary)"),
     ("pages.py", "text-bright font-bold text-3xl", "the logo-fallback tile (size-14 bg-primary)"),
     ("pages.py", "text-bright font-bold text-hero", "the logo-fallback tile with the name off (size-20 bg-primary)"),
