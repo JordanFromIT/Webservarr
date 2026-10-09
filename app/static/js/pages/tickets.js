@@ -513,7 +513,7 @@ export async function mount(ctx) {
       // Status dropdown
       var statusSelect = document.createElement('select');
       statusSelect.setAttribute('aria-label', 'Status');
-      statusSelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-primary';
+      statusSelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-focus';
       ['open', 'in_progress', 'resolved', 'closed'].forEach(function(s) {
         var opt = document.createElement('option');
         opt.value = s;
@@ -525,7 +525,7 @@ export async function mount(ctx) {
       // Priority dropdown
       var prioritySelect = document.createElement('select');
       prioritySelect.setAttribute('aria-label', 'Priority');
-      prioritySelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-primary';
+      prioritySelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-focus';
       var noneOpt = document.createElement('option');
       noneOpt.value = '';
       noneOpt.textContent = 'No priority';
@@ -544,7 +544,7 @@ export async function mount(ctx) {
       var pubCheck = document.createElement('input');
       pubCheck.type = 'checkbox';
       pubCheck.checked = ticket.is_public;
-      pubCheck.className = 'rounded border-steel-blue/30 bg-frosted-blue/[0.04] text-primary focus:ring-primary/30';
+      pubCheck.className = 'rounded border-steel-blue/30 bg-frosted-blue/[0.04] text-primary focus:ring-focus';
       pubLabel.appendChild(pubCheck);
       pubLabel.appendChild(document.createTextNode('Public'));
 
@@ -668,7 +668,7 @@ export async function mount(ctx) {
         else delete _commentDrafts[ticket.id];
         if (textarea.value.trim()) { textarea.classList.remove('ws-invalid'); commentError.classList.add('hidden'); }
       }, { signal: signal });
-      textarea.className = 'w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors mb-2';
+      textarea.className = 'w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-colors mb-2';
 
       var fileInput = document.createElement('input');
       fileInput.type = 'file';

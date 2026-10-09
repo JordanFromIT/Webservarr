@@ -125,7 +125,7 @@
   /* Off while an error shows (showPanel): there is no page to turn. */
   .nav-zone[hidden] { display: none; }
   .nav-zone:disabled .chev { opacity: .12; }
-  .nav-zone:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: -4px; }
+  .nav-zone:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -4px; }
 
   @media (prefers-reduced-motion: reduce) { .nav-zone .chev { transition: none; } }
 
@@ -302,7 +302,7 @@
     <input id="pageJumpInput" type="number" min="1" inputmode="numeric"
            class="w-16 bg-baltic-blue/20 border border-steel-blue/40 rounded-md px-2 py-0.5
                   text-[12px] text-frosted-blue text-center tabular-nums
-                  focus:outline-none focus:ring-2 focus:ring-steel-blue"
+                  focus:outline-none focus:ring-2 focus:ring-focus"
            aria-label="Go to page"/>
     <span id="pageJumpTotal" class="reader-meta text-[13px] tabular-nums"></span>
   </form>

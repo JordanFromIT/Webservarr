@@ -706,7 +706,7 @@ await run('the wheel can be focused and named for the keys', async (make) => {
   await t.open();
   check('focusable', t.wheel.getAttribute('tabindex') === '0');
   check('named, with the keys to use', t.wheel.getAttribute('aria-label') === 'Event log, use arrow keys to see older events' && t.wheel.getAttribute('role') === 'group');
-  check('a visible focus ring from the theme', /\.ws-wheel:focus-visible \{ outline: 2px solid rgb\(var\(--color-accent\)\)/.test(THEME_CSS));
+  check('a visible focus ring from the theme (the one focus colour)', /\.ws-wheel:focus-visible \{ outline: 2px solid rgb\(var\(--ws-focus\)\)/.test(THEME_CSS));
   check('"Latest" is there but hidden while following the newest', latestBtn(t) && latestBtn(t).hidden === true && latestBtn(t).textContent === 'Latest' && latestBtn(t).type === 'button');
   check('"Latest" moves nothing when it shows (absolute, in the gap below)', /\.ws-wheel-latest \{\s*position: absolute;/.test(THEME_CSS));
 });

@@ -238,7 +238,9 @@ class OneFocusRing(unittest.TestCase):
 
     def test_the_rule(self):
         theme = read("css/theme.css")
-        self.assertRegex(theme, r":where\(a\[href\], button, summary, \[role=\"button\"\], \[tabindex\]:not\(\[tabindex=\"-1\"\]\)\):focus-visible \{\s*outline: 2px solid rgb\(var\(--color-text\)\);\s*outline-offset: 2px;")
+        self.assertRegex(theme, r":where\(a\[href\], button, summary, \[role=\"button\"\], \[tabindex\]:not\(\[tabindex=\"-1\"\]\)\):focus-visible \{\s*outline: 2px solid rgb\(var\(--ws-focus\)\);\s*outline-offset: 2px;")
+        # The ring's colour is the one focus token, the text colour.
+        self.assertRegex(theme, r":where\(:root\) \{[^}]*--ws-focus: var\(--color-text\);")
         self.assertIn(".discover-row-wrapper:focus-within .discover-scroll-btn", read("requests.html"))
 
 

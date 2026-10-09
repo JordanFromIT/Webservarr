@@ -726,7 +726,10 @@ class FormControlsFollowTheTheme(unittest.TestCase):
         self.assertIn("rgb(var(--color-text) / .6)", chevron)
         self.assertNotIn("url(", chevron)
         focus = self.rule("input:focus, textarea:focus, select:focus")
-        self.assertIn("--tw-ring-color: rgb(var(--color-primary))", focus)
+        # The focus ring is the one focus colour (theme.css --ws-focus), not the
+        # primary blue, which is under 3:1 on black and on the frost.
+        self.assertIn("--tw-ring-color: rgb(var(--ws-focus))", focus)
+        self.assertIn("border-color: rgb(var(--ws-focus))", focus)
         self.assertIn("--tw-ring-offset-color: rgb(var(--color-background))", focus)
         self.assertIn("color: rgb(var(--color-primary))", self.rule("input:where([type='checkbox'], [type='radio'])"))
         self.assertIn("color: rgb(var(--color-text) / .7)", self.rule("input::placeholder, textarea::placeholder"))
@@ -854,7 +857,7 @@ class NoPaletteColours(unittest.TestCase):
         login = (STATIC / "login.html").read_text(encoding="utf-8")
         home = (STATIC / "index.html").read_text(encoding="utf-8")
         primary = ("bg-primary hover:bg-primary/90 text-bright",
-                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue "
+                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus "
                    "focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark")
         btn = next(l for l in login.splitlines() if 'id="authentikLoginBtn"' in l)
         for mark in ('id="viewRequestsLink"', "data-push-prompt-enable"):

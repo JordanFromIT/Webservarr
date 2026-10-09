@@ -120,7 +120,7 @@
         var input = document.createElement('input');
         input.type = type;
         input.id = id;
-        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
+        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all';
         input.placeholder = placeholder || '';
         if (value !== undefined) input.value = value;
         inputGroup.appendChild(input);
@@ -228,7 +228,7 @@
         var input = document.createElement('input');
         input.type = 'password';
         input.id = 'setup-secret-key';
-        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-20 text-frosted-blue font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
+        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-20 text-frosted-blue font-mono text-xs focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all';
         input.value = secretKey;
         input.readOnly = true;
         inputGroup.appendChild(input);

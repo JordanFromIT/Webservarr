@@ -147,12 +147,12 @@ const FORMAT_INFO = {
 
 // Class strings are written out whole: Tailwind only builds what it can read.
 const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6';
-const CHIP_ON = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright';
-const CHIP_OFF = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
-const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
+const CHIP_ON = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
+const CHIP_OFF = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
+const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 // A filter button: a format chip's shape with a picker's arrow; filled like a pressed chip while it is in use.
-const FILTER_ON = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright';
-const FILTER_OFF = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
+const FILTER_ON = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
+const FILTER_OFF = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
 // A filter in use: its kind, its name and a cross; the whole pill removes it.
 const ACTIVE_CHIP = 'inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full pl-3 pr-2 text-[15px] bg-frosted-blue/10 text-frosted-blue hover:bg-frosted-blue/[0.15] transition-colors ' + LINK_FOCUS;
 const CLEAR_ALL = 'inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue transition-colors ' + LINK_FOCUS;
@@ -461,7 +461,7 @@ const MORE_BTN = 'absolute right-1.5 top-1.5 grid size-8 place-items-center roun
   'ring-1 ring-frosted-blue/25 transition-[opacity,background-color,box-shadow] duration-150 hover:bg-background-dark hover:ring-2 hover:ring-frosted-blue ' +
   '[@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover/cont:opacity-100 group-focus-within/cont:opacity-100 aria-expanded:opacity-100 ' + LINK_FOCUS;
 const MENU_ITEM = 'flex min-h-11 w-full items-center gap-3 rounded-[10px] pl-3 pr-4 text-left text-[15px] font-semibold text-frosted-blue ' +
-  'hover:bg-frosted-blue/[0.07] focus:bg-frosted-blue/10 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-frosted-blue';
+  'hover:bg-frosted-blue/[0.07] focus:bg-frosted-blue/10 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus';
 const CONTINUE_EMPTY = 'Books you start will show up here.';
 const FADE_MS = 160;               // a Continue card leaving, or coming back
 let continueIds = 0;
@@ -2055,7 +2055,7 @@ export async function mount(ctx) {
 
     const find = el('div', isWide ? 'relative px-3 pb-2' : 'relative px-1 pb-2');
     find.appendChild(icon('search', 'pointer-events-none absolute top-1/2 -translate-y-1/2 text-[20px] text-frosted-blue/70 ' + (isWide ? 'left-6' : 'left-4')));
-    const box = el('input', 'h-11 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/85 focus:outline-none focus:ring-2 focus:ring-frosted-blue');
+    const box = el('input', 'h-11 w-full rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-10 pr-3 text-[16px] text-frosted-blue placeholder:text-frosted-blue/85 focus:outline-none focus:ring-2 focus:ring-focus');
     box.type = 'search';
     box.autocomplete = 'off';
     box.maxLength = NAME_MAX;

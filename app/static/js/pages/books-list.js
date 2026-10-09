@@ -38,7 +38,7 @@ const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) b
 const NAME_MAX = 200;               // the API's own limit on a name
 const FOLLOW_URL = '/api/books/series/follow';
 
-const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
+const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 // Class strings are written out whole: Tailwind only builds what it can read.
 const GRID = 'mt-6 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6';
 const ROW = 'group grid grid-cols-[1.5rem_3.75rem_minmax(0,1fr)] items-center gap-3 rounded-2xl bg-frosted-blue/[0.04] p-2.5 transition-colors hover:bg-frosted-blue/[0.07] sm:grid-cols-[2rem_4.5rem_minmax(0,1fr)] sm:gap-4 sm:p-3 ' + LINK_FOCUS;

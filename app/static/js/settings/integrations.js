@@ -489,7 +489,7 @@
         root.id = 'integration-card-' + id;
         root.tabIndex = -1;
         var head = el('button', 'w-full flex items-center gap-4 p-4 text-left rounded-2xl hover:bg-frosted-blue/[0.03] ' +
-          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary');
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus');
         head.type = 'button';
         head.setAttribute('aria-expanded', 'false');
         head.appendChild(icon(c.icon, 'text-[26px] text-frosted-blue/70'));

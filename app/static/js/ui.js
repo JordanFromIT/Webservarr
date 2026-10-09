@@ -22,7 +22,7 @@
   var cls = {
     input: 'w-full rounded-[10px] bg-frosted-blue/[0.04] border border-frosted-blue/10 px-3.5 py-2.5 ' +
       'text-[15px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 ' +
-      'focus:ring-primary focus:border-transparent transition-colors disabled:opacity-50',
+      'focus:ring-focus focus:border-transparent transition-colors disabled:opacity-50',
     label: 'block text-[13px] font-semibold text-frosted-blue/70 mb-1.5',
     help: 'text-[13px] text-frosted-blue/60 mt-1.5',
     error: 'text-[13px] font-semibold text-frosted-blue mt-1.5 flex items-center gap-1.5',
@@ -30,19 +30,19 @@
     fieldWidth: 'max-w-2xl',
     btnPrimary: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright ' +
       'text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 ' +
-      'focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors ' +
+      'focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors ' +
       'disabled:opacity-50 disabled:cursor-not-allowed',
     btnGhost: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
       'text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline ' +
-      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors ' +
+      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors ' +
       'disabled:opacity-50 disabled:cursor-not-allowed',
     btnQuiet: 'inline-flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-frosted-blue/70 ' +
       'text-sm font-semibold hover:text-frosted-blue hover:bg-frosted-blue/[0.06] focus-visible:outline ' +
-      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors',
+      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors',
     btnDanger: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
       'text-frosted-blue text-sm font-semibold ring-1 ring-inset ring-[rgb(var(--ws-status-err))] ' +
       'hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
-      'focus-visible:outline-primary transition-colors'
+      'focus-visible:outline-focus transition-colors'
   };
 
   function el(tag, className, text) {
@@ -68,11 +68,11 @@
   // Status colour only on deviation: an error's words, never a success's.
   var TONE_TEXT = { ok: 'text-frosted-blue', err: 'text-status-err-text', info: 'text-frosted-blue' };
   var toastBox = null;
-  // Its focus ring is the text colour, the site's one ring: the primary blue
-  // on the frost is under 3:1.
+  // Its focus ring is the site's one ring (outline-focus, theme.css
+  // --ws-focus): the primary blue on the frost is under 3:1.
   var ACTION_BTN = 'shrink-0 -my-1 ml-1 px-3 py-1.5 rounded-lg bg-frosted-blue/[0.08] text-frosted-blue text-xs ' +
     'font-bold hover:bg-frosted-blue/15 focus-visible:outline focus-visible:outline-2 ' +
-    'focus-visible:outline-offset-2 focus-visible:outline-frosted-blue transition-colors';
+    'focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors';
 
   // The toasts on screen, oldest first. Past TOAST_MAX the oldest leaves, so
   // a burst never runs the stack down the screen.

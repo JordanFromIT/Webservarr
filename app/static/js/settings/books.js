@@ -246,7 +246,7 @@
         input.value = String(value);
         input.checked = chosen;
         var face = el('span', ROW + ' peer-focus-visible:outline peer-focus-visible:outline-2 ' +
-          'peer-focus-visible:outline-offset-[-2px] peer-focus-visible:outline-primary');
+          'peer-focus-visible:outline-offset-[-2px] peer-focus-visible:outline-focus');
         var mark = icon('radio_button_unchecked', 'text-[20px] mt-0.5 shrink-0 text-frosted-blue/70');
         var text = el('span', 'min-w-0 break-words');
         text.appendChild(el('span', 'block text-[15px] font-semibold leading-snug text-frosted-blue', title || 'Untitled'));

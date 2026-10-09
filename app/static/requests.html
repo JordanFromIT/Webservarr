@@ -120,7 +120,7 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
   font-size: 0.8125rem; color: rgb(var(--color-text));
 }
 .rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
-.rs-select:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.rs-select:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 .poster-placeholder {
   background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
 }
@@ -532,7 +532,7 @@ html[data-rs-empty] #rsSection { display: none; }
       <label for="rsSearch" class="sr-only">Find a request</label>
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-lg pointer-events-none" aria-hidden="true">search</span>
       <input id="rsSearch" type="search" placeholder="Find a title"
-        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"/>
+        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-colors"/>
     </div>
     <select id="rsFilterStatus" class="rs-select" aria-label="Status"><option value="">All statuses</option></select>
     <select id="rsFilterType" class="rs-select" aria-label="Kind">
@@ -574,7 +574,7 @@ html[data-rs-empty] #rsSection { display: none; }
      Its surface is .ws-frost (theme.css), the one recipe the site's frosted surfaces share. -->
 <span class="material-symbols-outlined absolute z-10 left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-xl pointer-events-none" aria-hidden="true">search</span>
 <input id="searchInput" type="search" autocomplete="off" placeholder="Search movies, TV shows and books"
-  class="ws-frost w-full pl-10 pr-4 py-2.5 border rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body"/>
+  class="ws-frost w-full pl-10 pr-4 py-2.5 border rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-colors text-body"/>
 </div>
 </div>
 <p class="mb-5 text-label leading-relaxed text-frosted-blue/70">Requests are handled automatically and usually arrive within an hour, though not everything can be found.</p>

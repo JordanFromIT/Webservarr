@@ -743,7 +743,7 @@ function start() {
     btn.type = 'button';
     btn.className = 'ws-lift mt-4 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] ' +
       'bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 ' +
-      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors';
+      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors';
     btn.textContent = 'Try again';
     // A failure that repeats on the same soft path is what a full load
     // fixes (an update the page module needs, a helper that half loaded).

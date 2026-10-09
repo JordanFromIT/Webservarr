@@ -148,7 +148,7 @@ var WikiEditor = (function () {
   }
 
   var INPUT_CLS = 'w-full px-3 py-2 rounded-lg bg-background-dark border border-steel-blue/40 ' +
-                  'text-frosted-blue placeholder:text-steel-blue focus:border-primary focus:ring-0 transition-colors';
+                  'text-frosted-blue placeholder:text-steel-blue focus:border-focus focus:ring-0 transition-colors';
   var BTN_PRIMARY = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-bright ' +
                     'text-sm font-bold hover:opacity-90 transition-all';
   var BTN_GHOST = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-frosted-blue ' +
@@ -625,7 +625,7 @@ var WikiEditor = (function () {
     var holders = _session.holders;
     HELP_PLACES.forEach(function (h) {
       var line = el('label', 'inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-frosted-blue cursor-pointer');
-      var box = el('input', 'size-4 rounded border-steel-blue/40 bg-transparent text-primary focus:ring-primary');
+      var box = el('input', 'size-4 rounded border-steel-blue/40 bg-transparent text-primary focus:ring-focus');
       box.type = 'checkbox';
       box.name = 'wikiEditHelp';
       box.value = h[0];

@@ -231,7 +231,7 @@
         'bg-frosted-blue/[0.04] p-2 text-frosted-blue/70 transition-colors hover:bg-frosted-blue/[0.08] ' +
         'peer-checked:border-primary peer-checked:ring-1 peer-checked:ring-inset peer-checked:ring-primary ' +
         'peer-checked:bg-primary/15 peer-checked:text-frosted-blue peer-focus-visible:outline ' +
-        'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary');
+        'peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus');
       var screen = el('span', 'relative block w-full aspect-[16/10] overflow-hidden rounded-md ' +
         'border border-frosted-blue/20 bg-frosted-blue/[0.06]');
       screen.setAttribute('aria-hidden', 'true');
@@ -431,7 +431,7 @@
           // Not a <button>: some browsers won't start a drag from inside one.
           handle = el('span', 'hidden lg:inline-flex items-center justify-center size-10 rounded-[10px] ' +
             'text-frosted-blue/60 hover:text-frosted-blue hover:bg-frosted-blue/[0.06] cursor-grab ' +
-            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary');
+            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus');
           handle.tabIndex = 0;
           handle.setAttribute('role', 'button');
           handle.setAttribute('aria-roledescription', 'drag handle');

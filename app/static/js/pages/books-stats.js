@@ -23,7 +23,7 @@
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
 
-const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
+const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 const BUTTON = 'ws-lift mt-6 inline-flex h-11 items-center rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS;
 const H2 = 'text-xl font-bold leading-snug text-frosted-blue';
 

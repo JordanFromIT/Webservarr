@@ -487,7 +487,7 @@
       var btn = el('button', o.compact
         ? 'inline-flex items-center justify-center size-10 shrink-0 rounded-[10px] bg-frosted-blue/[0.04] ' +
           'border border-frosted-blue/10 hover:bg-frosted-blue/10 transition-colors focus-visible:outline ' +
-          'focus-visible:outline-2 focus-visible:outline-primary'
+          'focus-visible:outline-2 focus-visible:outline-focus'
         : cls.btnGhost + ' w-full justify-start');
       btn.type = 'button';
       btn.id = uid(o.key);

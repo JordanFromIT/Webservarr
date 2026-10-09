@@ -28,6 +28,9 @@ module.exports = {
         "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
         "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
         "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+        // The one focus ring colour (theme.css --ws-focus): outline-focus,
+        // ring-focus, border-focus. At least 3:1 on the page and the frost.
+        "focus": "rgb(var(--ws-focus) / <alpha-value>)",
         // The operator's status colours (Settings > Appearance), for dots,
         // rings, fills and borders.
         "status-ok": "rgb(var(--color-status-ok) / <alpha-value>)",

@@ -252,7 +252,7 @@ export async function mount(ctx) {
     var form = el('form', 'relative mb-8');
     var input = el('input',
       'w-full pl-11 pr-4 py-3 rounded-lg bg-baltic-blue/20 border border-steel-blue/30 ' +
-      'text-frosted-blue placeholder:text-steel-blue focus:border-primary focus:ring-0 transition-colors');
+      'text-frosted-blue placeholder:text-steel-blue focus:border-focus focus:ring-0 transition-colors');
     input.type = 'search';
     input.name = 'q';
     input.placeholder = 'Search the wiki…';

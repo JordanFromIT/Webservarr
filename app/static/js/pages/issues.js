@@ -519,7 +519,7 @@ export async function mount(ctx) {
       // Add comment form
       '<div class="border-t border-frosted-blue/10 pt-4">' +
         '<label for="commentMessage" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Add a comment</label>' +
-        '<textarea id="commentMessage" aria-describedby="commentError" class="w-full p-3 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none h-24 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"></textarea>' +
+        '<textarea id="commentMessage" aria-describedby="commentError" class="w-full p-3 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none h-24 focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-colors"></textarea>' +
         '<p id="commentError" class="hidden text-label font-semibold text-status-err-text mt-1.5">Write something first.</p>' +
         '<button type="button" id="addCommentBtn" data-action="add-comment" data-issue-id="' + escapeHtml(String(issue.id)) + '" class="ws-lift w-full py-2.5 mt-2 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">Post comment</button>' +
       '</div>';

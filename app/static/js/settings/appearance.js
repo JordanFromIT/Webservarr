@@ -583,7 +583,7 @@
       if (api.get('theme.custom_css')) adv.open = true;       // CSS in use is never tucked away
       var summary = el('summary', 'cursor-pointer list-none [&::-webkit-details-marker]:hidden inline-flex ' +
         'items-center gap-2 rounded-[10px] text-[15px] font-semibold text-frosted-blue focus-visible:outline ' +
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary');
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus');
       summary.appendChild(icon('chevron_right', 'text-base transition-transform motion-reduce:transition-none group-open:rotate-90'));
       summary.appendChild(document.createTextNode('Custom CSS (advanced)'));
       adv.appendChild(summary);

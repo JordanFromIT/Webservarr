@@ -71,6 +71,13 @@
      Appearance > Frosted glass); the rest of the frost is under "Frosted
      surfaces" below. 4px is the sign-in card's original glass. */
   --ws-frost-blur: blur(4px);
+
+  /* The one focus colour: every :focus-visible ring, every field's focus
+     ring and the Tailwind "focus" colour (outline-focus, ring-focus). It is
+     the text colour, which contrasts with the page by construction and keeps
+     well over 3:1 on the frost (whose floor holds even 70% text at 4.5:1);
+     the primary blue was 2.8:1 on black and about 1.2:1 on the frost. */
+  --ws-focus: var(--color-text);
 }
 
 /* ---- Base ---- */
@@ -98,9 +105,9 @@ select:where(:not([multiple])) {
   background-size: 5px 5px, 5px 5px;
 }
 input:focus, textarea:focus, select:focus {
-  --tw-ring-color: rgb(var(--color-primary));
+  --tw-ring-color: rgb(var(--ws-focus));
   --tw-ring-offset-color: rgb(var(--color-background));
-  border-color: rgb(var(--color-primary));
+  border-color: rgb(var(--ws-focus));
 }
 input:where([type='checkbox'], [type='radio']) {
   color: rgb(var(--color-primary));
@@ -111,15 +118,17 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 /* ---- One focus ring ----
  *
  * Every link, button and focusable card shows the same ring the Books pages
- * draw: 2px in the text colour (it contrasts with the page by construction,
- * where the primary blue on black does not reach 3:1), 2px clear of the box.
+ * draw: 2px in --ws-focus, the text colour (it contrasts with the page by
+ * construction, where the primary blue on black does not reach 3:1), 2px
+ * clear of the box. Every other ring (a control's own, a Tailwind
+ * focus-visible:outline-focus or focus:ring-focus) is the same colour.
  * Before this, the v1 pages fell back to the browser's 1px default. :where()
  * keeps the rule at zero specificity, so a control's own ring (Settings tabs,
  * the player, a Tailwind focus-visible: utility) still wins. Fields keep
  * their focus ring from the block above.
  */
 :where(a[href], button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
-  outline: 2px solid rgb(var(--color-text));
+  outline: 2px solid rgb(var(--ws-focus));
   outline-offset: 2px;
 }
 
@@ -523,7 +532,7 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-status-chip[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
 .ws-status-chip[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
 .ws-status-chip[data-state="err"]  { --ws-pill: var(--ws-status-err); }
-.ws-status-chip:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-status-chip:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .ws-status-chip-face {
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
   border-radius: 9999px; border: 1px solid rgb(var(--ws-pill) / .30); background: rgb(var(--ws-pill) / .10);
@@ -652,7 +661,7 @@ html:not([data-netdata]) [data-ws-gauges] { display: none; }
 }
 .ws-sp-seg:hover span { color: rgb(var(--color-text)); }
 .ws-sp-seg-input:checked + span { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
-.ws-sp-seg-input:focus-visible + span { outline: 2px solid rgb(var(--color-text)); outline-offset: 1px; }
+.ws-sp-seg-input:focus-visible + span { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 1px; }
 
 .ws-sp-list { border-top: 1px solid rgb(var(--color-accent) / .2); }
 .ws-sp-row {
@@ -1027,7 +1036,7 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
   .ws-navtab:not([aria-current]):hover .ws-navtab-icon { background: rgb(var(--color-text) / .06); }
 }
 .ws-navtab:active .ws-navtab-icon { transform: scale(.94); }
-.ws-navtab:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-navtab:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 /* The pending-requests count (the page that counts it toggles .hidden). */
 .ws-navtab-badge, .ws-sheet-badge {
   min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px; text-align: center;
@@ -1079,7 +1088,7 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
   color: rgb(var(--color-text) / .7); -webkit-tap-highlight-color: transparent;
 }
 .ws-sheet-close:hover, .ws-sheet-close:active { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
-.ws-sheet-close:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-sheet-close:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .ws-sheet-pages:not(:has(li)) { display: none; }
 .ws-sheet-list { display: flex; flex-direction: column; gap: 2px; }
 .ws-sheet-account { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgb(var(--color-text) / .08); }
@@ -1093,7 +1102,7 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
   .ws-sheet-row:not([aria-current]):hover { background: rgb(var(--color-text) / .06); }
 }
 .ws-sheet-row:not([aria-current]):active { background: rgb(var(--color-text) / .08); }
-.ws-sheet-row:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-sheet-row:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .ws-sheet-row-icon { font-size: 24px; color: rgb(var(--color-text) / .7); }
 .ws-sheet-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .ws-sheet-row-line { display: flex; align-items: baseline; min-width: 0; }
@@ -1381,7 +1390,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 }
 /* Focusable, to turn it with the arrow keys. */
 .ws-wheel:focus { outline: none; }
-.ws-wheel:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 4px; }
+.ws-wheel:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 4px; }
 /* Turned back: "Latest", in the gap under the wheel (absolute: it moves nothing). */
 .ws-wheel-latest {
   position: absolute;
@@ -1394,7 +1403,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
   background: none;
 }
 .ws-wheel-latest:hover { color: rgb(var(--color-text)); text-decoration: underline; }
-.ws-wheel-latest:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 2px; border-radius: 4px; }
+.ws-wheel-latest:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; border-radius: 4px; }
 .ws-wheel-latest[hidden] { display: none; }
 /* Held at an end (js/event-log.js nudge): a scroll or drag that turned the
    wheel to its newest or oldest line keeps going, and the wheel gives a 3px
@@ -1620,7 +1629,7 @@ html[data-settings-tab="books"] #tab-books,
 html[data-settings-tab="notifications"] #tab-notifications {
   color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary));
 }
-.ws-tab:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: -2px; }
+.ws-tab:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 
 [data-settings-panel] { display: none; }
 html[data-settings-tab="general"] [data-settings-panel="general"],
@@ -1644,7 +1653,7 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 .ws-switch[aria-checked="true"] { background: rgb(var(--color-primary)); }
 .ws-switch[aria-checked="true"]::after { transform: translateX(1.25rem); }
 .ws-switch:disabled { opacity: .5; cursor: not-allowed; }
-.ws-switch:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 2px; }
+.ws-switch:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 
 .ws-light { display: inline-block; flex-shrink: 0; width: .625rem; height: .625rem; border-radius: 9999px;
             background: rgb(var(--color-text) / .25); }
@@ -1722,7 +1731,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   padding: 0 8px; border-radius: 10px; text-align: left; color: inherit;
   transition: background-color 150ms ease-out;
 }
-.wsp-bar-open:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.wsp-bar-open:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .wsp-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .wsp-bar-title, .wsp-bar-meta { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsp-bar-title { font-size: 15px; font-weight: 600; line-height: 1.3; }
@@ -1757,7 +1766,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-play .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
 .wsp-play:active { transform: scale(.94); }
-.wsp-play:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 3px; }
+.wsp-play:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 3px; }
 .wsp-play-sm { width: 44px; height: 44px; }
 .wsp-play-sm .material-symbols-outlined { font-size: 28px; }
 .wsp-play-lg { width: 72px; height: 72px; }
@@ -1815,7 +1824,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   border-radius: 9999px; color: rgb(var(--color-text) / .7); transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 .wsp-icon-btn .material-symbols-outlined { font-size: 28px; }
-.wsp-icon-btn:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 0; }
+.wsp-icon-btn:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 0; }
 
 .wsp-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wsp-main, .wsp-panel-body { scrollbar-width: thin; scrollbar-color: rgb(var(--color-text) / .2) transparent; }
@@ -1858,7 +1867,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-chapter { margin: 0 0 8px; text-align: center; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsp-range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; }
 .wsp-range:focus { outline: none; }
-.wsp-range:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 4px; border-radius: 6px; }
+.wsp-range:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 4px; border-radius: 6px; }
 .wsp-range:disabled { opacity: .5; cursor: default; }
 .wsp-range::-webkit-slider-runnable-track {
   height: 4px; border-radius: 9999px;
@@ -1882,7 +1891,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-skip .material-symbols-outlined { font-size: 44px; }
 .wsp-skip:active { transform: scale(.94); }
-.wsp-skip:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 0; }
+.wsp-skip:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 0; }
 .wsp-skip-n { position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wsp-mirror { transform: scaleX(-1); }
 
@@ -1904,7 +1913,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-action-icon { font-size: 24px; line-height: 24px; height: 24px; }
 .wsp-action-text { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.wsp-action:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 0; }
+.wsp-action:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 0; }
 @media (hover: hover) and (pointer: fine) {
   .wsp-icon-btn:hover, .wsp-action:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
   .wsp-skip:hover { background: rgb(var(--color-text) / .06); }
@@ -1927,7 +1936,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-chapter-item.is-past { color: rgb(var(--color-text) / .7); }
 .wsp-chapter-item.is-current { font-weight: 600; background: rgb(var(--color-primary) / .2); }
-.wsp-chapter-item:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.wsp-chapter-item:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .wsp-chapter-now { font-size: 20px; color: rgb(var(--color-accent)); visibility: hidden; }
 .wsp-chapter-item.is-current .wsp-chapter-now { visibility: visible; }
 .wsp-chapter-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1977,7 +1986,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   color: rgb(var(--color-text)); background: rgb(var(--color-text) / .08); transition: background-color 150ms ease-out;
 }
 .wsp-notice-btn.is-primary { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
-.wsp-notice-btn:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsp-notice-btn:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 /* A prompt's buttons waiting on a read (aria-disabled: still focusable, so the
    one pressed keeps the focus; ui.js ignores presses meanwhile). */
 .wsp-notice-btn[aria-disabled="true"] { opacity: .45; cursor: default; }
@@ -2006,7 +2015,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 .wsp-chip[aria-pressed="true"] { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
-.wsp-chip:focus-visible, .wsp-switch:focus-visible, .wsp-row:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsp-chip:focus-visible, .wsp-switch:focus-visible, .wsp-row:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 .wsp-switch {
   position: relative; flex-shrink: 0; width: 52px; height: 32px; border-radius: 9999px;
   background: rgb(var(--color-text) / .2); transition: background-color 150ms ease-out;
@@ -2094,7 +2103,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-fp-btn.is-primary { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
 .wsp-fp-btn:disabled { opacity: .45; cursor: default; }
-.wsp-fp-btn:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsp-fp-btn:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 .wsp-fp-btn-icon { font-size: 22px; font-variation-settings: 'FILL' 1; }
 .wsp-fp-none { margin: 0; }
 .wsp-fp-others { margin: 0; }
@@ -2192,7 +2201,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   padding: 0 4px 0 6px; border-radius: 9999px; text-align: left; color: inherit;
   transition: background-color 150ms ease-out;
 }
-.wsp-pill-open:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.wsp-pill-open:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
 .wsp-pill-art { width: 36px; height: 36px; border-radius: 6px; }
 .wsp-pill-art img { border-radius: 4px; }
 .wsp-pill-art .wsp-art-mark { font-size: 20px; }
@@ -2202,7 +2211,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-pill-meta { font-size: 13px; line-height: 17px; color: rgb(var(--color-text) / .7); font-variant-numeric: tabular-nums; }
 .wsp-pill-play { width: 36px; height: 36px; }
 .wsp-pill-play .material-symbols-outlined { font-size: 24px; }
-.wsp-pill-play:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsp-pill-play:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 /* Stop, right of Play: quieter than Play (the icon button's muted text), a
    filled square so it reads as a transport control, not a checkbox. Dimmed
    while it can't act (ui.js sets aria-disabled), with no hover. */
@@ -2332,7 +2341,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window .wsp-series { margin-bottom: 2px; }
 .wsp-full.is-window .wsp-title { font-size: 18px; line-height: 1.25; letter-spacing: -0.01em; }
 .wsp-full.is-window .wsp-title:focus { outline: none; }
-.wsp-full.is-window .wsp-title:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; border-radius: 4px; }
+.wsp-full.is-window .wsp-title:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; border-radius: 4px; }
 .wsp-full.is-window .wsp-byline { font-size: 13px; margin-top: 2px; }
 .wsp-full.is-window .wsp-scrub { margin-top: 14px; }
 .wsp-full.is-window .wsp-chapter { margin-bottom: 4px; text-align: left; font-size: 14px; }
@@ -2404,7 +2413,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsr-btn.is-primary { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
 .wsr-btn[aria-disabled="true"] { opacity: .45; cursor: default; }
-.wsr-btn:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
+.wsr-btn:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
 .wsr-btn-icon { font-size: 20px; font-variation-settings: 'FILL' 1; }
 @media (hover: hover) and (pointer: fine) {
   .wsr-btn:hover:not([aria-disabled="true"]) { background: rgb(var(--color-text) / .14); }

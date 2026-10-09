@@ -60,7 +60,7 @@ const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) b
 const FOLD_AT = 400;                // a description longer than this folds behind "Show more"
 const MAX_ID = 2147483647;          // a database id; anything larger cannot be one
 
-const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
+const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 // Class strings are written out whole: Tailwind only builds what it can read.
 const BTN = 'ws-lift relative flex w-full items-center gap-3 min-h-14 overflow-hidden rounded-[10px] px-4 py-2 text-left ' + LINK_FOCUS;
 const MAIN = ' bg-primary text-bright';
@@ -753,7 +753,7 @@ export async function mount(ctx) {
     const label = el('label', 'mb-1 block text-[13px] font-medium text-frosted-blue/70', 'Narrator');
     label.setAttribute('for', 'narratorSelect');
     const box = el('div', 'relative');
-    const select = el('select', 'w-full appearance-none h-10 rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-4 pr-10 text-[15px] text-frosted-blue cursor-pointer focus:outline-none focus:ring-2 focus:ring-frosted-blue');
+    const select = el('select', 'w-full appearance-none h-10 rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-4 pr-10 text-[15px] text-frosted-blue cursor-pointer focus:outline-none focus:ring-2 focus:ring-focus');
     select.id = 'narratorSelect';
     editions.forEach(function (e) {
       const name = e.narrator || 'Unknown narrator';
