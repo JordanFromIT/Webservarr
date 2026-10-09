@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 import bleach
 import httpx
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
 from app.config import settings
 from app.database import SessionLocal
@@ -561,7 +562,36 @@ def _error_detail(resp: httpx.Response) -> str:
     return ""
 
 
-async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str, Any]:
+# A BookSearch sent for a row is remembered this long. Asking again for a
+# book that is already monitored used to fire another indexer search every
+# time (the same book, four requests, four searches); within this window a
+# repeat is answered as requested without one. Redis, like the book cache,
+# because the repeat can land on the other worker.
+_SEARCHED_TTL = 6 * 3600
+
+
+async def _searched_recently(book_ids: List[int]) -> bool:
+    """Whether a BookSearch went out for every one of these rows within
+    _SEARCHED_TTL. False when Redis cannot say, so the search goes out."""
+    try:
+        found = await _redis().exists(*[f"chaptarr:searched:{i}" for i in book_ids])
+    except RedisError as exc:
+        logger.info("Chaptarr search marker unavailable, searching anyway: %s", exc)
+        return False
+    return found == len(book_ids)
+
+
+async def _mark_searched(book_ids: List[int]) -> None:
+    try:
+        async with _redis().pipeline(transaction=False) as pipe:
+            for i in book_ids:
+                pipe.set(f"chaptarr:searched:{i}", "1", ex=_SEARCHED_TTL)
+            await pipe.execute()
+    except RedisError as exc:
+        logger.info("Chaptarr search marker not written: %s", exc)
+
+
+async def _want_existing(cfg: dict, book_ids: List[int], title: str, monitored: bool = False) -> Dict[str, Any]:
     """
     Request a book Chaptarr already holds a row for: monitor that row and
     search for it, as its own UI's monitor toggle and Search button do.
@@ -569,7 +599,16 @@ async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str
     Adding an author imports every one of their books unmonitored, so the
     second book of a series is usually here already by the time it is asked
     for. Posting it as a new book again is answered 200 and changes nothing.
+
+    `monitored` says every one of these rows is monitored already: then, if
+    a search went out for each of them recently, nothing is sent and the
+    answer is the same as if it had been.
     """
+    requested = {"ok": True, "message": "Book requested", "title": title, "state": "requested",
+                 "book_ids": list(book_ids)}
+    if monitored and await _searched_recently(book_ids):
+        logger.info("Chaptarr rows %s were searched for recently; not searching again", book_ids)
+        return requested
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.put(
@@ -595,7 +634,8 @@ async def _want_existing(cfg: dict, book_ids: List[int], title: str) -> Dict[str
     except httpx.RequestError as exc:
         logger.warning("Chaptarr monitor/search failed for %s: %s", book_ids, exc)
         return {"ok": False, "message": "Could not reach Chaptarr"}
-    return {"ok": True, "message": "Book requested", "title": title, "state": "requested", "book_ids": list(book_ids)}
+    await _mark_searched(book_ids)
+    return requested
 
 
 # The two formats a book comes in, each with its own library rows, root
@@ -613,6 +653,13 @@ def _row_ids(book: Dict[str, Any], fmt: str) -> List[int]:
 
 def _here(book: Dict[str, Any], fmt: str) -> bool:
     return any(r.get("hasFiles") for r in _rows_for(book, fmt))
+
+
+def _all_monitored(book: Dict[str, Any], fmts: List[str]) -> bool:
+    """Whether every row these formats hold (those _row_ids names) is
+    monitored already."""
+    rows = [r for f in fmts for r in _rows_for(book, f) if isinstance(r.get("id"), int)]
+    return bool(rows) and all(r.get("monitored") for r in rows)
 
 
 def _root_folder(cfg: dict, fmt: str) -> Optional[str]:
@@ -664,7 +711,7 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         return {"ok": True, "message": "Already in the library", "state": "available"}
     row_ids = _row_ids(book, fmt)
     if row_ids:
-        return await _want_existing(cfg, row_ids, title)
+        return await _want_existing(cfg, row_ids, title, _all_monitored(book, [fmt]))
     return await _add_book(cfg, foreign_id, book, fmt, title)
 
 
@@ -687,7 +734,8 @@ async def _request_formats(cfg: dict, foreign_id: str, book: Dict[str, Any], tit
     results: List[Dict[str, Any]] = []
     held = [f for f in wanted if _row_ids(book, f)]
     if held:
-        result = await _want_existing(cfg, [i for f in held for i in _row_ids(book, f)], title)
+        result = await _want_existing(cfg, [i for f in held for i in _row_ids(book, f)], title,
+                                      _all_monitored(book, held))
         results.append(result)
         if result["ok"]:
             for f in held:

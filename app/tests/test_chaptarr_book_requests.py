@@ -105,12 +105,53 @@ class _Chaptarr:
         return [(m, p, b) for (m, p, b) in self.calls if m != "GET"]
 
 
+class _Markers:
+    """The Redis the searched-recently markers live in: a dict, or down.
+    Only the calls the markers make exist, so anything else fails the test
+    rather than reaching a real Redis."""
+
+    def __init__(self, down=False):
+        self.keys = {}
+        self.down = down
+
+    def _check(self):
+        if self.down:
+            from redis.exceptions import ConnectionError as RedisConnectionError
+            raise RedisConnectionError("Redis is down")
+
+    async def exists(self, *keys):
+        self._check()
+        return sum(1 for k in keys if k in self.keys)
+
+    def pipeline(self, transaction=True):
+        outer = self
+        pending = []
+
+        class _Pipe:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            def set(self, key, value, ex=None):
+                pending.append((key, ex))
+
+            async def execute(self):
+                outer._check()
+                outer.keys.update(pending)
+
+        return _Pipe()
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class RequestBook(unittest.TestCase):
-    def _request(self, fake, fmt="ebook", cached=None):
+    def _request(self, fake, fmt="ebook", cached=None, markers=None):
+        markers = markers or _Markers()
         with mock.patch.object(chaptarr, "_get_config", return_value=dict(CONFIG)), \
              mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=cached)), \
              mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()), \
+             mock.patch.object(chaptarr, "_redis", lambda: markers), \
              mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
             return asyncio.run(chaptarr.request_book("gr:3341500", fmt=fmt))
 
@@ -209,10 +250,12 @@ class RequestBothFormats(unittest.TestCase):
     """The Requests page's one Request button: the book, in every format the
     server takes and does not have yet, in as few writes as Chaptarr allows."""
 
-    def _request(self, fake, cached=None, config=None):
+    def _request(self, fake, cached=None, config=None, markers=None):
+        markers = markers or _Markers()
         with mock.patch.object(chaptarr, "_get_config", return_value=dict(config or CONFIG)), \
              mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=cached)), \
              mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()), \
+             mock.patch.object(chaptarr, "_redis", lambda: markers), \
              mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
             return asyncio.run(chaptarr.request_book("gr:3341500", fmt="both"))
 
@@ -310,6 +353,67 @@ class RequestBothFormats(unittest.TestCase):
                          {("PUT", "/book/monitor"): _Resp(400, [{"errorMessage": "Book does not exist"}])})
         result = self._request(fake, cached=_book())
         self.assertEqual(result, {"ok": False, "message": "Book does not exist"})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SearchedRecently(unittest.TestCase):
+    """Asking again for a book that is already monitored used to send another
+    BookSearch every time (gr:3341500, four requests, four searches). A row
+    searched for in the last six hours is not searched again; the answer is
+    the same as the first one's."""
+
+    def _single(self, fake, markers, fmt="ebook"):
+        return RequestBook._request(self, fake, fmt=fmt, cached=_book(), markers=markers)
+
+    def _both(self, fake, markers):
+        return RequestBothFormats._request(self, fake, cached=_book(), markers=markers)
+
+    def searches(self, fake):
+        return [b for (m, p, b) in fake.writes() if p == "/command"]
+
+    def test_a_monitored_book_asked_for_again_is_not_searched_again(self):
+        markers = _Markers()
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True, "hasFiles": False}]), dict(_MONITOR_AND_SEARCH))
+        first = self._single(fake, markers)
+        again = self._single(fake, markers)
+        self.assertEqual(self.searches(fake), [{"name": "BookSearch", "bookIds": [8059]}])
+        self.assertEqual(again, first)
+        self.assertEqual(again, {"ok": True, "message": "Book requested", "title": TITLE, "state": "requested",
+                                 "book_ids": [8059]})
+        self.assertEqual(markers.keys, {"chaptarr:searched:8059": 6 * 3600})
+
+    def test_both_formats_asked_for_again_send_nothing(self):
+        markers = _Markers()
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True}], [{"id": 8075, "monitored": True}]),
+                         dict(_MONITOR_AND_SEARCH))
+        first = self._both(fake, markers)
+        writes = len(fake.writes())
+        again = self._both(fake, markers)
+        self.assertEqual(len(fake.writes()), writes)
+        self.assertEqual(again, first)
+        self.assertEqual(again["states"], {"ebook": "requested", "audiobook": "requested"})
+
+    def test_a_row_since_unmonitored_is_monitored_and_searched_despite_the_marker(self):
+        markers = _Markers()
+        markers.keys["chaptarr:searched:8059"] = 6 * 3600
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": False}]), dict(_MONITOR_AND_SEARCH))
+        self.assertTrue(self._single(fake, markers)["ok"])
+        self.assertEqual([w[:2] for w in fake.writes()], [("PUT", "/book/monitor"), ("POST", "/command")])
+
+    def test_a_row_without_its_own_marker_is_searched(self):
+        markers = _Markers()
+        markers.keys["chaptarr:searched:8059"] = 6 * 3600
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True}], [{"id": 8075, "monitored": True}]),
+                         dict(_MONITOR_AND_SEARCH))
+        self._both(fake, markers)
+        self.assertEqual(self.searches(fake), [{"name": "BookSearch", "bookIds": [8059, 8075]}])
+
+    def test_with_redis_down_every_request_searches(self):
+        markers = _Markers(down=True)
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True}]), dict(_MONITOR_AND_SEARCH))
+        self.assertTrue(self._single(fake, markers)["ok"])
+        self.assertTrue(self._single(fake, markers)["ok"])
+        self.assertEqual(len(self.searches(fake)), 2)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -436,6 +540,30 @@ class Routes(unittest.TestCase):
         rows = [self._row(24, "Path of Destruction", "Someone Else")]
         self.assertEqual(self.find(rows, "Path of Destruction").json(), {})
         self.assertEqual(self.find([], "Path of Destruction").json(), {})
+
+    def test_asking_again_is_one_search_and_one_line_per_format(self):
+        from app.services import status_feed
+        markers = _Markers()
+        fake = _Chaptarr(_found([{"id": 8059, "monitored": True}], [{"id": 8075, "monitored": True}]),
+                         dict(_MONITOR_AND_SEARCH))
+        with mock.patch.object(chaptarr, "_get_config", return_value=dict(CONFIG)), \
+             mock.patch.object(chaptarr, "_get_cached_book", mock.AsyncMock(return_value=_book())), \
+             mock.patch.object(chaptarr, "_cache_book", mock.AsyncMock()), \
+             mock.patch.object(chaptarr, "_redis", lambda: markers), \
+             mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
+            answers = [self.client.post("/api/integrations/chaptarr-request",
+                                        json={"bookId": "gr:3341500", "format": "both"}) for _ in range(2)]
+        self.assertEqual([a.status_code for a in answers], [200, 200])
+        self.assertEqual(answers[1].json(), answers[0].json())
+        self.assertEqual([b for (m, p, b) in fake.writes() if p == "/command"],
+                         [{"name": "BookSearch", "bookIds": [8059, 8075]}])
+        db = self.Session()
+        try:
+            lines = [i["text"] for i in status_feed.feed(db, 30, status_feed.now_utc())["items"]]
+        finally:
+            db.close()
+        self.assertEqual(sorted(lines), ["Requested: Rule of Two (Star Wars: Darth Bane, #2) (audiobook)",
+                                         "Requested: Rule of Two (Star Wars: Darth Bane, #2) (ebook)"])
 
 
 if __name__ == "__main__":
