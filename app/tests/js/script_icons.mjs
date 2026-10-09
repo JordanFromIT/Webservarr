@@ -61,7 +61,9 @@ async function boot(list) {
     '<header><div class="flex items-center"><div class="relative"><button id="userMenuBtn" type="button">Sam</button></div></div></header>';
   w.WS = {
     popOpen(el) { el.classList.remove('hidden'); el.classList.add('is-open'); },
-    popClose(el) { el.classList.remove('is-open'); el.classList.add('hidden'); }
+    popClose(el) { el.classList.remove('is-open'); el.classList.add('hidden'); },
+    // shell.js's visibility-aware interval: the unread count's 30 s poll.
+    poll() { return function () {}; }
   };
   w.WS_DATA = { branding: { features: {} }, user: { username: 'sam' } };
   w.getTimeAgo = () => '5m ago';

@@ -12,7 +12,7 @@
 
   // ---- State ----
   var _lastCount = 0;
-  var _pollTimer = null;
+  var _pollStop = null;     // the unread count's poll (WS.poll); set once per document
   var _dropdownOpen = false;
   var _modalOpen = false;
 
@@ -1138,6 +1138,10 @@
    * Initialize the notification system. Call after authentication is confirmed.
    */
   function init() {
+    // Once per document: a second call (the shell is not run again on a soft
+    // navigation, but nothing else stops a caller) would wire the bells and
+    // start the poll twice.
+    if (_pollStop) return;
     // Find/create bell + badge
     findOrCreateBell();
     if (_bellButtons.length === 0) {
@@ -1158,8 +1162,9 @@
       loadDropdownItems();
     });
 
-    // Poll every 30 seconds
-    _pollTimer = setInterval(function() {
+    // Every 30 seconds while the tab is on screen (WS.poll skips a hidden
+    // tab's ticks and asks again when it comes back), for the document's life.
+    _pollStop = WS.poll(function() {
       fetchUnreadCount().then(updateBadge);
     }, 30000);
 

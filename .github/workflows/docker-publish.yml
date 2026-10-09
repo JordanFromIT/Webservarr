@@ -124,6 +124,7 @@ jobs:
           node app/tests/js/login_status.mjs
           node app/tests/js/script_icons.mjs
           node app/tests/js/toast.mjs
+          node app/tests/js/notifications_poll.mjs
 
   build-and-push:
     needs: [test, js-checks]
