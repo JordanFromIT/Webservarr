@@ -289,9 +289,19 @@
 <script src="/static/js/login.js?v=1"></script>
 </main>
 <footer class="relative z-20 p-8 flex items-center justify-center">
+<!-- The badge sits in a slot over a hidden copy of its box holding every word
+     login.js can say (statusLine), stacked: the slot is as wide as the longest
+     from the first paint and the badge fills it, so it never moves when the
+     status lands. A down service's own name can still be longer. -->
+<div class="ws-pill-slot">
+<span class="ws-pill-ghost ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border" aria-hidden="true">
+<span class="ws-status-dot"></span>
+<span class="ws-pill-words text-label font-semibold"><span>Checking the server&hellip;</span><span>All systems online</span><span>Degraded performance</span><span>System issues detected</span><span>Status unavailable</span></span>
+</span>
 <div id="loginSystemStatus" data-state="off" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
 <span class="ws-status-dot" aria-hidden="true"></span>
 <span data-status-text class="ws-pill-label text-frosted-blue text-label font-semibold">Checking the server&hellip;</span>
+</div>
 </div>
 </footer>
 

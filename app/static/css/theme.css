@@ -460,6 +460,9 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 .ws-pill-ghost { visibility: hidden; }
 .ws-pill-words { display: grid; }
 .ws-pill-words > span { grid-area: 1 / 1; }
+/* The login page's badge is centred under the card: it fills its slot and
+   centres its words, so its box (and its place) is the same for every status. */
+#loginSystemStatus { justify-self: stretch; justify-content: center; }
 .ws-pill { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
 .ws-pill[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
 .ws-pill[data-state="warn"] { --ws-pill: var(--ws-status-warn); }

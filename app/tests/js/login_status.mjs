@@ -67,5 +67,33 @@ for (const [what, answer, state, text] of CASES) {
   check(`${what}: reads "${text}"`, got.text === text && got.state === state, got);
 }
 
+// The badge holds the room of its longest words from the first paint (as the
+// header pill's slot does): a hidden copy of its box stacks every fixed line
+// login.js can say plus the first one, and the badge fills that slot.
+{
+  const w = new Window({ url: 'https://dev.example.test/login' });
+  w.document.body.innerHTML = LOGIN_HTML.match(/<body[^>]*>([\s\S]*)<\/body>/)[1].replace(/<script\b[^>]*><\/script>/g, '');
+  const badge = w.document.getElementById('loginSystemStatus');
+  const slot = badge.parentElement;
+  const ghost = slot.querySelector('.ws-pill-ghost');
+  check('the badge sits in a .ws-pill-slot over a hidden ghost', slot.classList.contains('ws-pill-slot') && !!ghost &&
+    ghost.getAttribute('aria-hidden') === 'true' && ghost.nextElementSibling === badge);
+  const held = ghost ? Array.from(ghost.querySelectorAll('.ws-pill-words > span')).map((s) => s.textContent).sort() : [];
+  const said = [badge.querySelector('[data-status-text]').textContent]
+    .concat(CASES.map((c) => c[3]).filter((t) => !/ is down$/.test(t)));
+  const want = Array.from(new Set(said)).sort();
+  check('the ghost holds exactly the first line and every fixed line', JSON.stringify(held) === JSON.stringify(want), { held, want });
+  const type = (el) => (el ? el.className.split(/\s+/).filter((c) => /^(text-label|font-)/.test(c)).join(' ') : '');
+  check('the ghost words are set in the badge\'s own size and weight',
+    !!ghost && type(ghost.querySelector('.ws-pill-words')) === type(badge.querySelector('[data-status-text]')));
+  const box = (el) => (el ? el.className.split(/\s+/).filter((c) => /^(px-|py-|gap-|border$|rounded-)/.test(c)).sort().join(' ') : '');
+  check('the ghost has the badge\'s padding, gap and border', box(ghost) === box(badge), [box(ghost), box(badge)]);
+  const THEME = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
+  check('the badge fills its slot and centres its words',
+    /#loginSystemStatus \{ justify-self: stretch; justify-content: center; \}/.test(THEME));
+  await w.happyDOM.abort();
+  w.close();
+}
+
 console.log(`${total - failed}/${total} login status cases pass`);
 if (failed) process.exit(1);
