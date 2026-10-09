@@ -908,7 +908,9 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
  * the player bar and the tab bar stay clear (ui.js keeps three at most).
  * The arrival is slower than a popover's (320ms, not 220ms): it travels its
  * own width, and the long ease-out tail is what keeps that soft; it leaves
- * in 200ms (ui.js TOAST_OUT_MS waits that out). Reduced motion: a fade.
+ * in 200ms (ui.js TOAST_OUT_MS waits that out), and the ones below it then
+ * slide up into its room in 200ms (ui.js takeOut, a transform only).
+ * Reduced motion: a fade, and the ones below take their places at once.
  */
 .ws-toasts {
   position: fixed; z-index: 90; pointer-events: none;

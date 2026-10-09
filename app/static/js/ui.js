@@ -80,6 +80,28 @@
   var TOAST_MAX = 3;
   // How long .ws-toast.is-leaving runs (theme.css, Toasts).
   var TOAST_OUT_MS = 200;
+  // How long the toasts below one that went take to slide up into its room.
+  var TOAST_CLOSE_MS = 200;
+
+  // Takes t out of the stack. The toasts below it would jump up into its room
+  // at once; instead each is drawn where it was and slides up to its new
+  // place (a transform, added to any arrival still running, so the layout
+  // moves once). With reduced motion they simply take their new places.
+  function takeOut(t) {
+    var box = t.parentNode;
+    if (!box) return;
+    var below = [];
+    for (var n = t.nextElementSibling; n; n = n.nextElementSibling) below.push(n);
+    var was = below.map(function (n) { return n.getBoundingClientRect().top; });
+    box.removeChild(t);
+    if (reducedMotion()) return;
+    below.forEach(function (n, i) {
+      var dy = was[i] - n.getBoundingClientRect().top;
+      if (!dy || typeof n.animate !== 'function') return;
+      n.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'translateY(0)' }],
+        { duration: TOAST_CLOSE_MS, easing: 'cubic-bezier(.2, 0, 0, 1)', composite: 'add' });
+    });
+  }
 
   // A notification in the top right, under the account name in the header
   // (under the top bar on a phone): it slides in, stays a few seconds and
@@ -117,7 +139,7 @@
     }
     function remove() {
       unlist();
-      if (t.parentNode) t.parentNode.removeChild(t);
+      takeOut(t);
     }
     // Slides (or, with reduced motion, fades) out, then goes.
     function leave() {

@@ -7,6 +7,9 @@
 //    gone once the leave has run (ui.js TOAST_OUT_MS, theme.css 200ms).
 //  * under the pointer or holding the focus it stays, and leaves 2 s after.
 //  * several stack downward, the newest last; past three the oldest leaves.
+//  * when one goes, the ones below slide up into its room (a transform from
+//    where each was, 200ms, added to any arrival still running); with
+//    reduced motion they take their places at once.
 //  * the action button (Undo, Retry) closes it and runs; remove() is at once.
 //  * a soft navigation that drops the region from the body gets a new one.
 //  * theme.css: top right 8px under the 64px header on a wide screen, the
@@ -171,6 +174,72 @@ scenario('a burst keeps three on screen', () => {
   check('a fifth during that leave sends the next oldest', leaving.join() === 'One,Two', leaving);
   tick(200);
   check('three remain', toasts().map((t) => t.textContent).join() === 'Three,Four,Five');
+});
+
+/* Lays the stack out as the browser would (60px a toast, from 72px down)
+   and records every animate() call. */
+function laidOut(p, { reduce = false } = {}) {
+  const calls = [];
+  p.w.matchMedia = (q) => ({ matches: reduce && /reduce/.test(q), addEventListener() {}, removeEventListener() {} });
+  p.w.HTMLElement.prototype.getBoundingClientRect = function () {
+    const box = this.parentNode;
+    const i = box && box.id === 'wsToasts' ? Array.prototype.indexOf.call(box.children, this) : 0;
+    const top = 72 + i * 60;
+    return { top, bottom: top + 52, left: 0, right: 384, width: 384, height: 52, x: 0, y: top };
+  };
+  p.w.HTMLElement.prototype.animate = function (frames, opts) { calls.push({ el: this, frames, opts }); return { cancel() {} }; };
+  return calls;
+}
+
+scenario('the ones below slide up into the room of one that went', () => {
+  const p = page();
+  const calls = laidOut(p);
+  const { w, tick, toasts } = p;
+  w.WSUI.toast('One', 'ok');
+  tick(50);
+  w.WSUI.toast('Two', 'ok');
+  w.WSUI.toast('Three', 'ok');
+  tick(3950);
+  check('the first starts to leave, nothing has slid yet', toasts()[0].classList.contains('is-leaving') && calls.length === 0);
+  tick(200);
+  check('it is gone', toasts().map((t) => t.textContent).join() === 'Two,Three');
+  check('each one below slides once', calls.length === 2 && calls[0].el.textContent === 'Two' && calls[1].el.textContent === 'Three',
+    calls.map((c) => c.el.textContent));
+  const c = calls[0];
+  check('from where it was (60px lower) to its place', c && c.frames[0].transform === 'translateY(60px)' && c.frames[1].transform === 'translateY(0)',
+    c && c.frames);
+  check('in 200ms, added to any arrival still running', c && c.opts.duration === 200 && c.opts.composite === 'add', c && c.opts);
+  check('a transform only', calls.every((x) => x.frames.every((f) => Object.keys(f).join() === 'transform')));
+  calls.length = 0;
+  const h = w.WSUI.toast('Four', 'ok');
+  h.remove();
+  check('the last one going moves nothing', calls.length === 0, calls.length);
+});
+
+scenario('remove() of a middle toast slides the one below; the action button too', () => {
+  const p = page();
+  const calls = laidOut(p);
+  const { w, tick, toasts } = p;
+  w.WSUI.toast('One', 'ok');
+  tick(50);
+  w.WSUI.toast('Undoable', 'ok', { action: { label: 'Undo', run() {} } });
+  w.WSUI.toast('Three', 'ok');
+  toasts()[1].querySelector('button').click();
+  check('the pressed one is gone at once', toasts().map((t) => t.textContent).join() === 'One,Three');
+  check('only the one below it slides, 60px', calls.length === 1 && calls[0].el.textContent === 'Three' &&
+    calls[0].frames[0].transform === 'translateY(60px)', calls.map((c) => [c.el.textContent, c.frames[0].transform]));
+});
+
+scenario('reduced motion: the ones below take their places at once', () => {
+  const p = page();
+  const calls = laidOut(p, { reduce: true });
+  const { w, tick, toasts } = p;
+  w.WSUI.toast('One', 'ok');
+  tick(50);
+  w.WSUI.toast('Two', 'ok');
+  tick(4170);
+  check('the first went', toasts().map((t) => t.textContent).join() === 'Two', toasts().map((t) => t.textContent));
+  check('nothing slid', calls.length === 0, calls.length);
 });
 
 scenario('remove() takes it down at once', () => {
