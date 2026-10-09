@@ -32,12 +32,17 @@ logger = logging.getLogger(__name__)
 SEARCH_URL = "https://openlibrary.org/search.json"
 COVER_URL = "https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
 
-# The cover proxy serves upstream bytes from the app origin. Redirects are not
-# followed (a compromised 302 could point at an internal address), only real
-# raster images are served (never SVG/HTML, which would be stored XSS), and the
-# body is capped (M10).
+# The cover proxy serves upstream bytes from the app origin. Only real raster
+# images are served (never SVG/HTML, which would be stored XSS), and the body
+# is capped (M10). Redirects are refused (a compromised 302 could point at an
+# internal address) except Open Library's own move of older covers to the
+# Internet Archive (covers.openlibrary.org -> archive.org/download/... ->
+# iaNNNNNN.us.archive.org): at most MAX_COVER_REDIRECTS hops, each https on
+# the default port to archive.org or a subdomain of it, checked hop by hop.
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_COVER_BYTES = 10 * 1024 * 1024
+MAX_COVER_REDIRECTS = 3
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 # Short: covers are a nicety and must never hold up a search.
 LOOKUP_TIMEOUT = 3.0
@@ -332,6 +337,17 @@ def merge_trending(*sources: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return merged
 
 
+def _redirect_allowed(url: httpx.URL) -> bool:
+    """A redirect hop the cover fetch may follow: https to the Internet Archive."""
+    host = (url.host or "").lower().rstrip(".")
+    return (
+        url.scheme == "https"
+        and url.port in (None, 443)
+        and not url.userinfo
+        and (host == "archive.org" or host.endswith(".archive.org"))
+    )
+
+
 async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
     """
     Fetch a cover image by id. Returns (bytes, content_type) or None.
@@ -345,10 +361,26 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
         return None
 
     try:
-        # follow_redirects=False: a redirect from the cover CDN must not be
-        # followed to an arbitrary (possibly internal) host (M10).
+        # follow_redirects=False: each hop is checked here (_redirect_allowed)
+        # before it is followed, never left to the client (M10).
         async with httpx.AsyncClient(timeout=IMAGE_TIMEOUT, follow_redirects=False) as client:
-            async with client.stream("GET", COVER_URL.format(cover_id=cover_id)) as resp:
+            url = httpx.URL(COVER_URL.format(cover_id=cover_id))
+            hops = 0
+            while True:
+                req = client.build_request("GET", url)
+                resp = await client.send(req, stream=True)
+                if resp.status_code not in REDIRECT_STATUSES:
+                    break
+                await resp.aclose()
+                hops += 1
+                location = resp.headers.get("location")
+                nxt = url.join(location) if location else None
+                if nxt is None or hops > MAX_COVER_REDIRECTS or not _redirect_allowed(nxt):
+                    logger.warning("Open Library cover %s redirect refused (hop %d)", cover_id, hops)
+                    _miss(cover_id)
+                    return None
+                url = nxt
+            try:
                 if resp.status_code != 200:
                     _miss(cover_id)
                     return None
@@ -370,6 +402,8 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
                         return None
                     chunks.append(chunk)
                 content = b"".join(chunks)
+            finally:
+                await resp.aclose()
     except httpx.RequestError as exc:
         logger.warning("Open Library cover fetch failed for %s: %s", cover_id, exc)
         return None

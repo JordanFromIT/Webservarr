@@ -3,7 +3,9 @@ Book covers Open Library has no image for are not requested.
 
 A Requests visit logged 10 to 25 failed image requests, one per book card
 whose cover the proxy could not serve: Open Library answers some ids with a
-redirect to archive.org (refused, M10) or a tiny placeholder. Such a miss is
+redirect to the Internet Archive, which the proxy refused (M10), or a tiny
+placeholder. The proxy now follows that one move (at most three hops, each
+https to archive.org or a subdomain of it, nothing else), and a real miss is
 now remembered (openlibrary.known_missing); the trending shelves, built in
 the background, fetch each cover once and drop the ones that miss; search
 results leave out the ones already known; and the proxy answers a first miss
@@ -41,7 +43,7 @@ def answers(table, seen):
         status, ctype, body = a
         headers = {"content-type": ctype}
         if status == 302:
-            headers["location"] = f"https://archive.org/download/x/{cover}-M.jpg"
+            headers["location"] = f"http://example.invalid/{cover}-M.jpg"
         return httpx.Response(status, headers=headers, content=body)
     real = httpx.AsyncClient
 
@@ -61,7 +63,7 @@ class CoverMisses(unittest.TestCase):
     def test_open_library_misses_are_remembered_and_not_asked_again(self):
         seen = []
         table = {
-            1: (302, "text/html", b""),           # a redirect to archive.org
+            1: (302, "text/html", b""),           # a redirect off to an http host (refused)
             2: (200, "image/jpeg", b"\xff\xd8"),  # the tiny placeholder
             3: (200, "text/html", b"<html>" * 400),
             4: (404, "text/html", b""),
@@ -105,6 +107,111 @@ class CoverMisses(unittest.TestCase):
         self.assertEqual(got, {1})
         self.assertEqual(sorted(seen), [1, 5, 7], "each id fetched once, junk ignored")
         self.assertIn(5, openlibrary._image_cache, "the good cover is cached for the visit")
+
+
+OL = "https://covers.openlibrary.org/b/id/{}-M.jpg"
+
+
+def chain(routes, seen):
+    """A fake web: full URL -> (status, location or content-type, body)."""
+    def handler(request):
+        url = str(request.url)
+        seen.append(url)
+        if url not in routes:
+            return httpx.Response(404)
+        status, extra, body = routes[url]
+        if status in (301, 302, 303, 307, 308):
+            return httpx.Response(status, headers={"location": extra})
+        return httpx.Response(status, headers={"content-type": extra}, content=body)
+    real = httpx.AsyncClient
+
+    def client(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real(*args, **kwargs)
+    return mock.patch.object(openlibrary.httpx, "AsyncClient", client)
+
+
+class ArchiveRedirects(unittest.TestCase):
+    """Open Library's move of older covers to the Internet Archive is followed;
+    every other redirect is still refused (M10)."""
+
+    def setUp(self):
+        openlibrary._missing.clear()
+        openlibrary._image_cache.clear()
+        self.addCleanup(openlibrary._missing.clear)
+        self.addCleanup(openlibrary._image_cache.clear)
+
+    def fetch(self, cover, routes):
+        seen = []
+        with chain(routes, seen):
+            got = asyncio.run(openlibrary.fetch_cover(cover))
+        return got, seen
+
+    def test_the_archive_chain_is_followed(self):
+        a = "https://archive.org/download/m_covers_0010/m_covers_0010_60.zip/0010601402-M.jpg"
+        b = "https://ia800505.us.archive.org/view_archive.php?archive=/25/items/m_covers_0010/m_covers_0010_60.zip&file=0010601402-M.jpg"
+        got, seen = self.fetch(10601402, {OL.format(10601402): (302, a, b""), a: (302, b, b""), b: (200, "image/jpeg", JPEG)})
+        self.assertEqual(got, (JPEG, "image/jpeg"))
+        self.assertEqual(seen, [OL.format(10601402), a, b])
+        self.assertFalse(openlibrary.known_missing(10601402))
+
+    def test_a_relative_location_on_the_archive_is_followed(self):
+        a = "https://archive.org/download/x/1-M.jpg"
+        got, _ = self.fetch(1, {OL.format(1): (302, a, b""), a: (302, "/view/1-M.jpg", b""),
+                                "https://archive.org/view/1-M.jpg": (200, "image/jpeg", JPEG)})
+        self.assertEqual(got, (JPEG, "image/jpeg"))
+
+    def assertRefused(self, cover, routes, reached):
+        got, seen = self.fetch(cover, routes)
+        self.assertIsNone(got)
+        self.assertTrue(openlibrary.known_missing(cover), "a refused redirect is a miss")
+        self.assertNotIn(reached, seen, "the refused hop is never requested")
+
+    def test_an_http_hop_is_refused(self):
+        a = "https://archive.org/download/x/2-M.jpg"
+        bad = "http://ia800505.us.archive.org/2-M.jpg"
+        self.assertRefused(2, {OL.format(2): (302, a, b""), a: (302, bad, b""), bad: (200, "image/jpeg", JPEG)}, bad)
+
+    def test_a_host_off_the_archive_is_refused(self):
+        bad = "https://10.0.0.1/2-M.jpg"
+        self.assertRefused(3, {OL.format(3): (302, bad, b""), bad: (200, "image/jpeg", JPEG)}, bad)
+        bad = "https://openlibrary.org/3-M.jpg"
+        openlibrary._missing.clear()
+        self.assertRefused(3, {OL.format(3): (302, bad, b""), bad: (200, "image/jpeg", JPEG)}, bad)
+
+    def test_lookalike_hosts_are_refused(self):
+        for i, bad in enumerate(["https://archive.org.evil.com/4-M.jpg", "https://evilarchive.org/4-M.jpg",
+                                 "https://archive.org:8443/4-M.jpg", "https://user@archive.org/4-M.jpg"]):
+            openlibrary._missing.clear()
+            self.assertRefused(40 + i, {OL.format(40 + i): (302, bad, b""), bad: (200, "image/jpeg", JPEG)}, bad)
+
+    def test_a_fourth_redirect_is_refused(self):
+        hops = [f"https://archive.org/hop/{n}" for n in range(1, 5)]
+        routes = {OL.format(5): (302, hops[0], b"")}
+        for n in range(3):
+            routes[hops[n]] = (302, hops[n + 1], b"")
+        routes[hops[3]] = (200, "image/jpeg", JPEG)
+        got, seen = self.fetch(5, routes)
+        self.assertIsNone(got)
+        self.assertEqual(seen, [OL.format(5)] + hops[:3], "three hops followed, the fourth never requested")
+        self.assertTrue(openlibrary.known_missing(5))
+
+    def test_three_redirects_are_allowed(self):
+        hops = [f"https://archive.org/hop/{n}" for n in range(1, 4)]
+        routes = {OL.format(6): (302, hops[0], b""), hops[0]: (302, hops[1], b""), hops[1]: (302, hops[2], b""),
+                  hops[2]: (200, "image/jpeg", JPEG)}
+        got, _ = self.fetch(6, routes)
+        self.assertEqual(got, (JPEG, "image/jpeg"))
+
+    def test_the_archive_answer_still_meets_the_type_and_size_rules(self):
+        a = "https://archive.org/download/x/7-M.jpg"
+        got, _ = self.fetch(7, {OL.format(7): (302, a, b""), a: (200, "text/html", b"<svg>" * 400)})
+        self.assertIsNone(got)
+        self.assertTrue(openlibrary.known_missing(7))
+        with mock.patch.object(openlibrary, "MAX_COVER_BYTES", 2000):
+            got, _ = self.fetch(8, {OL.format(8): (302, a, b""), a: (200, "image/jpeg", JPEG)})
+        self.assertIsNone(got)
+        self.assertTrue(openlibrary.known_missing(8))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
