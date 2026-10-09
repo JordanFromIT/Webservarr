@@ -10,7 +10,7 @@
 // once with reduced motion) while from lg it holds (until the window narrows
 // below lg), searches out back to back topping up to one page, a page turn
 // waiting for the fetch it started, a double click or a held Enter on Next or
-// Prev turning one page, books that land late counted (and waited for before
+// Prev turning one page (the search pager and the Request Status pager), books that land late counted (and waited for before
 // "Nothing matches" when there are no films or shows), one request per title
 // in flight with every copy of its button (redrawn cards, the detail) saying
 // so, the bar's
@@ -886,6 +886,45 @@ await run('over more than one Seerr page the count keeps the books on every page
     const pages = t.net.urls('/api/integrations/seerr-search').map((u) => new URL(u, 'https://x').searchParams.get('page'));
     check('on Seerr\'s page 2', pages.join() === '1,2', pages);
     check('still 30 results', t.q('#searchResultCount').textContent === '30 results', t.q('#searchResultCount').textContent);
+  } finally { t.release(); }
+});
+
+await run('the Request Status pager: a double click or a held Enter turns one page', async () => {
+  const many = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, media_title: 'Asked ' + (i + 1), media_type: 'movie', status: 'available' }));
+  const t = visit((net) => {
+    routes({ body: FILMS }, { body: BOOKS })(net);
+    net.on('/api/integrations/recent-requests', () => ({ body: many }));
+  });
+  try {
+    await t.mount();
+    const info = () => t.q('#requestsPageInfo').textContent;
+    const next = t.q('#requestsNextBtn');
+    const prev = t.q('#requestsPrevBtn');
+    const press = (btn, detail) => btn.dispatchEvent(new t.win.MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+    check('40 requests are 5 pages', info() === 'Page 1 of 5', info());
+    press(next, 1);
+    await t.clock.advance(80);
+    press(next, 1);
+    check('two quick presses of Next: page 2', info() === 'Page 2 of 5', info());
+    await t.clock.advance(400);
+    press(next, 1);
+    await t.clock.advance(450);
+    press(next, 2);
+    check('a slow double click on Next: one more page, page 3', info() === 'Page 3 of 5', info());
+    await t.clock.advance(400);
+    press(prev, 1);
+    await t.clock.advance(80);
+    press(prev, 1);
+    check('two quick presses of Prev: page 2', info() === 'Page 2 of 5', info());
+    await t.clock.advance(400);
+    for (let i = 0; i < 10; i++) { press(next, 0); await t.clock.advance(33); }
+    check('Enter held for a third of a second: one page, page 3', info() === 'Page 3 of 5', info());
+    press(prev, 0);
+    check('Next then Prev at once: Prev is not held up, page 2', info() === 'Page 2 of 5', info());
+    await t.clock.advance(400);
+    press(prev, 0);
+    check('the lock lets go: the next press turns again, page 1', info() === 'Page 1 of 5', info());
+    check('the grid shows that page', t.q('#requestsGrid').textContent.indexOf('Asked 1') !== -1 && t.q('#requestsGrid').textContent.indexOf('Asked 10') === -1);
   } finally { t.release(); }
 });
 
