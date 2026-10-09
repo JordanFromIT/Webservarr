@@ -155,6 +155,10 @@ class CoverUrls(unittest.TestCase):
 
     def test_the_proxy_answers_a_miss_with_204(self):
         Session = helpers.make_sessionmaker()
+        # The setup gate reads the real database; the app is set up here.
+        gate = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        gate.start()
+        self.addCleanup(gate.stop)
         client = helpers.api_client(Session, user=helpers.MEMBER, headers=helpers.SAME_ORIGIN)
         self.addCleanup(helpers.reset_overrides)
 
