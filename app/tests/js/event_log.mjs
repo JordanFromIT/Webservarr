@@ -39,6 +39,7 @@ const LOG_PATH = process.env.EVENT_LOG_JS || join(STATIC, 'js/event-log.js');
 const LOG_HTML = readFileSync(join(STATIC, 'partials/shell-event-log.html'), 'utf8');
 const THEME_CSS = readFileSync(join(STATIC, 'css/theme.css'), 'utf8');
 const PINNED = JSON.parse(readFileSync(join(here, '../event_pinned_vectors.json'), 'utf8'));
+const UI_JS = readFileSync(join(STATIC, 'js/ui.js'), 'utf8');
 
 const report = console.error.bind(console);
 let failed = 0;
@@ -143,6 +144,8 @@ function visit(o = {}) {
   if (o.cached) WS.cache.set('status:feed', o.cached);
   const reduced = { on: !!o.reduced };
   win.matchMedia = (q) => ({ matches: q.indexOf('prefers-reduced-motion: reduce') !== -1 && reduced.on, media: q, addEventListener() {}, removeEventListener() {} });
+  // o.marquee: the real shared marquee (ui.js) over a model of the layout.
+  const slides = o.marquee ? marqueeLayout(win) : null;
   const g = globalThis;
   const saved = {};
   const set = (k, v) => { saved[k] = Object.getOwnPropertyDescriptor(g, k); Object.defineProperty(g, k, { value: v, configurable: true, writable: true }); };
@@ -165,13 +168,14 @@ function visit(o = {}) {
     },
     clearTimeout: (id) => { if (mine.delete(id)) clock.clearTimeout(id); },
     reducedMotion: () => !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    marquee: slides ? win.WSUI.marquee : undefined,
     now: () => clockNow.t
   };
   ctl.signal.addEventListener('abort', () => { mine.forEach((id) => clock.clearTimeout(id)); mine.clear(); });
   const section = doc.getElementById('wsEventLog');
   const wheel = section ? section.querySelector('[data-event-wheel]') : null;
   const t = {
-    win, doc, clock, ctl, WS, feed, reduced, section, wheel, polls, clockNow, env,
+    win, doc, clock, ctl, WS, feed, reduced, section, wheel, polls, clockNow, env, slides,
     pinnedList: () => section.querySelector('[data-event-pinned]'),
     pinned: () => Array.from(section.querySelector('[data-event-pinned]').children),
     pinnedTexts: () => t.pinned().map((el) => { const x = el.querySelector('.ws-pinned__text'); return x.textContent.slice(x.querySelector('.sr-only').textContent.length); }),
@@ -210,6 +214,36 @@ function visit(o = {}) {
     }
   };
   return t;
+}
+
+// The layout the marquee measures, as a model: a line's word box is 240px
+// wide on the page (nothing off it, or in a hidden section) and words are
+// 8px a character, a screen reader's prefix not counted (it is out of the
+// flow). ui.js is loaded for real; its observers are fakes the test fires.
+const BOX_PX = 240;
+function marqueeLayout(win) {
+  const words = (n) => { const sr = n.querySelector('.sr-only'); return (n.textContent.length - (sr ? sr.textContent.length : 0)) * 8; };
+  const shown = (n) => n.isConnected && !n.closest('[hidden]');
+  const isBox = (n) => n.classList.contains('ws-wheel__title') || n.classList.contains('ws-wheel__text');
+  const proto = win.HTMLElement.prototype;
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return shown(this) && isBox(this) ? BOX_PX : 0; } });
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return shown(this) ? Math.max(isBox(this) ? BOX_PX : 0, words(this)) : 0; } });
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return shown(this) ? (isBox(this) ? BOX_PX : words(this)) : 0; } });
+  const ro = { all: [] };
+  win.ResizeObserver = class {
+    constructor(cb) { this.cb = cb; this.els = new Set(); ro.all.push(this); }
+    observe(el) { this.els.add(el); }
+    unobserve(el) { this.els.delete(el); }
+    disconnect() { this.els.clear(); }
+  };
+  win.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+  win.eval(UI_JS);
+  return {
+    // Every box being watched now.
+    watched: () => (ro.all.length ? [...ro.all[ro.all.length - 1].els] : []),
+    // The browser's resize report: every watched box measured again.
+    resize: () => ro.all.forEach((r) => r.cb([...r.els].map((target) => ({ target }))))
+  };
 }
 
 function slot(el) { return Number(el.style.getPropertyValue('--i')); }
@@ -1058,6 +1092,105 @@ await run('a first page without the section: the first page with one is taken ov
   await t.clock.advance(800);
   const section = t.doc.getElementById('wsEventLog');
   check('the new page\'s section is taken and filled', section && fresh.contains(section) && t.WS.reads === 1 && !section.querySelector('.skel') && section.querySelectorAll('.ws-wheel__line').length === 5);
+});
+
+// ---- A line cut off slides to its end and back (WSUI.marquee) ----
+
+const LONG_GRAB = 'Downloading: The Fellowship of the Ring (2001) Extended Edition';
+const LONG_NOTE = 'Requests for 4K films are paused until the new disks arrive';
+const SLIDES = answer('ok', [], [
+  note(1, 'New shelves on Books', 300),
+  lib(2, LONG_GRAB, 20, 'not guaranteed'),
+  note(3, LONG_NOTE, 4)
+]);
+const lineOf = (t, words) => t.settled().find((el) => lineText(el).indexOf(words) === 0);
+const boxOf = (el) => el.querySelector('.ws-wheel__title') || el.querySelector('.ws-wheel__text');
+
+await run('a line cut off slides; one that fits does not; its words are read once', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const grab = lineOf(t, 'Downloading');
+  const longNote = lineOf(t, 'Requests for 4K');
+  const fits = lineOf(t, 'New shelves');
+  check('the grab\'s title slides, its note stays put beside it', boxOf(grab).className === 'ws-wheel__title' && boxOf(grab).getAttribute('data-marquee') === 'run' &&
+    boxOf(grab).firstElementChild.className === 'ws-marquee__track' && boxOf(grab).textContent === LONG_GRAB && grab.querySelector('.ws-wheel__note').parentElement === grab.querySelector('.ws-wheel__text'));
+  check('the distance is how far the title runs past its box', boxOf(grab).style.getPropertyValue('--marquee-shift') === -(LONG_GRAB.length * 8 - BOX_PX) + 'px', boxOf(grab).style.getPropertyValue('--marquee-shift'));
+  check('a line without a note slides its whole text', boxOf(longNote).className === 'ws-wheel__text' && boxOf(longNote).getAttribute('data-marquee') === 'run');
+  check('a line that fits does not move', !boxOf(fits).hasAttribute('data-marquee'));
+  check('the words are there once, the screen reader\'s prefix with them', lineText(longNote) === LONG_NOTE && longNote.querySelector('.sr-only').textContent === 'Note: ' &&
+    longNote.querySelectorAll('.sr-only').length === 1 && t.section.textContent.split(LONG_NOTE).length === 2);
+  check('the front line is still the only one read, and every line keeps its whole title', t.slots()[0] === longNote && !longNote.hasAttribute('aria-hidden') &&
+    grab.getAttribute('aria-hidden') === 'true' && grab.title === LONG_GRAB + ' · not guaranteed' && longNote.title === LONG_NOTE);
+  check('one marquee per line, on the page', t.slides.watched().length === 3 && t.slides.watched().every((b) => b.isConnected));
+});
+
+await run('live updates: rewritten words start over, a line that leaves stops, nothing is left behind', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const longNote = lineOf(t, 'Requests for 4K');
+  const oldBox = boxOf(longNote);
+  const oldTrack = oldBox.firstElementChild;
+  const edited = 'Requests for 4K films are paused until the new disks arrive on Friday';
+  await t.poll(answer('ok', [], [SLIDES.items[0], SLIDES.items[1], note(3, edited, 4)]));
+  await t.clock.advance(2000);
+  const now = lineOf(t, 'Requests for 4K');
+  check('the same line, its words rewritten', now === longNote && lineText(now) === edited);
+  check('a new track: the slide starts from the beginning, at the new distance', boxOf(now).firstElementChild !== oldTrack &&
+    boxOf(now).getAttribute('data-marquee') === 'run' && boxOf(now).style.getPropertyValue('--marquee-shift') === -(edited.length * 8 - BOX_PX) + 'px');
+  check('still one marquee per line', t.slides.watched().length === 3, t.slides.watched().length);
+  // Six new events, each turning the wheel a notch: the grab and the old notes go off the top.
+  const grabBox = boxOf(lineOf(t, 'Downloading'));
+  const burst = [1, 2, 3, 4, 5, 6].map((n) => lib(100 + n, 'Added: A film with a long name, part ' + n + ' of the collection', 3 - n * 0.1));
+  await t.poll(answer('ok', [], SLIDES.items.slice(0, 2).concat([note(3, edited, 4)], burst)));
+  await t.clock.advance(10000);
+  const boxes = t.settled().map(boxOf);
+  check('five lines on the wheel, nothing still leaving', t.all().length === 5 && t.settled().length === 5, t.all().length);
+  check('the marquees are exactly the lines\' boxes: the ones that left were stopped', t.slides.watched().length === 5 && boxes.every((b) => t.slides.watched().indexOf(b) !== -1));
+  check('the grab, gone off the wheel, was stopped and undone', !grabBox.isConnected && !grabBox.hasAttribute('data-marquee') &&
+    grabBox.style.getPropertyValue('--marquee-shift') === '' && t.slides.watched().indexOf(grabBox) === -1);
+  check('the new long lines slide', boxes.every((b) => b.getAttribute('data-marquee') === 'run'));
+  t.ctl.abort();
+  check('the owner\'s end stops every slide', t.slides.watched().length === 0 && boxes.every((b) => !b.hasAttribute('data-marquee')));
+});
+
+await run('reduced motion: no line moves, and the ellipsis and the whole title stay', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true, reduced: true });
+  await t.open();
+  check('nothing slides', t.settled().every((el) => !boxOf(el).hasAttribute('data-marquee') && boxOf(el).style.getPropertyValue('--marquee-shift') === ''));
+  check('the title holds the whole line', lineOf(t, 'Downloading').title === LONG_GRAB + ' · not guaranteed');
+  check('theme.css keeps the ellipsis on the words\' boxes', /\.ws-wheel__title \{[^}]*text-overflow: ellipsis/.test(THEME_CSS) && /\.ws-wheel__text \{[^}]*text-overflow: ellipsis/.test(THEME_CSS));
+});
+
+await run('soft navigation: the slides carry over with the section; a page without it stills them', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const grab = boxOf(lineOf(t, 'Downloading'));
+  const track = grab.firstElementChild;
+  t.swap();
+  t.slides.resize();
+  check('the next page: the same box, the same track, still sliding', grab.isConnected && grab.firstElementChild === track && grab.getAttribute('data-marquee') === 'run');
+  t.swap(false);
+  t.slides.resize();
+  check('the reader (no section): still, nothing measured off the page', !grab.isConnected && !grab.hasAttribute('data-marquee'));
+  t.swap();
+  t.slides.resize();
+  check('back on a page with it: sliding again', grab.isConnected && grab.getAttribute('data-marquee') === 'run');
+  check('no marquee was made twice', t.slides.watched().length === 3);
+});
+
+await run('the wheel still turns, holds its ends and lets the page scroll with lines sliding', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const front = t.texts()[0];
+  check('a scroll down at the newest is the page\'s', scroll(t, 120) === false);
+  check('a scroll up turns it back', scroll(t, -120) === true && t.texts()[0] !== front);
+  await t.clock.advance(1000);
+  check('turned back, the lines still slide', boxOf(lineOf(t, 'Downloading')).getAttribute('data-marquee') === 'run');
+  check('the same gesture held at the oldest', scroll(t, -120) === true);
+  await t.clock.advance(400);
+  t.section.querySelector('[data-event-latest]').click();
+  await t.clock.advance(1000);
+  check('Latest brings the newest back', t.texts()[0] === front && t.slides.watched().length === 3 && t.slides.watched().every((b) => b.isConnected));
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));

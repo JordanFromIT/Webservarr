@@ -22,7 +22,9 @@
 // each, in order. Under reduced motion the lines crossfade in place instead.
 // Only the front line is in the accessibility tree; a new event is announced
 // once through the section's polite live region. Text is written with
-// textContent only.
+// textContent only. A line whose words are cut off slides slowly to their
+// end and back (WSUI.marquee); under reduced motion it keeps its ellipsis,
+// and its title holds the whole line either way.
 //
 // Library lines (Sonarr, Radarr and Chaptarr: "Added: Dune (2021)")
 // carry a grey tick, and a grab its muted " · not guaranteed".
@@ -158,7 +160,8 @@ function wheelTime(at) {
 }
 
 // One wheel on one section. env: { setTimeout, clearTimeout, signal } (the
-// owner's: its abort ends the wheel's input and timers) and reducedMotion().
+// owner's: its abort ends the wheel's input, timers and slides),
+// reducedMotion() and marquee (WSUI.marquee; without it nothing slides).
 export function createEventLog(section, env) {
     var wheel = section.querySelector('[data-event-wheel]');
     var pinnedList = section.querySelector('[data-event-pinned]');
@@ -183,6 +186,10 @@ export function createEventLog(section, env) {
     var gestureTimer = null;
     var drag = null;
     var heldTimer = null;
+    // A line's words cut off slide to their end and back (env.marquee, ui.js
+    // WSUI.marquee): one marquee per line, on the box that clips its words,
+    // made again whenever fill() writes them.
+    var scrolls = new Map();   // line element -> its marquee
 
     // What the wheel shows of `list`: following the newest, onWheel (an open
     // outage held); turned back, the WHEEL_LINES events from the front one.
@@ -230,6 +237,29 @@ export function createEventLog(section, env) {
         } else if (time) {
             el.removeChild(time);
         }
+        scroll(el);
+    }
+
+    // The words' box: the title beside a note, or the whole text.
+    function scroll(el) {
+        if (typeof env.marquee !== 'function') return;
+        unscroll(el);
+        var box = el.querySelector('.ws-wheel__title') || el.querySelector('.ws-wheel__text');
+        if (box) scrolls.set(el, env.marquee(box));
+    }
+
+    function unscroll(el) {
+        var m = scrolls.get(el);
+        if (!m) return;
+        scrolls.delete(el);
+        m.destroy();
+    }
+
+    // Measured again once the line is on the wheel (built off the page,
+    // there was nothing to measure).
+    function rescroll(el) {
+        var m = scrolls.get(el);
+        if (m) m.refresh();
     }
 
     function build(ev) {
@@ -254,6 +284,7 @@ export function createEventLog(section, env) {
         if (animate) el.classList.add(from);
         if (before && before.parentNode === wheel) wheel.insertBefore(el, before);
         else wheel.appendChild(el);
+        rescroll(el);
         if (animate) {
             void el.offsetHeight;   // commit the start, so the turn animates
             el.classList.remove(from);
@@ -266,7 +297,9 @@ export function createEventLog(section, env) {
         el.setAttribute('aria-hidden', 'true');
         el.removeAttribute('title');
         leaving.push(el);
+        // It slides on while it fades, and stops when it goes.
         env.setTimeout(function () {
+            unscroll(el);
             if (el.parentNode) el.parentNode.removeChild(el);
             var k = leaving.indexOf(el);
             if (k !== -1) leaving.splice(k, 1);
@@ -276,6 +309,7 @@ export function createEventLog(section, env) {
         var cap = env.reducedMotion() ? WHEEL_LINES + 1 : 1;
         while (leaving.length > cap) {
             var old = leaving.shift();
+            unscroll(old);
             if (old.parentNode) old.parentNode.removeChild(old);
         }
     }
@@ -574,6 +608,12 @@ export function createEventLog(section, env) {
         wheel.addEventListener('touchcancel', onDragEnd, { signal: env.signal });
         wheel.addEventListener('keydown', onKey, { signal: env.signal });
     }
+    // The owner's end stops every slide.
+    if (env.signal) {
+        env.signal.addEventListener('abort', function () {
+            Array.from(scrolls.keys()).forEach(unscroll);
+        }, { once: true });
+    }
 
     // data: the feed's answer, or null when it could not be read.
     // quiet: true for a copy kept from an earlier visit, painted at once.
@@ -710,7 +750,7 @@ const STALE_MS = 15000;
 /* The section for the whole visit. env: { document, WS (shell.js: swr,
    getJSON, poll), target (where ws:swap is heard: window), setTimeout,
    clearTimeout, signal (ends everything; never, in the browser),
-   reducedMotion(), now() }. */
+   reducedMotion(), marquee, now() }. */
 export function startEventLog(env) {
     var WS = env.WS;
     var section = null;   // the live section, from the first page that had one
@@ -793,6 +833,8 @@ if (typeof window !== 'undefined' && window.WS && !window.WS.eventLog) {
         reducedMotion: function () {
             return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
         },
+        // ui.js, a classic script before every module, has made it.
+        marquee: window.WSUI && window.WSUI.marquee,
         now: function () { return Date.now(); }
     });
 }
