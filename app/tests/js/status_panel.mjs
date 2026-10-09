@@ -15,7 +15,9 @@
 // new checks slide into the strips (or just show under reduced motion), the
 // rows are updated in place, the words tick, Uptime Kuma going away and
 // coming back while open swaps the state without closing, and a closed
-// panel asks nothing.
+// panel asks nothing. The account menu beside it (shell.js wireChrome): its
+// button's aria-expanded follows it, and Escape closes it with focus back on
+// the button.
 // Run: node app/tests/js/status_panel.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -281,6 +283,46 @@ const text = (n) => (n ? n.textContent : '');
   await wait(10);
   t.d.dispatchEvent(new t.w.CustomEvent('ws:menu-open', { detail: null }));
   check('a page swap (closeChrome) closes', !open(t));
+  await t.done();
+}
+
+// ---- The account menu ----
+{
+  current = 'account menu';
+  const t = await boot();
+  const btn = t.d.getElementById('userMenuBtn');
+  const menu = t.d.getElementById('userMenuDropdown');
+  const isOpen = () => menu.classList.contains('is-open');
+  check('closed, the button says so and names its menu', btn.getAttribute('aria-expanded') === 'false' &&
+    btn.getAttribute('aria-controls') === 'userMenuDropdown' && !isOpen());
+  btn.focus();
+  btn.click();
+  check('a press opens it and the button says expanded', isOpen() && btn.getAttribute('aria-expanded') === 'true');
+  key(t, 'Escape');
+  check('Escape closes it', !isOpen() && btn.getAttribute('aria-expanded') === 'false');
+  check('focus is on the button', t.d.activeElement === btn);
+  btn.click();
+  const item = menu.querySelector('[data-logout]');
+  item.focus();
+  key(t, 'Escape');
+  check('Escape from inside the menu closes it and gives focus back to the button',
+    !isOpen() && btn.getAttribute('aria-expanded') === 'false' && t.d.activeElement === btn);
+  btn.click();
+  btn.click();
+  check('a second press closes it and the button says so', !isOpen() && btn.getAttribute('aria-expanded') === 'false');
+  btn.click();
+  t.d.getElementById('elsewhere').click();
+  check('a press outside closes it and the button says so', !isOpen() && btn.getAttribute('aria-expanded') === 'false');
+  btn.click();
+  t.d.dispatchEvent(new t.w.CustomEvent('ws:menu-open', { detail: null }));
+  check('a page swap (closeChrome) closes it and the button says so', !isOpen() && btn.getAttribute('aria-expanded') === 'false');
+  const other = t.d.getElementById('elsewhere');
+  btn.click();
+  other.focus();
+  key(t, 'Escape');
+  check('Escape with focus elsewhere on the page closes it and leaves the focus be', !isOpen() && t.d.activeElement === other);
+  key(t, 'Escape');
+  check('Escape with it closed changes nothing', btn.getAttribute('aria-expanded') === 'false' && t.d.activeElement === other);
   await t.done();
 }
 

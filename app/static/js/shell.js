@@ -731,20 +731,33 @@
     // from reaching document, so another menu's outside-click close never sees
     // it; instead a menu that opens announces itself with a ws:menu-open event
     // (detail: the menu element) and every other menu closes. notifications.js
-    // does the same for the bell dropdown.
+    // does the same for the bell dropdown. The button's aria-expanded follows
+    // the menu, and Escape closes it, focus back on the button when it was
+    // in the menu (or on the button, or nowhere).
     [['userMenuBtn', 'userMenuDropdown']].forEach(function (pair) {
       var btn = document.getElementById(pair[0]);
       var menu = document.getElementById(pair[1]);
       if (!btn || !menu) return;
+      function expanded(on) { btn.setAttribute('aria-expanded', on ? 'true' : 'false'); }
+      expanded(popIsOpen(menu));
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        if (popIsOpen(menu)) { popClose(menu); return; }
+        if (popIsOpen(menu)) { popClose(menu); expanded(false); return; }
         popOpen(menu);
+        expanded(true);
         document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: menu }));
       });
-      document.addEventListener('click', function () { popClose(menu); });
+      document.addEventListener('click', function () { popClose(menu); expanded(false); });
       document.addEventListener('ws:menu-open', function (e) {
-        if (e.detail !== menu) popClose(menu);
+        if (e.detail !== menu) { popClose(menu); expanded(false); }
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape' || e.isComposing || !popIsOpen(menu)) return;
+        var a = document.activeElement;
+        var inside = !a || a === document.body || a === btn || menu.contains(a);
+        popClose(menu);
+        expanded(false);
+        if (inside) btn.focus();
       });
     });
 

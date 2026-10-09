@@ -194,7 +194,8 @@ class SoftOpenClose(unittest.TestCase):
         # The account menus go through the helpers and never toggle .hidden
         # themselves; the bell in notifications.js uses the same two.
         self.assertFalse(live_matches(SHELL_JS, r"menu\.classList\."))
-        self.assertTrue(live_matches(SHELL_JS, r"if \(popIsOpen\(menu\)\) \{ popClose\(menu\); return; \}"))
+        # (expanded(false): the button's aria-expanded follows the menu.)
+        self.assertTrue(live_matches(SHELL_JS, r"if \(popIsOpen\(menu\)\) \{ popClose\(menu\); expanded\(false\); return; \}"))
         self.assertTrue(live_matches(SHELL_JS, r"popOpen\(menu\);"))
         self.assertRegex(js_code_only(SHELL_JS), r"popOpen: popOpen,\s*popClose: popClose,\s*popIsOpen: popIsOpen,")
         # The phone's More sheet: the same two states. It is shown (showModal)
