@@ -841,6 +841,7 @@ export async function mount(ctx) {
   var _searchCollapseTimer = null;  // ends the grid's close-up to a shorter answer (collapseSearchGrid)
   var _searchTurnDir = '';          // 'next' or 'prev' for SEARCH_TURN_LOCK_MS after that page turn
   var _searchTurnTimer = null;
+  var _searchBooks = { query: '', count: 0 };   // the books merged into page 1 of a query (showSearchCount)
   var _allRequests = [];
   var _currentFilter = 'all';
   var _requestsDisplayPage = 1;
@@ -1284,6 +1285,21 @@ export async function mount(ctx) {
       // takes seconds - most of it Open Library cover lookups - and holding
       // the whole result set hostage to it made every search feel broken.
       _searchResults = screenResults;
+      // Seerr's total counts people, whom the list leaves out: with one page
+      // the list itself is the count.
+      var screenCount = _totalSearchPages > 1 ? (data.totalResults || 0) : screenResults.length;
+
+      // No films or shows: the books are the whole answer, so the search
+      // stays held ("Searching...", the skeletons) until they come, and
+      // "Nothing matches" is said only when both are empty.
+      if (!screenResults.length && _currentSearchPage === 1) {
+        var onlyBooks = await bookSearch;
+        if (signal.aborted || _currentSearchQuery !== query || searchCtl !== ctl) return;
+        bookSearch = null;
+        _searchResults = onlyBooks;
+        _searchBooks = { query: query, count: onlyBooks.length };
+      }
+
       // Keep _searchDisplayPage if set to -1 (going to last page), otherwise reset to 1
       if (_searchDisplayPage === -1) {
         _searchDisplayPage = getSearchTotalDisplayPages() || 1;
@@ -1291,15 +1307,12 @@ export async function mount(ctx) {
         _searchDisplayPage = 1;
       }
 
-      var found = data.totalResults || 0;
-      $('searchResultCount').textContent = found === 1 ? '1 result' : found + ' results';
+      showSearchCount(query, screenCount);
       var held = releaseSearchGrid(grid);
 
-      if (screenResults.length) {
+      if (_searchResults.length) {
         renderSearchPage();
       } else {
-        // Books may still land here, so this says "nothing yet" rather
-        // than being the final word.
         grid.textContent = '';
         var emptyP = document.createElement('p');
         emptyP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
@@ -1311,10 +1324,13 @@ export async function mount(ctx) {
 
       // Books arrive late and are merged in place. The query is re-checked
       // because a slow book search can outlive the search that started it.
-      bookSearch.then(function (bookResults) {
+      if (bookSearch) bookSearch.then(function (bookResults) {
         if (signal.aborted || searchCtl !== ctl) return;
-        if (_currentSearchQuery !== query || !bookResults.length) return;
-        if (_currentSearchPage !== 1) return;
+        if (_currentSearchQuery !== query || _currentSearchPage !== 1) return;
+        // The count says what can be paged through, books included.
+        _searchBooks = { query: query, count: bookResults.length };
+        showSearchCount(query, screenCount);
+        if (!bookResults.length) return;
 
         // Books only join the first API page; Seerr owns pagination and
         // there is no sensible way to page two independent sources
@@ -1349,6 +1365,14 @@ export async function mount(ctx) {
       grid.appendChild(errP);
       keepSearchHeight(grid, heldBefore);
     }
+  }
+
+  // The count beside "Search results": the films and shows (screenCount)
+  // and the books merged into page 1 of this query, on every page of it, so
+  // it matches what can be paged through.
+  function showSearchCount(query, screenCount) {
+    var found = screenCount + (_searchBooks.query === query ? _searchBooks.count : 0);
+    $('searchResultCount').textContent = found === 1 ? '1 result' : found + ' results';
   }
 
   // While a search is out the results keep their size. The cards already

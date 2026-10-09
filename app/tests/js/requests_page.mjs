@@ -10,8 +10,10 @@
 // once with reduced motion) while from lg it holds (until the window narrows
 // below lg), searches out back to back topping up to one page, a page turn
 // waiting for the fetch it started, a double click or a held Enter on Next or
-// Prev turning one page, one request per title in flight with
-// every copy of its button (redrawn cards, the detail) saying so, the bar's
+// Prev turning one page, books that land late counted (and waited for before
+// "Nothing matches" when there are no films or shows), one request per title
+// in flight with every copy of its button (redrawn cards, the detail) saying
+// so, the bar's
 // transform-only flight, and the detail's year and rating leaving no gap
 // when empty.
 //
@@ -796,6 +798,93 @@ await run('a double click on Next or Prev over pages already here turns one page
     press(prev, 0);
     check('the lock lets go: the next press turns again, page 2', info() === 'Page 2 of 4', info());
     check('every turn was from pages already here', t.net.urls('/api/integrations/seerr-search').length === 1);
+  } finally { t.release(); }
+});
+
+// ---- Books land late: the count and the empty state wait for them ----
+
+// Films and shows answer at once; books wait until the test lets them go.
+function lateBooks(screen) {
+  const out = [];
+  return {
+    out,
+    routes: (net) => {
+      routes({ body: FILMS }, { body: BOOKS })(net);
+      net.on('/api/integrations/seerr-search', (url) => ({ body: screen(new URL(url, 'https://x').searchParams.get('page')) }));
+      net.on('/api/integrations/chaptarr-search', () => new Promise((resolve) => out.push(resolve)));
+    },
+    answer(i, results) { out[i]({ body: { results: results.map((b) => JSON.parse(JSON.stringify(b))) } }); }
+  };
+}
+
+await run('no films or shows: the search stays held until the books answer, and the count is theirs', async () => {
+  const h = lateBooks(() => ({ results: [], totalResults: 0, totalPages: 1 }));
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'rule of two darth bane');
+    await t.clock.advance(50);
+    const grid = t.q('#searchResultsGrid');
+    check('no "Nothing matches" while the books are out', grid.textContent.indexOf('Nothing matches') === -1, grid.textContent);
+    check('still held: skeletons, busy', grid.querySelectorAll(':scope > .skel').length === 9 && grid.getAttribute('aria-busy') === 'true');
+    check('the count still says it is searching', t.q('#searchResultCount').textContent === 'Searching…', t.q('#searchResultCount').textContent);
+    h.answer(0, BOOK_RESULTS);
+    await t.clock.advance(50);
+    check('three book cards', grid.querySelectorAll('[data-action="open-search"]').length === 3 && !grid.querySelector('.skel'));
+    check('the count says 3 results', t.q('#searchResultCount').textContent === '3 results', t.q('#searchResultCount').textContent);
+    check('no longer busy', !grid.hasAttribute('aria-busy') && grid.inert === false);
+  } finally { t.release(); }
+});
+
+await run('no films, shows or books: "Nothing matches" once both have answered', async () => {
+  const h = lateBooks(() => ({ results: [], totalResults: 0, totalPages: 1 }));
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'zzzz');
+    await t.clock.advance(50);
+    const grid = t.q('#searchResultsGrid');
+    check('not yet', grid.textContent.indexOf('Nothing matches') === -1);
+    h.answer(0, []);
+    await t.clock.advance(50);
+    check('said once both are empty', grid.textContent.indexOf('Nothing matches “zzzz”.') !== -1 && !grid.querySelector('.skel'), grid.textContent);
+    check('the count says 0 results', t.q('#searchResultCount').textContent === '0 results', t.q('#searchResultCount').textContent);
+  } finally { t.release(); }
+});
+
+await run('books merged into films and shows: the count goes up by the books', async () => {
+  // Seerr's total counts two people the list leaves out: one page, so the
+  // count is the list itself.
+  const h = lateBooks(() => ({ results: filmPage(4, 'Bane'), totalResults: 6, totalPages: 1 }));
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'bane');
+    await t.clock.advance(50);
+    check('films first: 4 results', t.q('#searchResultCount').textContent === '4 results', t.q('#searchResultCount').textContent);
+    h.answer(0, BOOK_RESULTS);
+    await t.clock.advance(50);
+    check('seven cards', t.doc.querySelectorAll('#searchResultsGrid [data-action="open-search"]').length === 7);
+    check('the count says 7 results', t.q('#searchResultCount').textContent === '7 results', t.q('#searchResultCount').textContent);
+  } finally { t.release(); }
+});
+
+await run('over more than one Seerr page the count keeps the books on every page', async () => {
+  const h = lateBooks((page) => ({ results: filmPage(page === '1' ? 20 : 7, 'P' + page), totalResults: 27, totalPages: 2 }));
+  const t = visit(h.routes);
+  try {
+    await t.mount();
+    await typeQuery(t, 'star wars');
+    await t.clock.advance(50);
+    check('Seerr\'s total first: 27 results', t.q('#searchResultCount').textContent === '27 results', t.q('#searchResultCount').textContent);
+    h.answer(0, BOOK_RESULTS);
+    await t.clock.advance(50);
+    check('with the books: 30 results', t.q('#searchResultCount').textContent === '30 results', t.q('#searchResultCount').textContent);
+    // To Seerr's page 2 (three display pages of 23 first).
+    for (let i = 0; i < 3; i++) { t.q('#searchNextBtn').click(); await t.clock.advance(500); }
+    const pages = t.net.urls('/api/integrations/seerr-search').map((u) => new URL(u, 'https://x').searchParams.get('page'));
+    check('on Seerr\'s page 2', pages.join() === '1,2', pages);
+    check('still 30 results', t.q('#searchResultCount').textContent === '30 results', t.q('#searchResultCount').textContent);
   } finally { t.release(); }
 });
 
