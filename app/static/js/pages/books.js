@@ -147,12 +147,12 @@ const FORMAT_INFO = {
 
 // Class strings are written out whole: Tailwind only builds what it can read.
 const GRID = 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6';
-const CHIP_ON = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
-const CHIP_OFF = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
+const CHIP_ON = 'inline-flex items-center justify-center h-11 px-3 lg:h-10 lg:px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
+const CHIP_OFF = 'inline-flex items-center justify-center h-11 px-3 lg:h-10 lg:px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 // A filter button: a format chip's shape with a picker's arrow; filled like a pressed chip while it is in use.
-const FILTER_ON = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
-const FILTER_OFF = 'inline-flex h-10 shrink-0 items-center gap-1 rounded-full pl-4 pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
+const FILTER_ON = 'inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-full pl-3 pr-2 lg:h-10 lg:pl-4 lg:pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-bright';
+const FILTER_OFF = 'inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-full pl-3 pr-2 lg:h-10 lg:pl-4 lg:pr-3 text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue';
 // A filter in use: its kind, its name and a cross; the whole pill removes it.
 const ACTIVE_CHIP = 'inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full pl-3 pr-2 text-[15px] bg-frosted-blue/10 text-frosted-blue hover:bg-frosted-blue/[0.15] transition-colors ' + LINK_FOCUS;
 const CLEAR_ALL = 'inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue transition-colors ' + LINK_FOCUS;

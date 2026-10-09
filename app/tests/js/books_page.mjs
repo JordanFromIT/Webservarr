@@ -2523,7 +2523,8 @@ await run('CLS: every skeleton copies the sizes of what it holds room for', asyn
 await run('CLS: the toolbar\'s skeleton is its controls, word for word and size for size', async (make) => {
   const t = make({ routes: usual() });
   const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
-  const WIDTH_RE = /^(?:h-|w-|min-w-|px-|pl-|pr-|gap-|text-\[\d|font-(?:semibold|medium|bold)$)/;
+  // Each class that sets a size, at any breakpoint (lg:h-10 as much as h-11).
+  const WIDTH_RE = /^(?:[a-z0-9-]+:)?(?:h-|w-|min-w-|px-|pl-|pr-|gap-|grow|text-\[\d|font-(?:semibold|medium|bold)$)/;
   const widthOf = (el) => (el.getAttribute('class') || '').split(/\s+/).filter((c) => WIDTH_RE.test(c)).sort().join(' ');
   const words = (el) => el.textContent.replace(/expand_more/g, '').replace(/\s+/g, ' ').trim();
   const skelControls = Array.from(skel.querySelectorAll('#toolbarSkel .skel'));
@@ -2558,6 +2559,42 @@ await run('CLS: the toolbar\'s skeleton is its controls, word for word and size 
   const f = make({ url: 'https://ws.test/books?author=Jane%20Austen', routes: usual() });
   await f.mount();
   check('and a pill is that height', Array.from(f.qa('#activeFilters button')).every((b) => /\bh-9\b/.test(b.className)) && f.qa('#activeFilters button').length === 2);
+});
+
+await run('the toolbar on a phone: even rows of 44px controls, centred; from lg up the desktop row as before', async (make) => {
+  const t = make({ routes: usual() });
+  await t.mount();
+  const cls = (sel) => t.q(sel).className.split(/\s+/);
+  const has = (sel, list) => list.filter((c) => cls(sel).indexOf(c) === -1);
+  const EVEN = 'grid-cols-[repeat(3,minmax(max-content,1fr))]';
+  // Below lg: one row each, the three chips and the three filters in even columns across the width.
+  check('the format chips: three even columns across the width, a 28rem block on a tablet', has('#formatChips', ['grid', 'w-full', EVEN, 'gap-2', 'sm:max-w-md']).length === 0, has('#formatChips', ['grid', 'w-full', EVEN, 'gap-2', 'sm:max-w-md']));
+  check('the filters: the same columns and width (their focus-ring margin aside), scrolling sideways only if a phone is too narrow',
+    has('#filterButtons', ['grid', 'w-[calc(100%+0.5rem)]', '-m-1', 'p-1', EVEN, 'gap-2', 'sm:max-w-[calc(28rem+0.5rem)]', 'overflow-x-auto']).length === 0);
+  check('Group series and the sort: a full row, the sort taking what Group series leaves',
+    has('#groupSwitch', ['h-11']).length === 0 && t.q('#groupSwitch').parentElement.classList.contains('w-full') && t.q('#groupSwitch').parentElement.classList.contains('sm:max-w-md') &&
+    has('#sortBtn', ['h-11', 'w-44', 'grow']).length === 0);
+  const controls = t.qa('#formatChips [data-format], #filterButtons [data-filter]');
+  check('every chip and filter is 44px tall on a phone, its words centred', controls.length === 6 && controls.every((b) => /(?:^| )h-11(?: |$)/.test(b.className) && /\bjustify-center\b/.test(b.className)));
+  // From lg up: what the desktop had.
+  check('lg: the chips a wrapping flex row, auto width', has('#formatChips', ['lg:flex', 'lg:w-auto', 'lg:max-w-none', 'lg:flex-wrap', 'lg:items-center']).length === 0);
+  check('lg: the filters a flex row within the toolbar', has('#filterButtons', ['lg:flex', 'lg:w-auto', 'lg:min-w-0', 'lg:max-w-full', 'lg:items-center']).length === 0);
+  check('lg: the pair at the far end, the sort its fixed 11rem', t.q('#groupSwitch').parentElement.classList.contains('lg:ml-auto') && has('#sortBtn', ['lg:h-10', 'lg:grow-0']).length === 0 && has('#groupSwitch', ['lg:h-10']).length === 0);
+  check('lg: chips and filters 40px with their old padding', controls.every((b) => /\blg:h-10\b/.test(b.className)) &&
+    t.qa('#formatChips [data-format]').every((b) => /\blg:px-4\b/.test(b.className)) && t.qa('#filterButtons [data-filter]').every((b) => /\blg:pl-4\b/.test(b.className) && /\blg:pr-3\b/.test(b.className)));
+  // The pressed chip keeps its look through a change, in the new shape.
+  t.click('#formatChips [data-format="audio"]');
+  await t.clock.advance(800);
+  const audio = t.q('#formatChips [data-format="audio"]');
+  const all = t.q('#formatChips [data-format="all"]');
+  check('pressed: filled and marked, in the phone shape', audio.getAttribute('aria-pressed') === 'true' && /\bbg-primary\b/.test(audio.className) && /(?:^| )h-11(?: |$)/.test(audio.className) && /\blg:h-10\b/.test(audio.className));
+  check('the others: quiet and unmarked, the same shape', all.getAttribute('aria-pressed') === 'false' && !/\bbg-primary\b/.test(all.className) && /(?:^| )h-11(?: |$)/.test(all.className));
+  // The skeleton's groups are the toolbar's, so the swap moves nothing at any width.
+  const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
+  const groups = skel.querySelectorAll('#toolbarSkel > div');
+  check('the skeleton\'s chip row is the chips\' row', groups[0].className === skel.querySelector('#formatChips').className, [groups[0].className, skel.querySelector('#formatChips').className]);
+  check('the skeleton\'s filter row is the filters\' row, unscrolled', groups[1].className === skel.querySelector('#filterButtons').className.replace('books-row ', '').replace('overflow-x-auto', 'overflow-hidden'),
+    [groups[1].className, skel.querySelector('#filterButtons').className]);
 });
 
 await run('the search\'s placeholder: the shared marquee runs it for the visit (ui.js; its behaviour in marquee.mjs)', async (make) => {
