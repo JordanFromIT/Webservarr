@@ -780,6 +780,12 @@ html.ws-vt #wsTabBar       { view-transition-name: ws-tabbar; }
   animation: none;
   mix-blend-mode: normal;
 }
+/* A bar that is itself named keeps its blur in the snapshot (the top bar,
+   the tab bar). The player's blur is on .wsp-bar, inside the named
+   #wsPlayer, and a snapshot's blur sees nothing outside it, so mid-swap the
+   page showed sharp through the bar's translucent background. For that
+   moment the player stands on the page colour instead. */
+::view-transition-group(ws-player) { background: rgb(var(--color-background)); }
 ::view-transition-old(ws-content) { animation: ws-vt-out 90ms ease-out both; }
 ::view-transition-new(ws-content) { animation: ws-vt-in 140ms ease-out both; }
 @keyframes ws-vt-out { to { opacity: 0; } }

@@ -301,6 +301,13 @@ class NavHighlight(unittest.TestCase):
         self.assertRegex(THEME, r"::view-transition-old\([^{}]*ws-tabbar\)[^{}]*\{\s*display: none;")
         self.assertRegex(THEME, r"::view-transition-new\([^{}]*ws-tabbar\)[^{}]*\{\s*animation: none;")
 
+    def test_the_player_bar_is_opaque_while_the_page_crossfades(self):
+        # The player's blur is on .wsp-bar inside the named #wsPlayer, so its
+        # snapshot blurs nothing: without a backing the crossfading page
+        # showed sharp through the bar. Its group stands on the page colour.
+        self.assertIn("background: rgb(var(--color-background))",
+                      css_rule(THEME, "::view-transition-group(ws-player)"))
+
     def test_no_cross_document_transition(self):
         # Every shell page is a soft-navigation page; a full navigation (sign
         # in, setup, a fallback) opts into no transition, under any motion
