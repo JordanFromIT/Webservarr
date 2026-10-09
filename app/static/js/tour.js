@@ -269,9 +269,21 @@
       playerWait.observe(document.documentElement, { attributes: true, attributeFilter: ['data-player-full'] });
     }
 
+    // The desktop player's drop-down (WS.playerUI.isWindow) hangs over the
+    // page, part of it rather than a dialog: the fog would dim it and a step
+    // could point under it. It collapses to its pill first, the book playing
+    // on; one moved to a window of its own (Pop out) is not over the page.
+    function collapsePlayer() {
+      var ui = window.WS && window.WS.playerUI;
+      if (!ui || typeof ui.isWindow !== 'function' || !ui.isWindow()) return;
+      if (typeof ui.popped === 'function' && ui.popped() === 'docked') return;
+      try { ui.close(); } catch (e) { /* never let the player stop the tour */ }
+    }
+
     function start() {
       if (active || !STEPS.length || (signal && signal.aborted)) return;
       if (playerOpen()) { afterPlayer(); return; }
+      collapsePlayer();
       active = true;
       step = 0;
       placed = false;

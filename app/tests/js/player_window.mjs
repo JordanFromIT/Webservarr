@@ -7,7 +7,8 @@
 // shrinking back), nothing to move or size, soft navigation, scrolling and
 // outside clicks leaving it open, the phone keeping the sheet, and Pop out
 // through fakes: Document Picture-in-Picture (a second happy-dom document)
-// and the remote window over a fake BroadcastChannel, both ends.
+// and the remote window over a fake BroadcastChannel, both ends. A page's
+// guided tour (tour.js) collapses the drop-down to its pill before it starts.
 //
 // Imports the modules as they are, through data: URLs, which also proves
 // they touch no DOM at import time.
@@ -254,6 +255,47 @@ await run('the pill: play pauses without opening; a held book expands it', () =>
 // ---------------------------------------------------------------------------
 // The drop-down
 // ---------------------------------------------------------------------------
+
+await run('a tour collapses the drop-down before it starts, every step kept', async () => {
+  const t = setup({ state: BOOK });
+  t.win.WS = { playerUI: t.ui };
+  const src = readFileSync(join(here, '../../static/js/tour.js'), 'utf8');
+  new Function('window', 'document', 'localStorage', 'location', src)(t.win, t.doc, t.win.localStorage, t.win.location);
+  const steps = [
+    { target: 'h1', icon: 'search', title: 'Find a book', body: 'b' },
+    { target: '#pageBtn', icon: 'x', title: 'Two', body: 'b' },
+    { target: '#pageBtn', icon: 'x', title: 'Three', body: 'b' }
+  ];
+  const ctl = new AbortController();
+  const tour = t.win.WebServarrTour.init({ seenKey: 'test_tour_seen', autoStart: false, signal: ctl.signal, steps });
+  t.q('.wsp-pill-open').click();
+  check('the drop-down is open', t.ui.isOpen() && t.ui.isWindow());
+  tour.maybeStart();
+  check('the tour started at once', tour.isActive() && t.doc.getElementById('tourTitle').textContent === 'Find a book');
+  check('and the drop-down collapsed to its pill', !t.ui.isOpen() && t.q('.wsp-pill-open').getAttribute('aria-expanded') === 'false');
+  check('the book plays on', !t.engine.calls.some((c) => c[0] === 'stop' || c[0] === 'pause' || c[0] === 'close'), t.engine.calls);
+  check('every step is there', t.doc.getElementById('tourDots').children.length === 3);
+  const titles = [];
+  for (let i = 0; i < 3; i++) { titles.push(t.doc.getElementById('tourTitle').textContent); t.doc.getElementById('tourNext').click(); }
+  check('and each is shown in turn', titles.join() === 'Find a book,Two,Three', titles);
+  ctl.abort();
+
+  // Popped out to a window of its own, it is not over the page: left be.
+  let closed = 0;
+  t.win.WS = { playerUI: { isWindow: () => true, popped: () => 'docked', close() { closed += 1; } } };
+  const ctl2 = new AbortController();
+  const tour2 = t.win.WebServarrTour.init({ seenKey: 'test_tour_seen2', autoStart: false, signal: ctl2.signal, steps });
+  tour2.start();
+  check('a docked player is not closed', tour2.isActive() && closed === 0);
+  ctl2.abort();
+  // No player on the page at all: the tour runs as before.
+  t.win.WS = {};
+  const ctl3 = new AbortController();
+  const tour3 = t.win.WebServarrTour.init({ seenKey: 'test_tour_seen3', autoStart: false, signal: ctl3.signal, steps });
+  tour3.start();
+  check('no player: it runs', tour3.isActive());
+  ctl3.abort();
+});
 
 await run('the pill expands into the player: part of the page, not a dialog', async () => {
   const t = setup({ state: BOOK });
