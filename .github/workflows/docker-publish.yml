@@ -131,6 +131,7 @@ jobs:
           node app/tests/js/settings_frost.mjs
           node app/tests/js/plex_callback.mjs
           node app/tests/js/login_request.mjs
+          node app/tests/js/settings_access.mjs
 
   build-and-push:
     needs: [test, js-checks]

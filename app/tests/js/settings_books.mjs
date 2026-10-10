@@ -311,7 +311,7 @@ await run('the tab: a catalog status, counts, and the four cards', async (make) 
   check('Catalog, Not matched, Matched books, Your choices, in that order', heads.join('|') === 'Catalog|Not matched|Matched books|Your choices', heads);
   check('built a while ago, and the counts in plain words', /Built \d+ \w+ ago\.|Built just now\./.test(t.text(`${panel} .min-h-6`)) && /6 books: 4 ebooks and 5 audiobook editions\./.test(t.text(panel)), t.text(`${panel} .min-h-6`));
   check('the skeleton is gone', !t.q(`${panel} [data-skel]`) && !t.q(`${panel} .skel`));
-  check('the tab is in the strip, after Integrations', t.qa('#settingsTabs [data-tab]').map((a) => a.getAttribute('data-tab')).join() === 'general,pages,appearance,sign-in,integrations,books,notifications');
+  check('the tab is in the strip, after Integrations', t.qa('#settingsTabs [data-tab]').map((a) => a.getAttribute('data-tab')).join() === 'general,pages,appearance,sign-in,access-requests,integrations,books,notifications');
   check('and selected from the address', t.doc.documentElement.getAttribute('data-settings-tab') === 'books' && t.q('#tab-books').getAttribute('aria-selected') === 'true');
 });
 

@@ -28,7 +28,7 @@
 var WSSettingsFirstPaint = (function () {
   'use strict';
 
-  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'books', 'notifications'];
+  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'access-requests', 'integrations', 'books', 'notifications'];
 
   function tab() {
     var t = (location.hash || '').slice(1);

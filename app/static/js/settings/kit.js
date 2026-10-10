@@ -25,9 +25,10 @@
   var UI = window.WSUI;
   var el = UI.el, icon = UI.icon, cls = UI.cls;
   var HEX = /^#[0-9a-fA-F]{6}$/;
-  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'books', 'notifications'];
+  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'access-requests', 'integrations', 'books', 'notifications'];
   var TITLES = { general: 'General', pages: 'Pages', appearance: 'Appearance', 'sign-in': 'Sign-in',
-                 integrations: 'Integrations', books: 'Books', notifications: 'Notifications' };
+                 'access-requests': 'Access requests', integrations: 'Integrations', books: 'Books',
+                 notifications: 'Notifications' };
   // Choices for the icon picker. A name can also be typed, but the site's icon
   // font only draws the names in app/static/fonts/material-symbols-outlined.icons.txt;
   // any other shows as the setting's default icon (app/icons.py).
@@ -1347,6 +1348,7 @@
     if (location.hash && location.hash.slice(1) !== S.current) setHash(S.current, 'replace');
     paintTab(S.current, false);
     load();
+    loadCounts();
   }
 
   // Leaving (the signal aborted; every listener is gone by now): whatever is
@@ -1389,9 +1391,33 @@
     return signal && !signal.aborted ? UI.confirm(opts) : Promise.resolve(false);
   }
 
+  // A tab's count of things waiting on the admin (Access requests): a badge on
+  // the tab whichever tab is open, and the tab's name says it ("Access
+  // requests 3 waiting": it starts with the visible text, so the two match).
+  // Hidden at 0.
+  function setCount(id, n) {
+    var a = document.getElementById('tab-' + id);
+    var badge = a && a.querySelector('[data-tab-count]');
+    if (!badge) return;
+    n = typeof n === 'number' && isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    badge.textContent = n ? String(n) : '';
+    badge.hidden = !n;
+    if (n) a.setAttribute('aria-label', TITLES[id] + ' ' + n + ' waiting');
+    else a.removeAttribute('aria-label');
+  }
+
+  function loadCounts() {
+    var sig = signal;
+    fetch('/api/admin/access-requests/count', { credentials: 'same-origin', signal: sig }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (d) {
+      if (d && !sig.aborted) setCount('access-requests', d.pending);
+    }, function () { /* the badge stays as it was; the tab still loads its own list */ });
+  }
+
   var WSSettings = {
     init: init, canLeave: canLeave, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave,
-    view: view, toast: toast, confirm: confirm, el: el, icon: icon, cls: cls
+    view: view, toast: toast, confirm: confirm, setCount: setCount, el: el, icon: icon, cls: cls
   };
   Object.defineProperty(WSSettings, 'values', { get: function () { return S.values; } });
   Object.defineProperty(WSSettings, 'meta', { get: function () { return S.meta; } });

@@ -9,10 +9,10 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 FRAME = "settings.html"
-TABS = ["general", "pages", "appearance", "sign-in", "integrations", "books", "notifications"]
+TABS = ["general", "pages", "appearance", "sign-in", "access-requests", "integrations", "books", "notifications"]
 MODULES = {"general": "general.js", "pages": "pages.js", "appearance": "appearance.js",
-           "sign-in": "signin.js", "integrations": "integrations.js", "books": "books.js",
-           "notifications": "notifications.js"}
+           "sign-in": "signin.js", "access-requests": "access-requests.js", "integrations": "integrations.js",
+           "books": "books.js", "notifications": "notifications.js"}
 # Text colour from outside the theme engine: a Tailwind palette class, an
 # arbitrary text-[#hex] / text-[rgb(...)] / text-[hsl(...)], or an inline
 # color: #... / rgb(...) / hsl(...) in markup or a JS string. rgb(var(--...))
@@ -354,6 +354,7 @@ class Skeletons(unittest.TestCase):
 
     MODULE = {"general": "settings/general.js", "pages": "settings/pages.js",
               "appearance": "settings/appearance.js", "sign-in": "settings/signin.js",
+              "access-requests": "settings/access-requests.js",
               "integrations": "settings/integrations.js", "books": "settings/books.js",
               "notifications": "settings/notifications.js"}
 

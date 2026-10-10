@@ -1803,18 +1803,23 @@ html[data-settings-tab="general"] #tab-general,
 html[data-settings-tab="pages"] #tab-pages,
 html[data-settings-tab="appearance"] #tab-appearance,
 html[data-settings-tab="sign-in"] #tab-sign-in,
+html[data-settings-tab="access-requests"] #tab-access-requests,
 html[data-settings-tab="integrations"] #tab-integrations,
 html[data-settings-tab="books"] #tab-books,
 html[data-settings-tab="notifications"] #tab-notifications {
   color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary));
 }
 .ws-tab:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
+/* A tab's count badge (Settings > Access requests) is inline-flex, which
+   outranks Tailwind's [hidden]: at 0 it must not paint as an empty pill. */
+#settingsTabs [data-tab-count][hidden] { display: none; }
 
 [data-settings-panel] { display: none; }
 html[data-settings-tab="general"] [data-settings-panel="general"],
 html[data-settings-tab="pages"] [data-settings-panel="pages"],
 html[data-settings-tab="appearance"] [data-settings-panel="appearance"],
 html[data-settings-tab="sign-in"] [data-settings-panel="sign-in"],
+html[data-settings-tab="access-requests"] [data-settings-panel="access-requests"],
 html[data-settings-tab="integrations"] [data-settings-panel="integrations"],
 html[data-settings-tab="books"] [data-settings-panel="books"],
 html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { display: block; }
