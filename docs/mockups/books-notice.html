@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Audiobook Notice Mockup</title>
+<!--
+  The Books page's audiobook notice, reworked into two states, drawn for
+  review before anything is built. It replaces today's "Best heard here"
+  notice (books.html #booksNotice, pages/books.js, theme-loader.js).
+
+  State A, the first visit (once per account): a frosted window over the
+  whole page, shell included, with everything behind it blurred. Okay counts
+  down from 15 and nothing closes it before then.
+  State B, every later visit: the same words inline, in today's spot under
+  the event log, with Okay and Don't show again.
+
+  Self-contained on purpose, like request-access.html: no app CSS. The
+  colours and the frost are the shipped defaults copied from
+  app/static/css/theme.css (:where(:root) and "Frosted surfaces"). The
+  shell (sidebar, header, phone bars, event log) and the Books page behind
+  are stand-ins drawn with the app's own classes.
+
+  Each frame is a viewport drawn at its real width (390 or 1440) and zoomed
+  to fit the column, so the app's breakpoints are container queries on the
+  frame rather than the reader's window.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=block" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: { extend: {
+    colors: {
+      "primary": "rgb(var(--color-primary) / <alpha-value>)",
+      "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+      "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+      "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+      "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+      "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+      "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      "focus": "rgb(var(--ws-focus) / <alpha-value>)",
+      "status-ok": "rgb(var(--color-status-ok) / <alpha-value>)"
+    },
+    fontFamily: { "display": ["var(--font-display)", "sans-serif"] },
+    fontSize: { "label": "13px", "body": "15px", "lead": "17px", "h3": "20px", "h2": "24px", "h1": "32px" },
+    borderRadius: { "card": "16px", "inner": "12px", "btn": "10px" }
+  } }
+}</script>
+<style>
+/* One dark look, the app's own: the shipped palette, the D8 glass slab, and
+   Spline Sans. The mockup's chrome is drawn from the same tokens. */
+:root {
+  /* The shipped default palette (theme.css :where(:root)). */
+  --color-primary: 18 87 147;
+  --color-secondary: 44 109 161;
+  --color-accent: 70 132 176;
+  --color-text: 190 238 244;
+  --color-text-secondary: 255 255 255;
+  --color-background: 0 0 0;
+  --color-status-ok: 74 222 128;
+  --color-status-warn: 251 191 36;
+  --color-media-book: 252 211 77;
+  --font-display: "Spline Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* The glass slab's defaults: 15px blur, tint .25, everything else at 1 or 0. */
+  --ws-frost-blur: blur(15px);
+  --ws-frost-tint-a: .25;
+  --ws-frost-hl: 1;
+  --ws-frost-sheen: 0;
+  --ws-frost-grain: 0;
+  --ws-frost-depth: 1;
+  --ws-frost-sat: 1;
+  --ws-focus: var(--color-text);
+  --ws-shade: color-mix(in srgb, rgb(var(--color-background)) 35%, black);
+
+  /* The frost recipe (theme.css "Frosted surfaces"). */
+  --ws-frost-tint: rgb(var(--color-secondary) / var(--ws-frost-tint-a));
+  --ws-frost-glow: rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth)));
+  --ws-frost-boost: saturate(calc(1 + .5 * var(--ws-frost-sat))) brightness(calc(1 + .06 * var(--ws-frost-sat)));
+  --ws-frost-edge: rgb(var(--color-text) / .12);
+  --ws-frost-ring: linear-gradient(135deg, rgb(255 255 255 / calc(.55 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.165 * var(--ws-frost-hl))) 40%, rgb(var(--color-text) / .04) 75%);
+  --ws-frost-ring-bar: linear-gradient(90deg, rgb(255 255 255 / calc(.44 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.138 * var(--ws-frost-hl))) 50%, rgb(var(--color-text) / .04));
+  --ws-frost-ring-layer: none;
+  --ws-frost-ring-bar-layer: none;
+  --ws-frost-sheen-layer: linear-gradient(160deg, rgb(255 255 255 / var(--ws-frost-sheen)), rgb(255 255 255 / 0) 45%);
+  --ws-frost-grain-layer: none;
+  --ws-frost-fill: var(--ws-frost-sheen-layer), var(--ws-frost-grain-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));
+  --ws-frost-shadow:
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 1px 0 0 rgb(255 255 255 / calc(.14 * var(--ws-frost-hl))),
+    inset 0 -1px 0 rgb(0 0 0 / calc(.256 * var(--ws-frost-depth))), inset 0 -12px 24px -12px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
+  --ws-frost-shadow-up:
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 -1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(-6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(-24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
+  --ws-frost-floor: 0;
+
+  /* New for this notice. The veil over the page while the window is open:
+     the page colour at .45 (lighter than the shared dialog's .7, so the page
+     still reads as a page) and its own blur, under the window's 15px. */
+  --bn-veil: rgb(var(--color-background) / .45);
+  --bn-veil-blur: blur(8px);
+  /* How long Okay waits. */
+  --bn-wait: 15s;
+
+  /* The mockup's own frame chrome, from the same palette. */
+  --mk-rule: rgb(var(--color-text) / .12);
+  --mk-muted: rgb(var(--color-text) / .7);
+  --mk-faint: rgb(var(--color-text) / .55);
+  color-scheme: dark;
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / var(--ws-frost-tint-a)) 70%, rgb(var(--color-text) / var(--ws-frost-tint-a)));
+    --ws-frost-glow: color-mix(in srgb, rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth))) 70%, rgb(var(--color-text) / calc(.14 * var(--ws-frost-depth))));
+  }
+}
+@supports (background-clip: border-area) {
+  :root {
+    --ws-frost-edge: transparent;
+    --ws-frost-ring-layer: var(--ws-frost-ring) border-box border-area;
+    --ws-frost-ring-bar-layer: var(--ws-frost-ring-bar) border-box border-area;
+  }
+}
+
+html { background: rgb(var(--color-background)); }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: rgb(var(--color-background));
+  color: rgb(var(--color-text));
+  font-family: var(--font-display);
+  line-height: 1.5;
+  overflow-x: clip;
+}
+.material-symbols-outlined { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; }
+:where(.material-symbols-outlined:not(.block)) { width: 1em; overflow: clip; flex-shrink: 0; }
+
+/* ---- The app's own pieces (theme.css) ---- */
+:where(a[href], button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px;
+}
+.ws-frost {
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border-color: var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow);
+}
+.ws-frost, .ws-frost * { scrollbar-width: thin; scrollbar-color: rgb(var(--color-accent) / .5) transparent; }
+.ws-pill { --ws-pill: var(--color-status-ok); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
+.ws-status-dot { flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px; background: rgb(var(--ws-pill, var(--color-status-ok))); }
+.ws-lift { transition: transform 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out; }
+@media (hover: hover) and (pointer: fine) {
+  .ws-lift:not([aria-disabled="true"]):hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--ws-shade) 90%, transparent); }
+}
+.ws-tabbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 46;
+  color: rgb(var(--color-text) / .7);
+  background: var(--ws-frost-ring-bar-layer), var(--ws-frost-fill);
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border-top: 1px solid var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow-up);
+}
+.ws-tabbar-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: 63px; margin: 0; padding: 0; list-style: none; }
+.ws-navtab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 100%; }
+.ws-navtab-icon { display: flex; align-items: center; justify-content: center; width: 56px; height: 32px; border-radius: 9999px; }
+.ws-navtab-label { font-size: 12px; line-height: 16px; font-weight: 500; }
+.ws-navtab[aria-current] { color: rgb(var(--color-text)); }
+.ws-navtab[aria-current] .ws-navtab-icon { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-navtab[aria-current] .ws-navtab-icon .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+.ws-navtab[aria-current] .ws-navtab-label { font-weight: 700; }
+/* The event log's wheel, drawn still: the newest line flat, one older line
+   curled up over it and dimmed. */
+.ws-wheel { position: relative; height: 3.5rem; overflow: hidden; }
+.ws-wheel__line { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: .625rem; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-wheel__line.is-front { bottom: .25rem; color: rgb(var(--color-text)); }
+.ws-wheel__line.is-back { top: .125rem; color: rgb(var(--color-text) / .45); transform: perspective(300px) rotateX(28deg) scale(.96); transform-origin: 50% 100%; }
+.ws-wheel__mark { width: .5rem; height: .5rem; border-radius: 9999px; flex-shrink: 0; }
+.ws-wheel__time { color: rgb(var(--color-text) / .6); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* ---- State A: the first-visit window ----
+   One overlay, fixed over the whole document in the build (here, over the
+   frame): the veil blurs and dims everything (shell included), and the
+   window is the veil's SIBLING, not its child. A backdrop-filter makes its
+   element a backdrop root, so a window inside the veil would blur only the
+   veil's own colour and not the page. */
+.bn-overlay {
+  position: absolute; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.bn-veil {
+  position: absolute; inset: 0;
+  background: var(--bn-veil);
+  -webkit-backdrop-filter: var(--bn-veil-blur);
+  backdrop-filter: var(--bn-veil-blur);
+}
+.bn-window {
+  position: relative;
+  width: 100%; max-width: 38rem; max-height: 100%;
+  display: flex; flex-direction: column;
+  border: 1px solid; border-radius: 16px; overflow: hidden;
+}
+.bn-window-head { display: flex; align-items: center; gap: 12px; padding: 24px 24px 0; }
+.bn-window-head .material-symbols-outlined { font-size: 28px; color: rgb(var(--color-accent)); }
+.bn-window-head h2 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.bn-window-head h2:focus { outline: none; }
+.bn-window-body {
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 24px 20px;
+  font-size: 15px; line-height: 1.6; color: rgb(var(--color-text) / .85);
+}
+.bn-window-body:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -4px; border-radius: 8px; }
+.bn-window-body p { margin-block: 0; max-width: 62ch; text-wrap: pretty; }
+.bn-window-body .bn-lead { font-size: 17px; line-height: 1.5; color: rgb(var(--color-text)); }
+.bn-window-foot {
+  display: flex; justify-content: flex-end;
+  padding: 16px 24px 24px;
+  border-top: 1px solid rgb(var(--color-text) / .1);
+}
+@container (max-width: 639.98px) {
+  .bn-window-head { padding: 20px 20px 0; }
+  .bn-window-head h2 { font-size: 20px; }
+  .bn-window-body { padding: 12px 20px 16px; }
+  .bn-window-foot { padding: 12px 20px 20px; }
+  .bn-window-foot .bn-count { width: 100%; }
+}
+
+/* The list, in both states: small accent dots, held tight to its lead-in. */
+.bn-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.bn-list li { display: flex; gap: 10px; align-items: baseline; }
+.bn-list li::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 9999px; background: rgb(var(--color-accent)); transform: translateY(-2px); }
+.bn-window-body p:has(+ .bn-list) { margin-bottom: -4px; }
+
+/* Okay with its count. The button is its own timer: a solid primary fill
+   grows across a dim primary track over the 15 seconds (transform only),
+   so the wait is visible without reading the number. aria-disabled, not
+   disabled: it stays in the Tab order, so focus has somewhere to be and a
+   screen reader hears "Okay, dimmed". The width is held for "Okay (15)" so
+   the button never jumps as the digits change. */
+.bn-count {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 9rem; height: 44px; padding-inline: 20px;
+  border: 0; border-radius: 10px;
+  background: rgb(var(--color-primary) / .32);
+  box-shadow: inset 0 0 0 1px rgb(var(--color-primary) / .9);
+  color: rgb(var(--color-text-secondary));
+  font: 600 15px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.bn-count::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: rgb(var(--color-primary));
+  transform-origin: 0 50%;
+  transform: scaleX(var(--bn-done, 1));
+}
+.bn-count[aria-disabled="true"] { cursor: not-allowed; color: rgb(var(--color-text-secondary) / .9); }
+.bn-count[aria-disabled="true"]::before { transform: scaleX(var(--bn-done, 0)); }
+.bn-count:not([aria-disabled="true"]):hover::before { background: rgb(var(--color-primary) / .9); }
+.bn-count.is-running::before { animation: bn-fill var(--bn-wait) linear both; }
+@keyframes bn-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Opening: the app's dialog motion (theme.css ws-dialog-in), 220ms. The
+   veil and the window fade each on their own, never the overlay around
+   them: opacity below 1 on a parent makes it a backdrop root too, and both
+   blurs would then see nothing but the overlay itself. */
+.bn-overlay.is-opening .bn-veil { animation: bn-fade 220ms ease-out backwards; }
+.bn-overlay.is-opening .bn-window { animation: bn-fade 220ms ease-out backwards, bn-rise 220ms ease-out backwards; }
+@keyframes bn-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bn-rise { from { transform: translateY(6px) scale(.985); } to { transform: none; } }
+
+/* Reduced motion: opacity only. The window does not rise, and the fill does
+   not sweep: Okay stays on its dim track and turns solid when the count
+   ends. The number still counts (text, not motion). .rm previews it. */
+@media (prefers-reduced-motion: reduce) {
+  .bn-overlay.is-opening .bn-window { animation: bn-fade 220ms ease-out backwards; }
+  .bn-count.is-running::before { animation: none; }
+  .ws-lift { transition: none; }
+}
+.rm .bn-overlay.is-opening .bn-window { animation: bn-fade 220ms ease-out backwards; }
+.rm .bn-count.is-running::before { animation: none; }
+
+/* ---- State B: the inline notice ----
+   Today's surface (bg-baltic-blue/10, a steel-blue/20 border, rounded-xl):
+   it sits in the page, so it is not frosted. Sized by its own width
+   (container query), so it is the same notice wherever it lands.
+   Narrow: head, words, buttons, stacked. From 720px: the buttons move up
+   beside the title and the words run in two columns. */
+.bn-inline { container-type: inline-size; }
+.bn-card {
+  display: grid; gap: 10px 16px;
+  grid-template-areas: "head" "text" "actions";
+  padding: 16px;
+  background: rgb(var(--color-primary) / .10);
+  border: 1px solid rgb(var(--color-accent) / .20);
+  border-radius: 12px;
+}
+.bn-card-head { grid-area: head; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bn-card-head .material-symbols-outlined { font-size: 20px; color: rgb(var(--color-accent)); }
+.bn-card-head h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; color: rgb(var(--color-text)); text-wrap: balance; }
+.bn-card-text { grid-area: text; min-width: 0; font-size: 14px; line-height: 20px; color: rgb(var(--color-text) / .8); }
+.bn-card-text p { margin: 0 0 6px; text-wrap: pretty; }
+.bn-card-text .bn-lead { color: rgb(var(--color-text)); font-weight: 500; }
+.bn-card-text .bn-list { margin: -2px 0 6px; gap: 0; }
+.bn-card-text > :last-child { margin-bottom: 0; }
+.bn-card-text a { color: rgb(var(--color-text)); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgb(var(--color-text) / .45); }
+.bn-card-text a:hover { text-decoration-color: rgb(var(--color-text)); }
+.bn-card-actions { grid-area: actions; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.bn-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 40px; padding-inline: 16px; border: 0; border-radius: 10px;
+  font: 600 14px/1 var(--font-display); white-space: nowrap; cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+.bn-btn-primary { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.bn-btn-primary:hover { background: rgb(var(--color-primary) / .9); }
+/* ui.js btnQuiet: no fill until hovered. */
+.bn-btn-quiet { background: transparent; color: rgb(var(--color-text) / .7); padding-inline: 12px; }
+.bn-btn-quiet:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
+@container (min-width: 720px) {
+  .bn-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head actions" "text text"; align-items: center; padding: 14px 20px 16px; }
+  .bn-card-actions { flex-wrap: nowrap; }
+  .bn-btn { height: 36px; }
+  .bn-card-text { columns: 2; column-gap: 40px; }
+  .bn-card-text .bn-list { break-inside: avoid; }
+}
+@media (prefers-reduced-motion: reduce) { .bn-btn { transition: none; } }
+
+/* ---- Stand-ins: book covers ---- */
+.cover { position: relative; aspect-ratio: 2 / 3; max-width: 100%; border-radius: 12px; overflow: hidden; display: flex; align-items: flex-end; padding: 10px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .08); }
+.cover b { font-size: 13px; line-height: 1.15; font-weight: 800; color: rgb(255 255 255 / .92); text-shadow: 0 1px 2px rgb(0 0 0 / .5); text-wrap: balance; }
+.cover-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgb(0 0 0 / .45); }
+.cover-bar > i { display: block; height: 100%; background: rgb(var(--color-accent)); }
+
+/* ---- Frames: one viewport each, drawn at its real size and scaled ---- */
+.vp { position: relative; overflow: hidden; border-radius: 12px; border: 1px solid var(--mk-rule); background: rgb(var(--color-background)); }
+.vp-inner { container-type: inline-size; }
+.vp-page { position: relative; display: flex; overflow: hidden; isolation: isolate; background: rgb(var(--color-background)); }
+.vp-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgb(var(--color-accent) / .5) transparent; }
+.vp-page[data-locked] .vp-scroll { overflow: hidden; }
+.fold { position: relative; height: 0; border-top: 1px dashed rgb(var(--color-status-warn) / .7); }
+
+/* ---- The mockup's own page ---- */
+.mk { max-width: 1960px; margin-inline: auto; padding-inline: 16px; padding-block: 32px 96px; }
+@media (min-width: 768px) { .mk { padding-inline: 32px; } }
+.mk-head { max-width: 76ch; }
+.mk-head h1 { font-size: clamp(1.75rem, 1.2rem + 2vw, 2.75rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+.mk-head > p { color: var(--mk-muted); font-size: 17px; margin: 12px 0 0; text-wrap: pretty; }
+.mk-notes { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 15px; color: var(--mk-muted); }
+.mk-notes li { display: flex; gap: 10px; align-items: baseline; }
+.mk-notes li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--color-accent)); transform: translateY(-2px); }
+.mk-notes b { color: rgb(var(--color-text)); font-weight: 600; }
+.mk-nav { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; }
+.mk-nav a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 16px; border-radius: 9999px; font-size: 15px; font-weight: 600; color: rgb(var(--color-text) / .8); background: rgb(var(--color-text) / .07); text-decoration: none; }
+.mk-nav a:hover { background: rgb(var(--color-text) / .12); color: rgb(var(--color-text)); }
+.mk-part { margin-top: 72px; scroll-margin-top: 24px; }
+.mk-part > h2 { font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin: 0; padding-bottom: 12px; border-bottom: 1px solid var(--mk-rule); }
+.mk-part > p { color: var(--mk-muted); font-size: 15px; margin: 12px 0 0; max-width: 76ch; text-wrap: pretty; }
+.mk-state { margin-top: 48px; }
+.mk-state-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; max-width: 90ch; }
+.mk-code { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; }
+.mk-state-head h3 { font-size: 20px; font-weight: 700; margin: 0; }
+.mk-state-head p { flex-basis: 100%; margin: 0; color: var(--mk-muted); font-size: 15px; text-wrap: pretty; }
+.mk-row { margin-top: 16px; display: grid; gap: 24px; align-items: start; }
+@media (min-width: 900px) { .mk-row.pair { grid-template-columns: minmax(0, 392px) minmax(0, 1fr); } }
+.mk-frame { min-width: 0; }
+.mk-cap { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; color: var(--mk-faint); font-variant-numeric: tabular-nums; }
+.mk-cap b { color: rgb(var(--color-text) / .85); font-weight: 600; }
+.mk-controls { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.mk-controls label { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--mk-muted); cursor: pointer; }
+.mk-controls input { width: 18px; height: 18px; border-radius: 4px; color: rgb(var(--color-primary)); background: transparent; border-color: rgb(var(--color-accent) / .6); }
+.mk-status { font-size: 15px; color: var(--mk-muted); font-variant-numeric: tabular-nums; }
+.mk-a11y { margin-top: 16px; display: grid; gap: 16px; max-width: 110ch; }
+@media (min-width: 900px) { .mk-a11y { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 40px; } }
+.mk-a11y h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; }
+.mk-a11y p { margin: 0; font-size: 15px; color: var(--mk-muted); text-wrap: pretty; }
+.mk-a11y code { font-size: 13px; padding: 1px 5px; border-radius: 4px; background: rgb(var(--color-text) / .08); color: rgb(var(--color-text) / .9); }
+</style>
+</head>
+<body>
+<div class="mk">
+
+<header class="mk-head">
+  <h1>The audiobook notice on Books, in two states</h1>
+  <p>A frosted window the first time someone opens Books, then the same words inline on every later visit. Each is drawn at 390 and 1440 wide, over a stand-in of the Books page and the shell.</p>
+  <ul class="mk-notes">
+    <li>The window is the shipped glass slab (15px blur, tint at 25%, the gradient ring and the 9-layer shadow). Behind it, a veil blurs and dims the whole page, sidebar, header, event log and phone bars included.</li>
+    <li><b>Okay is its own timer.</b> A solid blue fill grows across the button over the 15 seconds, so the wait shows without reading the number. When the fill is full, the button is the normal blue one.</li>
+    <li>The inline notice keeps today's quiet panel. It is only as tall as the full text needs: two columns from 720px wide, 14px type, tight paragraphs.</li>
+    <li>One blue button per state: Okay. Don't show again is the quiet style. "Your Server" stands in for the site's name.</li>
+    <li>Wide frames are scaled to fit your window; the caption says by how much. Phone frames scroll like a phone. Books, titles and events behind the notice are stand-ins.</li>
+  </ul>
+  <nav class="mk-nav" aria-label="Parts of this mockup">
+    <a href="#first">First visit</a>
+    <a href="#later">Later visits</a>
+    <a href="#try">Try the countdown</a>
+    <a href="#a11y">Accessibility</a>
+  </nav>
+</header>
+
+<section class="mk-part" id="first" aria-labelledby="first-h">
+  <h2 id="first-h">First visit: the window</h2>
+  <p>Shown once per account, the first time Books opens. Nothing else on the page can be used until Okay is. There is no close button, Escape does nothing and a click outside does nothing while the count runs.</p>
+
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">A1</span><h3>Counting down</h3><p>Six seconds in: "Okay (9)", dimmed, its fill 40% across. On the phone the words are taller than the screen, so they scroll inside the window and Okay stays pinned at its foot.</p></div>
+    <div class="mk-row pair" data-row="a:9"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">A2</span><h3>Count finished</h3><p>Okay is the solid blue button. Okay, Escape or a click outside closes the window and the page comes back into focus. The phone frame is scrolled to the end of the words.</p></div>
+    <div class="mk-row pair" data-row="a:0"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="later" aria-labelledby="later-h">
+  <h2 id="later-h">Later visits: the inline notice</h2>
+  <p>In today's spot, under the event log and above the Books title. Okay hides it until the next visit. Don't show again hides it for good. The dashed line is the bottom of the first screen.</p>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">B</span><h3>Full text, compact</h3><p>On the phone it stacks: title, words, then the two buttons at the end. From 720px the buttons sit beside the title and the words run in two columns.</p></div>
+    <div class="mk-row pair" data-row="b"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="try" aria-labelledby="try-h">
+  <h2 id="try-h">Try the countdown</h2>
+  <p>Opens the window in both frames and runs the real 15 seconds. Keyboard focus moves into the wide frame's window and stays there until Okay works. Tick the box to see the reduced-motion version: the window fades in without rising and the fill does not sweep.</p>
+  <div class="mk-controls">
+    <button id="tryStart" type="button" class="bn-btn bn-btn-primary">Open the window</button>
+    <label for="tryRm"><input id="tryRm" type="checkbox"> Reduced motion</label>
+    <span id="tryStatus" class="mk-status">Not started.</span>
+  </div>
+  <div class="mk-row pair" data-row="live"></div>
+</section>
+
+<section class="mk-part" id="a11y" aria-labelledby="a11y-h">
+  <h2 id="a11y-h">Accessibility</h2>
+  <p>What the build has to do. The try-it frames above behave this way.</p>
+  <div class="mk-a11y">
+    <div>
+      <h3>A dialog, modal</h3>
+      <p>The window is <code>role="dialog"</code> with <code>aria-modal="true"</code>, named by its title (<code>aria-labelledby</code>). Everything behind it is <code>inert</code> while it is open, so neither a pointer nor a screen reader reaches the page. Built on the shared <code>WSUI.modal</code> (ui.js), which needs one new option: Escape and the backdrop are ignored until the count ends.</p>
+    </div>
+    <div>
+      <h3>Focus trapped, then returned</h3>
+      <p>Focus starts on the title (<code>tabindex="-1"</code>) so the words are read from the top. Tab moves between the words' scroll area (on a phone) and Okay, and never leaves the window. When it closes, focus goes to the page's main heading, since nothing opened it.</p>
+    </div>
+    <div>
+      <h3>The count, said once</h3>
+      <p>One polite live region says "Okay will work in 15 seconds." when the window opens, and nothing after. The number on the button is <code>aria-hidden</code>, so the button's name is always "Okay" and no second is read out. While waiting it is <code>aria-disabled="true"</code> rather than <code>disabled</code>: it stays reachable and is heard as "Okay, dimmed".</p>
+    </div>
+    <div>
+      <h3>Reduced motion</h3>
+      <p>Opacity only. The window fades in without the 6px rise, and the button's fill does not sweep: Okay sits on its dim track and turns solid when the count ends. The number still counts, since that is text, not motion. The blur is not motion and stays.</p>
+    </div>
+    <div>
+      <h3>Contrast and targets</h3>
+      <p>The words are the text colour on the frost over a dimmed page. White on the dim Okay track is about 9:1 and on the solid blue 7:1. Okay is 44px tall (full width on a phone). The inline buttons are 40px on a phone and 36px wide, all over the 24px floor. Focus rings are the site's 2px text-colour ring.</p>
+    </div>
+    <div>
+      <h3>Inline notice</h3>
+      <p>A <code>section</code> named by its <code>h2</code>, as today. When Okay or Don't show again hides it, focus moves to the Books heading so it is not lost. The Tickets page is a real link here; in the window it stays plain text, so the window has one way out.</p>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- ================= The notice's words, once ================= -->
+<!-- Used verbatim in both states. data-site gets the site's name. -->
+<template id="tpl-words">
+<p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-site>Your Server</span>.</p>
+<p>Your audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
+<ul class="bn-list">
+  <li>They don't save your progress reliably</li>
+  <li>Books show up as albums of tracks, with no series or reading order</li>
+  <li>They have fewer features than you get here</li>
+</ul>
+<p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
+<p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
+<p>So I can keep improving it, I can see what's read and listened to here.</p>
+<p>If something isn't right, please open a ticket on the <span data-tickets>Tickets page</span> with as much detail as you can.</p>
+</template>
+
+<!-- ================= State A: the window ================= -->
+<template id="tpl-window">
+<div class="bn-overlay">
+  <div class="bn-veil" data-veil></div>
+  <div class="bn-window ws-frost" data-window aria-labelledby="bnTitle">
+    <div class="bn-window-head">
+      <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
+      <h2 id="bnTitle" tabindex="-1">Before you start listening</h2>
+    </div>
+    <div class="bn-window-body" data-words data-body></div>
+    <div class="bn-window-foot">
+      <button type="button" class="bn-count ws-lift" data-okay>Okay<span data-count aria-hidden="true"></span></button>
+    </div>
+    <p class="sr-only" data-announce aria-live="polite"></p>
+  </div>
+</div>
+</template>
+
+<!-- ================= State B: the inline notice ================= -->
+<template id="tpl-inline">
+<section class="bn-inline mb-8" aria-labelledby="bnInlineTitle">
+  <div class="bn-card">
+    <div class="bn-card-head">
+      <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
+      <h2 id="bnInlineTitle">Before you start listening</h2>
+    </div>
+    <div class="bn-card-text" data-words data-link></div>
+    <div class="bn-card-actions">
+      <button type="button" class="bn-btn bn-btn-quiet">Don't show again</button>
+      <button type="button" class="bn-btn bn-btn-primary ws-lift">Okay</button>
+    </div>
+  </div>
+</section>
+</template>
+
+<!-- ================= The Books page behind (stand-in) ================= -->
+<template id="tpl-eventlog">
+<section class="relative shrink-0 mb-8" aria-labelledby="evTitle">
+  <div class="flex items-center gap-3 mb-2">
+    <span class="material-symbols-outlined text-steel-blue" aria-hidden="true">history</span>
+    <h2 id="evTitle" class="text-xl font-bold text-frosted-blue">Event log</h2>
+  </div>
+  <div class="ws-wheel">
+    <div class="ws-wheel__line is-back" aria-hidden="true"><span class="ws-wheel__mark" style="background: rgb(var(--color-text-secondary) / .55)"></span>Added to Books: Project Hail Mary <span class="ws-wheel__time">9:02 AM</span></div>
+    <div class="ws-wheel__line is-front"><span class="ws-wheel__mark" style="background: rgb(var(--color-status-ok))"></span>Plex is back up <span class="ws-wheel__time">10:41 AM</span></div>
+  </div>
+</section>
+</template>
+
+<template id="tpl-books">
+<div data-books-head>
+  <h1 class="text-h2 @[640px]:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Books</h1>
+  <p class="mt-2 text-body text-frosted-blue/70">Read and listen to everything in the library, and pick up where you left off.</p>
+</div>
+<div class="mt-8 flex items-center gap-2">
+  <div class="relative min-w-0 flex-1 max-w-[36rem]">
+    <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70" aria-hidden="true">search</span>
+    <div class="w-full h-12 rounded-xl bg-frosted-blue/[0.07] pl-12 pr-4 flex items-center text-[17px] text-frosted-blue/70 whitespace-nowrap overflow-hidden">Title, author or narrator</div>
+  </div>
+  <span class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70"><span class="material-symbols-outlined" aria-hidden="true">help</span></span>
+  <span class="ml-auto shrink-0 inline-flex items-center gap-2 h-12 px-3 rounded-xl text-[15px] font-semibold text-frosted-blue/70"><span class="material-symbols-outlined" aria-hidden="true">insights</span><span class="hidden @[640px]:inline">Your stats</span></span>
+</div>
+<div class="mt-8">
+  <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue">Continue</h2>
+  <div class="flex gap-4 overflow-hidden" data-covers="continue"></div>
+</div>
+<div class="mt-8">
+  <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue">Up next</h2>
+  <div class="flex gap-4 overflow-hidden" data-covers="next"></div>
+</div>
+<div class="mt-8 pb-24">
+  <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue">Recently added</h2>
+  <div class="flex gap-4 overflow-hidden" data-covers="recent"></div>
+</div>
+</template>
+
+<script>
+(function () {
+  'use strict';
+
+  // Stand-in covers: a title on two of a cover's own colours.
+  var BOOKS = [
+    ['Project Hail Mary', '#1d4f6e', '#e0a53a', 62],
+    ['The Hobbit', '#5b3a1e', '#c58b3c', 18],
+    ['Dune', '#8a4b1c', '#e3b264', 85],
+    ['Leviathan Wakes', '#16303f', '#4f8fa6', 40],
+    ['The Name of the Wind', '#3a1f2b', '#a14d3b', 9],
+    ['Mistborn', '#22242c', '#8f6b45', 55],
+    ['The Martian', '#6b2a17', '#d0703a', 30],
+    ['Red Rising', '#40120f', '#b8352a', 71],
+    ['Piranesi', '#1f3b3a', '#8fb7a5', 0],
+    ['Circe', '#2b2148', '#c19a4b', 0]
+  ];
+  function covers(host, kind) {
+    var start = kind === 'next' ? 3 : kind === 'recent' ? 6 : 0;
+    for (var i = 0; i < 8; i++) {
+      var b = BOOKS[(start + i) % BOOKS.length];
+      var card = document.createElement('div');
+      card.className = 'shrink-0 ' + (kind === 'next' ? 'w-40' : 'w-36');
+      var bar = kind === 'continue' && b[3] ? '<span class="cover-bar"><i style="width:' + b[3] + '%"></i></span>' : '';
+      card.innerHTML = '<div class="cover" style="background:linear-gradient(160deg,' + b[2] + ',' + b[1] + ' 70%)"><b>' + b[0] + '</b>' + bar + '</div>' +
+        '<p class="mt-2 text-[15px] leading-snug text-frosted-blue truncate">' + b[0] + '</p>';
+      host.appendChild(card);
+    }
+  }
+
+  var seq = 0;
+  function clone(id) {
+    var frag = document.getElementById(id).content.cloneNode(true);
+    var n = ++seq;
+    // Ids repeat across frames: give each copy its own, and keep the
+    // references pointing at it.
+    frag.querySelectorAll('[id]').forEach(function (e) { e.id = e.id + '-' + n; });
+    frag.querySelectorAll('[aria-labelledby]').forEach(function (e) { e.setAttribute('aria-labelledby', e.getAttribute('aria-labelledby') + '-' + n); });
+    frag.querySelectorAll('[data-words]').forEach(function (w) {
+      w.appendChild(document.getElementById('tpl-words').content.cloneNode(true));
+      // The inline notice links the Tickets page; the window keeps it as words.
+      if (w.hasAttribute('data-link')) {
+        var t = w.querySelector('[data-tickets]');
+        var a = document.createElement('a');
+        a.href = '/tickets';
+        a.textContent = t.textContent;
+        t.replaceWith(a);
+      }
+    });
+    frag.querySelectorAll('[data-covers]').forEach(function (h) { covers(h, h.getAttribute('data-covers')); });
+    return frag;
+  }
+  function div(cls) { var d = document.createElement('div'); if (cls) d.className = cls; return d; }
+
+  var NAV = [['home', 'Home'], ['movie', 'Requests'], ['calendar_month', 'Calendar'], ['menu_book', 'Books'], ['report', 'Issues'], ['confirmation_number', 'Tickets'], ['article', 'Wiki']];
+
+  // The Books page in the shell. state: 'a' (window open), 'b' (inline), 'none'.
+  function booksPage(state, count, opts) {
+    opts = opts || {};
+    return function (w, h) {
+      var wide = w >= 1024;
+      var page = div('vp-page');
+      page.style.height = h + 'px';
+      page.style.flexDirection = wide ? 'row' : 'column';
+      if (state === 'a') page.setAttribute('data-locked', '');
+
+      // The shell. aria-hidden: these are pictures of the shell, not controls.
+      if (wide) {
+        var side = document.createElement('aside');
+        side.setAttribute('aria-hidden', 'true');
+        side.className = 'w-64 shrink-0 bg-baltic-blue/20 border-r border-steel-blue/30 flex flex-col';
+        side.innerHTML = '<div class="p-6 flex flex-col items-center gap-2"><span class="size-14 rounded-2xl bg-gradient-to-br from-cornflower-ocean to-baltic-blue grid place-items-center"><span class="material-symbols-outlined text-bright text-[30px]">shield</span></span><span class="text-frosted-blue font-bold text-lead">Your Server</span></div>' +
+          '<div class="px-4 py-4 space-y-1 text-[15px]">' + NAV.map(function (n) {
+            var on = n[1] === 'Books';
+            return '<div class="flex items-center gap-3 px-4 py-2.5 rounded-[10px] ' + (on ? 'bg-primary/30 text-frosted-blue font-semibold' : 'text-frosted-blue/70') + '"><span class="material-symbols-outlined text-[20px] ' + (on ? 'text-frosted-blue' : 'text-steel-blue') + '">' + n[0] + '</span>' + n[1] + '</div>';
+          }).join('') + '<div class="flex items-center gap-3 px-4 py-2.5 rounded-[10px] text-frosted-blue/70"><span class="material-symbols-outlined text-[20px] text-steel-blue">settings</span>Settings</div></div>';
+        page.appendChild(side);
+      }
+      var main = div('flex-1 min-w-0 flex flex-col');
+      var bar;
+      if (wide) {
+        bar = document.createElement('header');
+        bar.className = 'h-16 shrink-0 border-b border-steel-blue/20 flex items-center justify-between px-8 bg-background-dark/40';
+        bar.innerHTML = '<div class="flex items-center gap-6"><span class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border"><span class="ws-status-dot"></span><span class="text-frosted-blue text-xs font-bold uppercase tracking-widest">All Systems Online</span></span>' +
+          '<span class="flex items-center gap-4 text-label text-frosted-blue/70">' + ['CPU', 'RAM', 'NET'].map(function (g, i) {
+            return '<span class="flex items-center gap-1.5"><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8.5" fill="none" stroke="rgb(var(--color-text) / .15)" stroke-width="3"/><circle cx="11" cy="11" r="8.5" fill="none" stroke="rgb(var(--color-accent))" stroke-width="3" stroke-dasharray="' + [14, 30, 8][i] + ' 60" transform="rotate(-90 11 11)" stroke-linecap="round"/></svg>' + g + '</span>';
+          }).join('') + '</span></div>' +
+          '<div class="flex items-center gap-4"><span class="material-symbols-outlined text-steel-blue p-2">notifications</span><span class="flex items-center gap-3 pl-4"><span class="text-right"><span class="block text-sm font-bold text-frosted-blue leading-none">Sam</span><span class="block text-[10px] text-frosted-blue/60 mt-1">Member</span></span><span class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></span></span></div>';
+      } else {
+        bar = div('h-14 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-steel-blue/20 bg-background-dark/80');
+        bar.innerHTML = '<span class="text-[17px] font-bold tracking-[-0.02em] text-frosted-blue">Books</span><span class="flex items-center gap-3"><span class="ws-pill flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-label font-semibold text-frosted-blue"><span class="ws-status-dot"></span>Online</span><span class="material-symbols-outlined text-steel-blue">notifications</span></span>';
+      }
+      bar.setAttribute('aria-hidden', 'true');
+      main.appendChild(bar);
+
+      var scroll = div('vp-scroll');
+      var col = div('max-w-[1200px] w-full mx-auto min-w-0 p-4 @[1024px]:p-8');
+      if (!wide) col.style.paddingBottom = '88px';
+      col.appendChild(clone('tpl-eventlog'));
+      if (state === 'b') col.appendChild(clone('tpl-inline'));
+      col.appendChild(clone('tpl-books'));
+      scroll.appendChild(col);
+      main.appendChild(scroll);
+      page.appendChild(main);
+
+      if (!wide) {
+        var tabs = document.createElement('nav');
+        tabs.className = 'ws-tabbar';
+        tabs.setAttribute('aria-hidden', 'true');
+        tabs.innerHTML = '<ul class="ws-tabbar-list">' + [['home', 'Home'], ['movie', 'Requests'], ['menu_book', 'Books'], ['calendar_month', 'Calendar'], ['menu', 'More']].map(function (t) {
+          return '<li><span class="ws-navtab"' + (t[1] === 'Books' ? ' aria-current="page"' : '') + '><span class="ws-navtab-icon"><span class="material-symbols-outlined">' + t[0] + '</span></span><span class="ws-navtab-label">' + t[1] + '</span></span></li>';
+        }).join('') + '</ul>';
+        page.appendChild(tabs);
+      }
+
+      if (state === 'a') {
+        var ov = clone('tpl-window');
+        var overlay = ov.querySelector('.bn-overlay');
+        setCount(overlay.querySelector('[data-okay]'), count);
+        if (opts.live) {
+          overlay.hidden = true;
+          if (w < 1024) overlay.querySelector('[data-announce]').remove();
+          overlay.querySelector('[data-window]').setAttribute('role', 'dialog');
+          overlay.querySelector('[data-window]').setAttribute('aria-modal', 'true');
+        } else {
+          // A picture of the window: no dialog role, so this page doesn't
+          // present a reader with six open modals.
+          overlay.querySelector('[data-announce]').remove();
+        }
+        if (!wide) overlay.querySelector('[data-body]').setAttribute('tabindex', '0');
+        if (opts.scrollEnd) overlay.querySelector('[data-body]').setAttribute('data-scroll-end', '');
+        page.appendChild(ov);
+        page._overlay = overlay;
+        page._scroll = scroll;
+      }
+      if (state === 'b') {
+        // The first screen ends here: a dashed line at the viewport's height.
+        var fold = div('fold');
+        fold.style.position = 'absolute';
+        fold.style.left = '0'; fold.style.right = '0';
+        fold.style.top = (h - (wide ? 64 : 56) - (wide ? 0 : 64)) + 'px';
+        col.style.position = 'relative';
+        col.appendChild(fold);
+        fold.setAttribute('aria-hidden', 'true');
+      }
+      return page;
+    };
+  }
+
+  // n seconds left (0 = finished). The fill is the share of the wait gone.
+  function setCount(btn, n) {
+    btn.querySelector('[data-count]').textContent = n > 0 ? '\u00a0(' + n + ')' : '';
+    if (n > 0) btn.setAttribute('aria-disabled', 'true');
+    else btn.removeAttribute('aria-disabled');
+    btn.style.setProperty('--bn-done', n > 0 ? String((15 - n) / 15) : '1');
+  }
+
+  function frame(w, h, caption, build) {
+    var box = div('mk-frame');
+    var cap = div('mk-cap');
+    var left = document.createElement('span');
+    left.innerHTML = '<b>' + w + ' wide</b>' + (caption ? ', ' + caption : '');
+    var right = document.createElement('span');
+    cap.appendChild(left); cap.appendChild(right);
+    var vp = div('vp');
+    var inner = div('vp-inner');
+    inner.style.width = w + 'px';
+    var page = build(w, h);
+    inner.appendChild(page);
+    vp.appendChild(inner);
+    vp._w = w; vp._inner = inner; vp._cap = right;
+    box.appendChild(cap); box.appendChild(vp);
+    box._page = page;
+    return box;
+  }
+
+  var live = [];
+  document.querySelectorAll('[data-row]').forEach(function (row) {
+    var spec = row.getAttribute('data-row');
+    if (spec === 'b') {
+      row.appendChild(frame(390, 844, 'phone, scrolls', booksPage('b')));
+      row.appendChild(frame(1440, 900, 'beside the sidebar, scrolls', booksPage('b')));
+    } else if (spec === 'live') {
+      var p = frame(390, 844, 'phone', booksPage('a', 15, { live: true }));
+      var d = frame(1440, 900, 'beside the sidebar', booksPage('a', 15, { live: true }));
+      row.appendChild(p); row.appendChild(d);
+      live = [p._page, d._page];
+    } else {
+      var n = Number(spec.split(':')[1]);
+      row.appendChild(frame(390, 844, 'phone', booksPage('a', n, { scrollEnd: n === 0 })));
+      row.appendChild(frame(1440, 900, 'beside the sidebar', booksPage('a', n)));
+    }
+  });
+  // Links and buttons in the pictures lead nowhere.
+  document.querySelectorAll('.vp a[href]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); }); });
+
+  // ---- The live countdown ----
+  var startBtn = document.getElementById('tryStart');
+  var status = document.getElementById('tryStatus');
+  var rm = document.getElementById('tryRm');
+  var timer = null, left = 0, open = false;
+  rm.addEventListener('change', function () {
+    live.forEach(function (pg) { pg.classList.toggle('rm', rm.checked); });
+  });
+  function reduced() { return rm.checked || window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+
+  function closeAll() {
+    if (!open || left > 0) return;
+    open = false;
+    live.forEach(function (pg) {
+      pg._overlay.hidden = true;
+      pg.removeAttribute('data-locked');
+      pg._scroll.inert = false;
+    });
+    status.textContent = 'Closed. The page is back.';
+    startBtn.textContent = 'Open it again';
+    startBtn.focus();
+  }
+
+  live.forEach(function (pg, i) {
+    var ov = pg._overlay;
+    var win = ov.querySelector('[data-window]');
+    ov.querySelector('[data-okay]').addEventListener('click', closeAll);
+    ov.querySelector('[data-veil]').addEventListener('click', closeAll);
+    win.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeAll(); return; }
+      if (e.key !== 'Tab') return;
+      // Keep Tab inside the window.
+      var f = Array.prototype.filter.call(win.querySelectorAll('button, [tabindex="0"]'), function (el) { return el.offsetParent !== null; });
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !f.includes(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+  });
+
+  startBtn.addEventListener('click', function () {
+    clearInterval(timer);
+    left = 15; open = true;
+    live.forEach(function (pg) {
+      var ov = pg._overlay;
+      var btn = ov.querySelector('[data-okay]');
+      pg.setAttribute('data-locked', '');
+      pg._scroll.inert = true;
+      ov.querySelector('[data-body]').scrollTop = 0;
+      setCount(btn, 15);
+      btn.classList.remove('is-running'); ov.classList.remove('is-opening');
+      void btn.offsetWidth;
+      btn.style.removeProperty('--bn-done');
+      if (!reduced()) btn.classList.add('is-running');
+      ov.classList.add('is-opening');
+      ov.hidden = false;
+    });
+    // Said once, in the wide frame only (the phone frame is the same window).
+    var say = live[1]._overlay.querySelector('[data-announce]');
+    say.textContent = '';
+    setTimeout(function () { say.textContent = 'Okay will work in 15 seconds.'; }, 400);
+    // Focus into the wide frame's window, on its title.
+    live[1]._overlay.querySelector('h2').focus();
+    status.textContent = 'Open. 15 seconds left.';
+    timer = setInterval(function () {
+      left -= 1;
+      live.forEach(function (pg) {
+        var btn = pg._overlay.querySelector('[data-okay]');
+        btn.querySelector('[data-count]').textContent = left > 0 ? '\u00a0(' + left + ')' : '';
+        if (left <= 0) { btn.classList.remove('is-running'); setCount(btn, 0); }
+      });
+      status.textContent = left > 0 ? 'Open. ' + left + ' seconds left.' : 'Okay works now. Okay, Escape or a click outside closes it.';
+      if (left <= 0) clearInterval(timer);
+    }, 1000);
+  });
+
+  // Fit each frame to its column.
+  var frames = Array.prototype.slice.call(document.querySelectorAll('.vp'));
+  function fit() {
+    frames.forEach(function (vp) {
+      var s = Math.min(1, vp.clientWidth / vp._w);
+      // zoom, not a transform: a backdrop blur inside a scaled transform
+      // samples the wrong place in Chromium, and zoom keeps the frame's own
+      // CSS pixels (and its container queries) at the real width.
+      vp._inner.style.zoom = s;
+      vp._cap.textContent = s >= 1 ? 'actual size' : 'shown at ' + Math.round(s * 100) + '%';
+    });
+    document.querySelectorAll('[data-scroll-end]').forEach(function (b) { b.scrollTop = b.scrollHeight; });
+  }
+  if ('ResizeObserver' in window) {
+    var ro = new ResizeObserver(fit);
+    ro.observe(document.body);
+  }
+  window.addEventListener('load', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+})();
+</script>
+</body>
+</html>
