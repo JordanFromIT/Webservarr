@@ -115,6 +115,10 @@ class Form(unittest.TestCase):
         self.assertEqual(svc.clean_form("  Sam Lee ", " Friend of Ana.\r\nWe met at work. "),
                          ("Sam Lee", "Friend of Ana.\nWe met at work."))
         self.assertEqual(svc.clean_form("Zoë 🎬", "x" * 1000), ("Zoë 🎬", "x" * 1000))
+        # Enter at the end of the note, a pasted trailing tab: trimmed, not refused.
+        self.assertEqual(svc.clean_form("Sam", "Hello.\n"), ("Sam", "Hello."))
+        self.assertEqual(svc.clean_form("Sam", "Hello.\r\n"), ("Sam", "Hello."))
+        self.assertEqual(svc.clean_form("Sam\t", "Hello."), ("Sam", "Hello."))
 
     def test_refused(self):
         cases = [("", "note", svc.NAME_PROBLEM), ("   ", "note", svc.NAME_PROBLEM),
@@ -122,7 +126,8 @@ class Form(unittest.TestCase):
                  ("Sam\nLee", "note", svc.NAME_PROBLEM), ("Sam\x85", "note", svc.NAME_PROBLEM),
                  ("Sam", "", svc.NOTE_PROBLEM),
                  ("Sam", "x" * 1001, svc.NOTE_PROBLEM), ("Sam", "bell\x07", svc.NOTE_PROBLEM),
-                 ("Sam", "c1\x85", svc.NOTE_PROBLEM), ("Sam", "tab\tinside", svc.NOTE_PROBLEM)]
+                 ("Sam", "c1\x85", svc.NOTE_PROBLEM), ("Sam", "\x1fnote", svc.NOTE_PROBLEM),
+                 ("Sam", "tab\tinside", svc.NOTE_PROBLEM)]
         for name, note, message in cases:
             with self.subTest(name=name[:10], note=note[:10]):
                 with self.assertRaises(svc.FormProblem) as caught:
