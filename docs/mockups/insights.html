@@ -1,0 +1,1352 @@
+<!-- Approved by Jordan 2026-10-10 -->
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Insights Mockup</title>
+<!--
+  Insights: the admin-only page for reading and listening across everyone,
+  drawn for review before Tasks 8 and 9 are built (spec
+  docs/superpowers/specs/2026-10-10-insights-design.md, section 7; plan
+  docs/superpowers/plans/2026-10-10-insights.md, Task 3).
+
+  Self-contained on purpose: no app CSS, so it renders the same as a
+  published page. The colours and the frost are the shipped defaults copied
+  from app/static/css/theme.css (:where(:root) and "Frosted surfaces"), the
+  frame is books-stats.html's (max-w-[1200px], p-4 lg:p-8), and the section
+  bodies are drawn by the same functions, words and classes Tasks 8 and 9
+  write in pages/insights.js, with the changes listed under "For the build".
+
+  Each frame is a viewport drawn at its real width (390 or 1440) and zoomed
+  to fit the column, so the app's own breakpoints are container queries on
+  the frame (@[640px]: is sm, @[1024px]: is lg) rather than the reader's
+  window. Frames are pictures: hidden from screen readers, and Tab skips them.
+
+  People and books are made up. The mockup's "now" is Saturday 9 Jan 2027,
+  three months after tracking starts, so every chart has data.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=block" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: { extend: {
+    colors: {
+      "primary": "rgb(var(--color-primary) / <alpha-value>)",
+      "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+      "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+      "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+      "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+      "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+      "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      "focus": "rgb(var(--ws-focus) / <alpha-value>)",
+      "status-ok": "rgb(var(--color-status-ok) / <alpha-value>)"
+    },
+    fontFamily: { "display": ["var(--font-display)", "sans-serif"] }
+  } }
+}</script>
+<style>
+/* One dark look, the app's own: the shipped palette, the D8 glass slab
+   (15px blur, tint .25) and Spline Sans. The mockup's chrome uses the same
+   tokens. Layout: a reading column of notes, then pairs of frames (390
+   beside 1440) per part: the page, the way in, the dialog, the states. */
+:root {
+  /* The shipped default palette (theme.css :where(:root)). */
+  --color-primary: 18 87 147;
+  --color-secondary: 44 109 161;
+  --color-accent: 70 132 176;
+  --color-text: 190 238 244;
+  --color-text-secondary: 255 255 255;
+  --color-background: 0 0 0;
+  --color-status-ok: 74 222 128;
+  --color-status-warn: 251 191 36;
+  --font-display: "Spline Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* The glass slab's defaults: 15px blur, tint .25, everything else at 1 or 0. */
+  --ws-frost-blur: blur(15px);
+  --ws-frost-tint-a: .25;
+  --ws-frost-hl: 1;
+  --ws-frost-sheen: 0;
+  --ws-frost-grain: 0;
+  --ws-frost-depth: 1;
+  --ws-frost-sat: 1;
+  --ws-focus: var(--color-text);
+  --ws-shade: color-mix(in srgb, rgb(var(--color-background)) 35%, black);
+
+  /* The frost recipe (theme.css "Frosted surfaces"). */
+  --ws-frost-tint: rgb(var(--color-secondary) / var(--ws-frost-tint-a));
+  --ws-frost-glow: rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth)));
+  --ws-frost-boost: saturate(calc(1 + .5 * var(--ws-frost-sat))) brightness(calc(1 + .06 * var(--ws-frost-sat)));
+  --ws-frost-edge: rgb(var(--color-text) / .12);
+  --ws-frost-ring: linear-gradient(135deg, rgb(255 255 255 / calc(.55 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.165 * var(--ws-frost-hl))) 40%, rgb(var(--color-text) / .04) 75%);
+  --ws-frost-ring-bar: linear-gradient(90deg, rgb(255 255 255 / calc(.44 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.138 * var(--ws-frost-hl))) 50%, rgb(var(--color-text) / .04));
+  --ws-frost-ring-layer: none;
+  --ws-frost-ring-bar-layer: none;
+  --ws-frost-sheen-layer: linear-gradient(160deg, rgb(255 255 255 / var(--ws-frost-sheen)), rgb(255 255 255 / 0) 45%);
+  --ws-frost-grain-layer: none;
+  --ws-frost-fill: var(--ws-frost-sheen-layer), var(--ws-frost-grain-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));
+  --ws-frost-shadow:
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 1px 0 0 rgb(255 255 255 / calc(.14 * var(--ws-frost-hl))),
+    inset 0 -1px 0 rgb(0 0 0 / calc(.256 * var(--ws-frost-depth))), inset 0 -12px 24px -12px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
+  --ws-frost-shadow-up:
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 -1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(-6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(-24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
+  --ws-frost-floor: 0;
+
+  /* New for Insights: the estimate texture. Plex app time is a guess, so it
+     is drawn hatched wherever it is a mark (bars, the split bar, the legend),
+     never as a plain lighter fill alone. Same text colour as the web part. */
+  --ins-est: repeating-linear-gradient(135deg, rgb(var(--color-text) / .62) 0 2px, rgb(var(--color-text) / .2) 2px 5px);
+
+  /* The mockup's own frame chrome, from the same palette. */
+  --mk-rule: rgb(var(--color-text) / .12);
+  --mk-muted: rgb(var(--color-text) / .7);
+  --mk-faint: rgb(var(--color-text) / .55);
+  color-scheme: dark;
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / var(--ws-frost-tint-a)) 70%, rgb(var(--color-text) / var(--ws-frost-tint-a)));
+    --ws-frost-glow: color-mix(in srgb, rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth))) 70%, rgb(var(--color-text) / calc(.14 * var(--ws-frost-depth))));
+  }
+}
+@supports (background-clip: border-area) {
+  :root {
+    --ws-frost-edge: transparent;
+    --ws-frost-ring-layer: var(--ws-frost-ring) border-box border-area;
+    --ws-frost-ring-bar-layer: var(--ws-frost-ring-bar) border-box border-area;
+  }
+}
+
+html { background: rgb(var(--color-background)); }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: rgb(var(--color-background));
+  color: rgb(var(--color-text));
+  font-family: var(--font-display);
+  line-height: 1.5;
+  overflow-x: clip;
+}
+.material-symbols-outlined { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; }
+:where(.material-symbols-outlined:not(.block)) { width: 1em; overflow: clip; flex-shrink: 0; }
+.fill-1 { font-variation-settings: 'FILL' 1; }
+
+/* ---- The app's own pieces (theme.css) ---- */
+:where(a[href], button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px;
+}
+.ws-frost {
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border-color: var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow);
+}
+.ws-pill { --ws-pill: var(--color-status-ok); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
+.ws-status-dot { flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px; background: rgb(var(--ws-pill, var(--color-status-ok))); }
+.ws-lift { transition: transform 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out; }
+/* The phone tab bar. In a frame drawn full length it sticks to the bottom of
+   your window while the frame passes, as it sits on a phone's screen. */
+.ws-tabbar {
+  position: sticky; bottom: 0; z-index: 46;
+  color: rgb(var(--color-text) / .7);
+  background: var(--ws-frost-ring-bar-layer), var(--ws-frost-fill);
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border-top: 1px solid var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow-up);
+}
+.ws-tabbar-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: 63px; margin: 0; padding: 0; list-style: none; }
+.ws-navtab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 100%; }
+.ws-navtab-icon { display: flex; align-items: center; justify-content: center; width: 56px; height: 32px; border-radius: 9999px; }
+.ws-navtab-label { font-size: 12px; line-height: 16px; font-weight: 500; }
+.ws-navtab[aria-current] { color: rgb(var(--color-text)); }
+.ws-navtab[aria-current] .ws-navtab-icon { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-navtab[aria-current] .ws-navtab-icon .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+.ws-navtab[aria-current] .ws-navtab-label { font-weight: 700; }
+/* The event log's wheel, drawn still. */
+.ws-wheel { position: relative; height: 3.5rem; overflow: hidden; }
+.ws-wheel__line { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: .625rem; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-wheel__line.is-front { bottom: .25rem; color: rgb(var(--color-text)); }
+.ws-wheel__line.is-back { top: .125rem; color: rgb(var(--color-text) / .45); transform: perspective(300px) rotateX(28deg) scale(.96); transform-origin: 50% 100%; }
+.ws-wheel__mark { width: .5rem; height: .5rem; border-radius: 9999px; flex-shrink: 0; }
+.ws-wheel__time { color: rgb(var(--color-text) / .6); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* Skeletons (theme.css .skel). */
+.skel { position: relative; overflow: hidden; border-radius: 10px; background: rgb(var(--color-text) / 0.06); }
+.skel::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(var(--color-text) / 0.06), transparent); transform: translateX(-100%); animation: ws-shimmer 1.4s ease-in-out infinite; }
+@keyframes ws-shimmer { to { transform: translateX(100%); } }
+/* The More sheet (theme.css .ws-sheet), drawn open inside its frame. */
+.ws-sheet { position: absolute; inset: 0; z-index: 60; color: rgb(var(--color-text)); }
+.ws-sheet-scrim { position: absolute; inset: 0; background: rgb(var(--color-background) / .7); }
+.ws-sheet-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto; max-width: 36rem;
+  padding: 0 8px 16px;
+  border-radius: 16px 16px 0 0; border-top: 1px solid rgb(var(--color-text) / .10);
+  background: linear-gradient(rgb(var(--color-text) / .06), rgb(var(--color-text) / .06)), rgb(var(--color-background));
+  box-shadow: 0 -16px 40px -20px var(--ws-shade);
+}
+.ws-sheet-head { position: relative; display: flex; align-items: center; gap: 8px; padding: 20px 0 8px 12px; }
+.ws-sheet-grip { position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 9999px; background: rgb(var(--color-text) / .25); }
+.ws-sheet-title { flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.ws-sheet-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 9999px; color: rgb(var(--color-text) / .7); }
+.ws-sheet-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ws-sheet-account { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgb(var(--color-text) / .08); }
+.ws-sheet-row { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 56px; padding: 8px 12px; border-radius: 12px; color: rgb(var(--color-text)); }
+.ws-sheet-row-icon { font-size: 24px; color: rgb(var(--color-text) / .7); }
+.ws-sheet-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ws-sheet-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; line-height: 20px; font-weight: 600; }
+.ws-sheet-row-sub { font-size: 13px; line-height: 18px; color: rgb(var(--color-text) / .7); }
+.ws-sheet-row[aria-current] { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-sheet-row[aria-current] .ws-sheet-row-icon, .ws-sheet-row[aria-current] .ws-sheet-row-sub { color: rgb(var(--color-text-secondary) / .85); }
+.ws-sheet-row[aria-current] .ws-sheet-row-icon { font-variation-settings: 'FILL' 1; }
+
+/* ---- New for Insights (app.css in the build) ---- */
+/* The bars grow from the baseline once, as a section arrives. Reduced
+   motion: drawn still. */
+.ins-bar { transform-origin: bottom; }
+@media (prefers-reduced-motion: no-preference) {
+  .ins-bar { animation: ins-grow 250ms ease-out both; }
+}
+@keyframes ins-grow { from { transform: scaleY(0); } }
+.ins-est { background: var(--ins-est); }
+
+/* ---- Frames: one viewport each, drawn at its real width and scaled ---- */
+/* overflow: clip, not hidden, so the phone's tab bar can stick. */
+.vp { position: relative; overflow: clip; border-radius: 12px; border: 1px solid var(--mk-rule); background: rgb(var(--color-background)); }
+.vp-inner { container-type: inline-size; }
+.vp-page { position: relative; display: flex; isolation: isolate; background: rgb(var(--color-background)); }
+.vp-fixed { overflow: hidden; }
+.mk-annot { margin-block: 8px; padding: 6px 10px; border: 1px dashed rgb(var(--color-status-warn) / .7); border-radius: 8px; font-size: 13px; color: rgb(var(--color-status-warn)); }
+
+/* ---- The mockup's own page ---- */
+.mk { max-width: 1960px; margin-inline: auto; padding-inline: 16px; padding-block: 32px 96px; }
+@media (min-width: 768px) { .mk { padding-inline: 32px; } }
+.mk-head { max-width: 76ch; }
+.mk-head h1 { font-size: clamp(1.75rem, 1.2rem + 2vw, 2.75rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+.mk-head > p { color: var(--mk-muted); font-size: 17px; margin: 12px 0 0; text-wrap: pretty; }
+.mk-notes { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 15px; color: var(--mk-muted); }
+.mk-notes li { display: flex; gap: 10px; align-items: baseline; }
+.mk-notes li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--color-accent)); transform: translateY(-2px); }
+.mk-notes code { font-size: 13px; padding: 1px 5px; border-radius: 4px; background: rgb(var(--color-text) / .08); color: rgb(var(--color-text) / .9); }
+.mk-notes b { color: rgb(var(--color-text)); font-weight: 600; }
+.mk-nav { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; }
+.mk-nav a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 16px; border-radius: 9999px; font-size: 15px; font-weight: 600; color: rgb(var(--color-text) / .8); background: rgb(var(--color-text) / .07); text-decoration: none; }
+.mk-nav a:hover { background: rgb(var(--color-text) / .12); color: rgb(var(--color-text)); }
+.mk-part { margin-top: 72px; scroll-margin-top: 24px; }
+.mk-part > h2 { font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin: 0; padding-bottom: 12px; border-bottom: 1px solid var(--mk-rule); }
+.mk-part > p { color: var(--mk-muted); font-size: 15px; margin: 12px 0 0; max-width: 76ch; text-wrap: pretty; }
+.mk-state { margin-top: 48px; }
+.mk-state-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; max-width: 90ch; }
+.mk-code { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgb(var(--color-text) / .12); color: rgb(var(--color-text)); font-variant-numeric: tabular-nums; }
+.mk-state-head h3 { font-size: 20px; font-weight: 700; margin: 0; }
+.mk-state-head p { flex-basis: 100%; margin: 0; color: var(--mk-muted); font-size: 15px; text-wrap: pretty; }
+.mk-row { margin-top: 16px; display: grid; gap: 24px; align-items: start; }
+@media (min-width: 900px) { .mk-row.pair { grid-template-columns: minmax(0, 392px) minmax(0, 1fr); } }
+.mk-frame { min-width: 0; }
+.mk-cap { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; color: var(--mk-faint); font-variant-numeric: tabular-nums; }
+.mk-cap b { color: rgb(var(--color-text) / .85); font-weight: 600; }
+.mk-list { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 90ch; font-size: 15px; color: var(--mk-muted); }
+.mk-list li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.mk-list b { color: rgb(var(--color-text)); font-weight: 600; }
+.mk-list code { font-size: 13px; padding: 1px 5px; border-radius: 4px; background: rgb(var(--color-text) / .08); color: rgb(var(--color-text) / .9); overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main class="mk">
+
+<header class="mk-head">
+  <h1>Insights, the admin’s view of reading and listening</h1>
+  <p>Every section of the page, the person and book dialog, and every state, each drawn at 390 and 1440 wide inside the shell. The page has no blue button: the period picker, Close and Try again are all the quiet outlined style.</p>
+  <ul class="mk-notes">
+    <li><span><b>Plex app time is hatched wherever it is drawn</b> (bars, the split bar, the legend) and called “an estimate” in words beside it, so it never reads as a measured figure.</span></li>
+    <li><span>Each chart names its tallest value on a faint line at its top, so the bars have a scale without a full axis. Hover any bar in the build for its figures in words.</span></li>
+    <li><span>On a wide screen, Hours listened leads the Trends section with Pages read and Active people stacked beside it, and People rows lay out in three columns. On a phone everything stacks.</span></li>
+    <li><span>The people and books are made up; one name holds <code>&lt;b&gt;markup&lt;/b&gt;</code> to show it stays text. Wide frames are scaled to fit your window, and the caption says by how much.</span></li>
+  </ul>
+  <nav class="mk-nav" aria-label="Parts of this mockup">
+    <a href="#page">The page</a>
+    <a href="#way-in">Getting there</a>
+    <a href="#detail">Person and book</a>
+    <a href="#states">States</a>
+    <a href="#build">For the build</a>
+  </nav>
+</header>
+
+<section class="mk-part" id="page" aria-labelledby="page-h">
+  <h2 id="page-h">The page, loaded</h2>
+  <p>Ninety days chosen. Right now has two people listening (one playing in the web player, one paused in Plexamp) and one reading. People has five rows: one with five books in progress, one with a 300-character title, one whose name holds markup. Every frame is drawn at full length.</p>
+  <div class="mk-row pair" data-row="loaded"></div>
+</section>
+
+<section class="mk-part" id="way-in" aria-labelledby="way-h">
+  <h2 id="way-h">Getting there</h2>
+  <p>Admins only. On a wide screen the link sits just above Settings in the sidebar; on a phone it is a row in the More sheet, and the More tab is lit while you are on it. Members never see either.</p>
+  <div class="mk-row pair" data-row="nav"></div>
+</section>
+
+<section class="mk-part" id="detail" aria-labelledby="detail-h">
+  <h2 id="detail-h">A person or a book</h2>
+  <p>A row in People opens that person; any book in Trends, Books, Habits or a person’s list opens that book. A full-height sheet on a phone, a centred box from 640px up, both scrolling inside. Close, Escape or a click on the dim area closes it and focus goes back to the row that opened it.</p>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">D1</span><h3>A person</h3><p>Totals, 12 weekly bars (web and Plex apps stacked), every book they touched with progress and time, then their requests.</p></div>
+    <div class="mk-row pair" data-row="person"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">D2</span><h3>A book</h3><p>Totals, the drop-off chapter, everyone who started it, and who asked for it.</p></div>
+    <div class="mk-row pair" data-row="book"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="states" aria-labelledby="states-h">
+  <h2 id="states-h">States</h2>
+  <p>Each section loads on its own, so each state below can happen to one section while the others are drawn normally.</p>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S1</span><h3>Loading</h3><p>Every section’s skeleton, the shape of what is coming. The heading, its line and the period picker are there from the start.</p></div>
+    <div class="mk-row pair" data-row="skel"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S2</span><h3>Nothing yet, and new tracking</h3><p>A quiet server on day one. Each part says what it will show; Pages read and Requested then read add the day their records began.</p></div>
+    <div class="mk-row pair" data-row="empty"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S3</span><h3>Plex isn’t answering</h3><p>One line at the top of each section that uses Plex; everything from the web player is still drawn, with no hatched parts.</p></div>
+    <div class="mk-row pair" data-row="plex"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S4</span><h3>One section failed</h3><p>Books could not be read. It says so with Try again; Trends above and Habits below are untouched.</p></div>
+    <div class="mk-row pair" data-row="failed"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Gone from the dialog</h3><p>The person or book was removed after the page loaded (the server answered 404). The title keeps the name that was clicked.</p></div>
+    <div class="mk-row pair" data-row="gone"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="build" aria-labelledby="build-h">
+  <h2 id="build-h">For the build</h2>
+  <p>Where this mockup differs from the code in Tasks 8 and 9 as planned. Ids, data hooks and the rest of the words are unchanged.</p>
+  <ul class="mk-list">
+    <li><span class="mk-code">1</span><span><b>Hatched estimate.</b> The Plex part of every bar, the split bar and the legend swatch use <code>ins-est</code> (a 135° hatch of the text colour, in app.css) instead of <code>bg-frosted-blue/35</code>. Stacked parts have a 2px gap and the top part has 4px rounded corners.</span></li>
+    <li><span class="mk-code">2</span><span><b>Peak line.</b> Each bar chart gets a dashed hairline at its top, labelled with the tallest value (“40 hr 30 min”, “1,020 pages”, “5 people”).</span></li>
+    <li><span class="mk-code">3</span><span><b>Trends layout.</b> From lg: Hours listened in a 3fr column, Pages read and Active people each week stacked in a 2fr column. Bar heights: Hours listened 160px (216px from lg), the other two 112px (80px from lg).</span></li>
+    <li><span class="mk-code">4</span><span><b>People rows.</b> From lg the row is three columns (name and last active, time listened, books) instead of one stack. Each book’s percent is dimmer than its title so the pairs read as pairs.</span></li>
+    <li><span class="mk-code">5</span><span><b>Heatmap.</b> A visible line under it, “In your time zone. Plex app listening in it is an estimate.”, and a Less to More key, since the estimate rule covers every figure that includes Plex.</span></li>
+    <li><span class="mk-code">6</span><span><b>Abandoned.</b> The date reads “last touched 14 Nov 2026” rather than the bare date, since every abandoned book is at least 30 days old and <code>ago()</code> always returns a date there.</span></li>
+  </ul>
+</section>
+
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // ================= Made-up data =================
+  // The mockup's "now": Saturday 9 Jan 2027, 3 pm local.
+  var NOW_T = new Date(2027, 0, 9, 15, 0).getTime();
+  function minsAgo(m) { return new Date(NOW_T - m * 60000).toISOString(); }
+  function daysAgo(d) { return minsAgo(d * 1440); }
+  function H(h, m) { return Math.round((h * 60 + (m || 0)) * 60000); }
+  var LONG = 'The Remarkable and Entirely True Account of How a Small Coastal Town Lost Its Lighthouse, Found a Stranger Asleep in the Lamp Room, Argued for Eleven Winters About Whether to Keep Him, and Finally Learned That the Light Had Been Looking After All of Them All Along, Told in Letters, Lists and Recipes';
+  var MARKUP = '<b>Rowan</b> Pike';
+  var TRACKING = { requests: '2026-10-11', reading: '2026-10-11', ebook_places: '2026-10-11', hours: '2026-10-11' };
+
+  var NOW = {
+    listening: [
+      { name: 'Marisol Vega', title: 'The Long Tide', state: 'playing', where: 'web', percent: 62 },
+      { name: 'Hannah Lindqvist', title: 'Saltmarsh Winter', state: 'paused', where: 'plex' }
+    ],
+    reading: [{ name: 'Dev Okafor', title: LONG, where: 'reader', percent: 41 }],
+    unavailable: []
+  };
+
+  var PEOPLE = {
+    people: [
+      { key: 'a1', name: 'Marisol Vega', last_active: minsAgo(4), last_what: 'listening', listened_ms: H(12, 25), plex_ms_30d: H(6, 15),
+        current: [{ title: 'The Long Tide', percent: 62 }, { title: 'Glass Orchard', percent: 18 }, { title: 'Ember Road', percent: 90 },
+          { title: 'Under the Copper Moon', percent: 5 }, { title: 'The Lighthouse Keeper’s Ledger', percent: 47 }] },
+      { key: 'a2', name: 'Dev Okafor', last_active: minsAgo(12), last_what: 'reading', listened_ms: H(3, 10), plex_ms_30d: 0,
+        current: [{ title: LONG, percent: 41 }, { title: 'A Map of Quiet Rooms', percent: 77 }] },
+      { key: 'a3', name: 'Hannah Lindqvist', last_active: minsAgo(125), last_what: 'plex', listened_ms: 0, plex_ms_30d: H(9, 5),
+        current: [{ title: 'Saltmarsh Winter', where: 'plex' }, { title: 'The Ninth Lantern', percent: 33 }] },
+      { key: 'a4', name: MARKUP, last_active: daysAgo(1), last_what: 'request', listened_ms: H(1, 40), plex_ms_30d: 0,
+        current: [{ title: 'Brass and Bone', percent: 9 }] },
+      { key: 'a5', name: 'Theo Brandt', last_active: daysAgo(9), last_what: 'visit', listened_ms: 0, plex_ms_30d: 0, current: [] }
+    ],
+    unavailable: []
+  };
+  PEOPLE.people.forEach(function (p) { p.listened_ms_30d = p.listened_ms; });
+
+  var MONDAYS = [];
+  for (var i = 0; i < 13; i++) MONDAYS.push(new Date(2026, 9, 12 + i * 7));
+  function iso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  var WEB = [14.5, 16, 12, 18.2, 21, 19.5, 23, 17, 25.5, 31, 28, 22, 9.5];
+  var PLEX = [6, 7.5, 5, 8, 9, 6.5, 10, 7, 11, 9.5, 9, 8, 3];
+  var PAGES = [420, 510, 380, 610, 720, 560, 690, 640, 880, 1020, 930, 700, 260];
+  var ACTIVE = [4, 5, 4, 5, 5, 4, 5, 5, 5, 5, 5, 4, 3];
+  var TRENDS = {
+    period: '90d', bucket: 'week',
+    buckets: MONDAYS.map(function (d, i) { return { start: iso(d), web_ms: H(WEB[i]), plex_ms: H(PLEX[i]), pages: PAGES[i] }; }),
+    active: MONDAYS.map(function (d, i) { return { week: iso(d), people: ACTIVE[i] }; }),
+    top_books: [
+      { book_id: 11, title: 'The Long Tide', listened_ms: H(31, 20), people: 5 },
+      { book_id: 12, title: 'Glass Orchard', listened_ms: H(22, 5), people: 4 },
+      { book_id: 13, title: 'Saltmarsh Winter', listened_ms: H(18, 40), people: 3 },
+      { book_id: 14, title: 'The Ninth Lantern', listened_ms: H(14, 10), people: 3 },
+      { book_id: 15, title: 'Ember Road', listened_ms: H(9, 55), people: 2 }
+    ],
+    top_authors: [
+      { name: 'Ines Calder', listened_ms: H(44, 30), people: 5 },
+      { name: 'Mara Sutherland', listened_ms: H(27, 15), people: 4 },
+      { name: 'J. T. Halvorsen', listened_ms: H(19, 50), people: 3 },
+      { name: 'Lena Fairweather', listened_ms: H(11, 5), people: 3 },
+      { name: 'Paul Okonkwo-Reyes', listened_ms: H(6, 20), people: 2 }
+    ],
+    top_series: [
+      { name: 'The Tidewater Books', listened_ms: H(38, 45), people: 5 },
+      { name: 'The Cartographer Cycle', listened_ms: H(21, 30), people: 3 },
+      { name: 'Lantern Saga', listened_ms: H(14, 10), people: 3 },
+      { name: 'Brass Republic', listened_ms: H(4, 35), people: 1 }
+    ],
+    unavailable: [], tracking: TRACKING
+  };
+
+  var BOOKS = {
+    abandoned: [
+      { book_id: 11, title: 'The Long Tide', name: 'Theo Brandt', percent: 48, chapter: 'Chapter 14', last_at: daysAgo(56) },
+      { book_id: 12, title: 'Glass Orchard', name: 'Theo Brandt', percent: 22, chapter: 'Chapter 6', last_at: daysAgo(38) },
+      { book_id: 16, title: 'Under the Copper Moon', name: 'Dev Okafor', percent: 12, chapter: 'Chapter 3', last_at: daysAgo(52) }
+    ],
+    never_opened: { count: 37, items: [
+      { book_id: 21, title: 'Winter Orchard Letters', author: 'Lena Fairweather', added_at: '2027-01-06' },
+      { book_id: 22, title: 'The Salt Road', author: 'J. T. Halvorsen', added_at: '2027-01-04' },
+      { book_id: 23, title: 'A Field Guide to Small Hours', author: 'Paul Okonkwo-Reyes', added_at: '2026-12-29' },
+      { book_id: 24, title: 'The Cartographer’s Widow', author: 'Mara Sutherland', added_at: '2026-12-21' },
+      { book_id: 25, title: 'Copperline', author: 'Ines Calder', added_at: '2026-12-14' },
+      { book_id: 26, title: 'Harbour Lights, Volume Two', author: 'Lena Fairweather', added_at: '2026-12-02' }
+    ] },
+    finish: [
+      { book_id: 11, title: 'The Long Tide', started: 5, finished: 3, rate: 60, drop_off: { chapter: 'Chapter 14', people: 2 } },
+      { book_id: 12, title: 'Glass Orchard', started: 4, finished: 1, rate: 25, drop_off: { chapter: 'Chapter 6', people: 2 } },
+      { book_id: 13, title: 'Saltmarsh Winter', started: 3, finished: 2, rate: 67 },
+      { book_id: 15, title: 'Ember Road', started: 2, finished: 2, rate: 100 }
+    ],
+    unavailable: [], tracking: TRACKING
+  };
+
+  // The heatmap, Monday first: evenings, weekday commutes, weekend mornings.
+  var BASE = [6, 3, 1, 0, 0, 0, 4, 18, 22, 8, 6, 6, 12, 8, 6, 6, 8, 16, 20, 26, 34, 40, 30, 14];
+  var HEATMAP = [];
+  for (var d = 0; d < 7; d++) {
+    var row = [];
+    for (var h = 0; h < 24; h++) {
+      var m = BASE[h];
+      if (d >= 5 && (h === 7 || h === 8)) m = m * 0.3;
+      if (d >= 5 && h >= 9 && h <= 11) m = m * 2.6;
+      if (d === 6 && h >= 19) m = m * 1.35;
+      m += ((d * 7 + h * 3) % 5) - 2;
+      row.push(Math.max(0, Math.round(m)) * 60000 * 9);
+    }
+    HEATMAP.push(row);
+  }
+  var HABITS = {
+    split: { web_ms: H(247, 40), plex_ms: H(102) },
+    heatmap: HEATMAP,
+    requested: { total: 9, read: 4, items: [
+      { book_id: 30, title: 'The Orchard Keeper’s Almanac', name: MARKUP, requested_at: '2027-01-05' },
+      { book_id: null, title: 'Small Gods of the Harbour', name: 'Theo Brandt', requested_at: '2027-01-03' },
+      { book_id: 17, title: 'Brass and Bone', name: MARKUP, requested_at: '2026-12-30', started_at: '2027-01-08' },
+      { book_id: null, title: 'Night Ferry to Ostend', name: 'Dev Okafor', requested_at: '2026-12-20' },
+      { book_id: 31, title: 'The Glassblower’s Daughter', name: 'Marisol Vega', requested_at: '2026-12-12' },
+      { book_id: 25, title: 'Copperline', name: 'Theo Brandt', requested_at: '2026-12-01' },
+      { book_id: 18, title: 'A Map of Quiet Rooms', name: 'Dev Okafor', requested_at: '2026-11-11', started_at: '2026-11-15' },
+      { book_id: 14, title: 'The Ninth Lantern', name: 'Hannah Lindqvist', requested_at: '2026-11-02', started_at: '2026-11-03' },
+      { book_id: 15, title: 'Ember Road', name: 'Marisol Vega', requested_at: '2026-10-19', started_at: '2026-10-21' }
+    ] },
+    unavailable: [], tracking: TRACKING
+  };
+
+  var W12 = [[9, 3], [11, 4.5], [8, 2], [12.5, 5], [10, 4], [14, 6], [9.5, 3.5], [15, 5.5], [13, 4], [16.5, 6], [12, 4.5], [5, 1.5]];
+  var PERSON = {
+    name: 'Marisol Vega',
+    totals: { listened_ms: H(142, 30), plex_ms: H(48, 10), finished: 11, pages_read: 2384 },
+    weekly: W12.map(function (w, i) { return { week: iso(new Date(2026, 9, 19 + i * 7)), web_ms: H(w[0]), plex_ms: H(w[1]) }; }),
+    books: [
+      { book_id: 11, title: 'The Long Tide', author: 'Ines Calder', percent: 62, listened_ms: H(14, 55), plex_ms: H(6, 15), last_at: minsAgo(4) },
+      { book_id: 15, title: 'Ember Road', author: 'Mara Sutherland', percent: 90, listened_ms: H(8, 40), last_at: daysAgo(2) },
+      { book_id: 12, title: 'Glass Orchard', author: 'Ines Calder', percent: 18, listened_ms: H(2, 5), last_at: daysAgo(3) },
+      { book_id: 19, title: 'The Lighthouse Keeper’s Ledger', author: 'J. T. Halvorsen', percent: 47, listened_ms: H(5, 30), plex_ms: H(1, 10), last_at: daysAgo(6) },
+      { book_id: 16, title: 'Under the Copper Moon', author: 'Paul Okonkwo-Reyes', percent: 5, listened_ms: H(0, 35), last_at: daysAgo(11) },
+      { book_id: 20, title: 'Saltmarsh Winter', author: 'Lena Fairweather', finished: true, listened_ms: H(11, 20), plex_ms: H(3, 5), last_at: daysAgo(24) }
+    ],
+    requests: [
+      { title: 'The Glassblower’s Daughter', book_id: 31, requested_at: '2026-12-12' },
+      { title: 'Ember Road', book_id: 15, requested_at: '2026-10-19', started_at: '2026-10-21' }
+    ],
+    unavailable: [], tracking: TRACKING
+  };
+
+  var BOOK = {
+    title: 'The Long Tide', author: 'Ines Calder', series: 'The Tidewater Books',
+    totals: { started: 5, finished: 3, rate: 60, listened_ms: H(31, 20), plex_ms: H(12, 5) },
+    drop_off: { chapter: 'Chapter 14', people: 2 },
+    people: [
+      { name: 'Marisol Vega', percent: 62, listened_ms: H(14, 55), plex_ms: H(6, 15), last_at: minsAgo(4) },
+      { name: 'Hannah Lindqvist', finished: true, plex_ms: H(11, 40), last_at: daysAgo(3) },
+      { name: MARKUP, finished: true, listened_ms: H(10, 50), last_at: daysAgo(19) },
+      { name: 'Dev Okafor', finished: true, listened_ms: H(9, 15), plex_ms: H(0, 40), last_at: daysAgo(33) },
+      { name: 'Theo Brandt', percent: 48, listened_ms: H(5, 10), last_at: daysAgo(56) }
+    ],
+    requested_by: [{ name: 'Hannah Lindqvist', requested_at: '2026-10-14' }],
+    unavailable: []
+  };
+
+  // ================= The page's drawing (pages/insights.js) =================
+  // The plan's functions, with sm: and lg: as frame container queries and
+  // the "For the build" changes. Text only: every word goes in by textContent.
+  var FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
+  var NEUTRAL = 'ws-lift inline-flex h-10 items-center rounded-[10px] border border-frosted-blue/15 px-4 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] ' + FOCUS;
+  var MUTED = 'text-[15px] leading-6 text-frosted-blue/70';
+  var SMALL = 'text-[13px] leading-5 text-frosted-blue/70';
+  var H3 = 'text-[17px] font-semibold text-frosted-blue';
+  var ROW = 'flex w-full min-w-0 items-start gap-3 rounded-xl px-3 py-2 -mx-3 text-left transition-colors hover:bg-frosted-blue/[0.07] ' + FOCUS;
+  var WHAT = { listening: 'listening', plex: 'listening in a Plex app', reading: 'reading', visit: 'opening Books', request: 'asking for a book' };
+  var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  var DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  var HEAT = ['bg-frosted-blue/[0.04]', 'bg-frosted-blue/20', 'bg-frosted-blue/40', 'bg-frosted-blue/65', 'bg-frosted-blue'];
+  var EST = 'ins-est';
+
+  function el(tag, cls, words) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (words !== undefined && words !== null) n.textContent = words;
+    return n;
+  }
+  function icon(name, cls) {
+    var s = el('span', 'material-symbols-outlined' + (cls ? ' ' + cls : ''), name);
+    s.setAttribute('aria-hidden', 'true');
+    return s;
+  }
+  function num(n) { return typeof n === 'number' && isFinite(n) && n > 0 ? n : 0; }
+  function text(v) { return typeof v === 'string' ? v : ''; }
+  function duration(ms) {
+    var minutes = Math.round(num(ms) / 60000);
+    if (minutes < 60) return minutes + ' min';
+    var hours = Math.floor(minutes / 60), rest = minutes % 60;
+    return hours.toLocaleString('en-GB') + ' hr' + (rest ? ' ' + rest + ' min' : '');
+  }
+  function dayLabel(s) {
+    var d = null, m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text(s));
+    if (m) d = new Date(+m[1], +m[2] - 1, +m[3]); else if (s) d = new Date(s);
+    if (!d || !isFinite(d.getTime())) return '';
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  function ago(isoT, now) {
+    var t = Date.parse(text(isoT));
+    if (!isFinite(t)) return '';
+    var minutes = Math.max(0, Math.round((now - t) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return minutes + ' min ago';
+    var hours = Math.round(minutes / 60);
+    if (hours < 24) return hours + ' hr ago';
+    var days = Math.round(hours / 24);
+    if (days < 30) return days === 1 ? 'yesterday' : days + ' days ago';
+    return dayLabel(isoT);
+  }
+  function bucketLabel(start, unit) {
+    if (unit === 'week') return 'Week of ' + dayLabel(start);
+    return dayLabel(start);
+  }
+  function people(n) { return num(n).toLocaleString('en-GB') + (num(n) === 1 ? ' person' : ' people'); }
+
+  function section(id, title, cls, body) {
+    var s = el('section', cls);
+    s.id = id;
+    s.setAttribute('aria-labelledby', id + 'Title');
+    var h = el('h2', 'text-xl font-bold leading-snug text-frosted-blue', title);
+    h.id = id + 'Title';
+    s.appendChild(h);
+    body.setAttribute('data-ins-body', '');
+    s.appendChild(body);
+    return s;
+  }
+  function skel(wrapCls, shapes) {
+    var box = el('div', wrapCls);
+    box.setAttribute('aria-hidden', 'true');
+    shapes.forEach(function (c) { box.appendChild(el('div', 'skel ' + c)); });
+    return box;
+  }
+  function noteLine(words, source) {
+    var p = el('p', 'flex items-start gap-2 ' + MUTED);
+    p.setAttribute('data-ins-unavailable', source);
+    p.appendChild(icon('cloud_off', 'mt-1 text-base'));
+    p.appendChild(el('span', 'min-w-0', words));
+    return p;
+  }
+  function unavailableLines(list) {
+    var missing = Array.isArray(list) ? list : [];
+    var box = el('div', 'mb-3 space-y-1');
+    if (missing.indexOf('plex') !== -1) box.appendChild(noteLine('Plex isn’t answering, so listening in Plex apps is missing here.', 'plex'));
+    if (missing.indexOf('kavita') !== -1) box.appendChild(noteLine('Kavita didn’t answer the last nightly read, so reading may be a day behind.', 'kavita'));
+    return box.firstChild ? box : null;
+  }
+  function failed() {
+    var box = el('div', 'mt-4');
+    box.setAttribute('data-ins-failed', '');
+    box.appendChild(el('p', MUTED, 'This part couldn’t load.'));
+    var again = el('button', NEUTRAL + ' mt-3', 'Try again');
+    again.type = 'button';
+    box.appendChild(again);
+    return box;
+  }
+  function emptyLine(words, since) {
+    var box = el('div', 'mt-3');
+    box.setAttribute('data-ins-empty', '');
+    box.appendChild(el('p', MUTED, words));
+    var day = dayLabel(since);
+    if (day) box.appendChild(el('p', SMALL, 'Tracking started on ' + day + '.'));
+    return box;
+  }
+
+  // ---- Right now ----
+  function nowItem(item, audio) {
+    var li = el('li', 'flex min-w-0 items-start gap-3 rounded-xl border border-frosted-blue/10 px-3 py-3');
+    li.setAttribute('data-ins-now', audio ? 'listening' : 'reading');
+    li.appendChild(icon(audio ? 'headphones' : 'menu_book', 'mt-0.5 text-xl text-frosted-blue/70'));
+    var body = el('div', 'min-w-0 flex-1');
+    body.appendChild(el('p', 'break-words text-[15px] font-semibold text-frosted-blue', text(item.name)));
+    body.appendChild(el('p', 'break-words text-[15px] leading-6 text-frosted-blue', text(item.title)));
+    var bits = [];
+    if (audio) bits.push(item.state === 'playing' ? 'Playing' : 'Paused');
+    bits.push(item.where === 'plex' ? 'in a Plex app' : (audio ? 'in the web player' : 'in the reader'));
+    if (typeof item.percent === 'number') bits.push(item.percent + '% through');
+    body.appendChild(el('p', SMALL, bits.join(' · ')));
+    li.appendChild(body);
+    return li;
+  }
+  function drawNow(data) {
+    var box = el('div', 'mt-4');
+    var lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    var listening = data.listening || [], reading = data.reading || [];
+    if (!listening.length && !reading.length) { box.appendChild(emptyLine('No one is listening or reading right now.')); return box; }
+    var list = el('ul', 'grid gap-2 @[640px]:grid-cols-2');
+    listening.forEach(function (it) { list.appendChild(nowItem(it, true)); });
+    reading.forEach(function (it) { list.appendChild(nowItem(it, false)); });
+    box.appendChild(list);
+    return box;
+  }
+
+  // ---- People ----
+  function drawPeople(data) {
+    var box = el('div', 'mt-4');
+    var lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    var list0 = data.people || [];
+    if (!list0.length) { box.appendChild(emptyLine('No one has listened or read yet.')); return box; }
+    var list = el('ul', 'divide-y divide-frosted-blue/10');
+    list0.forEach(function (p) {
+      var li = el('li', 'py-1');
+      var open = el('button', ROW);
+      open.type = 'button';
+      open.setAttribute('data-ins-person', p.key);
+      // Narrow: one stack. From lg: who | time | books.
+      var main = el('span', 'block min-w-0 flex-1 @[1024px]:grid @[1024px]:grid-cols-[minmax(0,15rem)_minmax(0,13rem)_minmax(0,1fr)] @[1024px]:gap-x-6');
+      var who = el('span', 'block min-w-0');
+      who.appendChild(el('span', 'block break-words text-[15px] font-semibold text-frosted-blue', text(p.name)));
+      who.appendChild(el('span', 'block ' + SMALL, p.last_active ? 'Last active ' + ago(p.last_active, NOW_T) + (WHAT[p.last_what] ? ', ' + WHAT[p.last_what] : '') : 'Not active yet'));
+      main.appendChild(who);
+      var plex = num(p.plex_ms_30d), listened = num(p.listened_ms_30d) + plex;
+      var time = el('span', 'block min-w-0 ' + SMALL);
+      if (listened) time.textContent = duration(listened) + ' listened in 30 days' + (plex ? ' (' + duration(plex) + ' in Plex apps, an estimate)' : '');
+      main.appendChild(time);
+      var books = el('span', 'mt-1 flex min-w-0 flex-wrap gap-x-4 gap-y-1 @[1024px]:mt-0');
+      (p.current || []).forEach(function (c) {
+        var b = el('span', 'min-w-0 max-w-full break-words text-[13px] leading-5 text-frosted-blue/85');
+        b.appendChild(document.createTextNode(text(c.title)));
+        var how = typeof c.percent === 'number' ? ' · ' + c.percent + '%' : (c.where === 'plex' ? ' · in a Plex app' : '');
+        if (how) b.appendChild(el('span', 'text-frosted-blue/60', how));
+        books.appendChild(b);
+      });
+      main.appendChild(books);
+      open.appendChild(main);
+      open.appendChild(icon('chevron_right', 'mt-0.5 text-xl text-frosted-blue/50'));
+      li.appendChild(open);
+      list.appendChild(li);
+    });
+    box.appendChild(list);
+    return box;
+  }
+
+  // ---- Charts ----
+  /* One bar: its parts top to bottom, a 2px gap between parts, 4px round
+     corners on the top part only. */
+  function stack(li, parts, b, most) {
+    var shown = parts.filter(function (p) { return num(b[p[0]]) > 0; });
+    shown.forEach(function (p, i) {
+      var s = el('span', 'ins-bar block w-full ' + p[1] + (i === 0 ? ' rounded-t-[4px]' : '') + (i < shown.length - 1 ? ' mb-[2px]' : ''));
+      s.setAttribute('aria-hidden', 'true');
+      s.style.height = Math.max(2, Math.round(num(b[p[0]]) / most * 100)) + '%';
+      li.appendChild(s);
+    });
+  }
+  function peak(words) {
+    var p = el('p', 'mt-3 ' + SMALL + ' tabular-nums', words);
+    p.setAttribute('aria-hidden', 'true');
+    return p;
+  }
+  function barChart(hook, title, buckets, unit, parts, words, peakWords, heightCls, cls) {
+    var sec = el('section', cls || 'min-w-0');
+    sec.setAttribute(hook, '');
+    sec.appendChild(el('h3', H3, title));
+    var most = buckets.reduce(function (m, b) { return Math.max(m, parts.reduce(function (s, p) { return s + num(b[p[0]]); }, 0)); }, 0);
+    if (!most) { sec.appendChild(el('p', MUTED + ' mt-1', 'Nothing in this period.')); return sec; }
+    sec.appendChild(peak(peakWords(most)));
+    var list = el('ol', 'mt-1 flex ' + heightCls + ' items-end gap-px border-y border-frosted-blue/10 @[640px]:gap-1');
+    list.style.borderTopStyle = 'dashed';
+    buckets.forEach(function (b) {
+      var said = words(b);
+      var li = el('li', 'flex h-full min-w-0 flex-1 flex-col justify-end');
+      li.title = said;
+      li.appendChild(el('span', 'sr-only', said));
+      stack(li, parts, b, most);
+      list.appendChild(li);
+    });
+    sec.appendChild(list);
+    var ends = el('div', 'mt-2 flex justify-between gap-4 ' + SMALL);
+    ends.setAttribute('aria-hidden', 'true');
+    ends.appendChild(el('span', '', bucketLabel(buckets[0].start || buckets[0].week, unit)));
+    ends.appendChild(el('span', '', bucketLabel(buckets[buckets.length - 1].start || buckets[buckets.length - 1].week, unit)));
+    sec.appendChild(ends);
+    return sec;
+  }
+  function legend() {
+    var p = el('p', 'mt-2 flex flex-wrap gap-x-4 gap-y-1 ' + SMALL);
+    p.setAttribute('aria-hidden', 'true');
+    [['bg-frosted-blue', 'Web player'], [EST, 'Plex apps (an estimate)']].forEach(function (k) {
+      var item = el('span', 'inline-flex items-center gap-1.5');
+      item.appendChild(el('span', 'inline-block size-2.5 rounded-sm ' + k[0]));
+      item.appendChild(el('span', '', k[1]));
+      p.appendChild(item);
+    });
+    return p;
+  }
+  var LISTEN_PARTS = [['plex_ms', EST], ['web_ms', 'bg-frosted-blue']];
+
+  function topList(title, rows, books) {
+    var sec = el('section', 'min-w-0');
+    sec.setAttribute('data-ins-top', title);
+    sec.appendChild(el('h3', H3, title));
+    var list = rows || [];
+    if (!list.length) { sec.appendChild(el('p', MUTED + ' mt-1', 'Nothing in this period.')); return sec; }
+    var ol = el('ol', 'mt-2 space-y-1');
+    list.forEach(function (r) {
+      var name = text(r.title) || text(r.name);
+      var li = el('li', 'min-w-0');
+      var holder = books && typeof r.book_id === 'number' ? el('button', ROW) : el('div', 'px-3 py-2 -mx-3');
+      var words = el('span', 'block min-w-0 flex-1');
+      words.appendChild(el('span', 'block break-words text-[15px] font-semibold text-frosted-blue', name));
+      words.appendChild(el('span', 'block ' + SMALL, (num(r.listened_ms) ? duration(r.listened_ms) + ' · ' : '') + people(r.people)));
+      holder.appendChild(words);
+      if (holder.tagName === 'BUTTON') { holder.type = 'button'; holder.setAttribute('data-ins-book', String(r.book_id)); }
+      li.appendChild(holder);
+      ol.appendChild(li);
+    });
+    sec.appendChild(ol);
+    return sec;
+  }
+
+  // ---- Trends ----
+  function drawTrends(data) {
+    var box = el('div', 'mt-2');
+    var lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    var unit = text(data.bucket), buckets = data.buckets || [], tracking = data.tracking || {};
+    var grid = el('div', 'mt-2 grid gap-8 @[1024px]:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] @[1024px]:gap-10');
+    var lead = el('div', 'min-w-0');
+    lead.appendChild(barChart('data-ins-trend', 'Hours listened', buckets, unit, LISTEN_PARTS, function (b) {
+      return bucketLabel(b.start, unit) + ': ' + duration(b.web_ms) + (num(b.plex_ms) ? ', and ' + duration(b.plex_ms) + ' in Plex apps (an estimate)' : '');
+    }, duration, 'h-40 @[1024px]:h-[216px]'));
+    if (buckets.some(function (b) { return num(b.web_ms) + num(b.plex_ms); })) lead.appendChild(legend());
+    grid.appendChild(lead);
+    var side = el('div', 'grid min-w-0 content-start gap-8 @[1024px]:gap-6');
+    if (!buckets.length || buckets.every(function (b) { return b.pages === null || b.pages === undefined; })) {
+      var pages = el('section', 'min-w-0');
+      pages.setAttribute('data-ins-pages', '');
+      pages.appendChild(el('h3', H3, 'Pages read'));
+      pages.appendChild(emptyLine('Pages read show here once reading in Kavita is recorded.', tracking.reading));
+      side.appendChild(pages);
+    } else {
+      var pg = barChart('data-ins-pages', 'Pages read', buckets, unit, [['pages', 'bg-frosted-blue/70']], function (b) {
+        return bucketLabel(b.start, unit) + ': ' + num(b.pages).toLocaleString('en-GB') + ' pages';
+      }, function (m) { return m.toLocaleString('en-GB') + ' pages'; }, 'h-28 @[1024px]:h-20');
+      pg.appendChild(el('p', 'mt-1 ' + SMALL, 'By Kavita’s count; across days without a read, an estimate.'));
+      side.appendChild(pg);
+    }
+    side.appendChild(barChart('data-ins-active', 'Active people each week', data.active || [], 'week', [['people', 'bg-frosted-blue/70']], function (w) {
+      return 'Week of ' + dayLabel(w.week) + ': ' + people(w.people);
+    }, people, 'h-28 @[1024px]:h-20'));
+    grid.appendChild(side);
+    box.appendChild(grid);
+    var tops = el('div', 'mt-10 grid gap-8 @[1024px]:grid-cols-3');
+    tops.appendChild(topList('Top books', data.top_books, true));
+    tops.appendChild(topList('Top authors', data.top_authors, false));
+    tops.appendChild(topList('Top series', data.top_series, false));
+    box.appendChild(tops);
+    if ((data.top_books || []).length) box.appendChild(el('p', 'mt-3 ' + SMALL, 'Times include listening in Plex apps, which is an estimate.'));
+    return box;
+  }
+
+  // ---- Books ----
+  function bookItem(bookId, title, line) {
+    var li = el('li', 'min-w-0 py-1');
+    var holder = typeof bookId === 'number' ? el('button', ROW) : el('div', 'px-3 py-2 -mx-3');
+    var words = el('span', 'block min-w-0 flex-1');
+    words.appendChild(el('span', 'block break-words text-[15px] font-semibold text-frosted-blue', title));
+    words.appendChild(el('span', 'block break-words ' + SMALL, line));
+    holder.appendChild(words);
+    if (holder.tagName === 'BUTTON') {
+      holder.type = 'button';
+      holder.setAttribute('data-ins-book', String(bookId));
+      holder.appendChild(icon('chevron_right', 'mt-0.5 text-xl text-frosted-blue/50'));
+    }
+    li.appendChild(holder);
+    return li;
+  }
+  function drawBooks(data) {
+    var box = el('div', 'mt-2');
+    var lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    var cols = el('div', 'grid gap-8 @[1024px]:grid-cols-2 @[1024px]:gap-x-10');
+
+    var gone = el('section', 'min-w-0 mt-2');
+    gone.setAttribute('data-ins-abandoned', '');
+    gone.appendChild(el('h3', H3, 'Abandoned'));
+    gone.appendChild(el('p', SMALL, 'Unfinished and untouched for 30 days or more.'));
+    var ab = data.abandoned || [];
+    if (!ab.length) gone.appendChild(el('p', MUTED + ' mt-2', 'Nothing abandoned.'));
+    else {
+      var l1 = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+      ab.forEach(function (a) {
+        var bits = [text(a.name)];
+        if (typeof a.percent === 'number') bits.push(a.percent + '%');
+        if (text(a.chapter)) bits.push('stopped in ' + a.chapter);
+        bits.push('last touched ' + ago(a.last_at, NOW_T));
+        l1.appendChild(bookItem(a.book_id, text(a.title), bits.join(' · ')));
+      });
+      gone.appendChild(l1);
+    }
+    cols.appendChild(gone);
+
+    var fin = el('section', 'min-w-0 mt-2');
+    fin.setAttribute('data-ins-finish', '');
+    fin.appendChild(el('h3', H3, 'Finish rate'));
+    fin.appendChild(el('p', SMALL, 'Books two or more people started in this period.'));
+    var fl = data.finish || [];
+    if (!fl.length) fin.appendChild(el('p', MUTED + ' mt-2', 'No book has two starters in this period.'));
+    else {
+      var l2 = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+      fl.forEach(function (f) {
+        var words = num(f.started) + ' started · ' + num(f.finished) + ' finished · ' + num(f.rate) + '%';
+        if (f.drop_off && text(f.drop_off.chapter)) words += ' · most who stopped, stopped in ' + f.drop_off.chapter + ' (' + people(f.drop_off.people) + ')';
+        l2.appendChild(bookItem(f.book_id, text(f.title), words));
+      });
+      fin.appendChild(l2);
+    }
+    cols.appendChild(fin);
+    box.appendChild(cols);
+
+    var never = el('section', 'mt-8');
+    never.setAttribute('data-ins-never', '');
+    never.appendChild(el('h3', H3, 'Never opened'));
+    var nv = data.never_opened || {};
+    var count = num(nv.count);
+    never.appendChild(el('p', SMALL, count.toLocaleString('en-GB') + (count === 1 ? ' book' : ' books') + ' no one has opened, as far as WebServarr can tell.'));
+    var items = nv.items || [];
+    if (items.length) {
+      var l3 = el('ul', 'mt-2 grid divide-y divide-frosted-blue/10 @[1024px]:grid-cols-2 @[1024px]:gap-x-10 @[1024px]:divide-y-0');
+      items.forEach(function (b) {
+        l3.appendChild(bookItem(b.book_id, text(b.title), [text(b.author), b.added_at ? 'added ' + dayLabel(b.added_at) : ''].filter(Boolean).join(' · ')));
+      });
+      never.appendChild(l3);
+      if (count > items.length) never.appendChild(el('p', 'mk-annot', 'Mockup: the build lists ' + (count - items.length) + ' more here (the newest 50 at most).'));
+    }
+    box.appendChild(never);
+    return box;
+  }
+
+  // ---- Habits ----
+  function hourLabel(h) { return (h < 10 ? '0' : '') + h + ':00'; }
+  function heatmap(rows) {
+    var sec = el('section', 'mt-8');
+    sec.setAttribute('data-ins-heatmap', '');
+    sec.appendChild(el('h3', H3, 'Time of day'));
+    var grid = DAYS.map(function (_d, i) {
+      var row = Array.isArray(rows) && Array.isArray(rows[i]) ? rows[i] : [];
+      var hours = [];
+      for (var h = 0; h < 24; h++) hours.push(num(row[h]));
+      return hours;
+    });
+    var most = 0, busiest = null;
+    grid.forEach(function (hours, d) { hours.forEach(function (ms, h) { if (ms > most) { most = ms; busiest = [d, h]; } }); });
+    var line = el('p', SMALL, busiest ? 'Busiest: ' + DAYS[busiest[0]] + ', ' + hourLabel(busiest[1]) : 'No listening in this period.');
+    line.setAttribute('data-ins-busiest', '');
+    sec.appendChild(line);
+    if (!busiest) return sec;
+    var wrap = el('div', 'mt-3 max-w-full @[1024px]:max-w-[880px]');
+    var table = el('table', 'w-full table-fixed border-separate border-spacing-[2px]');
+    table.appendChild(el('caption', 'sr-only', 'Listening by day and hour, in your time zone. The Plex app part is an estimate.'));
+    var head = el('thead', ''), hr = el('tr', '');
+    hr.appendChild(el('th', 'w-9', ''));
+    for (var h = 0; h < 24; h++) {
+      var th = el('th', 'p-0 text-center text-[12px] font-normal text-frosted-blue/60', h % 6 === 0 ? String(h) : '');
+      th.setAttribute('scope', 'col'); th.setAttribute('aria-label', hourLabel(h));
+      hr.appendChild(th);
+    }
+    head.appendChild(hr); table.appendChild(head);
+    var body = el('tbody', '');
+    grid.forEach(function (hours, d) {
+      var tr = el('tr', '');
+      var th = el('th', 'pr-1 text-left text-[12px] font-normal text-frosted-blue/70', DAY_SHORT[d]);
+      th.setAttribute('scope', 'row'); th.setAttribute('aria-label', DAYS[d]);
+      tr.appendChild(th);
+      hours.forEach(function (ms, h) {
+        var level = ms ? Math.min(4, Math.ceil(ms / most * 4)) : 0;
+        var td = el('td', 'h-4 rounded-[3px] p-0 @[640px]:h-5 ' + HEAT[level]);
+        var said = DAYS[d] + ', ' + hourLabel(h) + ': ' + (ms ? duration(ms) : 'nothing');
+        td.title = said;
+        td.appendChild(el('span', 'sr-only', said));
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    wrap.appendChild(table);
+    var foot = el('div', 'mt-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 ' + SMALL);
+    foot.appendChild(el('span', 'min-w-0', 'In your time zone. Plex app listening in it is an estimate.'));
+    var key = el('span', 'inline-flex items-center gap-1');
+    key.setAttribute('aria-hidden', 'true');
+    key.appendChild(el('span', 'mr-1', 'Less'));
+    HEAT.forEach(function (c) { key.appendChild(el('span', 'inline-block size-3 rounded-[3px] ' + c)); });
+    key.appendChild(el('span', 'ml-1', 'More'));
+    foot.appendChild(key);
+    wrap.appendChild(foot);
+    sec.appendChild(wrap);
+    return sec;
+  }
+  function drawHabits(data) {
+    var box = el('div', 'mt-2');
+    var lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    var split = data.split || {}, web = num(split.web_ms), plex = num(split.plex_ms);
+    var both = el('section', 'mt-2 @[1024px]:max-w-[880px]');
+    both.setAttribute('data-ins-split', '');
+    both.appendChild(el('h3', H3, 'Web player and Plex apps'));
+    if (!web && !plex) both.appendChild(el('p', MUTED + ' mt-1', 'No listening in this period.'));
+    else {
+      var track = el('div', 'mt-3 flex h-3 gap-[2px] overflow-hidden rounded-full');
+      track.setAttribute('aria-hidden', 'true');
+      var a = el('span', 'block h-full bg-frosted-blue'); a.style.width = Math.round(web / (web + plex) * 100) + '%';
+      var b = el('span', 'block h-full flex-1 ' + EST);
+      track.appendChild(a); if (plex) track.appendChild(b);
+      both.appendChild(track);
+      both.appendChild(el('p', 'mt-2 ' + SMALL, 'Web player ' + duration(web) + ' · Plex apps ' + duration(plex) + ' (an estimate)'));
+    }
+    box.appendChild(both);
+    box.appendChild(heatmap(data.heatmap));
+
+    var asked = el('section', 'mt-8');
+    asked.setAttribute('data-ins-requested', '');
+    asked.appendChild(el('h3', H3, 'Requested then read'));
+    var req = data.requested || {}, items = req.items || [];
+    if (!num(req.total)) asked.appendChild(emptyLine('No book requests in this period.', (data.tracking || {}).requests));
+    else {
+      asked.appendChild(el('p', SMALL, num(req.read) + ' of ' + num(req.total) + (num(req.total) === 1 ? ' requested book was' : ' requested books were') + ' started by the person who asked (matched by title).'));
+      var list = el('ul', 'mt-2 grid divide-y divide-frosted-blue/10 @[1024px]:grid-cols-2 @[1024px]:gap-x-10 @[1024px]:divide-y-0');
+      items.forEach(function (r) {
+        var how = r.book_id === null || r.book_id === undefined ? 'not in the library yet' : (r.started_at ? 'started ' + dayLabel(r.started_at) : 'not started');
+        list.appendChild(bookItem(r.book_id, text(r.title), text(r.name) + ' · asked ' + dayLabel(r.requested_at) + ' · ' + how));
+      });
+      asked.appendChild(list);
+    }
+    box.appendChild(asked);
+    return box;
+  }
+
+  // ---- The dialog's bodies ----
+  function figure(value, label) {
+    var dl = el('dl', 'flex flex-col-reverse');
+    dl.appendChild(el('dt', 'mt-1 ' + SMALL, label));
+    dl.appendChild(el('dd', 'text-[24px] font-extrabold leading-[1.1] tracking-[-0.02em] tabular-nums text-frosted-blue', value));
+    return dl;
+  }
+  function weeklyBars(weeks) {
+    var sec = el('section', 'mt-8');
+    sec.setAttribute('data-ins-weekly', '');
+    sec.appendChild(el('h3', H3, 'Each week'));
+    var most = weeks.reduce(function (m, w) { return Math.max(m, num(w.web_ms) + num(w.plex_ms)); }, 0);
+    if (!most) { sec.appendChild(el('p', MUTED + ' mt-1', 'Nothing in the last 12 weeks.')); return sec; }
+    sec.appendChild(peak(duration(most)));
+    var list = el('ol', 'mt-1 grid h-32 grid-cols-12 items-end gap-1 border-y border-frosted-blue/10 @[640px]:gap-2');
+    list.style.borderTopStyle = 'dashed';
+    weeks.forEach(function (w) {
+      var words = 'Week of ' + dayLabel(w.week) + ': ' + duration(w.web_ms) + (num(w.plex_ms) ? ', and ' + duration(w.plex_ms) + ' in Plex apps (an estimate)' : '');
+      var li = el('li', 'flex h-full min-w-0 flex-col justify-end');
+      li.title = words;
+      li.appendChild(el('span', 'sr-only', words));
+      stack(li, LISTEN_PARTS, w, most);
+      list.appendChild(li);
+    });
+    sec.appendChild(list);
+    var ends = el('div', 'mt-2 flex justify-between gap-4 ' + SMALL);
+    ends.setAttribute('aria-hidden', 'true');
+    ends.appendChild(el('span', '', 'Week of ' + dayLabel(weeks[0].week)));
+    ends.appendChild(el('span', '', 'Week of ' + dayLabel(weeks[weeks.length - 1].week)));
+    sec.appendChild(ends);
+    sec.appendChild(legend());
+    return sec;
+  }
+  function bookLine(b) {
+    var bits = [];
+    if (text(b.author)) bits.push(b.author);
+    bits.push(b.finished ? 'Finished' : (typeof b.percent === 'number' ? b.percent + '% through' : 'Started'));
+    var time = num(b.listened_ms) + num(b.plex_ms);
+    if (time) bits.push(duration(time) + ' listened' + (num(b.plex_ms) ? ' (the Plex part an estimate)' : ''));
+    if (b.last_at) bits.push(ago(b.last_at, NOW_T));
+    return bits.join(' · ');
+  }
+  function drawPerson(data) {
+    var box = el('div', '');
+    var t = data.totals || {};
+    var row = el('div', 'grid grid-cols-2 gap-x-8 gap-y-4 @[640px]:flex @[640px]:flex-wrap @[640px]:gap-x-12');
+    row.setAttribute('data-ins-totals', '');
+    row.appendChild(figure(duration(t.listened_ms), 'In the web player'));
+    if (num(t.plex_ms)) row.appendChild(figure(duration(t.plex_ms), 'In Plex apps (an estimate)'));
+    row.appendChild(figure(num(t.finished).toLocaleString('en-GB'), num(t.finished) === 1 ? 'Book finished' : 'Books finished'));
+    if (typeof t.pages_read === 'number') row.appendChild(figure(t.pages_read.toLocaleString('en-GB'), 'Pages read, by Kavita’s count'));
+    box.appendChild(row);
+    box.appendChild(weeklyBars(data.weekly || []));
+    var bs = el('section', 'mt-8');
+    bs.appendChild(el('h3', H3, 'Books'));
+    var bl = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+    (data.books || []).forEach(function (b) {
+      var li = bookItem(b.book_id, text(b.title), bookLine(b));
+      li.setAttribute('data-ins-book-row', '');
+      bl.appendChild(li);
+    });
+    bs.appendChild(bl);
+    box.appendChild(bs);
+    var rs = el('section', 'mt-8');
+    rs.appendChild(el('h3', H3, 'Requests'));
+    var rl = el('ul', 'mt-2 space-y-2');
+    (data.requests || []).forEach(function (r) {
+      var li = el('li', 'min-w-0');
+      li.appendChild(el('p', 'break-words text-[15px] text-frosted-blue', text(r.title)));
+      var how = r.book_id === null || r.book_id === undefined ? 'not in the library yet' : (r.started_at ? 'started ' + dayLabel(r.started_at) : 'not started');
+      li.appendChild(el('p', SMALL, 'Asked ' + dayLabel(r.requested_at) + ' · ' + how + ' (matched by title)'));
+      rl.appendChild(li);
+    });
+    rs.appendChild(rl);
+    box.appendChild(rs);
+    return box;
+  }
+  function drawBook(data) {
+    var box = el('div', '');
+    var meta = [text(data.author), text(data.series)].filter(Boolean).join(' · ');
+    if (meta) box.appendChild(el('p', MUTED, meta));
+    var t = data.totals || {};
+    var row = el('div', 'mt-4 grid grid-cols-2 gap-x-8 gap-y-4 @[640px]:flex @[640px]:flex-wrap @[640px]:gap-x-12');
+    row.setAttribute('data-ins-totals', '');
+    row.appendChild(figure(num(t.started).toLocaleString('en-GB'), 'Started'));
+    row.appendChild(figure(num(t.finished).toLocaleString('en-GB'), 'Finished'));
+    row.appendChild(figure(num(t.rate) + '%', 'Finish rate'));
+    row.appendChild(figure(duration(t.listened_ms), 'In the web player'));
+    if (num(t.plex_ms)) row.appendChild(figure(duration(t.plex_ms), 'In Plex apps (an estimate)'));
+    box.appendChild(row);
+    if (data.drop_off && text(data.drop_off.chapter)) box.appendChild(el('p', MUTED + ' mt-4', 'Most who stopped, stopped in ' + data.drop_off.chapter + ' (' + people(data.drop_off.people) + ').'));
+    var who = el('section', 'mt-8');
+    who.appendChild(el('h3', H3, 'People'));
+    var list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+    (data.people || []).forEach(function (p) {
+      var li = el('li', 'min-w-0 py-2');
+      li.appendChild(el('p', 'break-words text-[15px] font-semibold text-frosted-blue', text(p.name)));
+      li.appendChild(el('p', 'break-words ' + SMALL, bookLine(p)));
+      list.appendChild(li);
+    });
+    who.appendChild(list);
+    box.appendChild(who);
+    var asked = data.requested_by || [];
+    if (asked.length) {
+      var rq = el('section', 'mt-8');
+      rq.appendChild(el('h3', H3, 'Requested by'));
+      var rl = el('ul', 'mt-2 space-y-1');
+      asked.forEach(function (r) { rl.appendChild(el('li', SMALL, text(r.name) + ' · asked ' + dayLabel(r.requested_at) + ' (matched by title)')); });
+      rq.appendChild(rl);
+      box.appendChild(rq);
+    }
+    return box;
+  }
+
+  // ================= The page in the shell =================
+  var SKEL = {
+    insNow: function () { return skel('mt-4 grid gap-2 @[640px]:grid-cols-2', ['h-20 rounded-xl', 'h-20 rounded-xl']); },
+    insPeople: function () { return skel('mt-4 space-y-3', ['h-16 rounded-xl', 'h-16 rounded-xl', 'h-16 rounded-xl']); },
+    insTrends: function () { return skel('mt-4 space-y-4', ['h-40 rounded-xl', 'h-24 rounded-xl']); },
+    insBooks: function () { return skel('mt-4 space-y-3', ['h-16 rounded-xl', 'h-16 rounded-xl', 'h-16 rounded-xl']); },
+    insHabits: function () { return skel('mt-4 space-y-4', ['h-10 rounded-xl', 'h-48 rounded-xl']); }
+  };
+  var DRAW = { insNow: drawNow, insPeople: drawPeople, insTrends: drawTrends, insBooks: drawBooks, insHabits: drawHabits };
+  var TITLES = { insNow: 'Right now', insPeople: 'People', insTrends: 'Trends', insBooks: 'Books', insHabits: 'Habits' };
+  var GAPS = { insNow: 'mt-10', insPeople: 'mt-12', insTrends: 'mt-8', insBooks: 'mt-12', insHabits: 'mt-12' };
+  var ORDER = ['insNow', 'insPeople', 'insTrends', 'insBooks', 'insHabits'];
+
+  function periodBar() {
+    var bar = el('div', 'mt-12 flex flex-wrap items-center gap-3');
+    bar.id = 'insPeriodBar';
+    var label = el('p', 'text-[15px] font-semibold text-frosted-blue', 'Period');
+    label.id = 'insPeriodLabel';
+    bar.appendChild(label);
+    var group = el('div', 'inline-flex flex-wrap gap-1 rounded-[12px] border border-frosted-blue/15 p-1');
+    group.setAttribute('role', 'group'); group.setAttribute('aria-labelledby', 'insPeriodLabel');
+    [['30d', '30 days'], ['90d', '90 days'], ['1y', '1 year'], ['all', 'All time']].forEach(function (p) {
+      var on = p[0] === '90d';
+      var b = el('button', 'ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold ' + (on ? 'bg-frosted-blue/15 text-frosted-blue' : 'text-frosted-blue/80') + ' ' + FOCUS, p[1]);
+      b.type = 'button'; b.setAttribute('data-period', p[0]); b.setAttribute('aria-pressed', String(on));
+      group.appendChild(b);
+    });
+    bar.appendChild(group);
+    return bar;
+  }
+  function eventLog() {
+    var s = el('section', 'relative shrink-0 mb-8');
+    s.innerHTML = '<div class="flex items-center gap-3 mb-2"><span class="material-symbols-outlined text-steel-blue" aria-hidden="true">history</span><h2 class="text-xl font-bold text-frosted-blue">Event log</h2></div>' +
+      '<div class="ws-wheel"><div class="ws-wheel__line is-back" aria-hidden="true"><span class="ws-wheel__mark" style="background: rgb(var(--color-text-secondary) / .55)"></span>Added to Books: Winter Orchard Letters <span class="ws-wheel__time">9:02 AM</span></div>' +
+      '<div class="ws-wheel__line is-front"><span class="ws-wheel__mark" style="background: rgb(var(--color-status-ok))"></span>Plex is back up <span class="ws-wheel__time">10:41 AM</span></div></div>';
+    return s;
+  }
+  /* The content column. spec: { insNow: data | 'skel' | 'failed', ... };
+     a section left out is not drawn. */
+  function content(spec) {
+    var col = el('div', 'max-w-[1200px] w-full mx-auto min-w-0 p-4 @[1024px]:p-8');
+    col.appendChild(eventLog());
+    col.appendChild(el('h1', 'text-[24px] @[640px]:text-[32px] font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue', 'Insights'));
+    col.appendChild(el('p', 'mt-2 text-[15px] leading-6 text-frosted-blue/70', 'Reading and listening across everyone. Only admins can see this page.'));
+    var prev = null;
+    ORDER.forEach(function (id) {
+      if (!(id in spec)) return;
+      // The period picker sits above the first of Trends, Books and Habits.
+      var periodic = id === 'insTrends' || id === 'insBooks' || id === 'insHabits';
+      var afterBar = false;
+      if (periodic && !col.querySelector('#insPeriodBar')) { col.appendChild(periodBar()); afterBar = true; }
+      var v = spec[id];
+      var body = v === 'skel' ? SKEL[id]() : v === 'failed' ? failed() : DRAW[id](v);
+      var gap = afterBar ? 'mt-8' : prev === null ? 'mt-10' : GAPS[id];
+      var s = section(id, TITLES[id], gap, body);
+      if (v === 'skel') s.setAttribute('aria-busy', 'true');
+      col.appendChild(s);
+      prev = id;
+    });
+    col.appendChild(el('div', 'h-8'));
+    return col;
+  }
+
+  var NAV = [['home', 'Home', 'See what’s happening'], ['movie', 'Requests', 'Request a movie or show'], ['report_problem', 'Issues', 'Report a problem with media'],
+    ['calendar_month', 'Calendar', 'See upcoming releases'], ['confirmation_number', 'Tickets', 'Get help from the admin'], ['menu_book', 'Books', 'Read and listen to books'],
+    ['library_books', 'Wiki', 'Read guides and how-tos'], ['insights', 'Insights', 'See reading and listening'], ['settings', 'Settings', 'Manage the site']];
+
+  function sidebar() {
+    var side = el('aside', 'w-64 shrink-0 bg-baltic-blue/20 border-r border-steel-blue/30 flex flex-col');
+    side.innerHTML = '<div class="p-6 flex flex-col items-center gap-2"><span class="size-14 rounded-2xl bg-gradient-to-br from-cornflower-ocean to-baltic-blue grid place-items-center"><span class="material-symbols-outlined text-bright text-[30px]">shield</span></span><span class="text-frosted-blue font-bold text-[17px]">Your Server</span></div>' +
+      '<div class="px-4 py-4 space-y-1 text-[15px]">' + NAV.map(function (n) {
+        var on = n[1] === 'Insights';
+        return '<div class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg ' + (on ? 'bg-primary text-bright font-bold' : 'text-frosted-blue') + '">' +
+          '<span class="material-symbols-outlined shrink-0 ' + (on ? 'fill-1' : 'text-steel-blue') + '">' + n[0] + '</span>' +
+          '<span class="flex flex-col min-w-0 leading-tight"><span class="truncate">' + n[1] + '</span><span class="text-[10px] font-normal truncate mt-0.5 ' + (on ? 'text-bright/80' : 'text-steel-blue') + '">' + n[2] + '</span></span></div>';
+      }).join('') + '</div>';
+    return side;
+  }
+  function desktopHeader() {
+    var bar = el('header', 'h-16 shrink-0 border-b border-steel-blue/20 flex items-center justify-between px-8 bg-background-dark/40');
+    bar.innerHTML = '<div class="flex items-center gap-6"><span class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border"><span class="ws-status-dot"></span><span class="text-frosted-blue text-xs font-bold uppercase tracking-widest">All Systems Online</span></span>' +
+      '<span class="flex items-center gap-4 text-[13px] text-frosted-blue/70">' + ['CPU', 'RAM', 'NET'].map(function (g, i) {
+        return '<span class="flex items-center gap-1.5"><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8.5" fill="none" stroke="rgb(var(--color-text) / .15)" stroke-width="3"/><circle cx="11" cy="11" r="8.5" fill="none" stroke="rgb(var(--color-accent))" stroke-width="3" stroke-dasharray="' + [14, 30, 8][i] + ' 60" transform="rotate(-90 11 11)" stroke-linecap="round"/></svg>' + g + '</span>';
+      }).join('') + '</span></div>' +
+      '<div class="flex items-center gap-4"><span class="material-symbols-outlined text-steel-blue p-2">notifications</span><span class="flex items-center gap-3 pl-4"><span class="text-right"><span class="block text-sm font-bold text-frosted-blue leading-none">Sam</span><span class="block text-[10px] text-frosted-blue/60 mt-1">Admin</span></span><span class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></span></span></div>';
+    return bar;
+  }
+  function phoneBar() {
+    var bar = el('div', 'sticky top-0 z-40 h-14 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-steel-blue/20 bg-background-dark/80 backdrop-blur-md');
+    bar.innerHTML = '<span class="text-[17px] font-bold tracking-[-0.02em] text-frosted-blue">Insights</span><span class="flex items-center gap-3"><span class="ws-pill flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[13px] font-semibold text-frosted-blue"><span class="ws-status-dot"></span>Online</span><span class="material-symbols-outlined text-steel-blue">notifications</span></span>';
+    return bar;
+  }
+  function tabBar() {
+    var tabs = el('nav', 'ws-tabbar');
+    tabs.innerHTML = '<ul class="ws-tabbar-list">' + [['home', 'Home'], ['movie', 'Requests'], ['report_problem', 'Issues'], ['calendar_month', 'Calendar'], ['confirmation_number', 'Tickets'], ['more_horiz', 'More']].map(function (t) {
+      return '<li><span class="ws-navtab"' + (t[1] === 'More' ? ' aria-current="true"' : '') + '><span class="ws-navtab-icon"><span class="material-symbols-outlined">' + t[0] + '</span></span><span class="ws-navtab-label">' + t[1] + '</span></span></li>';
+    }).join('') + '</ul>';
+    return tabs;
+  }
+  /* The page in the shell at width w. h: a fixed viewport height (the page
+     is cut off there), or null to draw it at full length. */
+  function shellPage(w, h, spec) {
+    var wide = w >= 1024;
+    var page = el('div', 'vp-page' + (h ? ' vp-fixed' : ''));
+    if (h) page.style.height = h + 'px';
+    page.style.flexDirection = wide ? 'row' : 'column';
+    if (wide) page.appendChild(sidebar());
+    var main = el('div', 'flex-1 min-w-0 flex flex-col');
+    main.appendChild(wide ? desktopHeader() : phoneBar());
+    main.appendChild(content(spec));
+    page.appendChild(main);
+    if (!wide && !h) page.appendChild(tabBar());
+    if (!wide && h) { var t = tabBar(); t.style.position = 'absolute'; t.style.left = '0'; t.style.right = '0'; t.style.bottom = '0'; page.appendChild(t); }
+    return page;
+  }
+
+  // The detail dialog over the page: a full-height sheet below 640, a centred box from 640.
+  function dialogOver(w, h, title, body) {
+    var page = shellPage(w, h, { insNow: NOW, insPeople: PEOPLE, insTrends: TRENDS });
+    var wide = w >= 640;
+    var scrim = el('div', 'absolute inset-0 z-50 bg-background-dark/70');
+    page.appendChild(scrim);
+    var holder = el('div', 'absolute inset-0 z-50 flex items-center justify-center' + (wide ? ' p-6' : ''));
+    var dlg = el('div', 'ws-frost flex flex-col text-frosted-blue ' + (wide ? 'w-full max-w-[760px] max-h-[85%] rounded-2xl border' : 'h-full w-full'));
+    dlg.setAttribute('role', 'presentation');
+    var head = el('div', 'flex items-start gap-3 border-b border-frosted-blue/10 px-4 py-3 @[640px]:px-6');
+    head.appendChild(el('h2', 'min-w-0 flex-1 break-words text-xl font-bold leading-snug text-frosted-blue', title));
+    var close = el('button', 'ws-lift inline-flex size-10 shrink-0 items-center justify-center rounded-[10px] text-frosted-blue hover:bg-frosted-blue/[0.07] ' + FOCUS);
+    close.type = 'button'; close.setAttribute('aria-label', 'Close');
+    close.appendChild(icon('close'));
+    head.appendChild(close);
+    dlg.appendChild(head);
+    var b = el('div', 'min-h-0 flex-1 overflow-y-auto px-4 py-4 @[640px]:px-6');
+    b.style.scrollbarWidth = 'thin';
+    b.style.scrollbarColor = 'rgb(var(--color-accent) / .5) transparent';
+    b.appendChild(body);
+    dlg.appendChild(b);
+    holder.appendChild(dlg);
+    page.appendChild(holder);
+    return page;
+  }
+
+  // The More sheet open on a phone, Insights its current row.
+  function moreSheet(w, h) {
+    var page = shellPage(w, h, { insNow: NOW, insPeople: PEOPLE });
+    var sheet = el('div', 'ws-sheet');
+    var rows = [['menu_book', 'Books', 'Read and listen to books'], ['library_books', 'Wiki', 'Read guides and how-tos'], ['insights', 'Insights', 'See reading and listening'], ['settings', 'Settings', 'Manage the site']];
+    var acct = [['add_to_home_screen', 'Add to home screen', 'Open Your Server like an app'], ['help', 'Welcome tour', 'A quick look around'], ['logout', 'Sign out', 'Signed in as Sam']];
+    function row(r, cur) {
+      return '<li><span class="ws-sheet-row"' + (cur ? ' aria-current="page"' : '') + '><span class="material-symbols-outlined ws-sheet-row-icon">' + r[0] + '</span><span class="ws-sheet-row-text"><span class="ws-sheet-row-label">' + r[1] + '</span><span class="ws-sheet-row-sub">' + r[2] + '</span></span></span></li>';
+    }
+    sheet.innerHTML = '<div class="ws-sheet-scrim"></div><div class="ws-sheet-panel ws-frost"><div class="ws-sheet-head"><span class="ws-sheet-grip"></span><h2 class="ws-sheet-title">More</h2><span class="ws-sheet-close"><span class="material-symbols-outlined">close</span></span></div>' +
+      '<ul class="ws-sheet-list">' + rows.map(function (r) { return row(r, r[1] === 'Insights'); }).join('') + '</ul>' +
+      '<ul class="ws-sheet-list ws-sheet-account">' + acct.map(function (r) { return row(r, false); }).join('') + '</ul></div>';
+    page.appendChild(sheet);
+    return page;
+  }
+  // The sidebar alone, at its real size.
+  function sidebarOnly(w, h) {
+    var page = el('div', 'vp-page vp-fixed');
+    page.style.height = h + 'px';
+    var s = sidebar();
+    s.style.width = '100%';
+    page.appendChild(s);
+    return page;
+  }
+
+  // ================= Frames =================
+  function frame(w, h, caption, build) {
+    var box = el('div', 'mk-frame');
+    var cap = el('div', 'mk-cap');
+    var left = el('span', '');
+    left.appendChild(el('b', '', w + ' wide'));
+    if (caption) left.appendChild(document.createTextNode(', ' + caption));
+    var right = el('span', '');
+    cap.appendChild(left); cap.appendChild(right);
+    var vp = el('div', 'vp');
+    var inner = el('div', 'vp-inner');
+    inner.style.width = w + 'px';
+    inner.appendChild(build(w, h));
+    // A picture, not controls: hidden from screen readers and out of the Tab
+    // order (not inert, so the dialog frames still scroll under a wheel).
+    inner.setAttribute('aria-hidden', 'true');
+    inner.querySelectorAll('button, a[href]').forEach(function (b) { b.tabIndex = -1; });
+    vp.appendChild(inner);
+    if (w < 390) { box.style.maxWidth = (w + 2) + 'px'; }
+    vp._w = w; vp._inner = inner; vp._cap = right;
+    box.appendChild(cap); box.appendChild(vp);
+    return box;
+  }
+  function pagePair(row, spec, capPhone, capWide) {
+    row.appendChild(frame(390, null, capPhone || 'phone, full length', function (w) { return shellPage(w, null, spec); }));
+    row.appendChild(frame(1440, null, capWide || 'beside the sidebar, full length', function (w) { return shellPage(w, null, spec); }));
+  }
+
+  var EMPTY_TRENDS = { period: '90d', bucket: 'week', buckets: MONDAYS.map(function (d) { return { start: iso(d), web_ms: 0, plex_ms: 0, pages: null }; }),
+    active: MONDAYS.map(function (d) { return { week: iso(d), people: 0 }; }), top_books: [], top_authors: [], top_series: [], unavailable: [], tracking: TRACKING };
+  var EMPTY_BOOKS = { abandoned: [], never_opened: { count: 214, items: BOOKS.never_opened.items }, finish: [], unavailable: [], tracking: TRACKING };
+  var EMPTY_HABITS = { split: { web_ms: 0, plex_ms: 0 }, heatmap: [], requested: { total: 0, read: 0, items: [] }, unavailable: [], tracking: TRACKING };
+  function noPlex(o) { var c = JSON.parse(JSON.stringify(o)); c.unavailable = ['plex']; return c; }
+  var PLEX_NOW = noPlex(NOW); PLEX_NOW.listening = PLEX_NOW.listening.filter(function (x) { return x.where !== 'plex'; });
+  var PLEX_PEOPLE = noPlex(PEOPLE);
+  PLEX_PEOPLE.people.forEach(function (p) { p.plex_ms_30d = 0; p.current = p.current.filter(function (c) { return c.where !== 'plex'; }); });
+  PLEX_PEOPLE.people[2].last_active = daysAgo(3); PLEX_PEOPLE.people[2].last_what = 'visit';
+  PLEX_PEOPLE.people.splice(3, 0, PLEX_PEOPLE.people.splice(2, 1)[0]);
+  var PLEX_TRENDS = noPlex(TRENDS); PLEX_TRENDS.buckets.forEach(function (b) { b.plex_ms = 0; });
+  PLEX_TRENDS.top_books = []; PLEX_TRENDS.top_authors = []; PLEX_TRENDS.top_series = [];
+
+  document.querySelectorAll('[data-row]').forEach(function (row) {
+    var k = row.getAttribute('data-row');
+    if (k === 'loaded') pagePair(row, { insNow: NOW, insPeople: PEOPLE, insTrends: TRENDS, insBooks: BOOKS, insHabits: HABITS });
+    else if (k === 'nav') {
+      row.appendChild(frame(390, 844, 'phone, More open', moreSheet));
+      row.appendChild(frame(256, 900, 'its sidebar', sidebarOnly));
+    } else if (k === 'person') {
+      row.appendChild(frame(390, 844, 'phone, scrolls inside', function (w, h) { return dialogOver(w, h, 'Marisol Vega', drawPerson(PERSON)); }));
+      row.appendChild(frame(1440, 900, 'over the page, scrolls inside', function (w, h) { return dialogOver(w, h, 'Marisol Vega', drawPerson(PERSON)); }));
+    } else if (k === 'book') {
+      row.appendChild(frame(390, 844, 'phone, scrolls inside', function (w, h) { return dialogOver(w, h, 'The Long Tide', drawBook(BOOK)); }));
+      row.appendChild(frame(1440, 900, 'over the page', function (w, h) { return dialogOver(w, h, 'The Long Tide', drawBook(BOOK)); }));
+    } else if (k === 'skel') pagePair(row, { insNow: 'skel', insPeople: 'skel', insTrends: 'skel', insBooks: 'skel', insHabits: 'skel' });
+    else if (k === 'empty') pagePair(row, { insNow: NOW_EMPTY(), insPeople: { people: [], unavailable: [] }, insTrends: EMPTY_TRENDS, insBooks: EMPTY_BOOKS, insHabits: EMPTY_HABITS });
+    else if (k === 'plex') pagePair(row, { insNow: PLEX_NOW, insPeople: PLEX_PEOPLE, insTrends: PLEX_TRENDS }, 'phone, three sections', 'three sections');
+    else if (k === 'failed') pagePair(row, { insTrends: TRENDS, insBooks: 'failed', insHabits: HABITS }, 'phone, Trends to Habits', 'Trends to Habits');
+    else if (k === 'gone') {
+      var gone = function (w, h) { return dialogOver(w, h, 'Theo Brandt', el('p', MUTED, 'That person or book isn’t here any more.')); };
+      row.appendChild(frame(390, 844, 'phone', gone));
+      row.appendChild(frame(1440, 900, 'over the page', gone));
+    }
+  });
+  function NOW_EMPTY() { return { listening: [], reading: [], unavailable: [] }; }
+
+  // Fit each frame to its column (zoom keeps the frame's own CSS pixels and
+  // its container queries at the real width).
+  var frames = Array.prototype.slice.call(document.querySelectorAll('.vp'));
+  function fit() {
+    frames.forEach(function (vp) {
+      var s = Math.min(1, vp.clientWidth / vp._w);
+      vp._inner.style.zoom = s;
+      vp._cap.textContent = s >= 1 ? 'actual size' : 'shown at ' + Math.round(s * 100) + '%';
+    });
+  }
+  if ('ResizeObserver' in window) new ResizeObserver(fit).observe(document.body);
+  window.addEventListener('load', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+})();
+</script>
+</body>
+</html>
