@@ -3713,7 +3713,8 @@ await run('popup: Plex still finishing', async (open) => {
 
 await run('popup: blocked, then reopened from a click', async (open) => {
   const t = await toWaiting(open, { blockPopup: 'once', answers: { [IDENTIFY]: [{ body: NEW }] } });
-  check('S2 says the window was blocked', t.step() === 'waiting' && t.error() === 'Your browser blocked the Plex window', t.error());
+  check('S2 says the window was blocked', t.step() === 'waiting' && t.error() === 'Your browser blocked the Plex window. Allow pop-ups, then press Reopen Plex sign-in.', t.error());
+  check('the error sits just above the buttons', t.q('#raError').nextElementSibling === t.q('[data-ra-reopen]'));
   await t.click('[data-ra-reopen]');
   check('reopened at Plex', t.opened.length === 2 && t.opened[1].url === AUTH_URL && t.error() === '');
   await t.message(t.popups[0], { type: 'plex-access-complete' });
@@ -3773,7 +3774,7 @@ await run('the form', async (open) => {
   check('two presses, one send', t.s.sent(SUBMIT).length === 1, t.s.sent(SUBMIT));
   check('what was sent', JSON.stringify(t.s.sent(SUBMIT)[0].body) === JSON.stringify({ name: 'Sam', note: 'Hello' }));
   check('S4', t.step() === 'sent' && focusedOnHeading(t));
-  check('S4 words', t.q('[data-ra-step="sent"]').textContent.indexOf('Request sent: watch your email for the Plex invite.') !== -1);
+  check('S4 words', t.q('[data-ra-step="sent"]').textContent.indexOf('Watch your email for the Plex invite.') !== -1);
 });
 
 await run('the form: what the server can say', async (open) => {
@@ -3802,7 +3803,7 @@ await run('each status', async (open) => {
     [{ state: 'invited' }, /^You’re approved\. Accept the Plex invite from your email or a Plex app, then sign in here\.$/],
     [{ state: 'denied', can_ask_after: '2026-11-08T12:00:00.000Z' }, /^This request wasn’t approved\. You can ask again after .*2026.*\.$/],
     [{ state: 'blocked' }, /^This Plex account can’t request access\.$/],
-    [{ state: 'member' }, /^You already have access\. Sign in\.$/]
+    [{ state: 'member' }, /^You already have access\.$/]
   ];
   for (const [answer, words] of cases) {
     const t = await toWaiting(open, { answers: { [IDENTIFY]: [{ body: Object.assign({ username: 'x', avatar_url: '' }, answer) }] } });
@@ -3878,13 +3879,16 @@ In `app/static/login.html`, between `</form>` and the `#loginLoadHint` paragraph
 <h2 data-ra-heading tabindex="-1" class="text-frosted-blue text-xl font-bold text-center focus:outline-none">Request access</h2>
 <p class="mt-3 text-frosted-blue text-sm text-center">Sign in to Plex so we know who you are.</p>
 <p class="mt-1 text-frosted-blue/80 text-sm text-center">We only read your Plex username, email and picture.</p>
-<button type="button" data-ra-plex class="mt-6 w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Continue with Plex</button>
+<button type="button" data-ra-plex class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark flex items-center justify-center gap-1.5"><span class="text-sm font-medium">Continue with</span>
+<!-- the Plex wordmark SVG from #authentikLoginBtn here, copied as is (aria-hidden); the line breaks keep the name "Continue with Plex" -->
+<span class="sr-only">Plex</span>
+</button>
 <button type="button" data-ra-back class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
 </div>
 <div data-ra-step="waiting" hidden>
 <h2 data-ra-heading tabindex="-1" class="text-frosted-blue text-xl font-bold text-center focus:outline-none">Waiting for Plex…</h2>
 <p class="mt-3 text-frosted-blue text-sm text-center">Finish signing in to Plex in the window that opened.</p>
-<button type="button" data-ra-reopen class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3 rounded-lg transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Reopen Plex sign-in</button>
+<button type="button" data-ra-reopen class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Reopen Plex sign-in</button>
 <button type="button" data-ra-cancel class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Cancel</button>
 </div>
 <form data-ra-step="form" novalidate hidden>
@@ -3902,21 +3906,22 @@ In `app/static/login.html`, between `</form>` and the `#loginLoadHint` paragraph
 <textarea id="raNote" name="note" rows="4" maxlength="1000" required aria-describedby="raCount" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 px-4 text-frosted-blue resize-y focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all"></textarea>
 <p id="raCount" class="text-frosted-blue/80 text-label text-right px-1">0/1000</p>
 </div>
-<button type="submit" data-ra-send class="mt-5 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Send request</button>
+<button type="submit" data-ra-send class="mt-5 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark disabled:opacity-60">Send request</button>
 <button type="button" data-ra-back class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
 </form>
 <div data-ra-step="sent" hidden>
 <h2 data-ra-heading tabindex="-1" class="text-frosted-blue text-xl font-bold text-center focus:outline-none">Request sent</h2>
-<p class="mt-3 text-frosted-blue text-sm text-center">Request sent: watch your email for the Plex invite.</p>
-<button type="button" data-ra-back class="mt-6 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+<p class="mt-3 text-frosted-blue text-sm text-center">Watch your email for the Plex invite.</p>
+<button type="button" data-ra-back class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Back to sign in</button>
 </div>
 <div data-ra-step="status" hidden>
 <h2 data-ra-heading tabindex="-1" class="text-frosted-blue text-xl font-bold text-center focus:outline-none">Your request</h2>
 <p data-ra-status class="mt-3 text-frosted-blue text-sm text-center"></p>
-<button type="button" data-ra-back class="mt-6 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+<button type="button" data-ra-back class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Back to sign in</button>
 </div>
 </div>
-<p id="raError" role="alert" class="w-full mt-3 text-status-err-text text-sm text-center empty:hidden"></p>
+<!-- show() moves this line to just above the current step's first button. -->
+<p id="raError" role="alert" class="w-full mt-4 text-status-err-text text-sm font-medium text-center text-balance empty:hidden"></p>
 ```
 
 Before `<script src="/static/js/login.js?v=1"></script>`:
@@ -3970,7 +3975,7 @@ var WSRequestAccess = (function () {
   var POLL_MS = 1000;
   var MSG = {
     closedEarly: 'Plex sign-in was closed before it finished.',
-    blocked: 'Your browser blocked the Plex window',
+    blocked: 'Your browser blocked the Plex window. Allow pop-ups, then press Reopen Plex sign-in.',
     plexDown: 'Plex isn’t answering right now. Try again in a minute.',
     offline: 'That didn’t go through. Check your connection and try again.',
     tooMany: 'Too many tries. Wait a few minutes and try again.',
@@ -3985,7 +3990,7 @@ var WSRequestAccess = (function () {
     invited: function () { return APPROVED; },
     denied: function (d) { return 'This request wasn’t approved. You can ask again after ' + day(d.can_ask_after) + '.'; },
     blocked: function () { return 'This Plex account can’t request access.'; },
-    member: function () { return 'You already have access. Sign in.'; }
+    member: function () { return 'You already have access.'; }
   };
 
   var on = false;          // the site takes requests (auth_methods.request_access)
@@ -4033,6 +4038,9 @@ var WSRequestAccess = (function () {
     $('requestAccess').hidden = !inFlow;
     var steps = document.querySelectorAll('#requestAccess [data-ra-step]');
     for (var i = 0; i < steps.length; i++) steps[i].hidden = steps[i].getAttribute('data-ra-step') !== name;
+    // The error line sits just above this step's buttons (Jordan, mockup 2026-10-10).
+    var first = inFlow ? step(name).querySelector('button') : null;
+    if (first) first.parentNode.insertBefore($('raError'), first);
     setError('');
     if (!inFlow) {
       var target = firstControl ? firstSignIn() : $('requestAccessLink');
@@ -4502,7 +4510,7 @@ await run('the badge, on any tab', async (open) => {
   const t = await open({ url: 'https://ws.test/settings#general' });
   const badge = t.q(`${tab} [data-tab-count]`);
   check('shows the count', !badge.hidden && badge.textContent === '2', badge.textContent);
-  check('named for screen readers', t.q(tab).getAttribute('aria-label') === 'Access requests, 2 waiting');
+  check('named for screen readers', t.q(tab).getAttribute('aria-label') === 'Access requests 2 waiting');
   check('the badge itself is not read twice', badge.getAttribute('aria-hidden') === 'true');
   const none = await open({ url: 'https://ws.test/settings#general', server: makeServer({ pending: [] }) });
   check('hidden at 0, no extra name', none.q(`${tab} [data-tab-count]`).hidden && !none.q(tab).hasAttribute('aria-label'));
@@ -4642,7 +4650,7 @@ In `app/static/settings.html`:
 - In `#settingsTabs`, after the Sign-in tab:
 
 ```html
-          <a role="tab" id="tab-access-requests" href="#access-requests" data-tab="access-requests" aria-controls="panel-access-requests" aria-selected="false" class="ws-tab">Access requests<span data-tab-count aria-hidden="true" class="inline-flex min-w-5 h-5 px-1.5 items-center justify-center rounded-full bg-primary text-bright text-label font-bold" hidden></span></a>
+          <a role="tab" id="tab-access-requests" href="#access-requests" data-tab="access-requests" aria-controls="panel-access-requests" aria-selected="false" class="ws-tab">Access requests <span data-tab-count aria-hidden="true" class="inline-flex min-w-5 h-5 px-1.5 items-center justify-center rounded-full bg-primary text-bright text-label font-bold" hidden></span></a>
 ```
 
 - After the `panel-sign-in` section:
@@ -4677,7 +4685,8 @@ In `app/static/js/settings/kit.js`, before `var WSSettings = {`:
 ```js
   // A tab's count of things waiting on the admin (Access requests): a badge on
   // the tab whichever tab is open, and the tab's name says it ("Access
-  // requests, 3 waiting"). Hidden at 0.
+  // requests 3 waiting": it starts with the visible text, so the two match).
+  // Hidden at 0.
   function setCount(id, n) {
     var a = document.getElementById('tab-' + id);
     var badge = a && a.querySelector('[data-tab-count]');
@@ -4685,7 +4694,7 @@ In `app/static/js/settings/kit.js`, before `var WSSettings = {`:
     n = typeof n === 'number' && isFinite(n) && n > 0 ? Math.floor(n) : 0;
     badge.textContent = n ? String(n) : '';
     badge.hidden = !n;
-    if (n) a.setAttribute('aria-label', TITLES[id] + ', ' + n + ' waiting');
+    if (n) a.setAttribute('aria-label', TITLES[id] + ' ' + n + ' waiting');
     else a.removeAttribute('aria-label');
   }
 
@@ -5056,7 +5065,7 @@ Create `app/static/js/settings/access-requests.js`:
         label.appendChild(block);
         label.appendChild(el('span', '', 'Block this Plex account for good'));
         body.appendChild(label);
-        WSSettings.confirm({ title: 'Deny ' + r.plex_username + '?', body: body, confirmLabel: 'Deny', danger: true }).then(function (ok) {
+        WSSettings.confirm({ title: 'Deny ' + r.plex_username + '?', body: body, confirmLabel: 'Deny' }).then(function (ok) {
           if (!ok) { busy[r.id] = false; return; }
           button.disabled = true;
           var forGood = block.checked;
@@ -5253,7 +5262,7 @@ try {
       await b.intercept('*/api/admin/access-requests/*/approve', 200, { body: JSON.stringify({ status: 'approved', share_state: 'failed', share_error: 'intercepted in the live check' }) });
       await b.goto('/settings#access-requests', { width });
       await sleep(1500);
-      check(`tab@${width}: the badge`, (await b.evaluate(`document.querySelector('#tab-access-requests').getAttribute('aria-label')`)) === 'Access requests, 2 waiting');
+      check(`tab@${width}: the badge`, (await b.evaluate(`document.querySelector('#tab-access-requests').getAttribute('aria-label')`)) === 'Access requests 2 waiting');
       check(`tab@${width}: two waiting`, (await b.evaluate(`document.querySelectorAll('[data-ar-request]').length`)) === 2);
       await shoot(a1, 'admin-tab', width);
       await b.evaluate(`document.querySelector('[data-ar-approve]').click()`);

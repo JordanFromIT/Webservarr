@@ -33,7 +33,7 @@ The feature is done when all of these hold:
   flow creates no session. Sign-in stays Authentik-only; Plex PIN is not a sign-in method.
 - **Form:** after the popup, the requester gives their name and a required answer to "Who are you and
   how do you know us?".
-- **After submitting:** the card says "Request sent: watch your email for the Plex invite." Doing the
+- **After submitting:** the card says "Request sent" and "Watch your email for the Plex invite." Doing the
   popup again later shows the status (pending, approved or denied).
 - **Admin side:** a new "Access requests" section in Settings, admin only and enforced on the server
   like the rest of `/api/admin`, with a count badge. Each new request also goes to the admin's bell
@@ -315,7 +315,7 @@ nothing is built from strings of HTML; user text is set with `textContent`.
 | S1 Intro | Heading "Request access". Two short lines: they sign in to Plex so we know who they are, and we read only their Plex username, email and picture. Button "Continue with Plex" | S2; "Back to sign in" to S0 |
 | S2 Waiting | "Waiting for Plex..." and a "Reopen Plex sign-in" button, for when the popup was blocked or lost | S3 or S5 when identify answers; "Cancel" to S1 |
 | S3 Form | "Requesting as <username>" with the avatar. Name field (`autocomplete="name"`). Textarea "Who are you and how do you know us?" with a 0/1000 counter. Button "Send request" | S4; "Back to sign in" to S0 |
-| S4 Sent | "Request sent: watch your email for the Plex invite." | "Back to sign in" to S0 |
+| S4 Sent | Heading "Request sent", then "Watch your email for the Plex invite." | "Back to sign in" to S0 |
 | S5 Status | One message per state (below) | "Back to sign in" to S0 |
 
 S5 messages:
@@ -325,7 +325,7 @@ S5 messages:
   then sign in here."
 - `denied`: "This request wasn't approved. You can ask again after <date>."
 - `blocked`: "This Plex account can't request access."
-- `member`: "You already have access. Sign in." This message's button takes them to S0 and focuses
+- `member`: "You already have access." Its button is labelled "Sign in", takes them to S0 and focuses
   the first sign-in button.
 
 Behaviour:
@@ -333,7 +333,15 @@ Behaviour:
 - **Entering the flow** pushes one history entry (`#request-access`), so the browser's Back button
   returns to S0. Moving between steps doesn't add history entries.
 - **Focus:** each new state moves focus to its heading (`tabindex="-1"`). One polite live region
-  announces the step. Errors appear in a `role="alert"` line inside the card.
+  announces the step. Errors appear in one `role="alert"` line inside the card, just above the
+  current step's buttons.
+- **Buttons (approved by Jordan, 2026-10-10):** every step has exactly one primary action, and it is
+  always the blue primary button (`bg-primary`, the same style as "Continue with Plex"): S0 its sign-in
+  button, S1 "Continue with Plex", S2 "Reopen Plex sign-in" (waiting and blocked alike), S3 "Send
+  request", S4 and S5 "Back to sign in" (member: "Sign in"). The other actions ("Back to sign in",
+  "Cancel") are one quiet text button, the same on every step. The Settings dialogs follow the same
+  rule: "Share and approve" and "Deny" are both the blue primary. The approved look is
+  `docs/mockups/request-access.html`.
 - **Desktop** uses a popup, like the existing Plex button. The message handler accepts only this
   origin and only the popup this page opened. If the popup closes without a message, the page calls
   identify once. "Not yet authorized" then goes back to S1 with "Plex sign-in was closed before it
@@ -351,7 +359,8 @@ Behaviour:
 
 A new tab, `access-requests`, after Sign-in. It has its own `app/static/js/settings/access-requests.js`
 and follows the kit's patterns. The tab carries a pending count badge, which is hidden at 0 and whose
-accessible name is "Access requests, 3 waiting". The panel, top to bottom:
+accessible name is "Access requests 3 waiting" (a space before the badge, and the name starts with the
+tab's visible text, so the two match). The panel, top to bottom:
 
 1. **Switch:** "Let people request access from the sign-in page". When Plex isn't connected, a note
    says the switch needs it.
@@ -372,7 +381,7 @@ accessible name is "Access requests, 3 waiting". The panel, top to bottom:
 | Feature off | No link. Every public route returns 403 "Access requests are closed." |
 | Plex not configured | Same as feature off (the branding flag is false and the gate refuses) |
 | Plex down when starting or identifying | Inline error "Plex isn't answering right now. Try again in a minute." The card stays on the same step |
-| Popup blocked | S2 with "Your browser blocked the Plex window" and the Reopen button (opened from a click) |
+| Popup blocked | S2 with "Your browser blocked the Plex window. Allow pop-ups, then press Reopen Plex sign-in." and the Reopen button (opened from a click) |
 | Popup closed early | Back to S1 with "Plex sign-in was closed before it finished." |
 | PIN expired or binding wrong | "That Plex sign-in expired. Start again." Back to S1 |
 | Already a member | S5 `member` |
