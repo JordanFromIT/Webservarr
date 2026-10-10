@@ -746,7 +746,8 @@ class BooksPage(unittest.TestCase):
         self.assertIn("html.removeAttribute('data-books-flat');", src)
 
     def test_the_discovery_shelves_are_held_like_the_rows_above(self):
-        # Books 3c: Recently added and Popular on the server, after My list and before the toolbar.
+        # Books 3c: Recently added (beside Continue when wide, under it otherwise) and
+        # Popular on the server (after My list), all before the search and the toolbar.
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         self.assertIn("['recent', 'data-books-recent']", loader)
         self.assertIn("['popular', 'data-books-popular']", loader)
@@ -757,10 +758,11 @@ class BooksPage(unittest.TestCase):
         src = module_source("books")
         self.assertIn("key: 'webservarr_books_recent:'", src)
         self.assertIn("key: 'webservarr_books_popular:'", src)
-        self.assertIn("const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];", src)
+        self.assertIn("const ROW_ORDER = ['continue', 'recent', 'upnext', 'mylist', 'popular'];", src)
         section = h[h.index('id="librarySection"'):h.index('id="toolbar"')]
-        self.assertLess(section.index('id="mylistHost"'), section.index('id="recentHost"'))
-        self.assertLess(section.index('id="recentHost"'), section.index('id="popularHost"'))
+        order = [section.index(f'id="{n}"') for n in ("continueHost", "recentHost", "upnextHost", "mylistHost",
+                                                       "popularHost", "searchRow", "toolbarSkel")]
+        self.assertEqual(order, sorted(order))
         # Your stats is a plain link at the end of the search row.
         self.assertIn('<a id="statsLink" href="/books/stats"', h)
 

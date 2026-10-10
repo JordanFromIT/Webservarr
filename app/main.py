@@ -528,9 +528,8 @@ def _event_log_off() -> bool:
 
 def books_notice(user: dict) -> str:
     """What the Books page shows this person about where to listen: "window"
-    (the first visit's), "inline" (later visits) or "off" (Don't show again),
-    from their account's answer (book_personal.set_notice), so it holds on
-    every device. Read with the page, so the page knows from its first paint.
+    (on every visit) or "off" (Don't show again), from their account's answer
+    (book_personal.set_notice), so it holds on every device. Read with the page, so the page knows from its first paint.
     No identity (nothing can be kept for it) or no database: "off"."""
     identity = tickets.account_identity(user)
     if not identity:

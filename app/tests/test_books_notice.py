@@ -4,9 +4,9 @@ Books: the audiobook notice's answer, kept per account (POST
 Books page render that carries it (main.books_notice into the #ws-data
 block, the site's name written into the notice).
 
-What is proven: a person with no answer gets the first-visit window, Okay on
-it ("seen") turns later visits into the inline notice, Don't show again
-("off") is for good, answers are per identity, the write needs a session,
+What is proven: a person with no answer gets the window, an older page's
+Okay ("seen") hides nothing (the window still shows on every visit), Don't
+show again ("off") is for good, answers are per identity, the write needs a session,
 an identity and a same-origin request, and the page says what to show from
 its first byte. Each class has its own in-memory database.
 """
@@ -47,9 +47,10 @@ class NoticeState(unittest.TestCase):
     def test_no_answer_is_the_window(self):
         self.assertEqual(book_personal.notice_state(self.db, "plex:1001"), "window")
 
-    def test_seen_is_the_inline_notice_and_off_is_for_good(self):
-        self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "seen"), "inline")
-        self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "seen"), "inline")     # again: the same
+    def test_seen_hides_nothing_and_off_is_for_good(self):
+        self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "seen"), "window")
+        self.assertEqual(book_personal.notice_state(self.db, "plex:1001"), "window")
+        self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "seen"), "window")     # again: the same
         self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "off"), "off")
         # Another tab's window pressed later never brings it back.
         self.assertEqual(book_personal.set_notice(self.db, "plex:1001", "seen"), "off")
@@ -94,8 +95,8 @@ class NoticeRoute(unittest.TestCase):
         c = self.client(MEMBER)
         r = c.post(URL, json={"state": "seen"})
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json(), {"notice": "inline"})
-        self.assertEqual(self.state("plex:1001"), "inline")
+        self.assertEqual(r.json(), {"notice": "window"})
+        self.assertEqual(self.state("plex:1001"), "window")
         self.assertEqual(c.post(URL, json={"state": "off"}).json(), {"notice": "off"})
         self.assertEqual(c.post(URL, json={"state": "seen"}).json(), {"notice": "off"})
         self.assertEqual(self.state("plex:1001"), "off")
@@ -156,7 +157,7 @@ class NoticeOnThePage(unittest.TestCase):
     def test_from_the_account(self):
         self.assertEqual(main.books_notice(MEMBER), "window")
         self.answer("plex:1001", "seen")
-        self.assertEqual(main.books_notice(MEMBER), "inline")
+        self.assertEqual(main.books_notice(MEMBER), "window")
         self.assertEqual(main.books_notice(OTHER), "window")
         self.answer("plex:1001", "off")
         self.assertEqual(main.books_notice(MEMBER), "off")
@@ -194,7 +195,7 @@ class NoticeRender(unittest.TestCase):
         return json.loads(re.search(r'<script id="ws-data" type="application/json">(.*?)</script>', out, re.S).group(1))
 
     def test_the_data_block_says_what_to_show(self):
-        for notice in ("window", "inline", "off"):
+        for notice in ("window", "off"):
             with self.subTest(notice=notice):
                 self.assertEqual(self.data(self.render(notice=notice))["books_notice"], notice)
         self.assertNotIn("books_notice", self.data(self.render(name="index")))

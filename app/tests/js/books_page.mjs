@@ -281,6 +281,8 @@ function usual(over = {}) {
 }
 
 const sortOptions = (t) => t.qa('#booksSortList [role="option"]');
+// Each selector's element comes after the one before it in the page.
+const inOrder = (t, ...sels) => sels.every((sel, i) => i === 0 || !!(t.q(sels[i - 1]).compareDocumentPosition(t.q(sel)) & 4));
 
 async function run(name, fn) {
   current = name;
@@ -533,11 +535,12 @@ await run('search waits a moment after the last key, and the newest word wins', 
   await t.clock.advance(1);
   check('one search goes out after 300 ms', t.net.urls('/api/books/search').length === 1 && t.net.urls('/api/books/search')[0] === '/api/books/search?q=dune&limit=60', t.net.urls('/api/books/search'));
   await t.clock.advance(50);
-  check('the results take the place of Continue and the library', t.hidden('#browseArea') && !t.hidden('#searchSection') && !t.hidden('#searchGrid'));
+  check('the results take the place of the rows and the library, under the search', t.hidden('#shelves') && t.hidden('#libraryBody') && !t.hidden('#searchSection') && !t.hidden('#searchGrid') &&
+    !t.hidden('#searchRow') && !t.hidden('#browseArea') && inOrder(t, '#searchRow', '#libraryBody', '#searchSection'));
   check('with the same cards', t.cards('searchGrid').length === 1 && t.cards('searchGrid')[0].getAttribute('href') === '/books/1');
   check('and a count a screen reader hears', t.text('#searchStatus') === '1 book found' && t.q('#searchStatus').getAttribute('role') === 'status');
   t.type('');
-  check('clearing the box brings the library back at once', !t.hidden('#browseArea') && t.hidden('#searchSection'));
+  check('clearing the box brings the library back at once', !t.hidden('#shelves') && !t.hidden('#libraryBody') && t.hidden('#searchSection'));
   t.type('d u');
   t.type('');
   await t.clock.advance(400);
@@ -1256,7 +1259,8 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   await t.clock.advance(100);
   await m;
   check('with the books: toolbar, notes, connect message and Continue all there', t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !t.hidden('#notes') && !t.hidden('#connectState') && !!t.q('#continueHost [data-continue]') && t.doc.documentElement.hasAttribute('data-books-continue'));
-  check('all of it, Continue included (in its area with the audiobook notice), sits above the books inside the library section (no element already shown has to move)', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => (c.querySelector('#continueHost') ? 'continueHost' : c.id)); return kids.indexOf('continueHost') !== -1 && kids.indexOf('continueHost') < kids.indexOf('toolbar') && kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
+  check('all of it, Continue included, sits above the books inside the library section (no element already shown has to move)', t.q('#librarySection').contains(t.q('#continueHost')) &&
+    inOrder(t, '#continueHost', '#toolbar', '#connectState', '#notes', '#libraryGrid'));
   // A library that never answers does not keep the page a skeleton for ever.
   const never = deferred();
   const u = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => never.promise); } });
@@ -1430,10 +1434,8 @@ await run('3b: Up next and My list rows: in order, with their controls, above th
   const list = t.q('#mylistHost [data-mylist]');
   check('My list: newest first, as library cards with their format badges', !!list && list.querySelector('h2').textContent === 'My list' &&
     t.qa('#mylistHost li > a').map((a) => a.getAttribute('href')).join() === '/books/5,/books/1' && !!t.q('#mylistHost [data-format="audio"]'));
-  check('both rows sit above the toolbar inside the library section, after Continue', (() => {
-    const kids = Array.from(t.q('#librarySection').children).map((c) => c.id);
-    return kids.indexOf('continueHost') < kids.indexOf('upnextHost') && kids.indexOf('upnextHost') < kids.indexOf('mylistHost') && kids.indexOf('mylistHost') < kids.indexOf('toolbar');
-  })());
+  check('both rows sit above the toolbar inside the library section, after Continue and Recently added', t.q('#librarySection').contains(t.q('#upnextHost')) &&
+    inOrder(t, '#continueHost', '#recentHost', '#upnextHost', '#mylistHost', '#toolbar'));
   check('both shown, and remembered for the next first paint', t.doc.documentElement.hasAttribute('data-books-upnext') && t.doc.documentElement.hasAttribute('data-books-mylist') &&
     t.win.localStorage.getItem('webservarr_books_upnext:sam') === '1' && t.win.localStorage.getItem('webservarr_books_mylist:sam') === '1');
   check('no overflow at 320: the rows scroll sideways inside the page gutter, as Continue does', t.qa('#upnextHost ol.books-row.-mx-4.px-4, #mylistHost ul.books-row.-mx-4.px-4').length === 2);
@@ -1543,7 +1545,7 @@ await run('3b: Remove: the card goes at once, the focus to its neighbour; the la
   upBtn(t, 3, 'remove').click();
   await t.clock.advance(10);
   check('the last one: the row hides and is remembered as none', !t.q('#upnextHost [data-upnext]') && !t.doc.documentElement.hasAttribute('data-books-upnext') && t.win.localStorage.getItem('webservarr_books_upnext:sam') === '0');
-  check('the focus went on down the page, not lost', t.doc.activeElement && t.doc.activeElement !== t.doc.body && t.doc.activeElement.closest('#formatChips'), t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
+  check('the focus went on down the page (the search, right above the filters), not lost', t.doc.activeElement === t.q('#booksSearch'), t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
   const srv2 = mine({ queue: QUEUE });
   srv2.removeStatus = 503;
   const u = make({ routes: withMine(srv2) });
@@ -1648,11 +1650,7 @@ await run('3c: Recently added and Popular on the server: two shelves under My li
   check('the cards in the order sent, each a link to its book', t.qa('#recentHost li > a').map((a) => a.getAttribute('href')).join() === '/books/1,/books/2,/books/3' &&
     t.qa('#popularHost li > a').map((a) => a.getAttribute('href')).join() === '/books/3,/books/1');
   check('library cards: a cover with its format badges, the title and the author', /The Hobbit/.test(t.q('#popularHost li > a').textContent) && /Tolkien/.test(t.q('#popularHost li > a').textContent) && !!t.q('#recentHost [data-format="audio"]'));
-  check('in order: Continue, Up next, My list, Recently added, Popular, then the toolbar', (() => {
-    const kids = Array.from(t.q('#librarySection').children).map((c) => c.id);
-    const at = (id) => kids.indexOf(id);
-    return at('continueHost') < at('upnextHost') && at('upnextHost') < at('mylistHost') && at('mylistHost') < at('recentHost') && at('recentHost') < at('popularHost') && at('popularHost') < at('toolbar');
-  })());
+  check('in order: Continue, Recently added, Up next, My list, Popular, the search, then the toolbar', inOrder(t, '#continueHost', '#recentHost', '#upnextHost', '#mylistHost', '#popularHost', '#searchRow', '#toolbar'));
   check('both shown, and remembered for the next first paint', t.doc.documentElement.hasAttribute('data-books-recent') && t.doc.documentElement.hasAttribute('data-books-popular') &&
     t.win.localStorage.getItem('webservarr_books_recent:sam') === '1' && t.win.localStorage.getItem('webservarr_books_popular:sam') === '1');
   check('asked once each, on the visit\'s signal', t.net.urls('/api/books/recent').length === 1 && t.net.urls('/api/books/popular').length === 1 &&
@@ -2679,14 +2677,13 @@ await run('CLS: a library slower than the wait brings in the toolbar alone, only
   check('the same height: the toolbar comes in on its own, the grid\'s skeleton stays where it is', u.hidden('#toolbarSkel') && !u.hidden('#toolbar') && !u.hidden('#gridSkeleton') && !!u.q('#continueHost .skel'));
 });
 
-// ---- The audiobook notice: the first-visit window and the inline card ----
+// ---- The audiobook notice: a window on every visit until Don't show again ----
 //
-// Everyone who opens Books. The first visit (once per account: the page's
-// books_notice says "window" until Okay is pressed after the count) is a
-// window over the whole page; Okay works after 15 seconds and nothing closes
-// it before then. Later visits ("inline") have the same words under the event
-// log: Okay hides them for this browser session, Don't show again for good
-// (kept on the server). Run with the real ui.js (WSUI.modal and its hold).
+// Everyone who opens Books gets a window over the whole page (the page's
+// books_notice says "window" until the account has Don't show again, "off").
+// Okay works after 15 seconds and closes it for this visit only; Don't show
+// again works after 30 and turns it off for the account. Nothing closes it
+// before Okay works. Run with the real ui.js (WSUI.modal and its hold).
 
 const UI_SRC = readFileSync(join(STATIC, 'js/ui.js'), 'utf8');
 const LOADER = readFileSync(join(STATIC, 'js/theme-loader.js'), 'utf8');
@@ -2736,27 +2733,25 @@ function noticeRoutes(statuses = [200]) {
     net.on(NOTICE_URL, (url, init) => {
       const status = statuses[Math.min(i++, statuses.length - 1)];
       const state = JSON.parse(init.body).state;
-      return { status, body: status === 200 ? { notice: state === 'off' ? 'off' : 'inline' } : { detail: 'no' } };
+      return { status, body: status === 200 ? { notice: state === 'off' ? 'off' : 'window' } : { detail: 'no' } };
     });
   };
 }
 const posts = (t) => t.net.calls.filter((c) => c.url === NOTICE_URL).map((c) => ({ method: c.init.method, body: JSON.parse(c.init.body) }));
 const windowOn = (t) => !t.q('#booksNoticeWindow').hidden;
-const inlineOn = (t) => !t.q('#booksNotice').hidden;
 const okayBtn = (t) => t.q('#booksNoticeWindowOkay');
+const offBtn = (t) => t.q('#booksNoticeWindowOff');
 const escape = (t) => t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-const firstVisit = (make, o = {}) => withNotice(make({ data: { books_notice: 'window' }, routes: noticeRoutes(o.statuses), branding: o.branding }), o);
-const laterVisit = (make, o = {}) => withNotice(make({ data: Object.assign({ books_notice: 'inline' }, o.data || {}), routes: noticeRoutes(o.statuses), branding: o.branding }), o);
+const visitWith = (make, o = {}) => withNotice(make({ data: Object.assign({ books_notice: o.notice || 'window' }, o.data || {}), routes: noticeRoutes(o.statuses), branding: o.branding }), o);
 
-await run('the window: a first visit opens it over the whole page, a modal named by its title, the words in it', async (make) => {
-  const t = firstVisit(make, { branding: { app_name: '  Riverbend ' } });
+await run('the window: every visit opens it over the whole page, a modal named by its title, the words in it', async (make) => {
+  const t = visitWith(make, { branding: { app_name: '  Riverbend ' } });
   const m = t.mount();
   check('open from the visit\'s first frame', windowOn(t));
   const box = t.q('#booksNoticeBox');
   check('a modal dialog named by its title', box.getAttribute('role') === 'dialog' && box.getAttribute('aria-modal') === 'true' &&
     box.getAttribute('aria-labelledby') === 'booksNoticeWindowTitle' && t.text('#booksNoticeWindowTitle') === 'Before you start listening');
   check('focus starts on the title, so the words are read from the top', t.doc.activeElement === t.q('#booksNoticeWindowTitle'));
-  check('the inline card is not shown with it', !inlineOn(t));
   check('the page under it holds still', t.doc.documentElement.hasAttribute('data-books-notice-open'));
   check('everything behind it is inert: the page under it', t.q('#wsPage > div').inert === true);
   check('the window itself is not', !t.q('#booksNoticeWindow').inert);
@@ -2765,33 +2760,37 @@ await run('the window: a first visit opens it over the whole page, a modal named
   check('the lead names the site', paras[0] === LEAD + 'Riverbend.', paras[0]);
   check('the second paragraph starts with the approved words', paras[1].indexOf(SYNC) === 0 && !/Your audiobooks/.test(words.textContent), paras[1]);
   check('the three problems as a list', words.querySelectorAll('ul.bn-list > li').length === 3);
-  const parts = (n) => Array.from(n.querySelectorAll('p, li')).map((x) => x.textContent).join('|');
-  check('the same words as the inline card', parts(words) === parts(t.q('#booksNoticeWords')), [parts(words), parts(t.q('#booksNoticeWords'))]);
-  check('the Tickets page is words here, not a link: the window has one way out', !words.querySelector('a') && /on the Tickets page with/.test(words.textContent));
-  check('the inline card keeps its link', t.q('#booksNoticeWords a[data-books-notice-tickets]').getAttribute('href') === '/tickets');
-  check('Okay is dimmed but focusable (aria-disabled, not disabled), the count unread', okayBtn(t).getAttribute('aria-disabled') === 'true' &&
-    !okayBtn(t).disabled && okayBtn(t).textContent === 'Okay (15)' && okayBtn(t).querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
-  check('its fill sweeps', okayBtn(t).classList.contains('is-running'));
+  check('the Tickets page is words here, not a link: the window has no way out but its buttons', !words.querySelector('a') && /on the Tickets page with/.test(words.textContent));
+  const [off, okay] = t.qa('#booksNoticeBox .bn-window-foot button');
+  check('two buttons side by side at its foot: Don\'t show again (quiet), then Okay (the one blue primary)', off === offBtn(t) && okay === okayBtn(t) &&
+    off.type === 'button' && okay.type === 'button' && off.classList.contains('bn-count-quiet') && !okay.classList.contains('bn-count-quiet'));
+  check('Okay is dimmed but focusable (aria-disabled, not disabled), the count unread', okay.getAttribute('aria-disabled') === 'true' &&
+    !okay.disabled && okay.textContent === 'Okay\u00a0(15)' && okay.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
+  check('Don\'t show again too, with its own, longer count', off.getAttribute('aria-disabled') === 'true' &&
+    !off.disabled && off.textContent === 'Don\'t show again\u00a0(30)' && off.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
+  check('both fills sweep', okay.classList.contains('is-running') && off.classList.contains('is-running'));
   check('nothing is kept on opening', posts(t).length === 0 && t.win.sessionStorage.getItem(SESSION_KEY) === null);
   await t.clock.advance(400);
-  check('the count is said once', t.text('#booksNoticeSay') === 'Okay will work in 15 seconds.');
+  check('the counts are said once', t.text('#booksNoticeSay') === 'Okay will work in 15 seconds, and Don\u2019t show again in 30.', t.text('#booksNoticeSay'));
   await t.clock.advance(1600);
   await m;
-  check('and the number counts down', okayBtn(t).textContent === 'Okay (13)', okayBtn(t).textContent);
+  check('and the numbers count down', okay.textContent === 'Okay\u00a0(13)' && off.textContent === 'Don\'t show again\u00a0(28)', [okay.textContent, off.textContent]);
   await finish(t);
 });
 
-await run('the window: nothing closes it for 15 seconds, then Okay does and is kept for the account', async (make) => {
-  const t = firstVisit(make);
+await run('the window: nothing closes it for 15 seconds, then Okay closes it for this visit only', async (make) => {
+  const t = visitWith(make);
   t.mount();
   await t.clock.advance(6000);
-  check('six seconds in: "Okay (9)"', okayBtn(t).textContent === 'Okay (9)', okayBtn(t).textContent);
+  check('six seconds in: "Okay\u00a0(9)"', okayBtn(t).textContent === 'Okay\u00a0(9)', okayBtn(t).textContent);
   escape(t);
   check('Escape does nothing', windowOn(t));
   t.click('[data-books-notice-veil]');
   check('a click outside does nothing', windowOn(t));
   t.click('#booksNoticeWindowOkay');
   check('Okay does nothing', windowOn(t) && posts(t).length === 0);
+  t.click('#booksNoticeWindowOff');
+  check('Don\'t show again does nothing', windowOn(t) && posts(t).length === 0);
   // Tab stays inside: from Okay (the last) back to the first control.
   okayBtn(t).focus();
   t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
@@ -2799,136 +2798,142 @@ await run('the window: nothing closes it for 15 seconds, then Okay does and is k
   await t.clock.advance(9000);
   check('after 15 seconds Okay works: no count, not dimmed, the fill done', !okayBtn(t).hasAttribute('aria-disabled') &&
     okayBtn(t).textContent === 'Okay' && !okayBtn(t).classList.contains('is-running'));
-  check('still nothing kept until it is pressed', posts(t).length === 0);
+  check('Don\'t show again still counts', offBtn(t).getAttribute('aria-disabled') === 'true' && offBtn(t).textContent === 'Don\'t show again\u00a0(15)', offBtn(t).textContent);
+  t.click('#booksNoticeWindowOff');
+  check('and still does nothing', windowOn(t) && posts(t).length === 0);
   t.click('#booksNoticeWindowOkay');
   await t.clock.advance(50);
-  check('it closes', !windowOn(t) && !t.doc.documentElement.hasAttribute('data-books-notice-open'));
-  check('seen is sent once, for the account', JSON.stringify(posts(t)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(t));
-  check('it is a same-origin write', t.net.calls.find((c) => c.url === NOTICE_URL).init.credentials === 'same-origin');
-  check('the inline card takes its place on this same view, coming in', inlineOn(t) && t.q('#booksNotice').classList.contains('is-arriving'));
-  check('the window\'s Okay does not hide the card for the session: it records the window as seen', t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
+  check('Okay closes it', !windowOn(t) && !t.doc.documentElement.hasAttribute('data-books-notice-open'));
+  check('nothing is sent or kept: the window is back on the next visit', posts(t).length === 0 && t.win.sessionStorage.getItem(SESSION_KEY) === null);
   check('the page is usable again', !t.q('#wsPage > div').inert);
   check('focus goes to the page\'s heading', t.doc.activeElement === t.q('h1'));
-  await finish(t);
+  const again = visitWith(make);
+  again.mount();
+  check('the next visit (the server still says window): it is back', windowOn(again));
+  await finish(t, again);
 });
 
-await run('the window: Escape or a click outside after the count also counts as seen', async (make) => {
-  const esc = firstVisit(make);
+await run('the window: Escape or a click outside close it like Okay, once Okay works', async (make) => {
+  const esc = visitWith(make);
   esc.mount();
-  await esc.clock.advance(6000);
+  await esc.clock.advance(14000);
   escape(esc);
-  check('not before the count is done', windowOn(esc) && posts(esc).length === 0);
-  await esc.clock.advance(9000);
+  check('not before the count is done', windowOn(esc));
+  await esc.clock.advance(1000);
   escape(esc);
   await esc.clock.advance(50);
-  check('Escape closes it once the count is done', !windowOn(esc));
-  check('and seen is kept for the account, as Okay keeps it', JSON.stringify(posts(esc)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(esc));
-  check('and the inline card shows in its place', inlineOn(esc) && esc.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
-  const out = firstVisit(make);
+  check('Escape closes it once Okay works, and keeps nothing', !windowOn(esc) && posts(esc).length === 0 && esc.win.sessionStorage.getItem(SESSION_KEY) === null);
+  const out = visitWith(make);
   out.mount();
   await out.clock.advance(15000);
   out.click('[data-books-notice-veil]');
   await out.clock.advance(50);
-  check('a click outside closes it too, and keeps seen', !windowOn(out) && JSON.stringify(posts(out)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(out));
+  check('a click outside closes it too, and keeps nothing', !windowOn(out) && posts(out).length === 0);
   await finish(esc, out);
 });
 
-await run('after the window closes: the inline card on every visit this session until its Okay', async (make) => {
-  const t = firstVisit(make);
-  t.mount();
-  await t.clock.advance(15000);
-  t.click('#booksNoticeWindowOkay');
-  await t.clock.advance(50);
-  check('the card is on the same view', inlineOn(t) && !windowOn(t));
-  t.click('#booksNoticeOkay');
-  check('its Okay hides it for the session', !inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
-  const reload = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'seen' } });
-  reload.mount();
-  check('a reload in the same session (the server says inline): the card', inlineOn(reload) && !windowOn(reload));
-  const stale = withNotice(make({ data: { books_notice: 'window' }, routes: noticeRoutes() }), { sessionStore: { [SESSION_KEY]: 'seen' } });
-  stale.mount();
-  check('the seen answer not on the server yet (the page still says window): the card, not the window again', inlineOn(stale) && !windowOn(stale));
-  const hidden = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'okay' } });
-  hidden.mount();
-  check('after the card\'s Okay this session: not shown', !inlineOn(hidden));
-  await finish(t, reload, stale, hidden);
-});
-
-await run('after the window: the guide waits for the person\'s first act (a key, a tap, the card\'s Okay)', async (make) => {
-  const key = withTour(firstVisit(make));
-  key.mount();
-  await key.clock.advance(15000);
-  key.click('#booksNoticeWindowOkay');
-  await key.clock.advance(5000);
-  check('waiting, the card in view', !tourOn(key) && inlineOn(key));
-  key.doc.dispatchEvent(new key.win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
-  await key.clock.advance(400);
-  check('a key starts it', tourOn(key));
-  const tap = withTour(firstVisit(make));
-  tap.mount();
-  await tap.clock.advance(15000);
-  tap.click('#booksNoticeWindowOkay');
-  await tap.clock.advance(1000);
-  tap.q('#booksNoticeOkay').dispatchEvent(new tap.win.PointerEvent('pointerdown', { bubbles: true }));
-  tap.click('#booksNoticeOkay');
-  await tap.clock.advance(400);
-  check('the card\'s Okay: the card goes, then the guide', !inlineOn(tap) && tourOn(tap));
-  const left = withTour(firstVisit(make));
-  left.mount();
-  await left.clock.advance(15000);
-  left.click('#booksNoticeWindowOkay');
-  left.ctl.abort();
-  left.doc.dispatchEvent(new left.win.Event('wheel'));
-  await left.clock.advance(400);
-  check('a visit that ended starts nothing', !tourOn(left));
-  await finish(key, tap, left);
-});
-
-await run('the window: reduced motion has no sweep, and the number still counts', async (make) => {
-  const t = firstVisit(make, { reduced: true });
-  t.mount();
-  check('no sweep', !okayBtn(t).classList.contains('is-running'));
+await run('the window: Don\'t show again works after 30 seconds, closes it and turns it off for the account', async (make) => {
+  const t = visitWith(make);
+  const m = t.mount();
+  await t.clock.advance(29000);
+  check('29 seconds in: "Don\'t show again\u00a0(1)"', offBtn(t).textContent === 'Don\'t show again\u00a0(1)' && offBtn(t).getAttribute('aria-disabled') === 'true', offBtn(t).textContent);
   await t.clock.advance(1000);
-  check('the count is text, so it still counts', okayBtn(t).textContent === 'Okay (14)');
+  check('then it works: no count, not dimmed, its line gone', !offBtn(t).hasAttribute('aria-disabled') && offBtn(t).textContent === 'Don\'t show again' &&
+    !offBtn(t).classList.contains('is-running'));
+  await t.clock.advance(5000);
+  check('the counting stops there', offBtn(t).textContent === 'Don\'t show again' && okayBtn(t).textContent === 'Okay' && windowOn(t));
+  t.click('#booksNoticeWindowOff');
+  await t.clock.advance(50);
+  await m;
+  check('it closes, the page given back, the focus on the heading', !windowOn(t) && !t.q('#wsPage > div').inert && t.doc.activeElement === t.q('h1'));
+  check('off is sent once, for the account', JSON.stringify(posts(t)) === JSON.stringify([{ method: 'POST', body: { state: 'off' } }]), posts(t));
+  check('it is a same-origin write', t.net.calls.find((c) => c.url === NOTICE_URL).init.credentials === 'same-origin');
+  check('and held for this session too (a page fetched before it still says window)', t.win.sessionStorage.getItem(SESSION_KEY) === 'off');
+  check('no error shown', t.toasts.length === 0);
+  const stale = visitWith(make, { sessionStore: { [SESSION_KEY]: 'off' } });
+  stale.mount();
+  check('a soft visit back in the same session, the page still saying window: not shown', !windowOn(stale));
+  const next = visitWith(make, { notice: 'off' });
+  next.mount();
+  check('every later visit (the server says off): never shown', !windowOn(next));
+  const other = visitWith(make, { data: { user: { username: 'sam', identity_key: 'k9' } }, sessionStore: { [SESSION_KEY]: 'off' } });
+  other.mount();
+  check('the session\'s record is per account (its identity key)', windowOn(other));
+  await finish(t, stale, next, other);
+});
+
+await run('the window: Don\'t show again that fails (signed out, the server down) still closes it and says so', async (make) => {
+  for (const status of [401, 503]) {
+    const t = visitWith(make, { statuses: [status] });
+    t.mount();
+    await t.clock.advance(30000);
+    t.click('#booksNoticeWindowOff');
+    await t.clock.advance(50);
+    check(`${status}: closed, and held for this session all the same`, !windowOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'off');
+    check(`${status}: an error says it will be back`, t.toasts.length === 1 && t.toasts[0][1] === 'err' && /will be back on your next visit/.test(t.toasts[0][0]), t.toasts);
+    await finish(t);
+  }
+});
+
+await run('the window: session storage blocked still shows it, and both buttons still work', async (make) => {
+  const t = visitWith(make, { session: 'blocked' });
+  let err = null;
+  try { t.mount(); } catch (e) { err = e; }
+  check('shown, no error', !err && windowOn(t), err && String(err));
+  await t.clock.advance(30000);
+  t.click('#booksNoticeWindowOff');
+  await t.clock.advance(50);
+  check('Don\'t show again closes it and is sent', !windowOn(t) && posts(t).length === 1);
+  await finish(t);
+});
+
+await run('the window: reduced motion has no sweep, and the numbers still count', async (make) => {
+  const t = visitWith(make, { reduced: true });
+  t.mount();
+  check('no sweep on either', !okayBtn(t).classList.contains('is-running') && !offBtn(t).classList.contains('is-running'));
+  await t.clock.advance(1000);
+  check('the counts are text, so they still count', okayBtn(t).textContent === 'Okay\u00a0(14)' && offBtn(t).textContent === 'Don\'t show again\u00a0(29)');
   await finish(t);
 });
 
 await run('the window and the first-visit guide never run at once: the guide waits for it', async (make) => {
-  const t = withTour(firstVisit(make));
+  const t = withTour(visitWith(make));
   const m = t.mount();
   await t.clock.advance(3000);
   await m;
   check('the books are drawn, the guide holds back while the window is open', !t.hidden('#libraryGrid') && !tourOn(t) && windowOn(t));
   await t.clock.advance(12000);
-  check('the count done, the guide still waits for the window to close', !tourOn(t));
-  t.click('#booksNoticeWindowOkay');
-  await t.clock.advance(2000);
-  check('closed: the inline card comes in and stays in view, no guide yet', !windowOn(t) && inlineOn(t) && !tourOn(t));
-  t.doc.dispatchEvent(new t.win.Event('scroll'));
-  await t.clock.advance(400);
-  check('a scroll alone (bringing the card into view is one) does not start it', !tourOn(t));
-  t.doc.dispatchEvent(new t.win.Event('wheel'));
-  await t.clock.advance(400);
-  check('the person turns the wheel: then it starts', tourOn(t));
-  await finish(t);
-});
-
-await run('the window: Okay that cannot be kept still closes it, and the guide still runs', async (make) => {
-  const t = withTour(firstVisit(make, { statuses: [503] }));
-  t.mount();
-  await t.clock.advance(15000);
+  check('Okay works, the guide still waits for the window to close', !tourOn(t));
   t.click('#booksNoticeWindowOkay');
   await t.clock.advance(400);
-  check('closed, sent once, no error shown', !windowOn(t) && posts(t).length === 1 && t.toasts.length === 0);
-  check('the inline card shows, and this session treats the window as seen', inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
-  t.doc.dispatchEvent(new t.win.Event('wheel'));
-  await t.clock.advance(400);
-  check('the guide runs', tourOn(t));
+  check('closed: then it starts', !windowOn(t) && tourOn(t));
+  check('marked seen for this person', t.win.localStorage.getItem(GUIDE_FLAG) === '1');
   await finish(t);
+  const off = withTour(visitWith(make));
+  off.mount();
+  await off.clock.advance(30000);
+  off.click('#booksNoticeWindowOff');
+  await off.clock.advance(400);
+  check('closed by Don\'t show again: the guide runs too', !windowOn(off) && tourOn(off));
+  await finish(off);
+  const later = withTour(visitWith(make));
+  later.win.localStorage.setItem(GUIDE_FLAG, '1');
+  later.mount();
+  await later.clock.advance(15000);
+  later.click('#booksNoticeWindowOkay');
+  await later.clock.advance(1000);
+  check('a later visit: the window again, but the guide only ever the first time', !windowOn(later) && !tourOn(later));
+  const left = withTour(visitWith(make));
+  left.mount();
+  await left.clock.advance(15000);
+  left.ctl.abort();
+  await left.clock.advance(400);
+  check('a visit that ended starts nothing', !tourOn(left));
+  await finish(later, left);
 });
 
 await run('the window: leaving the page during the count takes it away and keeps nothing', async (make) => {
-  const t = firstVisit(make);
+  const t = visitWith(make);
   t.mount();
   await t.clock.advance(3000);
   // The router closes every dialog before a navigation, then the visit ends.
@@ -2936,7 +2941,7 @@ await run('the window: leaving the page during the count takes it away and keeps
   t.ctl.abort();
   check('closed, the page given back', !windowOn(t) && !t.q('#wsPage > div').inert);
   check('nothing kept, so the next visit has it again', posts(t).length === 0 && t.win.sessionStorage.getItem(SESSION_KEY) === null);
-  const ended = firstVisit(make);
+  const ended = visitWith(make);
   ended.mount();
   await ended.clock.advance(3000);
   ended.ctl.abort();
@@ -2945,11 +2950,24 @@ await run('the window: leaving the page during the count takes it away and keeps
 });
 
 await run('the window: not over a book\'s pop-up (a full load of its address)', async (make) => {
-  const t = firstVisit(make);
+  const t = visitWith(make);
   t.doc.documentElement.setAttribute('data-book-open', '');
   t.mount();
-  check('not opened, nothing kept', !windowOn(t) && !inlineOn(t) && posts(t).length === 0);
+  check('not opened, nothing kept', !windowOn(t) && posts(t).length === 0);
   await finish(t);
+});
+
+await run('the window: what the page says', async (make) => {
+  for (const [notice, on] of [['window', true], ['inline', true], ['off', false], [undefined, false]]) {
+    const t = withNotice(make({ data: notice === undefined ? {} : { books_notice: notice }, routes: noticeRoutes() }));
+    t.mount();
+    check(`${notice}: ${on ? 'shown' : 'not shown'}`, windowOn(t) === on);
+    await finish(t);
+  }
+  const blank = visitWith(make, { branding: { app_name: '   ' } });
+  blank.mount();
+  check('a site with no name says "this site"', blank.q('#booksNoticeWindowWords p').textContent === LEAD + 'this site.', blank.q('#booksNoticeWindowWords p').textContent);
+  await finish(blank);
 });
 
 await run('the shared modal\'s hold is opt-in: another dialog still closes on Escape', async (make) => {
@@ -2972,147 +2990,29 @@ await run('the shared modal\'s hold is opt-in: another dialog still closes on Es
   await finish(t);
 });
 
-await run('later visits: the inline card under the event log, from the first frame, the site named', async (make) => {
-  const t = laterVisit(make, { branding: { app_name: 'Riverbend' } });
-  t.mount();
-  check('shown before anything is awaited', inlineOn(t));
-  check('no window', !windowOn(t));
-  const box = t.q('#booksNotice');
-  check('a section named by its heading', box.tagName === 'SECTION' && box.getAttribute('aria-labelledby') === 'booksNoticeTitle' &&
-    t.q('#booksNoticeTitle').tagName === 'H2' && t.text('#booksNoticeTitle') === 'Before you start listening');
-  check('the full words, the site named', t.q('#booksNoticeWords p').textContent === LEAD + 'Riverbend.' && t.q('#booksNoticeWords p + p').textContent.indexOf(SYNC) === 0);
-  check('the Tickets page is a link', t.q('#booksNoticeWords a').getAttribute('href') === '/tickets' && t.q('#booksNoticeWords a').textContent === 'Tickets page');
-  const [off, okay] = t.qa('#booksNotice .bn-card-actions button');
-  check('Don\'t show again (quiet), then Okay (the one blue button)', off.textContent === 'Don\'t show again' && /bn-btn-quiet/.test(off.className) &&
-    okay.textContent === 'Okay' && /bn-btn-primary/.test(okay.className) && off.type === 'button' && okay.type === 'button');
-  check('with the Continue row: right after it, in the area that sets it beside the row when wide', box.parentElement === t.q('#continueArea') &&
-    box.previousElementSibling === t.q('#continueHost') && t.q('#continueArea').parentElement.classList.contains('bn-area'));
-  check('after the page\'s title and the search', t.q('h1').compareDocumentPosition(box) === 4 && t.q('#booksSearch').compareDocumentPosition(box) === 4);
-  check('one column, Okay and Don\'t show again at its foot: no two-column rule', !/columns: 2/.test(BOOKS_HTML) &&
-    t.q('#booksNotice .bn-card').lastElementChild.classList.contains('bn-card-actions'));
-  check('wide: beside the row in a column of its own, held from the first paint too',
-    /@container \(min-width: 912px\) \{\s*\.bn-continue:has\(> #booksNotice:not\(\[hidden\]\)\), html\[data-books-notice\] \.bn-continue \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) 26rem;/.test(BOOKS_HTML));
-  check('the first paint\'s mark is the page\'s to take off', !t.doc.documentElement.hasAttribute('data-books-notice'));
-  check('nothing is sent for showing it', posts(t).length === 0);
-  await finish(t);
-});
-
-await run('later visits: a site with no name says "this site"', async (make) => {
-  for (const branding of [{ app_name: '' }, { app_name: '   ' }, undefined]) {
-    const t = laterVisit(make, { branding });
-    t.mount();
-    check(`${JSON.stringify(branding)}: this site`, t.q('#booksNoticeWords p').textContent === LEAD + 'this site.', t.q('#booksNoticeWords p').textContent);
-    await finish(t);
-  }
-});
-
-await run('later visits: Okay hides it for the rest of the browser session', async (make) => {
-  const t = laterVisit(make);
-  t.mount();
-  t.click('#booksNoticeOkay');
-  check('it goes at once, nothing sent', !inlineOn(t) && posts(t).length === 0);
-  check('kept for this session, for this account', t.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
-  check('the focus goes to the page\'s heading, not lost with the button', t.doc.activeElement === t.q('h1') && t.q('h1').getAttribute('tabindex') === '-1');
-  const again = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'okay' } });
-  again.mount();
-  check('a soft visit back to Books in the same session: not shown', !inlineOn(again));
-  const next = laterVisit(make);
-  next.mount();
-  check('the next session: back', inlineOn(next));
-  const other = laterVisit(make, { data: { user: { username: 'sam', identity_key: 'k9' } }, sessionStore: { [SESSION_KEY]: 'okay' } });
-  other.mount();
-  check('the session\'s Okay is per account (its identity key)', inlineOn(other));
-  await finish(t, again, next, other);
-});
-
-await run('later visits: Don\'t show again is kept on the server, for every device', async (make) => {
-  const t = laterVisit(make);
-  const m = t.mount();
-  t.click('#booksNoticeOff');
-  await t.clock.advance(1600);
-  await m;
-  check('it goes at once', !inlineOn(t) && t.doc.activeElement === t.q('h1'));
-  check('off is sent once', JSON.stringify(posts(t)) === JSON.stringify([{ method: 'POST', body: { state: 'off' } }]), posts(t));
-  check('and held for this session too (a page fetched before it still says inline)', t.win.sessionStorage.getItem(SESSION_KEY) === 'off');
-  check('no error shown', t.toasts.length === 0);
-  const next = withNotice(make({ data: { books_notice: 'off' }, routes: noticeRoutes() }));
-  const n = next.mount();
-  check('the next visit (the server says off): neither the card nor the window', !inlineOn(next) && !windowOn(next));
-  await next.clock.advance(1600);
-  await n;
-  await finish(t, next);
-});
-
-await run('later visits: Don\'t show again that fails (signed out, the server down) says so', async (make) => {
-  for (const status of [401, 503]) {
-    const t = laterVisit(make, { statuses: [status] });
-    t.mount();
-    t.click('#booksNoticeOff');
-    await t.clock.advance(50);
-    check(`${status}: hidden for this session all the same`, !inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'off');
-    check(`${status}: an error says it will be back`, t.toasts.length === 1 && t.toasts[0][1] === 'err' && /will be back on your next visit/.test(t.toasts[0][0]), t.toasts);
-    await finish(t);
-  }
-});
-
-await run('later visits: session storage blocked still shows it, and Okay still hides it', async (make) => {
-  const t = laterVisit(make, { session: 'blocked' });
-  let err = null;
-  try { t.mount(); } catch (e) { err = e; }
-  check('shown, no error', !err && inlineOn(t), err && String(err));
-  t.click('#booksNoticeOkay');
-  check('Okay hides it', !inlineOn(t));
-  await finish(t);
-});
-
-await run('the notice on a soft navigation into Books', async (make) => {
-  // The router swaps in the page as the server sent it (hidden, no mark on
-  // <html>) and mounts it: the visit decides before its first await.
-  const t = laterVisit(make);
-  check('swapped in hidden, as the markup has it', t.q('#booksNotice').hidden);
-  t.mount();
-  check('shown in the same frame the page is mounted', inlineOn(t));
-  t.ctl.abort();
-  const back = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'okay' } });
-  back.doc.documentElement.setAttribute('data-books-notice', '');
-  back.mount();
-  check('after Okay earlier this session: a stale mark is taken off, and it stays away', !inlineOn(back) && !back.doc.documentElement.hasAttribute('data-books-notice'));
-  const first = firstVisit(make);
-  first.mount();
-  check('a first visit by soft navigation opens the window', windowOn(first));
-  await finish(t, back, first);
-});
-
-current = 'the notice on a full load: theme-loader.js holds the inline card\'s room before the first paint';
+current = 'the inline card is gone, and Recently added sits beside Continue';
 {
-  const load = (notice, opts = {}) => {
-    const w = new Window({ url: 'https://ws.test/books' });
-    if (opts.blocked) Object.defineProperty(w, 'sessionStorage', { get() { throw new Error('blocked'); }, configurable: true });
-    else for (const [k, v] of Object.entries(opts.session || {})) w.sessionStorage.setItem(k, v);
-    const data = { branding: { app_name: 'Riverbend' }, user: opts.user || { username: 'sam' }, page: opts.page || 'books' };
-    if (notice) data.books_notice = notice;
-    w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';
-    w.console.error = () => {};
-    let err = null;
-    try { w.eval(LOADER); } catch (e) { err = e; }
-    return { marked: w.document.documentElement.hasAttribute('data-books-notice'), err };
-  };
-  check('the page says inline: marked', load('inline').marked);
-  check('the window, off, or nothing said: not', !load('window').marked && !load('off').marked && !load(null).marked);
-  check('the window closed earlier this session (an older copy of the page still says window): marked', load('window', { session: { [SESSION_KEY]: 'seen' } }).marked &&
-    load('inline', { session: { [SESSION_KEY]: 'seen' } }).marked);
-  check('after Okay or Don\'t show again this session: not', !load('inline', { session: { [SESSION_KEY]: 'okay' } }).marked &&
-    !load('inline', { session: { [SESSION_KEY]: 'off' } }).marked);
-  check('per account: the identity key when there is one', load('inline', { user: { username: 'sam', identity_key: 'k9' }, session: { [SESSION_KEY]: 'okay' } }).marked &&
-    !load('inline', { user: { username: 'sam', identity_key: 'k9' }, session: { 'webservarr_books_notice_session:k9': 'okay' } }).marked);
-  check('another page: not', !load('inline', { page: 'index' }).marked);
-  const blocked = load('inline', { blocked: true });
-  check('session storage blocked: marked (the page shows it), and no error', blocked.marked && !blocked.err, blocked.err && String(blocked.err));
-  check('the mark holds the room with the card unseen (books.html\'s page style)',
-    /html\[data-books-notice\] #booksNotice\[hidden\] \{ display: block; visibility: hidden; \}/.test(BOOKS_HTML));
-  check('the section has no display utility of its own (it would beat hidden)', /<section id="booksNotice" class="bn-inline" hidden aria-labelledby="booksNoticeTitle">/.test(BOOKS_HTML));
+  check('no inline card, its buttons or its first-paint hold', !/id="booksNotice"/.test(BOOKS_HTML) && !/booksNoticeOkay|booksNoticeOff"|booksNoticeWords|bn-card|bn-inline/.test(BOOKS_HTML) &&
+    !/data-books-notice\]/.test(BOOKS_HTML) && !/books_notice|data-books-notice/.test(LOADER));
   check('the window is hidden until opened, and its own display rule gives way to hidden', /<div id="booksNoticeWindow" class="bn-overlay" hidden>/.test(BOOKS_HTML) &&
     /\.bn-overlay\[hidden\] \{ display: none; \}/.test(BOOKS_HTML));
+  check('Don\'t show again waits 30 seconds in its sweep too', /\.bn-count\.bn-count-quiet \{\s*--bn-wait: 30s;/.test(BOOKS_HTML));
+  check('wide, with books in both: Recently added in a column of its own beside Continue, held from the first paint by the rows\' own flags',
+    /@container \(min-width: 912px\) \{\s*html\[data-books-continue\]\[data-books-recent\] \.books-top \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) 26rem;/.test(BOOKS_HTML) &&
+    /\.books-top-area \{ container-type: inline-size; \}/.test(BOOKS_HTML));
+  const win = new Window({ url: 'https://ws.test/books' });
+  win.document.write(BOOKS_HTML);
+  const d = win.document;
+  const top = d.getElementById('continueArea');
+  check('Continue then Recently added, together in that area, the sized wrapper around it', top.classList.contains('books-top') &&
+    Array.from(top.children).map((c) => c.id).join() === 'continueHost,recentHost' && top.parentElement.classList.contains('books-top-area'));
+  check('the search row (with Your stats) sits right above the library\'s filters', d.getElementById('searchRow').nextElementSibling === d.getElementById('libraryBody') &&
+    d.getElementById('libraryBody').querySelector('#toolbarSkel') === d.getElementById('libraryBody').firstElementChild &&
+    d.getElementById('searchRow').contains(d.getElementById('statsLink')) && d.getElementById('searchRow').contains(d.getElementById('helpBtn')));
+  check('after every row above the library', !!(d.getElementById('shelves').compareDocumentPosition(d.getElementById('searchRow')) & 4) &&
+    d.getElementById('shelves').contains(d.getElementById('popularHost')));
+  check('its look is unchanged: the same row of controls', /^mb-6 flex items-center gap-2$/.test(d.getElementById('searchRow').className));
+  win.happyDOM.close();
 }
 
 // ---- Requests: ?q= runs the search on arrival ----

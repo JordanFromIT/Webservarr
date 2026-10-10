@@ -330,7 +330,7 @@ async def show_in_continue(request: Request, book_id: BookId, identity: str = De
 class NoticeIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    # seen: the first-visit window closed after its count. off: Don't show again.
+    # off: Don't show again. seen: an older copy of the page's Okay (changes nothing).
     state: Literal["seen", "off"]
 
 
@@ -340,7 +340,7 @@ class NoticeIn(BaseModel):
 async def answer_notice(request: Request, body: NoticeIn, identity: str = Depends(_owner),
                         db: Session = Depends(get_db)):
     """The caller's answer to the audiobook notice, kept for their account on
-    every device: {"notice": "inline"} once the first-visit window is seen,
-    {"notice": "off"} after Don't show again (which no later answer undoes).
+    every device: {"notice": "off"} after Don't show again (which no later
+    answer undoes), {"notice": "window"} otherwise.
     The Books page reads it back from its own render (main.books_notice)."""
     return {"notice": book_personal.set_notice(db, identity, body.state)}

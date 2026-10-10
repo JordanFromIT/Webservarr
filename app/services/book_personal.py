@@ -115,29 +115,26 @@ def remove_from_list(db, identity: str, book_ids: Iterable[int]) -> None:
 
 # --- The audiobook notice ------------------------------------------------------------
 #
-# What the Books page shows about where to listen (pages/books.js): the
-# first-visit window until the person presses its Okay, then the inline notice
-# on later visits until they press Don't show again. One row per identity,
-# so the answer holds on every device.
+# What the Books page shows about where to listen (pages/books.js): a window
+# on every visit until the person presses its Don't show again. One row per
+# identity, so the answer holds on every device.
 
-NOTICE_WINDOW = "window"     # no row: the first-visit window
-NOTICE_INLINE = "inline"     # the window closed after its count: the inline notice
+NOTICE_WINDOW = "window"     # the window, on every visit
 NOTICE_OFF = "off"           # Don't show again
-NOTICE_SEEN = "seen"         # the stored state behind NOTICE_INLINE
+NOTICE_SEEN = "seen"         # an older page's Okay: kept, but it hides nothing
 
 
 def notice_state(db, identity: str) -> str:
-    """What the Books page shows this person: window, inline or off."""
+    """What the Books page shows this person: window or off."""
     row = db.query(BookNotice.state).filter(BookNotice.identity == identity).first()
-    if row is None:
-        return NOTICE_WINDOW
-    return NOTICE_OFF if row[0] == NOTICE_OFF else NOTICE_INLINE
+    return NOTICE_OFF if row is not None and row[0] == NOTICE_OFF else NOTICE_WINDOW
 
 
 def set_notice(db, identity: str, state: str) -> str:
-    """Record "seen" (the window closed after its count) or "off" (Don't show again) and
-    return what the page shows now. Off is for good: a later "seen" (another
-    tab's window) never brings the notice back."""
+    """Record "off" (Don't show again), or "seen" (an older copy of the page
+    still open, whose Okay sent it; it changes nothing the page shows), and
+    return what the page shows now. Off is for good: a later "seen" never
+    brings the notice back."""
     if state not in (NOTICE_SEEN, NOTICE_OFF):
         raise ValueError(state)
     for _ in range(2):

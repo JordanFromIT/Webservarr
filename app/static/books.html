@@ -36,20 +36,16 @@
      held in the grid's skeleton the same way (data-books-flat). */
   #gridSkeleton [data-skel="series"] { display: none; }
   html[data-books-flat] #gridSkeleton [data-skel="series"] { display: block; }
-  /* The audiobook notice's inline card, held from the first paint of a full
-     load (theme-loader.js): its room, unseen until pages/books.js has wired
-     its buttons and taken the hidden attribute off. */
-  html[data-books-notice] #booksNotice[hidden] { display: block; visibility: hidden; }
   /* The first-visit window is open: the page under it holds still. */
   html[data-books-notice-open] body { overflow: hidden; }
 
   /* ---- The audiobook notice (docs/mockups/books-notice.html) ----
-     The list, in both states: small accent dots, held tight to its lead-in. */
+     The list: small accent dots, held tight to its lead-in. */
   .bn-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
   .bn-list li { display: flex; gap: 10px; align-items: baseline; }
   .bn-list li::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 9999px; background: rgb(var(--color-accent)); transform: translateY(-2px); }
 
-  /* The first-visit window: the veil blurs and dims everything (shell
+  /* The window: the veil blurs and dims everything (shell
      included), and the window is the veil's sibling, not its child: a
      backdrop-filter makes its element a backdrop root, so a window inside the
      veil would blur only the veil's own colour and not the page. */
@@ -74,17 +70,21 @@
   .bn-window-body p { margin-block: 0; max-width: 62ch; text-wrap: pretty; }
   .bn-window-body .bn-lead { font-size: 17px; line-height: 1.5; color: rgb(var(--color-text)); }
   .bn-window-body p:has(+ .bn-list) { margin-bottom: -4px; }
-  .bn-window-foot { display: flex; justify-content: flex-end; padding: 16px 24px 24px; border-top: 1px solid rgb(var(--color-text) / .1); }
+  /* Don't show again, then Okay, side by side at the window's foot. */
+  .bn-window-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px 24px; border-top: 1px solid rgb(var(--color-text) / .1); }
   @media (max-width: 639.98px) {
     .bn-window-head { padding: 20px 20px 0; }
     .bn-window-head h2 { font-size: 20px; }
     .bn-window-body { padding: 12px 20px 16px; }
     .bn-window-foot { padding: 12px 20px 20px; }
-    .bn-window-foot .bn-count { width: 100%; }
+    /* A phone: the pair spans the foot, Okay at its own width. */
+    .bn-window-foot .bn-count { flex: 0 0 auto; min-width: 7.5rem; }
+    .bn-window-foot .bn-count.bn-count-quiet { flex: 1 1 auto; min-width: 0; padding-inline: 8px; }
   }
-  /* Okay is its own timer: a solid primary fill grows across a dim primary
-     track over the wait (transform only). aria-disabled, not disabled, so it
-     stays in the Tab order. Its width holds "Okay (15)", so it never jumps. */
+  /* Each button is its own timer. aria-disabled, not disabled, so both stay
+     in the Tab order. Okay: a solid primary fill grows across a dim primary
+     track over its wait (transform only). Its width holds "Okay (15)", so it
+     never jumps. */
   .bn-count {
     position: relative; isolation: isolate; overflow: hidden;
     display: inline-flex; align-items: center; justify-content: center;
@@ -103,6 +103,20 @@
   .bn-count.is-running::before { animation: bn-fill var(--bn-wait) linear both; }
   .bn-count:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
   @keyframes bn-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  /* Don't show again: the quiet button, with a thin line under its words
+     that grows over its own, longer wait and is gone once it works. Its
+     width holds "Don't show again (30)", so it never jumps either. */
+  .bn-count.bn-count-quiet {
+    --bn-wait: 30s;
+    min-width: 0; padding-inline: 12px;
+    background: transparent; box-shadow: none;
+    color: rgb(var(--color-text) / .75);
+    transition: background-color 150ms ease-out, color 150ms ease-out;
+  }
+  .bn-count-quiet::before { inset: auto 12px 8px; height: 2px; border-radius: 1px; background: rgb(var(--color-text) / .4); }
+  .bn-count-quiet[aria-disabled="true"] { color: rgb(var(--color-text) / .65); }
+  .bn-count-quiet:not([aria-disabled="true"])::before { content: none; }
+  .bn-count-quiet:not([aria-disabled="true"]):hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
   /* Opening: the app's dialog motion, 220ms. The veil and the window fade
      each on their own, never the overlay around them (opacity below 1 on a
      parent makes it a backdrop root too, and both blurs would see nothing). */
@@ -111,50 +125,25 @@
   @keyframes bn-fade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes bn-rise { from { transform: translateY(6px) scale(.985); } to { transform: none; } }
   /* Reduced motion: opacity only. No rise, and no sweep: Okay sits on its dim
-     track and turns solid when the count ends. The number still counts. */
+     track and turns solid when the count ends, and Don't show again has no
+     line. The numbers still count. */
   @media (prefers-reduced-motion: reduce) {
     .bn-overlay.is-opening .bn-window { animation: bn-fade 220ms ease-out backwards; }
     .bn-count.is-running::before { animation: none; }
+    .bn-count.bn-count-quiet { transition: none; }
   }
 
-  /* The inline notice: a quiet panel in the page, not frosted. One column:
-     the title, the words, then Okay and Don't show again at its foot. */
-  /* Wide: the card beside the Continue row, under Your stats, in its own
-     column (the row keeps the rest and scrolls as before); its room is held
-     from the first paint like the card's own. Narrower: under the row. */
-  .bn-area { container-type: inline-size; }
-  #booksNotice { scroll-margin-top: 72px; }
-  #booksNotice:not([hidden]), html[data-books-notice] #booksNotice { margin-bottom: 32px; }
+  /* Recently added beside the Continue row on a wide screen, in the column
+     the audiobook notice's card used to have (the row keeps the rest and
+     scrolls as before), when both have books; otherwise, and on narrower
+     screens, under it. Held from the first paint by the same <html> flags
+     that hold each row's room (theme-loader.js, pages/books.js markRow). */
+  .books-top-area { container-type: inline-size; }
   @container (min-width: 912px) {
-    .bn-continue:has(> #booksNotice:not([hidden])), html[data-books-notice] .bn-continue {
+    html[data-books-continue][data-books-recent] .books-top {
       display: grid; grid-template-columns: minmax(0, 1fr) 26rem; column-gap: 32px; align-items: start;
     }
-    .bn-continue > #booksNotice { grid-column: 2; grid-row: 1; }
   }
-  /* Coming in when the first-visit window closes: the person's own action,
-     so the page below may move. Reduced motion: a fade only. */
-  .bn-inline.is-arriving { animation: bn-arrive 280ms ease-out both; }
-  @keyframes bn-arrive { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .bn-inline.is-arriving { animation: bn-fade 220ms ease-out both; } }
-  .bn-card { display: grid; gap: 10px 16px; grid-template-areas: "head" "text" "actions"; padding: 16px; background: rgb(var(--color-primary) / .10); border: 1px solid rgb(var(--color-accent) / .20); border-radius: 12px; }
-  .bn-card-head { grid-area: head; display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .bn-card-head .material-symbols-outlined { font-size: 20px; color: rgb(var(--color-accent)); }
-  .bn-card-head h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; color: rgb(var(--color-text)); text-wrap: balance; }
-  .bn-card-text { grid-area: text; min-width: 0; font-size: 14px; line-height: 20px; color: rgb(var(--color-text) / .8); }
-  .bn-card-text p { margin: 0 0 6px; max-width: 72ch; text-wrap: pretty; }
-  .bn-card-text .bn-lead { color: rgb(var(--color-text)); font-weight: 500; }
-  .bn-card-text .bn-list { margin: -2px 0 6px; gap: 0; }
-  .bn-card-text > :last-child { margin-bottom: 0; }
-  .bn-card-text a { color: rgb(var(--color-text)); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgb(var(--color-text) / .45); }
-  .bn-card-text a:hover { text-decoration-color: rgb(var(--color-text)); }
-  .bn-card-actions { grid-area: actions; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-  .bn-btn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding-inline: 16px; border: 0; border-radius: 10px; font: 600 14px/1 var(--font-display); white-space: nowrap; cursor: pointer; transition: background-color 150ms ease-out, color 150ms ease-out, transform 150ms ease-out, box-shadow 150ms ease-out; }
-  .bn-btn:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
-  .bn-btn-primary { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
-  .bn-btn-primary:hover { background: rgb(var(--color-primary) / .9); }
-  .bn-btn-quiet { background: transparent; color: rgb(var(--color-text) / .7); padding-inline: 12px; }
-  .bn-btn-quiet:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
-  @media (prefers-reduced-motion: reduce) { .bn-btn { transition: none; } }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
      scrollbar would only take a strip of height from the cards. */
@@ -179,32 +168,6 @@
   <p class="mt-2 text-body text-frosted-blue/70">Read and listen to everything in the library, and pick up where you left off.</p>
 </div>
 
-  <!-- Search. Everything below it steps aside while there is a search. The help
-       button next to it runs the first-visit guide again (pages/books.js). Your
-       stats sits at the far end of the row (its words only from sm up). -->
-  <div class="flex items-center gap-2">
-    <div class="flex min-w-0 flex-1 items-center gap-2 max-w-[calc(36rem+3.5rem)]">
-      <div class="relative min-w-0 flex-1">
-        <label for="booksSearch" class="sr-only">Search books</label>
-        <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
-        <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
-               class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-ellipsis text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-focus"/>
-        <!-- The placeholder, cut off on a narrow phone, slides to its end and back here
-             over the input's own (ui.js WSUI.marqueePlaceholder, pages/books.js) until the
-             search has the focus or any text. The input's padding is its inset. -->
-        <span id="booksSearchMarquee" class="ws-marquee-ph pointer-events-none absolute inset-y-0 left-12 right-4 overflow-hidden whitespace-nowrap text-[17px] leading-[3rem] text-frosted-blue/70" aria-hidden="true"></span>
-      </div>
-      <button id="helpBtn" type="button" title="How Books works" aria-label="How Books works"
-              class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-        <span class="material-symbols-outlined" aria-hidden="true">help</span>
-      </button>
-    </div>
-    <a id="statsLink" href="/books/stats"
-       class="ml-auto shrink-0 inline-flex items-center justify-center gap-2 h-12 min-w-12 px-3 rounded-xl text-[15px] font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-      <span class="material-symbols-outlined" aria-hidden="true">insights</span><span class="sr-only sm:not-sr-only">Your stats</span>
-    </a>
-  </div>
-
   <div id="browseArea">
 
     <!-- Only the order: Continue answers first, then everything is drawn in one write (pages/books.js commitFrame). -->
@@ -213,9 +176,12 @@
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
       <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. Always shown (the first-visit guide points at it). -->
-      <!-- The Continue row and, beside it on a wide screen, the audiobook notice. -->
-      <div class="bn-area">
-      <div id="continueArea" class="bn-continue">
+      <!-- The rows above the library (#shelves): the search hides them while there is a search. -->
+      <div id="shelves">
+      <!-- The Continue row and Recently added: beside it on a wide screen, under it
+           otherwise (books.html's page style, .books-top). -->
+      <div class="books-top-area">
+      <div id="continueArea" class="books-top">
         <div id="continueHost" class="mb-8" aria-busy="true">
           <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
           <div data-skel="row" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
@@ -223,42 +189,15 @@
           </div>
           <p data-skel="empty" class="text-[15px] leading-6" aria-hidden="true">&nbsp;</p>
         </div>
-        <!-- The audiobook notice, inline: every visit after the first-visit window
-             (#booksNoticeWindow) has been closed, until Don't show again. Okay hides it
-             for the rest of the browser session. Wide: beside the Continue row, under
-             Your stats, one column of text; narrower: under the row, full width
-             (#continueArea, books.html's page style). What to show comes with the page
-             (the #ws-data block's books_notice, from the person's account, so it holds
-             on every device); theme-loader.js marks html[data-books-notice] on a full
-             load so its room is held from the first paint, and pages/books.js shows it
-             on every visit before its first await. The words are the window's too:
-             pages/books.js copies them in, with the Tickets link as plain words. The
-             section has no display utility (one would override hidden). -->
-        <section id="booksNotice" class="bn-inline" hidden aria-labelledby="booksNoticeTitle">
-          <div class="bn-card">
-            <div class="bn-card-head">
-              <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
-              <h2 id="booksNoticeTitle">Before you start listening</h2>
-            </div>
-            <div id="booksNoticeWords" class="bn-card-text">
-              <p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-books-notice-site>this site</span>.</p>
-              <p>Audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
-              <ul class="bn-list">
-                <li>They don't save your progress reliably</li>
-                <li>Books show up as albums of tracks, with no series or reading order</li>
-                <li>They have fewer features than you get here</li>
-              </ul>
-              <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
-              <p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
-              <p>So I can keep improving it, I can see what's read and listened to here.</p>
-              <p>If something isn't right, please open a ticket on the <a href="/tickets" data-books-notice-tickets>Tickets page</a> with as much detail as you can.</p>
-            </div>
-            <div class="bn-card-actions">
-              <button id="booksNoticeOff" type="button" class="bn-btn bn-btn-quiet">Don't show again</button>
-              <button id="booksNoticeOkay" type="button" class="bn-btn bn-btn-primary ws-lift">Okay</button>
-            </div>
+        <!-- Recently added (pages/books.js, books 3c): the newest books, with New on
+             those added since the last visit. Held like the rows below and written
+             in the same frame. -->
+        <div id="recentHost" class="mb-8" aria-busy="true">
+          <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Recently added</span></h2>
+          <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+            <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
           </div>
-        </section>
+        </div>
       </div>
       </div>
       <!-- Up next and My list (pages/books.js): the person's own rows, held like Continue
@@ -275,15 +214,8 @@
           <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
         </div>
       </div>
-      <!-- The discovery shelves (pages/books.js, books 3c): the newest books, with New on
-           those added since the last visit, and the books several people listened to.
-           Held like the rows above and written in the same frame. -->
-      <div id="recentHost" class="mb-8" aria-busy="true">
-        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Recently added</span></h2>
-        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
-          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-        </div>
-      </div>
+      <!-- Popular on the server (pages/books.js, books 3c): the books several people
+           listened to. Held like the rows above and written in the same frame. -->
       <div id="popularHost" class="mb-8" aria-busy="true">
         <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Popular on the server</span></h2>
         <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
@@ -292,6 +224,37 @@
       </div>
       <!-- What a press on those rows did, for a screen reader (the cards' own words do not change). -->
       <p id="booksSaid" class="sr-only" role="status" aria-live="polite"></p>
+      </div>
+
+      <!-- Search, right above the library's filters. While there is a search the rows
+           above it and the library below it step aside for the results (pages/books.js
+           setSearching). The help button next to it runs the first-visit guide again.
+           Your stats sits at the far end of the row (its words only from sm up). -->
+      <div id="searchRow" class="mb-6 flex items-center gap-2">
+        <div class="flex min-w-0 flex-1 items-center gap-2 max-w-[calc(36rem+3.5rem)]">
+          <div class="relative min-w-0 flex-1">
+            <label for="booksSearch" class="sr-only">Search books</label>
+            <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
+            <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
+                   class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-ellipsis text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-focus"/>
+            <!-- The placeholder, cut off on a narrow phone, slides to its end and back here
+                 over the input's own (ui.js WSUI.marqueePlaceholder, pages/books.js) until the
+                 search has the focus or any text. The input's padding is its inset. -->
+            <span id="booksSearchMarquee" class="ws-marquee-ph pointer-events-none absolute inset-y-0 left-12 right-4 overflow-hidden whitespace-nowrap text-[17px] leading-[3rem] text-frosted-blue/70" aria-hidden="true"></span>
+          </div>
+          <button id="helpBtn" type="button" title="How Books works" aria-label="How Books works"
+                  class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+            <span class="material-symbols-outlined" aria-hidden="true">help</span>
+          </button>
+        </div>
+        <a id="statsLink" href="/books/stats"
+               class="ml-auto shrink-0 inline-flex items-center justify-center gap-2 h-12 min-w-12 px-3 rounded-xl text-[15px] font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          <span class="material-symbols-outlined" aria-hidden="true">insights</span><span class="sr-only sm:not-sr-only">Your stats</span>
+        </a>
+      </div>
+
+      <!-- The library (#libraryBody): its toolbar and the books. Steps aside for a search too. -->
+      <div id="libraryBody">
       <!-- The toolbar, the notes and Continue all arrive in one write with the first
            books (pages/books.js commitFrame), so nothing already on screen moves.
            Until then the toolbar is this skeleton, the controls' own size. -->
@@ -405,42 +368,45 @@
       <div id="moreWrap" class="hidden mt-8 flex justify-center">
         <button id="moreBtn" type="button" class="ws-lift h-11 min-w-[10rem] px-6 rounded-[10px] bg-frosted-blue/[0.07] text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Show more</button>
       </div>
+      </div>
+
+      <!-- Search results: under the search, in the place of the rows and the library. -->
+      <section id="searchSection" class="hidden" aria-labelledby="searchTitle">
+        <h2 id="searchTitle" class="sr-only">Search results</h2>
+        <!-- The filters narrow the search too: shown here while there is one. -->
+        <div id="searchFilters" data-active-filters class="hidden mb-4 min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
+        <p id="searchStatus" class="mb-4 text-[15px] text-frosted-blue/70" role="status" aria-live="polite">&nbsp;</p>
+        <div id="searchSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
+          <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        </div>
+        <ul id="searchGrid" class="hidden grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></ul>
+        <div id="searchEmpty" class="hidden py-12 text-center">
+          <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">search_off</span>
+          <p id="searchEmptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue break-words">No matches</p>
+          <p id="searchEmptyText" class="mt-1 text-[15px] text-frosted-blue/70 break-words">Check the spelling, or ask for it.</p>
+          <a id="searchRequest" href="/requests" class="ws-lift mt-4 inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Can't find it? Request it</a>
+          <button id="searchClear" type="button" class="hidden mt-4 inline-flex h-10 items-center rounded-full px-4 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Clear filters</button>
+        </div>
+        <div id="searchError" class="hidden py-12 text-center">
+          <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">cloud_off</span>
+          <p class="mt-3 text-[17px] font-semibold text-frosted-blue">The search didn't go through</p>
+          <p class="mt-1 text-[15px] text-frosted-blue/70">Try again in a moment.</p>
+        </div>
+      </section>
     </section>
 
   </div>
 
-  <!-- Search results: take the place of Continue and the library. -->
-  <section id="searchSection" class="hidden" aria-labelledby="searchTitle">
-    <h2 id="searchTitle" class="sr-only">Search results</h2>
-    <!-- The filters narrow the search too: shown here while there is one. -->
-    <div id="searchFilters" data-active-filters class="hidden mb-4 min-w-0 flex flex-wrap items-center gap-2" role="group" aria-label="Filters in use"></div>
-    <p id="searchStatus" class="mb-4 text-[15px] text-frosted-blue/70" role="status" aria-live="polite">&nbsp;</p>
-    <div id="searchSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
-      <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-    </div>
-    <ul id="searchGrid" class="hidden grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></ul>
-    <div id="searchEmpty" class="hidden py-12 text-center">
-      <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">search_off</span>
-      <p id="searchEmptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue break-words">No matches</p>
-      <p id="searchEmptyText" class="mt-1 text-[15px] text-frosted-blue/70 break-words">Check the spelling, or ask for it.</p>
-      <a id="searchRequest" href="/requests" class="ws-lift mt-4 inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Can't find it? Request it</a>
-      <button id="searchClear" type="button" class="hidden mt-4 inline-flex h-10 items-center rounded-full px-4 text-[15px] font-semibold text-frosted-blue bg-frosted-blue/[0.07] hover:bg-frosted-blue/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Clear filters</button>
-    </div>
-    <div id="searchError" class="hidden py-12 text-center">
-      <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">cloud_off</span>
-      <p class="mt-3 text-[17px] font-semibold text-frosted-blue">The search didn't go through</p>
-      <p class="mt-1 text-[15px] text-frosted-blue/70">Try again in a moment.</p>
-    </div>
-  </section>
-
 </div>
 </div>
-<!-- The audiobook notice's first-visit window, once per account: over the
-     whole page, shell included, with everything behind it blurred, dimmed and
-     inert. Okay counts down from 15 and nothing closes it before then.
-     pages/books.js runs it (WSUI.modal with its hold); its words are copied
-     in from #booksNotice. Outside the page's scroll box, so nothing behind it
-     scrolls. -->
+<!-- The audiobook notice: a window over the whole page, shell included, with
+     everything behind it blurred, dimmed and inert, on every visit to Books
+     until Don't show again. Okay works after 15 seconds and closes it for this
+     visit; Don't show again works after 30 and turns it off for the account
+     (POST /api/books/me/notice). Nothing closes it before Okay works.
+     pages/books.js runs it (WSUI.modal with its hold). Outside the page's
+     scroll box, so nothing behind it scrolls. The site's name is written in
+     by the server (pages.py BOOKS_NOTICE_SITE). -->
 <div id="booksNoticeWindow" class="bn-overlay" hidden>
   <div class="bn-veil" data-books-notice-veil></div>
   <div id="booksNoticeBox" class="bn-window ws-frost" aria-labelledby="booksNoticeWindowTitle">
@@ -448,8 +414,21 @@
       <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
       <h2 id="booksNoticeWindowTitle" tabindex="-1">Before you start listening</h2>
     </div>
-    <div id="booksNoticeWindowWords" class="bn-window-body"></div>
+    <div id="booksNoticeWindowWords" class="bn-window-body">
+      <p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-books-notice-site>this site</span>.</p>
+      <p>Audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
+      <ul class="bn-list">
+        <li>They don't save your progress reliably</li>
+        <li>Books show up as albums of tracks, with no series or reading order</li>
+        <li>They have fewer features than you get here</li>
+      </ul>
+      <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
+      <p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
+      <p>So I can keep improving it, I can see what's read and listened to here.</p>
+      <p>If something isn't right, please open a ticket on the Tickets page with as much detail as you can.</p>
+    </div>
     <div class="bn-window-foot">
+      <button id="booksNoticeWindowOff" type="button" class="bn-count bn-count-quiet" aria-disabled="true">Don't show again<span data-books-notice-count aria-hidden="true"></span></button>
       <button id="booksNoticeWindowOkay" type="button" class="bn-count ws-lift" aria-disabled="true">Okay<span data-books-notice-count aria-hidden="true"></span></button>
     </div>
     <p id="booksNoticeSay" class="sr-only" aria-live="polite"></p>

@@ -397,7 +397,7 @@ def data_block(branding: dict, user: Optional[dict], version: str, name: str,
     setup: which connections are set up (settings_setup), on the Settings
     page only.
     books_notice: what the Books page shows this person about where to
-    listen ("window", "inline" or "off"; main.books_notice), on Books only.
+    listen ("window" or "off"; main.books_notice), on Books only.
     debug_mode: True only for an admin while Settings has debug mode on
     (render_html); router.js honours ?ws-debug= only then. Otherwise the
     key is left out, so nobody else learns whether it is on.

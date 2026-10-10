@@ -823,10 +823,9 @@ class BookRequestTime(Base):
 
 class BookNotice(Base):
     """One person's answer to the audiobook notice on Books (pages/books.js):
-    no row means they have not had the first-visit window yet; `seen` means
-    they closed it after its countdown, so later visits get the inline notice; `off`
-    means Don't show again. Keyed by account identity, so it holds across
-    devices."""
+    `off` means Don't show again; no row, or `seen` (an older page's Okay),
+    means the window shows on every visit. Keyed by account identity, so it
+    holds across devices."""
     __tablename__ = "book_notice"
 
     identity = Column(String(255), primary_key=True)

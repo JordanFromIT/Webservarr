@@ -59,12 +59,12 @@
  * every book is its own card with a "Dune #2" line. Remembered with the
  * format and the sort in the person's view (localStorage).
  *
- * The audiobook notice says where audiobooks are best heard, to everyone who
- * opens Books. The first visit (once per account, kept on the server) is a
- * window over the whole page whose Okay works after NOTICE_WAIT_S seconds;
- * the first-visit guide waits for it to close. Later visits have the same
- * words inline under the event log, with Okay (hidden for the rest of the
- * browser session) and Don't show again (kept on the server).
+ * The audiobook notice says where audiobooks are best heard, in a window
+ * over the whole page on every visit to Books. Its Okay works after
+ * NOTICE_WAIT_S seconds and closes it for this visit; its Don't show again
+ * works after NOTICE_OFF_WAIT_S seconds and turns it off for the account
+ * (kept on the server, so on every device). The first-visit guide waits for
+ * it to close.
  */
 
 const PAGE_SIZE = 36;
@@ -89,19 +89,18 @@ const ROWS = {
   recent: { key: 'webservarr_books_recent:', flag: 'data-books-recent', host: 'recentHost', url: '/api/books/recent', cache: 'books:recent' },
   popular: { key: 'webservarr_books_popular:', flag: 'data-books-popular', host: 'popularHost', url: '/api/books/popular', cache: 'books:popular' }
 };
-// Every row above the library, top to bottom.
-const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];
+// Every row above the library, top to bottom (Recently added beside Continue on a wide screen).
+const ROW_ORDER = ['continue', 'recent', 'upnext', 'mylist', 'popular'];
 const MOVE_MS = 200;               // a card trading places with its neighbour
 const GUIDE_KEY = 'webservarr_books_guide_seen:';
-// The audiobook notice: the person's answer, kept for their account
-// (POST state "seen" or "off"), and this browser session's own record, per
-// account: "seen" (the window was closed: the inline card from now on, even
-// if the answer did not reach the server), "okay" (the inline card's Okay)
-// or "off" (Don't show again). The last two hide the card for the session.
+// The audiobook notice: Don't show again is kept for the account (POST state
+// "off"), and in this browser session's own record, per account ("off"), so a
+// page fetched before the answer reached the server does not show it again.
 const NOTICE_URL = '/api/books/me/notice';
 const NOTICE_SESSION_KEY = 'webservarr_books_notice_session:';
-// Seconds the first-visit window's Okay waits before it works.
+// Seconds the window's Okay, and its Don't show again, wait before they work.
 const NOTICE_WAIT_S = 15;
+const NOTICE_OFF_WAIT_S = 30;
 // The cards have their covers by then, so the first spotlight sits on something drawn.
 const GUIDE_WAIT_MS = 900;
 
@@ -968,37 +967,28 @@ export async function mount(ctx) {
 
   // ---- The audiobook notice ----
 
-  // What to show comes with the page (books_notice: "window", "inline" or
-  // "off", from the person's account), unless Okay or Don't show again hid it
-  // earlier in this browser session. Decided before the first await, so the
-  // inline card is there from the first frame of a soft visit (theme-loader.js
-  // holds its room on a full load).
-  const notice = $('booksNotice');
+  // A window on every visit, unless the person's account has Don't show
+  // again (books_notice "off", from the page's render) or it was pressed
+  // earlier in this browser session. Decided before the first await.
   const noticeWin = $('booksNoticeWindow');
   const account = ((ctx.data || {}).user || {}).identity_key || user;
   const noticeKey = NOTICE_SESSION_KEY + account;
-  // The window: open, and the guide waiting for it to close.
-  const win = { modal: null, left: 0, guideWaiting: false, inerted: [] };
+  // The window: open, each button's seconds to go, and the guide waiting for it to close.
+  const win = { modal: null, left: 0, offLeft: 0, guideWaiting: false, inerted: [] };
 
   function sessionGet(key) {
     try { return sessionStorage.getItem(key); } catch (e) { return null; }
   }
   function sessionSet(key, value) {
-    try { sessionStorage.setItem(key, value); } catch (e) { /* blocked: the notice is back next visit */ }
+    try { sessionStorage.setItem(key, value); } catch (e) { /* blocked: the server's answer still holds */ }
   }
 
-  /** The page's heading takes the focus, so it is not lost with a button that went. */
+  /** The page's heading takes the focus, so it is not lost with the window. */
   function focusHeading() {
     const h1 = root.querySelector('h1');
     if (!h1) return;
     if (!h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1');
     h1.focus({ preventScroll: true });
-  }
-
-  function hideNotice() {
-    notice.hidden = true;
-    notice.classList.remove('is-arriving');
-    html.removeAttribute('data-books-notice');
   }
 
   /** Everything but the window (the page, the shell) is inert while it is
@@ -1020,42 +1010,47 @@ export async function mount(ctx) {
     win.inerted = [];
   }
 
-  /** The count on Okay: n seconds to go, or 0 (it works). */
-  function setCount(n) {
-    const okay = $('booksNoticeWindowOkay');
-    okay.querySelector('[data-books-notice-count]').textContent = n > 0 ? '\u00a0(' + n + ')' : '';
-    if (n > 0) okay.setAttribute('aria-disabled', 'true');
+  /** The count on a button: n seconds to go, or 0 (it works). */
+  function setCount(btn, n) {
+    btn.querySelector('[data-books-notice-count]').textContent = n > 0 ? '\u00a0(' + n + ')' : '';
+    if (n > 0) btn.setAttribute('aria-disabled', 'true');
     else {
-      okay.removeAttribute('aria-disabled');
-      okay.classList.remove('is-running');
+      btn.removeAttribute('aria-disabled');
+      btn.classList.remove('is-running');
     }
   }
 
   function tick() {
     if (!win.modal || signal.aborted) return;
-    win.left -= 1;
-    setCount(win.left);
-    if (win.left > 0) ctx.setTimeout(tick, 1000);
-    else win.modal.release();
+    if (win.left > 0) {
+      win.left -= 1;
+      setCount($('booksNoticeWindowOkay'), win.left);
+      // From here Escape and a click outside close it, as Okay does.
+      if (win.left === 0) win.modal.release();
+    }
+    if (win.offLeft > 0) {
+      win.offLeft -= 1;
+      setCount($('booksNoticeWindowOff'), win.offLeft);
+    }
+    if (win.left > 0 || win.offLeft > 0) ctx.setTimeout(tick, 1000);
   }
 
-  /** The first-visit window. Nothing closes it for NOTICE_WAIT_S seconds:
-      Okay is aria-disabled (still in the Tab order), and Escape (the modal's
-      hold) and a click outside do nothing. The count is said once. */
+  /** The window. Nothing closes it for NOTICE_WAIT_S seconds: both buttons
+      are aria-disabled (still in the Tab order), and Escape (the modal's
+      hold) and a click outside do nothing. Don't show again waits
+      NOTICE_OFF_WAIT_S. The counts are said once. */
   function openWindow() {
     const words = $('booksNoticeWindowWords');
-    words.textContent = '';
-    Array.prototype.forEach.call($('booksNoticeWords').children, function (n) {
-      words.appendChild(n.cloneNode(true));
-    });
-    // In the window the Tickets page is words, not a way out.
-    words.querySelectorAll('a[data-books-notice-tickets]').forEach(function (a) {
-      a.replaceWith(document.createTextNode(a.textContent));
-    });
-    win.left = NOTICE_WAIT_S;
-    setCount(win.left);
     const okay = $('booksNoticeWindowOkay');
-    if (!motionOff()) okay.classList.add('is-running');
+    const off = $('booksNoticeWindowOff');
+    win.left = NOTICE_WAIT_S;
+    win.offLeft = NOTICE_OFF_WAIT_S;
+    setCount(okay, win.left);
+    setCount(off, win.offLeft);
+    if (!motionOff()) {
+      okay.classList.add('is-running');
+      off.classList.add('is-running');
+    }
     noticeWin.classList.add('is-opening');
     noticeWin.hidden = false;
     html.setAttribute('data-books-notice-open', '');
@@ -1072,15 +1067,16 @@ export async function mount(ctx) {
       onClose: windowClosed
     });
     ctx.setTimeout(function () {
-      if (win.modal) $('booksNoticeSay').textContent = 'Okay will work in ' + NOTICE_WAIT_S + ' seconds.';
+      if (win.modal) {
+        $('booksNoticeSay').textContent = 'Okay will work in ' + NOTICE_WAIT_S + ' seconds, and Don\u2019t show again in ' + NOTICE_OFF_WAIT_S + '.';
+      }
     }, 400);
     ctx.setTimeout(tick, 1000);
   }
 
-  /** Closed by Okay or Escape after the count, a click outside after it, or
-      the router before a navigation. Any close once the count is done is
-      the answer kept for the account (seen), and the inline card takes its
-      place on this same view, as on every later visit until its Okay. */
+  /** Closed by Okay or Don't show again, by Escape or a click outside once
+      Okay works, or by the router before a navigation. Nothing is kept for
+      Okay: the window is back on the next visit. */
   function windowClosed() {
     const finished = win.left <= 0;
     win.modal = null;
@@ -1089,83 +1085,45 @@ export async function mount(ctx) {
     $('booksNoticeSay').textContent = '';
     html.removeAttribute('data-books-notice-open');
     inertBack();
-    if (finished) {
-      sessionSet(noticeKey, 'seen');
-      // Not on the visit's signal: the answer goes through if they leave at once.
-      sendBooks('POST', NOTICE_URL, { state: 'seen' }).then(null, function () { /* the window is back next session */ });
-      if (!signal.aborted) {
-        // In its place by the Continue row, coming in (books.html's page style),
-        // and brought into view when it is not (under the row on a phone).
-        notice.classList.add('is-arriving');
-        notice.hidden = false;
-        const box = notice.getBoundingClientRect();
-        if (box.top < 0 || box.top > (window.innerHeight || 0) - 120) {
-          notice.scrollIntoView({ block: 'start', behavior: motionOff() ? 'auto' : 'smooth' });
-        }
-      }
-    }
     if (finished && win.guideWaiting && !signal.aborted) {
       win.guideWaiting = false;
-      guideAfterFirstAct();
+      ctx.setTimeout(startGuide, 300);
     }
   }
 
-  /** The guide after the window, but only once the person does something
-      (a tap, a key, a wheel or a swipe, the card's Okay): until then the
-      inline card that just came in stays where they can read it, and the
-      guide's first spotlight does not scroll it away. Not a scroll: bringing
-      the card into view is one. */
-  function guideAfterFirstAct() {
-    const waiting = new AbortController();
-    const go = function () {
-      waiting.abort();
-      ctx.setTimeout(startGuide, 300);
-    };
-    ['pointerdown', 'keydown', 'wheel', 'touchmove'].forEach(function (type) {
-      document.addEventListener(type, go, { capture: true, passive: true, signal: waiting.signal });
-    });
-    signal.addEventListener('abort', function () { waiting.abort(); }, { once: true, signal: waiting.signal });
-  }
-
+  /** Okay, Escape or a click outside: closed for this visit, once Okay works. */
   function closeWindow() {
     if (!win.modal || win.left > 0) return;
     win.modal.close();
   }
 
-  if (notice) {
+  /** Don't show again, once it works: closed, and off for the account. */
+  function turnOff() {
+    if (!win.modal || win.offLeft > 0) return;
+    sessionSet(noticeKey, 'off');
+    win.modal.close();
+    // Not on the visit's signal: the answer goes through if they leave at once.
+    sendBooks('POST', NOTICE_URL, { state: 'off' }).then(null, function () {
+      if (window.WSUI && typeof window.WSUI.toast === 'function') {
+        window.WSUI.toast('Don\u2019t show again wasn\u2019t saved, so the notice will be back on your next visit.', 'err');
+      }
+    });
+  }
+
+  if (noticeWin) {
     const brand = window.WEBSERVARR_THEME || (ctx.data || {}).branding || {};
     const site = typeof brand.app_name === 'string' ? brand.app_name.trim() : '';
     root.querySelectorAll('[data-books-notice-site]').forEach(function (n) { n.textContent = site || 'this site'; });
     const server = (ctx.data || {}).books_notice;
-    const held = sessionGet(noticeKey);
-    // Okay or Don't show again this session: nothing. The window closed this
-    // session: the inline card, whatever an older copy of the page says.
-    let mode = held === 'okay' || held === 'off' ? 'off' : (held === 'seen' && server === 'window' ? 'inline' : server);
+    // "window" (an older render may still say "inline"): open it. "off", or
+    // Don't show again earlier this session: not.
+    let open = (server === 'window' || server === 'inline') && sessionGet(noticeKey) !== 'off';
     // Not over a book's pop-up (a full load of its address): the window waits for the next visit.
-    if (mode === 'window' && (html.hasAttribute('data-book-open') || !noticeWin ||
-        !window.WSUI || typeof window.WSUI.modal !== 'function')) mode = 'off';
-    notice.hidden = mode !== 'inline';
-    html.removeAttribute('data-books-notice');
+    if (open && (html.hasAttribute('data-book-open') || !window.WSUI || typeof window.WSUI.modal !== 'function')) open = false;
 
-    $('booksNoticeOkay').addEventListener('click', function () {
-      // Back on the next visit to the site (a new browser session).
-      sessionSet(noticeKey, 'okay');
-      hideNotice();
-      focusHeading();
-    }, { signal: signal });
-    $('booksNoticeOff').addEventListener('click', function () {
-      sessionSet(noticeKey, 'off');
-      hideNotice();
-      focusHeading();
-      sendBooks('POST', NOTICE_URL, { state: 'off' }).then(null, function () {
-        if (window.WSUI && typeof window.WSUI.toast === 'function') {
-          window.WSUI.toast('Don\u2019t show again wasn\u2019t saved, so the notice will be back on your next visit.', 'err');
-        }
-      });
-    }, { signal: signal });
-
-    if (mode === 'window') {
+    if (open) {
       $('booksNoticeWindowOkay').addEventListener('click', closeWindow, { signal: signal });
+      $('booksNoticeWindowOff').addEventListener('click', turnOff, { signal: signal });
       noticeWin.querySelector('[data-books-notice-veil]').addEventListener('click', closeWindow, { signal: signal });
       // Leaving the page: the window goes with it, and nothing is kept (the
       // router closes it first; this is for any other way the visit ends).
@@ -1696,9 +1654,9 @@ export async function mount(ctx) {
     });
   }
 
-  /** After the last card of a row goes: the next thing on the page, so the focus is never lost. */
+  /** After Up next's last card goes: the next thing on the page, so the focus is never lost. */
   function focusAfterRows() {
-    const next = root.querySelector('#mylistHost a, #recentHost a, #popularHost a, #formatChips button');
+    const next = root.querySelector('#mylistHost a, #popularHost a, #booksSearch');
     if (next) next.focus();
   }
 
@@ -2702,9 +2660,11 @@ export async function mount(ctx) {
     line.classList.toggle('sr-only', !!readerOnly);
   }
 
+  /** A search: the rows above the search and the library under it step aside for the results. */
   function setSearching(on) {
     state.searching = on;
-    $('browseArea').classList.toggle('hidden', on);
+    $('shelves').classList.toggle('hidden', on);
+    $('libraryBody').classList.toggle('hidden', on);
     $('searchSection').classList.toggle('hidden', !on);
   }
 
