@@ -205,6 +205,25 @@ def migrate_listening_log_source(db: Session) -> None:
             raise
 
 
+def migrate_insights_started_v1(db: Session) -> None:
+    """One-time: note the UTC day this install began recording for Insights
+    (requests, reading totals, ebook places), so its page can say "Tracking
+    started on ..." where it has no history yet. Written once; a worker that
+    loses the race to the other one leaves the first value."""
+    from sqlalchemy.exc import IntegrityError
+    from app.services import insights_store
+
+    if _setting_row(db, insights_store.STARTED_KEY):
+        return
+    db.add(Setting(key=insights_store.STARTED_KEY, value=insights_store.now_utc().date().isoformat(),
+                   description="Insights tracking began (internal)"))
+    try:
+        db.commit()
+        logger.info("Insights tracking started")
+    except IntegrityError:
+        db.rollback()
+
+
 def migrate_books_catalog_v2(db: Session) -> None:
     """One-time migration for databases that made the Books catalog tables
     in an earlier shape (the ebook was a whole Kavita series; a book held one

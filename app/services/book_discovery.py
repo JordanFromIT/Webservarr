@@ -32,7 +32,7 @@ from app.database import SessionLocal
 from app.integrations import plex_player as pp
 from app.models import (Book, BookAnnounced, BookAudioEdition, BookFollow, BookListEntry, BookPopularity, BookVisit,
                         ListeningDaily, ListeningLog, ListeningPosition, Setting)
-from app.services import book_catalog, listening
+from app.services import book_catalog, insights_store, listening
 from app.services.notification_poller import _create_notification
 from app.services.push import send_push_to_users
 from app.utils import identity_email
@@ -188,8 +188,8 @@ def store_popularity(db: Session, plays: Optional[list], now: Optional[datetime]
 
 async def refresh(now: Optional[datetime] = None) -> None:
     """The leader's hourly pass: popularity (Plex's history read first; when
-    it cannot be read, WebServarr's own data alone) and the listening
-    rollup by day and by hour."""
+    it cannot be read, WebServarr's own data alone), the listening rollup
+    by day and by hour, and the Insights prune."""
     now = now or _now()
     try:
         plays = await pp.play_history(now - POPULAR_WINDOW)
@@ -203,6 +203,7 @@ async def refresh(now: Optional[datetime] = None) -> None:
             store_popularity(db, plays, now)
             listening.roll_up(db, now)
             listening.roll_up_hours(db, now)
+            insights_store.prune(db, now)
         except BaseException:
             db.rollback()
             raise

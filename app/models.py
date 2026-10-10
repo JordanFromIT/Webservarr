@@ -833,3 +833,80 @@ class BookNotice(Base):
 
     def __repr__(self):
         return f"<BookNotice(identity='{self.identity}', state='{self.state}')>"
+
+
+# ---- Insights (app/services/insights_store.py) ----
+# Recorded as things happen, so the admin's Insights page has their history
+# (docs/superpowers/specs/2026-10-10-insights-design.md, section 5). Keyed by
+# account identity. The admin sees these on Insights; a person's own pages
+# show them only their own. Kept insights_store.KEEP_DAYS.
+
+class BookRequester(Base):
+    """Who asked for a book through the Requests page, and when: one row per
+    request Chaptarr took (never "Already in the library")."""
+    __tablename__ = "book_requesters"
+    __table_args__ = (Index("ix_book_requesters_identity", "identity"),
+                      Index("ix_book_requesters_requested_at", "requested_at"))
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    foreign_id = Column(String(100), nullable=False)               # Chaptarr's book id, e.g. gr:3634639
+    title = Column(String(300), nullable=False, default="")
+    format = Column(String(10), nullable=False)                    # ebook, audiobook or both
+    requested_at = Column(DateTime, nullable=False)                # naive UTC
+
+    def __repr__(self):
+        return f"<BookRequester(id={self.id})>"
+
+
+class KavitaLink(Base):
+    """The Kavita account a person connected to WebServarr, as Kavita named
+    it at their latest connect: its id and username, nothing else."""
+    __tablename__ = "kavita_links"
+
+    identity = Column(String(255), primary_key=True)
+    kavita_user_id = Column(Integer, nullable=True)
+    kavita_username = Column(String(100), nullable=False, default="")
+    linked_at = Column(DateTime, nullable=False)                   # naive UTC
+
+    def __repr__(self):
+        return f"<KavitaLink(identity='{self.identity}')>"
+
+
+class ReadingTotal(Base):
+    """A person's lifetime reading totals as Kavita counted them, the last
+    time WebServarr read them on one UTC day. Pages read between two days are
+    the rise from one row to the next."""
+    __tablename__ = "reading_totals"
+    __table_args__ = (UniqueConstraint("identity", "day", name="uq_reading_totals_identity_day"),)
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    day = Column(Date, nullable=False)
+    pages = Column(Integer, nullable=False, default=0)
+    words = Column(Integer, nullable=False, default=0)
+    hours = Column(Integer, nullable=False, default=0)
+    seen_at = Column(DateTime, nullable=False)                     # naive UTC
+
+    def __repr__(self):
+        return f"<ReadingTotal(identity='{self.identity}', day={self.day})>"
+
+
+class EbookPlace(Base):
+    """A person's place in one ebook (a catalog book) as Kavita gave it the
+    last time WebServarr read it for them. `pages` 0 means the book is known
+    to be opened but not how far (the nightly sweep saw it in their history)."""
+    __tablename__ = "ebook_places"
+    __table_args__ = (UniqueConstraint("identity", "book_id", name="uq_ebook_places_identity_book"),
+                      Index("ix_ebook_places_book_id", "book_id"))
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_id = Column(Integer, nullable=False)
+    page = Column(Integer, nullable=False, default=0)
+    pages = Column(Integer, nullable=False, default=0)
+    read_at = Column(DateTime, nullable=True)                      # Kavita's, naive UTC; null when it gave none
+    seen_at = Column(DateTime, nullable=False)                     # naive UTC
+
+    def __repr__(self):
+        return f"<EbookPlace(identity='{self.identity}', book_id={self.book_id})>"

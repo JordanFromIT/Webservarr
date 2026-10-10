@@ -45,7 +45,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user, require_admin
 from app.integrations import kavita
 from app.integrations import plex_player as pp
@@ -54,7 +54,7 @@ from app.limiter import limiter
 from app.routers import kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import book_catalog, book_discovery, book_personal, listening
+from app.services import book_catalog, book_discovery, book_personal, insights_store, listening
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -728,7 +728,8 @@ def _is_visible_ebook(book, who: Scope) -> bool:
 @router.get("/continue")
 @_limit(LIST_LIMIT, "continue")
 @_db_503
-async def continue_row(request: Request, who: Scope = Depends(caller), db: Session = Depends(get_db)):
+async def continue_row(request: Request, background: BackgroundTasks, who: Scope = Depends(caller),
+                       db: Session = Depends(get_db)):
     """What the caller is partway through, newest activity first, at most
     CONTINUE_MAX: {"items": [{book_id, format, title, author, cover_url,
     progress_label, percent, updated_at, resume}], "notes"}.
@@ -784,6 +785,13 @@ async def continue_row(request: Request, who: Scope = Depends(caller), db: Sessi
         offer(book_id, {"book_id": book_id, "format": "ebook", "at": place["at"] or datetime.min,
                         "progress": progress, "chapter_id": chapter_id, "place": place,
                         "resume": {"read_url": _read_url(rows[book_id])}})
+    if who.identity and ebook_places:
+        # Insights keeps each place it sees (spec 4.3): read here anyway, through the person's own link.
+        insights_store.best_effort(db, "ebook places", insights_store.record_ebook_places, who.identity,
+                                   {chapters[c]: p for c, p in ebook_places.items() if c in chapters})
+    if who.identity and who.kavita and insights_store.best_effort(
+            db, "the reading check", insights_store.has_reading_today, who.identity) is False:
+        background.add_task(_snapshot_reading, who.identity, who.kavita)
     if who.identity and any(reading):
         # Reading a series in Kavita follows it (spec 3c 2.5): seen only here,
         # through the person's own link, so it is noted while it can be.
@@ -824,6 +832,20 @@ async def _chapter_numbers(who: Scope, ebook_items: List[dict]) -> Dict[int, int
     found = await asyncio.gather(*(kavita.chapter_number_at(base, token, i["place"]["toc_chapter"],
                                                              i["place"]["toc_page"]) for i in ebook_items))
     return {i["chapter_id"]: n for i, n in zip(ebook_items, found) if n}
+
+
+async def _snapshot_reading(identity: str, reach: Tuple[str, str]) -> None:
+    """Today's Kavita totals for Insights, read after the Continue row has
+    answered and at most once a day per person (spec 4.3). Best effort."""
+    try:
+        totals = await kavita.reading_stats(*reach)
+    except kavita.KavitaUnavailable:
+        return
+    db = SessionLocal()
+    try:
+        insights_store.best_effort(db, "reading totals", insights_store.record_reading_totals, identity, totals)
+    finally:
+        db.close()
 
 
 def _read_url(book) -> str:
@@ -898,6 +920,9 @@ async def book_detail(request: Request, book_id: BookId, background: BackgroundT
         progress = None
         places, note = await _ebook_places(who, [(book.kavita_chapter_id, book.kavita_volume_id)])
         place = places.get(book.kavita_chapter_id)
+        if place and who.identity:
+            insights_store.best_effort(db, "an ebook place", insights_store.record_ebook_places, who.identity,
+                                       {book.id: place})
         if place:
             number = None
             if not _ebook_progress(place)["finished"]:

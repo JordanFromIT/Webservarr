@@ -742,6 +742,7 @@ async def create_chaptarr_request(
     _book_request_time(db, result.pop("book_ids", []))
     title = result.pop("title", "")
     if title:
+        _record_requester(db, current_user, body.bookId.strip(), title, fmt)
         # "both" is no format of its own: a line for each format the states
         # say this request asked for.
         formats = [fmt] if fmt != "both" else \
@@ -764,6 +765,16 @@ def _book_request_time(db: Session, book_ids: list) -> None:
     except SQLAlchemyError as exc:
         db.rollback()
         logger.warning("A book request's time could not be written: %s", type(exc).__name__)
+
+
+def _record_requester(db: Session, current_user: dict, foreign_id: str, title: str, fmt: str) -> None:
+    """Who asked for this book, for the admin's Insights ("requested then
+    read"). Never fails the request."""
+    from app.routers.tickets import account_identity
+    from app.services import insights_store
+
+    insights_store.best_effort(db, "a book request", insights_store.record_request,
+                               account_identity(current_user), foreign_id, title, fmt)
 
 
 def _book_request_line(db: Session, book_id: str, fmt: str, title: str) -> None:

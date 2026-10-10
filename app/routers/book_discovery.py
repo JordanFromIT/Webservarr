@@ -30,6 +30,7 @@ from app.routers.books import Scope, caller
 from app.routers.player import Text, require_encodable_body, require_same_origin
 from app.services import book_catalog
 from app.services import book_discovery as discovery
+from app.services import insights_store
 from app.utils import identity_email
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,7 @@ async def my_stats(request: Request, tz: Optional[str] = Query(None, max_length=
     if who.kavita:
         try:
             reading = await kavita.reading_stats(*who.kavita)
+            insights_store.best_effort(db, "reading totals", insights_store.record_reading_totals, identity, reading)
         except kavita.KavitaTokenRefused:
             notes.append(books._note("kavita", "not_connected", READING_NOT_CONNECTED))
         except kavita.KavitaUnavailable:

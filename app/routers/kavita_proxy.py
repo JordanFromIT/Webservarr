@@ -752,6 +752,7 @@ async def signin_oidc(
     body = await request.body()
     token = None
     kavita_api_key = None
+    kavita_account = None
 
     try:
         async with httpx.AsyncClient(timeout=PROXY_TIMEOUT, follow_redirects=False) as client:
@@ -783,7 +784,8 @@ async def signin_oidc(
                         account.status_code,
                     )
                 else:
-                    api_key = (account.json() or {}).get("apiKey")
+                    kavita_account = account.json() or {}
+                    api_key = kavita_account.get("apiKey") if isinstance(kavita_account, dict) else None
                     if api_key:
                         # Stored alongside the JWT because Kavita's image
                         # endpoints only accept a key as a query parameter
@@ -822,6 +824,7 @@ async def signin_oidc(
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
         return RedirectResponse(_with_error_flag(return_to), status_code=302)
 
+    _remember_kavita_account(session, kavita_account)
     # The address is stored with the token: the proxy sends the token only to
     # the address it came from, so one obtained just before the Kavita address
     # moved (or missed by the reset) never reaches the new one.
@@ -830,6 +833,23 @@ async def signin_oidc(
         {"kavita_token": token, "kavita_api_key": kavita_api_key or "", "kavita_base": base},
     )
     return RedirectResponse(return_to, status_code=302)
+
+
+def _remember_kavita_account(session: dict, account) -> None:
+    """Note which Kavita account this person connected (its id and username
+    only), so the admin's Insights can match Kavita's records to them. Best
+    effort: never fails the connect."""
+    from app.routers.tickets import account_identity
+    from app.services import insights_store
+
+    identity = account_identity(session)
+    if not identity or not isinstance(account, dict):
+        return
+    db = SessionLocal()
+    try:
+        insights_store.best_effort(db, "a Kavita link", insights_store.record_kavita_link, identity, account)
+    finally:
+        db.close()
 
 
 @router.api_route(
