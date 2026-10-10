@@ -501,7 +501,7 @@
     var stop = { label: 'Don’t ask me again', kind: 'link', run: function () { setNoticeView('confirm'); } };
     var later = { label: 'Not now', kind: 'quiet', run: function () { noticeAnswer('later'); } };
     if (_noticeView === 'confirm') {
-      return { icon: kind === 'push' ? 'notifications_paused' : 'add_to_home_screen', title: 'Stop asking?', body: kind === 'push' ? w.PUSH_STOP : w.HOME_STOP, say: true,
+      return { icon: kind === 'push' ? 'notifications' : 'add_to_home_screen', title: 'Stop asking?', body: kind === 'push' ? w.PUSH_STOP : w.HOME_STOP, say: true,
                actions: [{ label: 'Stop asking', kind: 'primary', run: function () { noticeAnswer('never'); } },
                          { label: 'Cancel', kind: 'quiet', focus: true, run: function () { setNoticeView('', 'link'); } }] };
     }
@@ -520,7 +520,7 @@
     }
     var push = asker().pushKind();
     if (push === 'blocked') {
-      return { icon: 'notifications_off', title: 'Notifications are blocked', body: w.PUSH_BLOCKED, actions: [later, stop] };
+      return { icon: 'notifications', title: 'Notifications are blocked', body: w.PUSH_BLOCKED, actions: [later, stop] };
     }
     if (push === 'ios') {
       return { icon: 'notifications', title: 'Turn on notifications', body: w.PUSH_IOS, list: w.IOS_STEPS, actions: [later, stop] };
