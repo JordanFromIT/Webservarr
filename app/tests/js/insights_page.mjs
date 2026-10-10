@@ -618,6 +618,10 @@ await run('Top users: a card a person, most time first, its rows tinted by their
   check('a picture that fails leaves the letter', !kim.querySelector('img') && rr(kim.querySelector('.rounded-full').textContent) === 'K');
   check('a name with markup is a letter, not markup', rr(cards[2].querySelector('.rounded-full').textContent) === '<');
   check('the estimate and the units in sight', rr(t.text('#insTopUsers')).includes('Plex app time is an estimate'));
+  let shown = null;
+  cards[2].closest('li').scrollIntoView = (o) => { shown = o; };
+  cards[2].focus();
+  check('a card reached by Tab comes fully into the row', !!shown && shown.inline === 'nearest' && shown.block === 'nearest');
   kim.focus();
   kim.click();
   await flush();

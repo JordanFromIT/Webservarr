@@ -556,6 +556,11 @@ export async function mount(ctx) {
     row.setAttribute('aria-label', 'Top users, most time first');
     list.forEach(function (p) { row.appendChild(userCard(p)); });
     row.addEventListener('scroll', showPagers, { signal: signal, passive: true });
+    // A card reached by Tab comes fully into the row (the browser leaves one that peeks in half hidden).
+    row.addEventListener('focusin', function (e) {
+      const card = e.target && e.target.closest ? e.target.closest('li') : null;
+      if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }, { signal: signal });
     box.appendChild(row);
     box.appendChild(el('p', 'mt-2 ' + SMALL, 'Plex app time is an estimate: each track counts at its full length. Ebook time is the reading Kavita measured. A session is a book on a day, or a day of reading.'));
     ctx.setTimeout(showPagers, 0);
