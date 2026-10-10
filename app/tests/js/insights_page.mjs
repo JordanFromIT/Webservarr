@@ -331,6 +331,7 @@ await run('a person opens in the dialog, with their history, and Close gives foc
   check('12 weeks, each said in words', weeks.length === 12 && weeks.every((li) => /^Week of /.test(li.querySelector('.sr-only').textContent)));
   check('the books', rr(t.text('[data-ins-book-row]')).includes('Frank Herbert · 42% through · 3 hr 30 min listened (the Plex part an estimate)'));
   check('requests, matched by title', rr(t.text('#insDetailBody')).includes('not in the library yet (matched by title)'));
+  check('dates are day first, as the design writes them', rr(t.text('#insDetailBody')).includes('Asked 1 Oct 2026'), rr(t.text('#insDetailBody')));
   check('the Plex part of a bar is hatched, never a plain lighter fill', t.qa('[data-ins-weekly] .ins-bar.ins-est').length === 4 && t.qa('[data-ins-weekly] p .ins-est').length === 1 &&
     !/bg-frosted-blue\/35/.test(t.q('[data-ins-weekly]').innerHTML));
   check('the tallest week names its value', rr(t.text('[data-ins-weekly]')).includes('1 hr 50 min'));

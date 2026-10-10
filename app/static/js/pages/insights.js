@@ -65,7 +65,8 @@ function duration(ms) {
   return hours.toLocaleString() + ' hr' + (rest ? ' ' + rest + ' min' : '');
 }
 
-/** A day ("2026-10-11") or a moment (ISO with a zone) in the viewer's words: "11 Oct 2026". */
+/** A day ("2026-10-11") or a moment (ISO with a zone) as the approved design
+    writes it, day first in every browser: "11 Oct 2026". */
 function dayLabel(iso) {
   const s = text(iso);
   let d = null;
@@ -74,7 +75,7 @@ function dayLabel(iso) {
   else if (s) d = new Date(s);
   if (!d || !isFinite(d.getTime())) return '';
   try {
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   } catch (e) {
     return s.slice(0, 10);
   }
