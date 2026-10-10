@@ -1053,6 +1053,8 @@ export async function mount(ctx) {
     }
     noticeWin.classList.add('is-opening');
     noticeWin.hidden = false;
+    // The page's own scrollbar (below lg the page itself scrolls) keeps its room.
+    if ((window.innerWidth || 0) > html.clientWidth && html.clientWidth > 0) html.setAttribute('data-books-notice-gutter', '');
     html.setAttribute('data-books-notice-open', '');
     // Words taller than the window scroll inside it, and can then be reached by Tab.
     if (words.scrollHeight > words.clientHeight) words.setAttribute('tabindex', '0');
@@ -1084,6 +1086,7 @@ export async function mount(ctx) {
     noticeWin.classList.remove('is-opening');
     $('booksNoticeSay').textContent = '';
     html.removeAttribute('data-books-notice-open');
+    html.removeAttribute('data-books-notice-gutter');
     inertBack();
     if (finished && win.guideWaiting && !signal.aborted) {
       win.guideWaiting = false;

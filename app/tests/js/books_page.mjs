@@ -2753,6 +2753,7 @@ await run('the window: every visit opens it over the whole page, a modal named b
     box.getAttribute('aria-labelledby') === 'booksNoticeWindowTitle' && t.text('#booksNoticeWindowTitle') === 'Before you start listening');
   check('focus starts on the title, so the words are read from the top', t.doc.activeElement === t.q('#booksNoticeWindowTitle'));
   check('the page under it holds still', t.doc.documentElement.hasAttribute('data-books-notice-open'));
+  check('no page scrollbar here, so no gutter is held for one', !t.doc.documentElement.hasAttribute('data-books-notice-gutter'));
   check('everything behind it is inert: the page under it', t.q('#wsPage > div').inert === true);
   check('the window itself is not', !t.q('#booksNoticeWindow').inert);
   const words = t.q('#booksNoticeWindowWords');
@@ -2803,7 +2804,7 @@ await run('the window: nothing closes it for 15 seconds, then Okay closes it for
   check('and still does nothing', windowOn(t) && posts(t).length === 0);
   t.click('#booksNoticeWindowOkay');
   await t.clock.advance(50);
-  check('Okay closes it', !windowOn(t) && !t.doc.documentElement.hasAttribute('data-books-notice-open'));
+  check('Okay closes it', !windowOn(t) && !t.doc.documentElement.hasAttribute('data-books-notice-open') && !t.doc.documentElement.hasAttribute('data-books-notice-gutter'));
   check('nothing is sent or kept: the window is back on the next visit', posts(t).length === 0 && t.win.sessionStorage.getItem(SESSION_KEY) === null);
   check('the page is usable again', !t.q('#wsPage > div').inert);
   check('focus goes to the page\'s heading', t.doc.activeElement === t.q('h1'));

@@ -36,9 +36,11 @@
      held in the grid's skeleton the same way (data-books-flat). */
   #gridSkeleton [data-skel="series"] { display: none; }
   html[data-books-flat] #gridSkeleton [data-skel="series"] { display: block; }
-  /* The notice's window is open: the page under it holds still, and keeps
-     its scrollbar's room, so nothing behind the window moves sideways. */
-  html[data-books-notice-open] { scrollbar-gutter: stable; }
+  /* The notice's window is open: the page under it holds still. A page
+     scrollbar that this takes away keeps its room (pages/books.js marks
+     data-books-notice-gutter only when there is one), so nothing behind the
+     window moves sideways. */
+  html[data-books-notice-gutter] { scrollbar-gutter: stable; }
   html[data-books-notice-open] body { overflow: hidden; }
 
   /* ---- The audiobook notice (docs/mockups/books-notice.html) ----
