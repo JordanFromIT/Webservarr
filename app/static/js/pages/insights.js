@@ -65,9 +65,10 @@ function num(n) { return typeof n === 'number' && isFinite(n) && n > 0 ? n : 0; 
 
 function text(v) { return typeof v === 'string' ? v : ''; }
 
-/** A time in words: "45 min", "3 hr", "12 hr 30 min". */
+/** A time in words: "45 min", "3 hr", "12 hr 30 min"; a few seconds is "under 1 min", not "0 min". */
 function duration(ms) {
   const minutes = Math.round(num(ms) / 60000);
+  if (!minutes && num(ms)) return 'under 1 min';
   if (minutes < 60) return minutes + ' min';
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -597,7 +598,7 @@ export async function mount(ctx) {
   function bookItem(bookId, title, line, hook, opener) {
     const li = el('li', 'min-w-0 py-1');
     const isBook = typeof bookId === 'number';
-    const holder = isBook ? el('button', ROW) : el('div', 'px-3 py-2 -mx-3');
+    const holder = isBook ? el('button', ROW) : el('div', 'w-full min-w-0 px-3 py-2 -mx-3');
     const words = el('span', 'block min-w-0 flex-1');
     words.appendChild(el('span', 'block break-words text-[15px] font-semibold text-frosted-blue', title));
     words.appendChild(el('span', 'block break-words ' + SMALL, line));
@@ -749,6 +750,7 @@ export async function mount(ctx) {
           .filter(Boolean).join(' · ')));
       });
       never.appendChild(list);
+      if (count > items.length) never.appendChild(el('p', 'mt-2 ' + SMALL, 'The newest ' + items.length.toLocaleString() + ' are listed.'));
     }
     box.appendChild(never);
     return box;

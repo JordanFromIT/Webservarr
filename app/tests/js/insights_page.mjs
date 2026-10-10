@@ -514,6 +514,7 @@ await run('the approved design: hatched estimates, each chart names its tallest 
   check('and has a Less to More key', /^Less\s*More$/.test(rr(t.text('[data-ins-heatmap] [data-ins-key]'))) && t.qa('[data-ins-heatmap] [data-ins-key] span.rounded-\\[3px\\]').length === 5);
   check('the busiest hour is the darkest cell', t.qa('[data-ins-heatmap] td.bg-frosted-blue').length === 1);
   check('an abandoned book says when it was last touched', /last touched \d{1,2} [A-Z][a-z]{2} \d{4}/.test(rr(t.text('[data-ins-abandoned]'))), rr(t.text('[data-ins-abandoned]')));
+  check('never opened says how many of them are listed', rr(t.text('[data-ins-never]')).includes('The newest 1 are listed.'));
   check('a book with no library id is plain text, not a button', !t.q('[data-ins-requested] button[data-ins-book="null"]') &&
     t.qa('[data-ins-requested] button[data-ins-book]').length === 1);
 });
