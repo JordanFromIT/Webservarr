@@ -121,6 +121,57 @@ class Cleanup(WithDatabase):
             self.assertEqual(left, ["local:7", "plex:12345", "plex:99001", "plex:990100"], table)
 
 
+ACCESS = ("CREATE TABLE access_requests (id INTEGER PRIMARY KEY, plex_account_id TEXT UNIQUE NOT NULL, "
+          "plex_username TEXT NOT NULL, plex_email TEXT NOT NULL DEFAULT '', plex_avatar_url TEXT NOT NULL DEFAULT '', "
+          "name TEXT NOT NULL, note TEXT NOT NULL, status TEXT NOT NULL, share_state TEXT, share_error TEXT, "
+          "library_keys TEXT, created_at TEXT NOT NULL, decided_at TEXT, decided_by TEXT, cooldown_until TEXT)")
+
+
+class AccessSeeding(WithDatabase):
+    def with_access(self) -> sqlite3.Connection:
+        conn = self.database()
+        conn.execute(ACCESS)
+        return conn
+
+    def rows(self, conn):
+        return conn.execute("SELECT plex_account_id, plex_username, status, share_state, decided_at IS NOT NULL, "
+                            "cooldown_until IS NOT NULL FROM access_requests ORDER BY plex_account_id").fetchall()
+
+    def test_one_row_per_identity_and_each_status(self):
+        conn = self.with_access()
+        now = datetime(2026, 10, 10, 12, 0, 0)
+        devkit.seed_access(conn, "plex:990011", "pending", "A", "n", now=now)
+        devkit.seed_access(conn, "plex:990011", "denied", "A", "n", now=now)
+        devkit.seed_access(conn, "plex:990012", "approved", "B", "n", share_state="failed",
+                           share_error="Plex refused the share (HTTP 400)", now=now)
+        devkit.seed_access(conn, "plex:990013", "blocked", "C", "n", now=now)
+        self.assertEqual(self.rows(conn), [("990011", "devkit-990011", "denied", None, 1, 1),
+                                           ("990012", "devkit-990012", "approved", "failed", 1, 0),
+                                           ("990013", "devkit-990013", "blocked", None, 1, 0)])
+
+    def test_refusals_write_nothing(self):
+        conn = self.with_access()
+        for args in (("plex:12345", "pending"), ("plex:990011", "maybe")):
+            with self.subTest(args=args), self.assertRaises(devkit.DevkitError):
+                devkit.seed_access(conn, args[0], args[1], "A", "n")
+        with self.assertRaises(devkit.DevkitError):
+            devkit.seed_access(conn, "plex:990011", "pending", "A", "n", share_state="failed")
+        self.assertEqual(self.rows(conn), [])
+
+    def test_cleanup_takes_only_the_reserved_range(self):
+        conn = self.with_access()
+        for account_id in ("990011", "990099", "990100", "12345"):
+            conn.execute("INSERT INTO access_requests (plex_account_id, plex_username, name, note, status, created_at) "
+                         "VALUES (?, 'u', 'n', 'n', 'pending', 'now')", (account_id,))
+        removed = devkit.delete_reserved_rows(conn)
+        self.assertEqual(removed["access_requests"], 2)
+        left = sorted(r[0] for r in conn.execute("SELECT plex_account_id FROM access_requests"))
+        self.assertEqual(left, ["12345", "990100"])
+
+    def test_cleanup_without_the_table(self):
+        self.assertNotIn("access_requests", devkit.delete_reserved_rows(self.database()))
+
+
 class SnapshotAndRestore(WithDatabase):
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp()) / "snaps"

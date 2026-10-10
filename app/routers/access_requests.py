@@ -8,28 +8,34 @@ it does anything else. The flow proves a Plex account with the Plex PIN window, 
 does, in a namespace of its own (access_pin:* and its own cookies), so a sign-in PIN can't complete
 a request and a request PIN can't sign anyone in. It never makes a session. The requester's Plex
 token lives only in identify's local variables: never in Redis, the database, a log or a response.
+Admin, under /api/admin and require_admin: the list, the count, the libraries, approve, deny and
+unblock. They work with the switch off, so requests already waiting can still be answered.
 """
 import asyncio
 import hmac
 import json
 import logging
 import secrets
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy.orm import Session
 
 from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
+from app.dependencies import require_admin
 from app.integrations import plex_share
 from app.limiter import limiter
+from app.models import AccessRequest
 from app.routers import auth, plex_auth
 from app.routers.player import Text, require_encodable_body, require_same_origin
+from app.routers.tickets import account_identity
 from app.services import access_requests as svc
+from app.settings_registry import _LIBRARY_KEY
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -255,3 +261,101 @@ async def submit(request: Request, body: SubmitBody, response: Response, db: Ses
     else:
         logger.info("Access request not made: account=%s state=%s", account.get("plex_account_id"), result["state"])
     return result
+
+
+admin_router = APIRouter()
+
+APPROVE_CLAIM_TTL = 60
+GONE = "That request is gone."
+ANSWERED = "That request was already answered."
+PICK_LIBRARIES = "Pick libraries from the list."
+
+
+class ApproveBody(BaseModel):
+    library_keys: List[Text] = Field(min_length=1, max_length=50)
+
+
+class DenyBody(BaseModel):
+    block: StrictBool = False
+
+
+def _row_in(db: Session, request_id: int, wanted: str) -> AccessRequest:
+    row = db.get(AccessRequest, request_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=GONE)
+    if row.status != wanted:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ANSWERED)
+    return row
+
+
+@admin_router.get("/access-requests")
+async def list_access_requests(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return svc.listing(db, svc.now_utc())
+
+
+@admin_router.get("/access-requests/count")
+async def count_access_requests(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return {"pending": svc.pending_count(db)}
+
+
+@admin_router.get("/access-requests/libraries")
+async def access_libraries(current_user: dict = Depends(require_admin)):
+    try:
+        return {"libraries": await plex_share.list_libraries()}
+    except plex_share.PlexShareUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
+
+
+@admin_router.post("/access-requests/{request_id}/approve",
+                   dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
+async def approve_access_request(request_id: int, body: ApproveBody, current_user: dict = Depends(require_admin),
+                                 db: Session = Depends(get_db)):
+    """Approve and share the server with that account and the ticked
+    libraries. Approval is final even when Plex refuses the share; the row
+    then says why, and the admin can share by hand."""
+    row = _row_in(db, request_id, "pending")
+    keys = list(dict.fromkeys(body.library_keys))
+    if not all(_LIBRARY_KEY.fullmatch(k) for k in keys):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=PICK_LIBRARIES)
+    try:
+        on_server = {lib["key"] for lib in await plex_share.list_libraries()}
+    except plex_share.PlexShareUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
+    if not set(keys) <= on_server:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=PICK_LIBRARIES)
+    r = await session_manager.get_redis()
+    claim = f"access_approve:{request_id}"
+    if not await r.set(claim, "1", nx=True, ex=APPROVE_CLAIM_TTL):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ANSWERED)
+    try:
+        db.refresh(row)
+        if row.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ANSWERED)
+        svc.mark_approved(db, row, keys, account_identity(current_user), svc.now_utc())
+        state, error = await plex_share.share_server(
+            {"plex_account_id": row.plex_account_id, "plex_username": row.plex_username}, keys)
+        svc.record_share(db, row, state, error)
+    finally:
+        await r.delete(claim)
+    logger.info("Access request %s approved: account=%s share=%s", row.id, row.plex_account_id, state)
+    return svc.admin_view(row)
+
+
+@admin_router.post("/access-requests/{request_id}/deny",
+                   dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
+async def deny_access_request(request_id: int, body: DenyBody, current_user: dict = Depends(require_admin),
+                              db: Session = Depends(get_db)):
+    row = _row_in(db, request_id, "pending")
+    svc.deny(db, row, body.block, account_identity(current_user), svc.now_utc())
+    logger.info("Access request %s %s: account=%s", row.id, row.status, row.plex_account_id)
+    return svc.admin_view(row)
+
+
+@admin_router.post("/access-requests/{request_id}/unblock", dependencies=[Depends(require_same_origin)])
+async def unblock_access_request(request_id: int, current_user: dict = Depends(require_admin),
+                                 db: Session = Depends(get_db)):
+    row = _row_in(db, request_id, "blocked")
+    logger.info("Access request %s unblocked: account=%s", row.id, row.plex_account_id)
+    db.delete(row)
+    db.commit()
+    return {"ok": True}

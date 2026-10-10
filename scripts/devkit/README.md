@@ -52,6 +52,13 @@ dk seed-listen --identity plex:990001 --book-key 283644:1 --ms 5000000 --duratio
 # Seed a place in a book that is NOT in the library (the "were you listening to one of these?" case).
 dk seed-orphan --identity plex:990001 --book-key 990011:1 --author "Some Author" --title "Gone Book" --ms 1200000
 
+# Seed a request for access (Settings > Access requests). Its username is devkit-<id>.
+# NEVER approve a seeded request on a live site: approving shares the real Plex server
+# with whoever holds that username. Live checks intercept the approve route.
+dk seed-access --identity plex:990011                       # pending
+dk seed-access --identity plex:990012 --status approved --share-state failed --share-error "Plex refused the share (HTTP 400)"
+dk seed-access --identity plex:990013 --status blocked
+
 # Put the snapshot back exactly, check it matches, delete the kit's sessions and the snapshot.
 dk restore before-books
 

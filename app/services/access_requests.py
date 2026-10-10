@@ -6,10 +6,11 @@ The router (app/routers/access_requests.py) talks to Plex and Redis and
 holds the submit lock; this module decides. Times are naive UTC, as every
 stored timestamp is.
 """
+import json
 import logging
 import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from sqlalchemy.exc import IntegrityError
@@ -206,3 +207,66 @@ async def notify_admins(r, db: Session, row: AccessRequest) -> int:
         except Exception as exc:
             logger.warning("Access request %s: the push failed: %s", row.id, type(exc).__name__)
     return len(told)
+
+
+DECIDED_SHOWN = timedelta(days=30)   # how far back Settings lists approved and denied rows
+
+
+def _keys(raw: Optional[str]) -> List[str]:
+    try:
+        keys = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return [k for k in keys if isinstance(k, str)] if isinstance(keys, list) else []
+
+
+def admin_view(row: AccessRequest) -> Dict:
+    """A row as Settings shows it. The Plex account id stays on the server."""
+    return {
+        "id": row.id, "plex_username": row.plex_username, "plex_email": row.plex_email,
+        "avatar_url": row.plex_avatar_url, "name": row.name, "note": row.note, "status": row.status,
+        "share_state": row.share_state, "share_error": row.share_error, "library_keys": _keys(row.library_keys),
+        "created_at": utc_iso(row.created_at), "decided_at": utc_iso(row.decided_at),
+        "can_ask_after": utc_iso(row.cooldown_until),
+    }
+
+
+def listing(db: Session, now: datetime) -> Dict[str, List[Dict]]:
+    """Pending oldest first; approved and denied from the last 30 days and
+    every blocked account, newest first."""
+    q = db.query(AccessRequest)
+    pending = q.filter(AccessRequest.status == "pending").order_by(AccessRequest.created_at.asc(), AccessRequest.id.asc())
+    decided = (q.filter(AccessRequest.status.in_(("approved", "denied")), AccessRequest.decided_at.isnot(None),
+                        AccessRequest.decided_at >= now - DECIDED_SHOWN)
+               .order_by(AccessRequest.decided_at.desc(), AccessRequest.id.desc()))
+    blocked = q.filter(AccessRequest.status == "blocked").order_by(AccessRequest.decided_at.desc(), AccessRequest.id.desc())
+    return {"pending": [admin_view(r) for r in pending], "decided": [admin_view(r) for r in decided],
+            "blocked": [admin_view(r) for r in blocked]}
+
+
+def pending_count(db: Session) -> int:
+    return db.query(AccessRequest).filter(AccessRequest.status == "pending").count()
+
+
+def deny(db: Session, row: AccessRequest, block: bool, decided_by: str, now: datetime) -> None:
+    """Denied (the account may ask again after COOLDOWN) or blocked for good."""
+    row.status = "blocked" if block else "denied"
+    row.decided_at = now
+    row.decided_by = (decided_by or "")[:64] or None
+    row.cooldown_until = None if block else now + COOLDOWN
+    db.commit()
+
+
+def mark_approved(db: Session, row: AccessRequest, keys: List[str], decided_by: str, now: datetime) -> None:
+    """Approved, before the share is tried: approval is final either way."""
+    row.status = "approved"
+    row.decided_at = now
+    row.decided_by = (decided_by or "")[:64] or None
+    row.library_keys = json.dumps(keys)
+    db.commit()
+
+
+def record_share(db: Session, row: AccessRequest, state: str, error: Optional[str]) -> None:
+    row.share_state = state
+    row.share_error = (error or "")[:200] or None
+    db.commit()

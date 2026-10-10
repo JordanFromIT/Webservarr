@@ -191,6 +191,14 @@ def delete_reserved_rows(conn: sqlite3.Connection) -> dict:
             for identity in filter(is_reserved, identities):
                 count += conn.execute(f'DELETE FROM "{table}" WHERE identity = ?', (identity,)).rowcount
             removed[table] = count
+        # Requests for access are keyed by the bare Plex account id.
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'access_requests'").fetchone():
+            count = 0
+            for (account_id,) in conn.execute("SELECT plex_account_id FROM access_requests").fetchall():
+                if is_reserved(f"plex:{account_id}"):
+                    count += conn.execute("DELETE FROM access_requests WHERE plex_account_id = ?",
+                                          (account_id,)).rowcount
+            removed["access_requests"] = count
     except BaseException:
         conn.execute("ROLLBACK")
         raise
@@ -224,6 +232,45 @@ def require_not_in_library(conn: sqlite3.Connection, book_key: str) -> None:
     found = conn.execute("SELECT 1 FROM book_audio_editions WHERE plex_book_key = ?", (book_key,)).fetchone()
     if found is not None:
         raise DevkitError(f"book key {book_key} is in the library, so a place in it is not an orphan")
+
+
+ACCESS_STATUSES = ("pending", "approved", "denied", "blocked")
+SHARE_STATES = ("shared", "existing", "failed")
+
+
+def seed_access(conn: sqlite3.Connection, identity: str, status: str, name: str, note: str,
+                minutes_ago: int = 0, share_state: str | None = None, share_error: str | None = None,
+                now: datetime | None = None) -> dict:
+    """A request for access from a reserved identity (replacing any it has).
+    Its username is devkit-<id>. Never approve one on a live site: approving
+    shares the real Plex server with whoever holds that username, so live
+    checks intercept the approve route."""
+    require_reserved(identity)
+    if status not in ACCESS_STATUSES:
+        raise DevkitError(f"status must be one of {', '.join(ACCESS_STATUSES)}")
+    if share_state is not None and (share_state not in SHARE_STATES or status != "approved"):
+        raise DevkitError("--share-state is for an approved request only: shared, existing or failed")
+    if minutes_ago < 0:
+        raise DevkitError("--minutes-ago cannot be negative")
+    account_id = identity.split(":", 1)[1]
+    at = (now or datetime.now(timezone.utc).replace(tzinfo=None)) - timedelta(minutes=minutes_ago)
+    stamp = at.strftime("%Y-%m-%d %H:%M:%S.000000")
+    decided = None if status == "pending" else stamp
+    cooldown = (at + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S.000000") if status == "denied" else None
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("DELETE FROM access_requests WHERE plex_account_id = ?", (account_id,))
+        conn.execute(
+            "INSERT INTO access_requests (plex_account_id, plex_username, plex_email, plex_avatar_url, name, note, "
+            "status, share_state, share_error, library_keys, created_at, decided_at, decided_by, cooldown_until) "
+            "VALUES (?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (account_id, f"devkit-{account_id}", name, note, status, share_state, share_error,
+             '["1"]' if status == "approved" else None, stamp, decided, "devkit" if decided else None, cooldown))
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+    return {"identity": identity, "status": status, "share_state": share_state}
 
 
 # --- sessions (Redis) --------------------------------------------------------
@@ -347,6 +394,18 @@ def build_parser() -> argparse.ArgumentParser:
         seed.add_argument("--narrator")
         seed.add_argument("--chapter")
 
+    access = commands.add_parser("seed-access", help="seed a request for access from a test identity")
+    access.add_argument("--identity", type=identity_arg, required=True)
+    access.add_argument("--status", choices=ACCESS_STATUSES, default="pending")
+    access.add_argument("--name", default="Devkit Person")
+    # The default note has a second line and one 200-letter word, so a live
+    # check sees line breaks kept and a long word wrapped at 390 wide.
+    access.add_argument("--note", default="A test request from the dev kit.\nIt has a second line and one long word: "
+                        + "w" * 200)
+    access.add_argument("--minutes-ago", type=int, default=0)
+    access.add_argument("--share-state", choices=SHARE_STATES)
+    access.add_argument("--share-error")
+
     commands.add_parser("cleanup", help="remove every row and session of the reserved test identities")
     return parser
 
@@ -386,6 +445,9 @@ def run(args: argparse.Namespace) -> int:
             placed = seed_position(conn, args.identity, args.book_key, args.ms, args.duration_ms,
                                    args.minutes_ago, args.title, args.author, args.narrator, args.chapter)
             print(json.dumps(placed))
+        elif args.command == "seed-access":
+            print(json.dumps(seed_access(conn, args.identity, args.status, args.name, args.note,
+                                         args.minutes_ago, args.share_state, args.share_error)))
         elif args.command == "cleanup":
             removed = delete_reserved_rows(conn)
             gone = asyncio.run(finish(purge_sessions()))

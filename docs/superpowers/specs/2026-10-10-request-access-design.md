@@ -471,8 +471,11 @@ tab's visible text, so the two match). The panel, top to bottom:
    on their unique identifier. Allowed servers is blank and Allow friends is off. WebServarr's
    application bindings are empty. Task 1's sign-in with the test account succeeded, but that account
    already existed in Authentik, so brand-new enrollment rests on this screen check alone.
-   Allowed servers being blank means Authentik admits any Plex account; WebServarr's membership gate
-   is what keeps strangers out. Jordan has been advised to tick the server there.
+   Allowed servers looked blank on the edit form, but in authentik 2026.8.3 an empty list matches no
+   server (with Allow friends off it would refuse every Plex login), and Plex sign-in works, so the
+   saved list holds the server; the form shows it only after loading servers with the source's own
+   Plex token. Review: Dropbox notes, authentik-allowed-servers-review.md. Do not save the source form
+   while the list looks empty. WebServarr's membership gate is what keeps strangers out.
 3. **Invite acceptance.** Until the person accepts the invite, both Authentik and WebServarr refuse
    them. The S4 and S5 wording covers this. Plex's own email is the only reminder.
 4. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A
