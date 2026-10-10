@@ -349,6 +349,32 @@ class OwnerWhilePlexTvIsDown(Base):
         self.assertEqual(got["unavailable"], [])
 
 
+class DuplicateNames(Base):
+    def test_only_names_that_collide_are_told_apart(self):
+        names = {"1001": "JordanFromIT", "2002": "jordanfromit", "3003": "Sam", "4004": "JordanFromIT"}
+        usernames = {"2002": "jordan-two", "4004": "JordanFromIT"}
+        self.assertEqual(insights.distinct_names(names, usernames, "1001"),
+                         {"1001": "JordanFromIT (owner)", "2002": "jordanfromit (jordan-two)", "3003": "Sam",
+                          "4004": "JordanFromIT (2)"})
+
+    def test_two_namesakes_without_the_owner_or_usernames(self):
+        self.assertEqual(insights.distinct_names({"5": "Kim", "6": "Kim"}, {}, "1001"),
+                         {"5": "Kim (2)", "6": "Kim (3)"})
+
+    def test_a_suffix_never_lands_on_someone_elses_name(self):
+        got = insights.distinct_names({"5": "Kim", "6": "Kim", "7": "Kim (2)"}, {}, "")
+        self.assertEqual(len(set(got.values())), 3)
+        self.assertEqual(got["7"], "Kim (2)")
+
+    def test_plex_people_gives_the_told_apart_names(self):
+        from app.integrations import plex_share
+        answer = {"owner": "1001", "names": {"1001": "JordanFromIT", "2002": "JordanFromIT"},
+                  "usernames": {"1001": "jordan", "2002": "jordan.alt"}, "thumbs": {}}
+        with mock.patch.object(plex_share, "server_people", mock.AsyncMock(return_value=answer)):
+            owner, names = asyncio.run(insights.plex_people(None, self.db))
+        self.assertEqual((owner, names), ("1001", {"1001": "JordanFromIT (owner)", "2002": "JordanFromIT (jordan.alt)"}))
+
+
 class Wording(unittest.TestCase):
     """Spec section 10: tell them, then show you."""
 

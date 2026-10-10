@@ -108,7 +108,7 @@ class ServerPeople(unittest.TestCase):
                     {"invitedId": 7, "invited": "junk"}, "junk"])
             if url == "https://plex.tv/api/v2/user":
                 return httpx.Response(200, json={"id": 99, "title": "Owner", "email": "o@x.test",
-                                                 "authToken": "OWNER-SENTINEL"})
+                                                 "username": "o@x.test", "authToken": "OWNER-SENTINEL"})
             raise AssertionError(f"unexpected Plex call: {url}")
         server = plex_share.PlexServer("m1", {"Accept": "application/json", "X-Plex-Token": "ADMIN-SENTINEL"})
         for p in (mock.patch.object(plex_share, "_server", mock.AsyncMock(return_value=server)),
@@ -122,6 +122,7 @@ class ServerPeople(unittest.TestCase):
         calls = self.use()
         found = asyncio.run(plex_share.server_people())
         self.assertEqual(found, {"owner": "99", "names": {"5": "Sam", "6": "kim", "99": "Owner"},
+                                 "usernames": {"5": "sam", "6": "kim"},      # never one that looks like an email
                                  "thumbs": {"5": "https://plex.tv/users/s5/avatar?c=1"}})   # plex.tv's pictures only
         self.assertNotIn("x.test", repr(found))
         self.assertNotIn("OWNER-SENTINEL", repr(found))

@@ -157,22 +157,28 @@ NAME_MAX = 100
 async def server_people() -> Dict[str, object]:
     """Who the server is shared with, and its owner, for the names and
     pictures on the admin's Insights page: {"owner": the owner's plex.tv id
-    or "", "names": {plex.tv id: name}, "thumbs": {plex.tv id: picture
-    address}}. From each accepted share's `invited` account and plex.tv's
-    own account for the admin token. Only ids, names and picture addresses
-    on plex.tv (avatar_url) are read out of either answer (never an email or
-    a token). Raises PlexShareUnavailable."""
+    or "", "names": {plex.tv id: name}, "usernames": {plex.tv id: username},
+    "thumbs": {plex.tv id: picture address}}. From each accepted share's
+    `invited` account and plex.tv's own account for the admin token. Only
+    ids, names, usernames (never one that looks like an email: the page tells
+    two people with the same name apart by it) and picture addresses on
+    plex.tv (avatar_url) are read out of either answer (never an email or a
+    token). Raises PlexShareUnavailable."""
     server = await _server()
     async with _client() as client:
         accepted = await _get_json(client, f"{CLIENTS}/api/v2/shared_servers/owned/accepted", server)
         owner = await _get_json(client, f"{PLEX_TV}/api/v2/user", server)
     names: Dict[str, str] = {}
+    usernames: Dict[str, str] = {}
     thumbs: Dict[str, str] = {}
 
     def keep(account: dict) -> str:
         found = str(account.get("id") or "")
         if found:
             names[found] = str(account.get("title") or account.get("username") or "")[:NAME_MAX]
+            username = str(account.get("username") or "")[:NAME_MAX]
+            if username and "@" not in username:
+                usernames[found] = username
             thumb = avatar_url(account.get("thumb"))
             if thumb:
                 thumbs[found] = thumb
@@ -183,7 +189,7 @@ async def server_people() -> Dict[str, object]:
         if isinstance(invited, dict):
             keep(invited)
     owner_id = keep(owner) if isinstance(owner, dict) else ""
-    return {"owner": owner_id, "names": names, "thumbs": thumbs}
+    return {"owner": owner_id, "names": names, "usernames": usernames, "thumbs": thumbs}
 
 
 # Some plex.tv pictures are full-size uploads (2 MB seen); the browser keeps each a day.

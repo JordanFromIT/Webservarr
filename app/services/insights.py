@@ -75,7 +75,7 @@ ANSWER_TTL = 5 * 60
 PLAYS_TTL = 10 * 60
 DURATIONS_TTL = 6 * 60 * 60
 PEOPLE_TTL = 60 * 60
-PEOPLE_KEY = "people:v2"                   # v2 carries the pictures (plex_share.server_people's thumbs)
+PEOPLE_KEY = "people:v3"                   # v3 carries the usernames (plex_share.server_people's)
 OWNER_KEY = "owner"                        # the owner plex.tv last gave, for while it can't be read
 OWNER_TTL = 90 * 24 * 60 * 60
 SESSIONS_TTL = 15
@@ -235,13 +235,14 @@ async def cache_set(r, key: str, value, ttl: int) -> None:
 
 async def plex_people(r, db: Optional[Session] = None) -> Tuple[str, Dict[str, str]]:
     """(the owner's plex.tv id, {plex.tv id: name}) from plex.tv, cached for
-    PEOPLE_TTL. While plex.tv can't be read the names are {} (they
+    PEOPLE_TTL, with names that would read the same told apart
+    (distinct_names). While plex.tv can't be read the names are {} (they
     fall back to short_name) and the owner is known_owner, so the owner's
     plays and sessions (Plex's account 1) still count; "" only when nothing
     says who the owner is."""
     found = await _people_answer(r)
     owner = str(found.get("owner") or "")
-    names = dict(found.get("names") or {})
+    names = distinct_names(found.get("names"), found.get("usernames"), owner)
     return owner or await known_owner(r, db), names
 
 
@@ -256,6 +257,40 @@ async def known_owner(r, db: Optional[Session]) -> str:
     if isinstance(kept, str) and kept:
         return kept
     return admin_contacts.owner_account(db) if db is not None else ""
+
+
+def distinct_names(names, usernames, owner: str) -> Dict[str, str]:
+    """{plex.tv id: name}, where two or more people share a name (in any
+    case): the owner's gets " (owner)", anyone else's their plex.tv
+    username when it reads differently, else a number from 2 (in id order).
+    Names no one else has are left as they are. Never an email: plex_share
+    keeps no username that looks like one."""
+    names = {str(k): str(v) for k, v in names.items() if v} if isinstance(names, dict) else {}
+    usernames = usernames if isinstance(usernames, dict) else {}
+    groups: Dict[str, List[str]] = {}
+    for plex_id in sorted(names, key=lambda i: (len(i), i)):
+        groups.setdefault(names[plex_id].casefold(), []).append(plex_id)
+    taken = set(groups)
+    out = dict(names)
+    for ids in groups.values():
+        if len(ids) < 2:
+            continue
+        number = 2
+        for plex_id in ids:
+            name = names[plex_id]
+            username = str(usernames.get(plex_id) or "")
+            if plex_id == owner:
+                wanted = f"{name} (owner)"
+            elif username and username.casefold() != name.casefold():
+                wanted = f"{name} ({username})"
+            else:
+                wanted = ""
+            while not wanted or wanted.casefold() in taken:
+                wanted = f"{name} ({number})"
+                number += 1
+            taken.add(wanted.casefold())
+            out[plex_id] = wanted
+    return out
 
 
 async def plex_thumbs(r) -> Dict[str, str]:
