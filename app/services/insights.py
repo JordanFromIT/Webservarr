@@ -69,7 +69,8 @@ PEOPLE_TTL = 60 * 60
 
 @dataclass(frozen=True)
 class Listen:
-    """Web listening by one person in one book in one UTC hour."""
+    """Listening WebServarr logged for one person in one book in one UTC hour,
+    by where the check-ins came from (listening_log.source)."""
     identity: str
     hour: datetime
     book_key: str
@@ -120,13 +121,22 @@ class EbookAt:
 
 @dataclass
 class Sources:
-    """What one answer is worked out from. `plays` are the Plex app plays (the
-    web player's own left out), None while Plex can't be read."""
+    """What one answer is worked out from. `listens` are the web player's;
+    `plays` are Plex app listening: Plex's history plays (the web player's
+    own left out; None while Plex can't be read) and the logged hours whose
+    source is Plex. Those hours are moved from `listens` to `plays` here, so
+    every figure counts them as Plex app time, as the source says."""
     listens: List[Listen]
     plays: Optional[List[Play]]
     names: Dict[str, str]
     now: datetime
     unavailable: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        logged = [Play(x.identity, x.book_key, x.hour, x.ms) for x in self.listens if x.source == "plex"]
+        if logged:
+            self.listens = [x for x in self.listens if x.source != "plex"]
+            self.plays = list(self.plays or []) + logged
 
 
 # --- Small helpers ---------------------------------------------------------------

@@ -164,6 +164,21 @@ class Person(Base):
         self.assertEqual([(r["title"], r["book_id"], r["started_at"]) for r in got["requests"]],
                          [("dune", 1, "2026-10-01T09:00:00.000Z")])
 
+    def test_time_logged_from_plex_is_plex_app_time(self):
+        self.book(1, "Dune", keys=["5:1"])
+        self.hour(ME, "5:1", datetime(2026, 10, 8, 9), 600000)
+        self.hour(ME, "5:1", datetime(2026, 10, 8, 10), 1200000, source="plex")
+        self.hour(ME, "5:1", datetime(2026, 10, 8, 11), 300000, source="local")      # the web player's own copy
+        for plays in ([], None):                                                     # Plex's history read, or down
+            with self.subTest(plays=plays):
+                src = self.src(plays=plays)
+                got = insights.person_view(self.db, src, ME, timezone.utc)
+                self.assertEqual((got["totals"]["listened_ms"], got["totals"]["plex_ms"]), (900000, 1200000))
+                self.assertEqual(got["weekly"][-1], {"week": "2026-10-05", "web_ms": 900000, "plex_ms": 1200000})
+                self.assertEqual([(b["listened_ms"], b["plex_ms"]) for b in got["books"]], [(900000, 1200000)])
+                sam = insights.people_view(self.db, src)["people"][0]
+                self.assertEqual((sam["listened_ms_30d"], sam["plex_ms_30d"]), (900000, 1200000))
+
     def test_a_key_finds_the_person_and_nothing_else(self):
         self.add(BookVisit(identity=ME, seen_at=NOW))
         src = self.src(plays=[])
