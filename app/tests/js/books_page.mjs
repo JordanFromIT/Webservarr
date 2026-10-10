@@ -2811,18 +2811,24 @@ await run('the window: nothing closes it for 15 seconds, then Okay does and is k
   await finish(t);
 });
 
-await run('the window: Escape or a click outside after the count closes it, without keeping it for the account', async (make) => {
+await run('the window: Escape or a click outside after the count also counts as seen', async (make) => {
   const esc = firstVisit(make);
   esc.mount();
-  await esc.clock.advance(15000);
+  await esc.clock.advance(6000);
   escape(esc);
+  check('not before the count is done', windowOn(esc) && posts(esc).length === 0);
+  await esc.clock.advance(9000);
+  escape(esc);
+  await esc.clock.advance(50);
   check('Escape closes it once the count is done', !windowOn(esc));
-  check('not kept on the server (only Okay is), but gone for this session', posts(esc).length === 0 && esc.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
+  check('and seen is kept for the account, as Okay keeps it', JSON.stringify(posts(esc)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(esc));
+  check('gone for this session', esc.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
   const out = firstVisit(make);
   out.mount();
   await out.clock.advance(15000);
   out.click('[data-books-notice-veil]');
-  check('a click outside closes it too, and keeps nothing', !windowOn(out) && posts(out).length === 0);
+  await out.clock.advance(50);
+  check('a click outside closes it too, and keeps seen', !windowOn(out) && JSON.stringify(posts(out)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(out));
   await finish(esc, out);
 });
 

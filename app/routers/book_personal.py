@@ -330,7 +330,7 @@ async def show_in_continue(request: Request, book_id: BookId, identity: str = De
 class NoticeIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    # seen: Okay on the first-visit window. off: Don't show again.
+    # seen: the first-visit window closed after its count. off: Don't show again.
     state: Literal["seen", "off"]
 
 

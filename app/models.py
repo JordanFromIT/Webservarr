@@ -797,7 +797,7 @@ class BookRequestTime(Base):
 class BookNotice(Base):
     """One person's answer to the audiobook notice on Books (pages/books.js):
     no row means they have not had the first-visit window yet; `seen` means
-    they pressed Okay on it, so later visits get the inline notice; `off`
+    they closed it after its countdown, so later visits get the inline notice; `off`
     means Don't show again. Keyed by account identity, so it holds across
     devices."""
     __tablename__ = "book_notice"

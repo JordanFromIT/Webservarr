@@ -976,7 +976,7 @@ export async function mount(ctx) {
   const account = ((ctx.data || {}).user || {}).identity_key || user;
   const noticeKey = NOTICE_SESSION_KEY + account;
   // The window: open, and the guide waiting for it to close.
-  const win = { modal: null, left: 0, answered: false, guideWaiting: false, inerted: [] };
+  const win = { modal: null, left: 0, guideWaiting: false, inerted: [] };
 
   function sessionGet(key) {
     try { return sessionStorage.getItem(key); } catch (e) { return null; }
@@ -1050,7 +1050,6 @@ export async function mount(ctx) {
       a.replaceWith(document.createTextNode(a.textContent));
     });
     win.left = NOTICE_WAIT_S;
-    win.answered = false;
     setCount(win.left);
     const okay = $('booksNoticeWindowOkay');
     if (!motionOff()) okay.classList.add('is-running');
@@ -1076,8 +1075,8 @@ export async function mount(ctx) {
   }
 
   /** Closed by Okay or Escape after the count, a click outside after it, or
-      the router before a navigation. Only Okay after the count is the answer
-      kept for the account; a finished count keeps it away for this session. */
+      the router before a navigation. Any close once the count is done is
+      the answer kept for the account (seen), and keeps it away this session. */
   function windowClosed() {
     const finished = win.left <= 0;
     win.modal = null;
@@ -1086,8 +1085,8 @@ export async function mount(ctx) {
     $('booksNoticeSay').textContent = '';
     html.removeAttribute('data-books-notice-open');
     inertBack();
-    if (finished) sessionSet(noticeKey, 'okay');
-    if (win.answered) {
+    if (finished) {
+      sessionSet(noticeKey, 'okay');
       // Not on the visit's signal: the answer goes through if they leave at once.
       sendBooks('POST', NOTICE_URL, { state: 'seen' }).then(null, function () { /* the window is back next session */ });
     }
@@ -1132,11 +1131,7 @@ export async function mount(ctx) {
     }, { signal: signal });
 
     if (mode === 'window') {
-      $('booksNoticeWindowOkay').addEventListener('click', function () {
-        if (win.left > 0) return;
-        win.answered = true;
-        closeWindow();
-      }, { signal: signal });
+      $('booksNoticeWindowOkay').addEventListener('click', closeWindow, { signal: signal });
       noticeWin.querySelector('[data-books-notice-veil]').addEventListener('click', closeWindow, { signal: signal });
       // Leaving the page: the window goes with it, and nothing is kept (the
       // router closes it first; this is for any other way the visit ends).

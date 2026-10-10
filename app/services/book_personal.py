@@ -121,7 +121,7 @@ def remove_from_list(db, identity: str, book_ids: Iterable[int]) -> None:
 # so the answer holds on every device.
 
 NOTICE_WINDOW = "window"     # no row: the first-visit window
-NOTICE_INLINE = "inline"     # Okay pressed on the window: the inline notice
+NOTICE_INLINE = "inline"     # the window closed after its count: the inline notice
 NOTICE_OFF = "off"           # Don't show again
 NOTICE_SEEN = "seen"         # the stored state behind NOTICE_INLINE
 
@@ -135,7 +135,7 @@ def notice_state(db, identity: str) -> str:
 
 
 def set_notice(db, identity: str, state: str) -> str:
-    """Record "seen" (Okay on the window) or "off" (Don't show again) and
+    """Record "seen" (the window closed after its count) or "off" (Don't show again) and
     return what the page shows now. Off is for good: a later "seen" (another
     tab's window) never brings the notice back."""
     if state not in (NOTICE_SEEN, NOTICE_OFF):
