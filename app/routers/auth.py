@@ -169,13 +169,19 @@ async def _fetch_plex_account(plex_token: str, headers: dict | None = None) -> d
     return {}
 
 
+class PlexTokenRejected(RuntimeError):
+    """plex.tv answered 401: the token itself is no good, so asking again
+    with it can't help."""
+
+
 async def _fetch_server_identifiers_for_token(
     plex_token: str, base_headers: dict, owned_only: bool = False
 ) -> set:
     """Return the set of Plex server machineIdentifiers (clientIdentifier) that a
     given token can see on plex.tv. `base_headers` must carry the Plex client
     identity (see _plex_client_headers) or plex.tv answers 400. TLS verified.
-    Raises on transport error so callers can fail closed."""
+    Raises on transport error so callers can fail closed: PlexTokenRejected
+    when plex.tv refuses the token (401), RuntimeError on any other status."""
     ids: set = set()
     if not plex_token:
         return ids
@@ -186,6 +192,8 @@ async def _fetch_server_identifiers_for_token(
             params={"includeHttps": 1},
             headers={**base_headers, "X-Plex-Token": plex_token},
         )
+        if resp.status_code == 401:
+            raise PlexTokenRejected("plex.tv resources returned HTTP 401")
         if resp.status_code != 200:
             raise RuntimeError(f"plex.tv resources returned HTTP {resp.status_code}")
         for res in (resp.json() or []):
@@ -247,33 +255,46 @@ async def _fetch_configured_server_identifiers(db: Session) -> set:
     return ids
 
 
-async def _user_has_server_access(plex_token: str, db: Session) -> bool:
-    """True if the Plex user behind `plex_token` can access the configured
-    server (server owner OR a shared/home user). Fails CLOSED: any error, or an
-    inability to positively confirm membership, returns False.
-    """
+async def _server_membership(plex_token: str, db: Session) -> str:
+    """Whether the Plex user behind `plex_token` can access the configured
+    server (owner, or a shared or home user): "member", "not_member",
+    "token_rejected" when plex.tv refuses the token itself (HTTP 401), or
+    "unknown" when that can't be told (the server's id can't be found, or
+    plex.tv errs). Request access reads "unknown" as Plex being down and
+    "token_rejected" as a Plex sign-in to start again, never as "not a
+    member"."""
     if not plex_token:
-        return False
+        return "not_member"
 
     authorized_ids = await _fetch_configured_server_identifiers(db)
     if not authorized_ids:
         logger.error(
             "Plex membership check: could not determine the configured server's "
-            "identifier — denying access (fail closed)"
+            "identifier (fail closed)"
         )
-        return False
+        return "unknown"
 
     try:
         user_ids = await _fetch_server_identifiers_for_token(plex_token, _plex_client_headers(db))
+    except PlexTokenRejected:
+        logger.warning("Plex membership check: plex.tv refused the account's token (HTTP 401)")
+        return "token_rejected"
     except Exception as e:
-        logger.error("Plex membership check: failed to fetch user's servers — denying: %s", str(e))
-        return False
+        logger.error("Plex membership check: failed to fetch the user's servers: %s", str(e))
+        return "unknown"
 
     if authorized_ids & user_ids:
-        return True
+        return "member"
 
-    logger.warning("Plex membership check: account has no access to the configured server — denying")
-    return False
+    logger.warning("Plex membership check: account has no access to the configured server")
+    return "not_member"
+
+
+async def _user_has_server_access(plex_token: str, db: Session) -> bool:
+    """True if the Plex user behind `plex_token` can access the configured
+    server. Fails CLOSED: any error, or an inability to positively confirm
+    membership, returns False."""
+    return await _server_membership(plex_token, db) == "member"
 
 
 async def _is_plex_server_owner(

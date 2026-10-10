@@ -183,7 +183,10 @@ request PIN can't complete a sign-in.
 4. With the token, reads `/api/v2/user` (id, username, email, thumb) and checks membership.
    Membership uses a three-way version of the existing gate: member, not member, or unknown. "Unknown"
    (the configured server id can't be found, or plex.tv errors) returns 503, so that Plex being down
-   never reads as "not a member".
+   never reads as "not a member". Until the answer is member or not member, the PIN key stays and only
+   the claim is released, so the card can ask again on the same PIN. If plex.tv refuses the token
+   itself (HTTP 401), asking again can't help: the PIN key is deleted and the route returns 400 "That
+   Plex sign-in expired. Start again."
 5. Drops the token and deletes the PIN key.
 6. Works out the state for this account, in this order:
    - `member`: the account can already see the server.
@@ -200,14 +203,17 @@ request PIN can't complete a sign-in.
 
 **Submit** does the following:
 
-1. Requires and consumes the ticket cookie. If the cookie is missing or expired, it returns 400 "Your
-   Plex check timed out. Start again."
-2. Validates the form. `name` is 1 to 80 characters and `note` is 1 to 1000 characters, both trimmed.
-   Control characters are refused, except newlines in `note`.
-3. Takes a Redis lock (`access_requests:submit`, 10 seconds) and checks, in order: blocked, cooldown,
-   an existing open request (pending or approved, answered with that state), and the cap of 20
-   pending rows. Then it inserts a `pending` row.
-4. Notifies the admins (section 8) and returns `{state: "pending"}`.
+1. Validates the form. `name` is 1 to 80 characters and `note` is 1 to 1000 characters, both trimmed.
+   Control characters are refused, except newlines in `note`. A form problem returns 422 and leaves
+   the ticket alone, so a typo costs no Plex sign-in.
+2. Requires the ticket cookie. If it is missing, it returns 400 "Your Plex check timed out. Start
+   again."
+3. Takes a Redis lock (`access_requests:submit`, 10 seconds), then consumes the ticket (GETDEL; an
+   expired or unknown ticket returns the same 400) and checks, in order: blocked, cooldown, an
+   existing open request (pending or approved, answered with that state), and the cap of 20 pending
+   rows. Then it inserts a `pending` row.
+4. Notifies the admins (section 8) and returns `{state: "pending", sent: true}`, or the existing
+   request's state with `sent: false`.
 
 ### Admin (`require_admin`, under `/api/admin`)
 
@@ -460,6 +466,13 @@ tab's visible text, so the two match). The panel, top to bottom:
    checking is off since the August 2026 friends retirement). Before the build, confirm this
    read-only in Authentik's admin UI or API: the Plex source's enrollment flow, user matching mode and
    allowed servers. Change nothing.
+   Checked read-only by Jordan on 2026-10-10. The Plex source's enrollment flow is
+   default-source-enrollment (it asks the new user to choose a username). User matching links users
+   on their unique identifier. Allowed servers is blank and Allow friends is off. WebServarr's
+   application bindings are empty. Task 1's sign-in with the test account succeeded, but that account
+   already existed in Authentik, so brand-new enrollment rests on this screen check alone.
+   Allowed servers being blank means Authentik admits any Plex account; WebServarr's membership gate
+   is what keeps strangers out. Jordan has been advised to tick the server there.
 3. **Invite acceptance.** Until the person accepts the invite, both Authentik and WebServarr refuse
    them. The S4 and S5 wording covers this. Plex's own email is the only reminder.
 4. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A

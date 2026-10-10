@@ -238,14 +238,14 @@ class PlexPopupPageIsThemed(unittest.TestCase):
     It now carries the operator's colours, font and custom CSS like every
     other page, and still hands the sign-in back to the opener."""
 
-    def fetch(self, values):
+    def fetch(self, values, path="/auth/plex-callback-page"):
         # Setup is marked done like the other route tests: the setup redirect
         # middleware would otherwise read the settings table, which CI's
         # fresh checkout has no tables for.
         b = build_branding(values, {}, None, dict(EMPTY_WIKI_HOOKS))
         with mock.patch("app.routers.setup.is_setup_completed", return_value=True), \
              mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})) as ctx:
-            r = TestClient(app).get("/auth/plex-callback-page")
+            r = TestClient(app).get(path)
         ctx.assert_called_once_with(False)   # public branding only
         return r
 
@@ -275,9 +275,19 @@ class PlexPopupPageIsThemed(unittest.TestCase):
         self.assertNotIn("Plex Auth", body)
         self.assertIn(self.HANDOFF_TAG, body)
         js = (STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8")
-        self.assertIn("window.opener.postMessage({ type: 'plex-auth-complete' }, window.location.origin);", js)
-        self.assertIn("window.location.href = '/login?plex_auth=complete';", js)
+        self.assertIn("var forAccess = new URLSearchParams(window.location.search).get('for') === 'access';", js)
+        self.assertIn("window.opener.postMessage({ type: forAccess ? 'plex-access-complete' : 'plex-auth-complete' }, "
+                      "window.location.origin);", js)
+        self.assertIn("window.location.href = forAccess ? '/login?access_request=complete' : '/login?plex_auth=complete';",
+                      js)
         self.assertNotIn("webservarr-custom-css", body)   # none saved, none written
+
+    def test_the_request_access_flow_lands_on_the_same_page(self):
+        # Request access sends Plex back with for=access; the page is the
+        # same and the script tells the two flows apart (plex_callback.mjs).
+        r = self.fetch({}, "/auth/plex-callback-page?for=access")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(self.HANDOFF_TAG, r.text)
 
     def test_no_inline_script(self):
         # The CSP is script-src 'self': the hand-back is a file, and the only

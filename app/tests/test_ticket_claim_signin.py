@@ -51,6 +51,9 @@ class FakeRedis:
     async def setex(self, key, ttl, value):
         return await self.set(key, value)
 
+    async def getdel(self, key):
+        return self.data.pop(key, None)
+
     async def delete(self, *keys):
         return sum((self.data.pop(k, None) is not None) + (self.hashes.pop(k, None) is not None)
                    for k in keys)

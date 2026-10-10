@@ -26,7 +26,7 @@ from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
 from app import home_event_log, home_news, web_analytics
-from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery
+from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery, access_requests
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services import book_requests as book_requests_service
@@ -400,6 +400,7 @@ app.include_router(setup_router.router, tags=["Setup"])
 app.include_router(simple_auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(oidc_auth.router, prefix="/auth", tags=["OIDC Authentication"])
 app.include_router(plex_auth.router, prefix="/auth", tags=["Plex Authentication"])
+app.include_router(access_requests.router, prefix="/api/access-requests", tags=["Access requests"])
 app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(status.router, prefix="/api/status", tags=["Status"])
 # The three admin routers share /api/admin. Their paths do not overlap, so
