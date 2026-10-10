@@ -94,10 +94,12 @@ const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];
 const MOVE_MS = 200;               // a card trading places with its neighbour
 const GUIDE_KEY = 'webservarr_books_guide_seen:';
 // The audiobook notice: the person's answer, kept for their account
-// (POST state "seen" or "off"), and this browser session's Okay ("okay") or
-// Don't show again ("off"), per account.
+// (POST state "seen" or "off"), and this browser session's own record, per
+// account: "seen" (the window was closed: the inline card from now on, even
+// if the answer did not reach the server), "okay" (the inline card's Okay)
+// or "off" (Don't show again). The last two hide the card for the session.
 const NOTICE_URL = '/api/books/me/notice';
-const NOTICE_SESSION_KEY = 'webservarr_books_notice:';
+const NOTICE_SESSION_KEY = 'webservarr_books_notice_session:';
 // Seconds the first-visit window's Okay waits before it works.
 const NOTICE_WAIT_S = 15;
 // The cards have their covers by then, so the first spotlight sits on something drawn.
@@ -995,6 +997,7 @@ export async function mount(ctx) {
 
   function hideNotice() {
     notice.hidden = true;
+    notice.classList.remove('is-arriving');
     html.removeAttribute('data-books-notice');
   }
 
@@ -1076,7 +1079,8 @@ export async function mount(ctx) {
 
   /** Closed by Okay or Escape after the count, a click outside after it, or
       the router before a navigation. Any close once the count is done is
-      the answer kept for the account (seen), and keeps it away this session. */
+      the answer kept for the account (seen), and the inline card takes its
+      place on this same view, as on every later visit until its Okay. */
   function windowClosed() {
     const finished = win.left <= 0;
     win.modal = null;
@@ -1086,9 +1090,14 @@ export async function mount(ctx) {
     html.removeAttribute('data-books-notice-open');
     inertBack();
     if (finished) {
-      sessionSet(noticeKey, 'okay');
+      sessionSet(noticeKey, 'seen');
       // Not on the visit's signal: the answer goes through if they leave at once.
       sendBooks('POST', NOTICE_URL, { state: 'seen' }).then(null, function () { /* the window is back next session */ });
+      if (!signal.aborted) {
+        // In its place under the event log, coming in (books.html's page style).
+        notice.classList.add('is-arriving');
+        notice.hidden = false;
+      }
     }
     if (finished && win.guideWaiting && !signal.aborted) {
       win.guideWaiting = false;
@@ -1106,7 +1115,10 @@ export async function mount(ctx) {
     const site = typeof brand.app_name === 'string' ? brand.app_name.trim() : '';
     root.querySelectorAll('[data-books-notice-site]').forEach(function (n) { n.textContent = site || 'this site'; });
     const server = (ctx.data || {}).books_notice;
-    let mode = sessionGet(noticeKey) ? 'off' : server;
+    const held = sessionGet(noticeKey);
+    // Okay or Don't show again this session: nothing. The window closed this
+    // session: the inline card, whatever an older copy of the page says.
+    let mode = held === 'okay' || held === 'off' ? 'off' : (held === 'seen' && server === 'window' ? 'inline' : server);
     // Not over a book's pop-up (a full load of its address): the window waits for the next visit.
     if (mode === 'window' && (html.hasAttribute('data-book-open') || !noticeWin ||
         !window.WSUI || typeof window.WSUI.modal !== 'function')) mode = 'off';

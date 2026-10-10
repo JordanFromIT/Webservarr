@@ -121,6 +121,11 @@
      own width: stacked when narrow; from 720px the buttons sit beside the
      title and the words run in two columns. */
   .bn-inline { container-type: inline-size; }
+  /* Coming in when the first-visit window closes: the person's own action,
+     so the page below may move. Reduced motion: a fade only. */
+  .bn-inline.is-arriving { animation: bn-arrive 280ms ease-out both; }
+  @keyframes bn-arrive { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .bn-inline.is-arriving { animation: bn-fade 220ms ease-out both; } }
   .bn-card { display: grid; gap: 10px 16px; grid-template-areas: "head" "text" "actions"; padding: 16px; background: rgb(var(--color-primary) / .10); border: 1px solid rgb(var(--color-accent) / .20); border-radius: 12px; }
   .bn-card-head { grid-area: head; display: flex; align-items: center; gap: 10px; min-width: 0; }
   .bn-card-head .material-symbols-outlined { font-size: 20px; color: rgb(var(--color-accent)); }

@@ -2691,7 +2691,7 @@ await run('CLS: a library slower than the wait brings in the toolbar alone, only
 const UI_SRC = readFileSync(join(STATIC, 'js/ui.js'), 'utf8');
 const LOADER = readFileSync(join(STATIC, 'js/theme-loader.js'), 'utf8');
 const NOTICE_URL = '/api/books/me/notice';
-const SESSION_KEY = 'webservarr_books_notice:sam';
+const SESSION_KEY = 'webservarr_books_notice_session:sam';
 const LEAD = 'For the best audiobook experience, I highly recommend listening right here on ';
 const SYNC = 'Audiobooks also show up in Plex and Plexamp, and your place should sync between them.';
 
@@ -2805,7 +2805,8 @@ await run('the window: nothing closes it for 15 seconds, then Okay does and is k
   check('it closes', !windowOn(t) && !t.doc.documentElement.hasAttribute('data-books-notice-open'));
   check('seen is sent once, for the account', JSON.stringify(posts(t)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(t));
   check('it is a same-origin write', t.net.calls.find((c) => c.url === NOTICE_URL).init.credentials === 'same-origin');
-  check('and no inline card for the rest of this session', !inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
+  check('the inline card takes its place on this same view, coming in', inlineOn(t) && t.q('#booksNotice').classList.contains('is-arriving'));
+  check('the window\'s Okay does not hide the card for the session: it records the window as seen', t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
   check('the page is usable again', !t.q('#wsPage > div').inert);
   check('focus goes to the page\'s heading', t.doc.activeElement === t.q('h1'));
   await finish(t);
@@ -2822,7 +2823,7 @@ await run('the window: Escape or a click outside after the count also counts as 
   await esc.clock.advance(50);
   check('Escape closes it once the count is done', !windowOn(esc));
   check('and seen is kept for the account, as Okay keeps it', JSON.stringify(posts(esc)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(esc));
-  check('gone for this session', esc.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
+  check('and the inline card shows in its place', inlineOn(esc) && esc.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
   const out = firstVisit(make);
   out.mount();
   await out.clock.advance(15000);
@@ -2830,6 +2831,27 @@ await run('the window: Escape or a click outside after the count also counts as 
   await out.clock.advance(50);
   check('a click outside closes it too, and keeps seen', !windowOn(out) && JSON.stringify(posts(out)) === JSON.stringify([{ method: 'POST', body: { state: 'seen' } }]), posts(out));
   await finish(esc, out);
+});
+
+await run('after the window closes: the inline card on every visit this session until its Okay', async (make) => {
+  const t = firstVisit(make);
+  t.mount();
+  await t.clock.advance(15000);
+  t.click('#booksNoticeWindowOkay');
+  await t.clock.advance(50);
+  check('the card is on the same view', inlineOn(t) && !windowOn(t));
+  t.click('#booksNoticeOkay');
+  check('its Okay hides it for the session', !inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
+  const reload = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'seen' } });
+  reload.mount();
+  check('a reload in the same session (the server says inline): the card', inlineOn(reload) && !windowOn(reload));
+  const stale = withNotice(make({ data: { books_notice: 'window' }, routes: noticeRoutes() }), { sessionStore: { [SESSION_KEY]: 'seen' } });
+  stale.mount();
+  check('the seen answer not on the server yet (the page still says window): the card, not the window again', inlineOn(stale) && !windowOn(stale));
+  const hidden = laterVisit(make, { sessionStore: { [SESSION_KEY]: 'okay' } });
+  hidden.mount();
+  check('after the card\'s Okay this session: not shown', !inlineOn(hidden));
+  await finish(t, reload, stale, hidden);
 });
 
 await run('the window: reduced motion has no sweep, and the number still counts', async (make) => {
@@ -2862,7 +2884,7 @@ await run('the window: Okay that cannot be kept still closes it, and the guide s
   t.click('#booksNoticeWindowOkay');
   await t.clock.advance(400);
   check('closed, sent once, no error shown', !windowOn(t) && posts(t).length === 1 && t.toasts.length === 0);
-  check('gone for this session (it is back on a later one)', t.win.sessionStorage.getItem(SESSION_KEY) === 'okay');
+  check('the inline card shows, and this session treats the window as seen', inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
   check('the guide runs', tourOn(t));
   await finish(t);
 });
@@ -3034,10 +3056,12 @@ current = 'the notice on a full load: theme-loader.js holds the inline card\'s r
   };
   check('the page says inline: marked', load('inline').marked);
   check('the window, off, or nothing said: not', !load('window').marked && !load('off').marked && !load(null).marked);
+  check('the window closed earlier this session (an older copy of the page still says window): marked', load('window', { session: { [SESSION_KEY]: 'seen' } }).marked &&
+    load('inline', { session: { [SESSION_KEY]: 'seen' } }).marked);
   check('after Okay or Don\'t show again this session: not', !load('inline', { session: { [SESSION_KEY]: 'okay' } }).marked &&
     !load('inline', { session: { [SESSION_KEY]: 'off' } }).marked);
   check('per account: the identity key when there is one', load('inline', { user: { username: 'sam', identity_key: 'k9' }, session: { [SESSION_KEY]: 'okay' } }).marked &&
-    !load('inline', { user: { username: 'sam', identity_key: 'k9' }, session: { 'webservarr_books_notice:k9': 'okay' } }).marked);
+    !load('inline', { user: { username: 'sam', identity_key: 'k9' }, session: { 'webservarr_books_notice_session:k9': 'okay' } }).marked);
   check('another page: not', !load('inline', { page: 'index' }).marked);
   const blocked = load('inline', { blocked: true });
   check('session storage blocked: marked (the page shows it), and no error', blocked.marked && !blocked.err, blocked.err && String(blocked.err));
