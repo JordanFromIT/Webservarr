@@ -1,7 +1,7 @@
 # Request access from the sign-in page
 
 Status: designed 2026-10-10; decisions approved by Jordan in chat. Amended 2026-10-10: the admin's
-notifications find the admin by Plex account id, not by email (section 8). Not built. The build plan is
+notifications find the admin by Plex account id, not by email (section 8). Built and live-checked on dev 2026-10-10 (390 and 1440, all three card positions, keyboard, admin and member; one end-to-end request with Jordan's test account). The build plan is
 `docs/superpowers/plans/2026-10-10-request-access.md`. This feature adds public
 routes, so it joins the v2.0 security audit scope (roadmap step 6). The audit stays on hold until Jordan
 says it is ready.
