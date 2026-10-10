@@ -301,7 +301,7 @@ export async function mount(ctx) {
 
   /** Nothing to show: what this part will show, and since when it has been recorded. */
   function emptyLine(words, since) {
-    const box = el('div', 'mt-3');
+    const box = el('div', 'mt-3 first:mt-0');
     box.setAttribute('data-ins-empty', '');
     box.appendChild(el('p', MUTED, words));
     const day = dayLabel(since);
@@ -483,8 +483,9 @@ export async function mount(ctx) {
   /** One person's card: picture, sessions and time, the name band, then a row
       a kind of time, each tinted more strongly the more of their time it holds. */
   function userCard(p) {
-    // Four to a row from lg, as Plex shows them; narrower, the row scrolls.
-    const li = el('li', 'w-[min(82vw,288px)] shrink-0 snap-start lg:w-[calc((100%-48px)/4)]');
+    // Four to a row from lg, as Plex shows them, never narrower than its rows need (288px):
+    // where four do not fit, the next one peeks in and the row scrolls.
+    const li = el('li', 'w-[min(82vw,288px)] shrink-0 snap-start lg:w-[max(288px,calc((100%-48px)/4))]');
     const card = el('button', 'ws-frost flex h-full w-full flex-col overflow-hidden rounded-card border text-left ' + FOCUS);
     card.type = 'button';
     card.setAttribute('data-ins-user', p.key);

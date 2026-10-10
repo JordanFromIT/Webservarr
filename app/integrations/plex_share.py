@@ -186,7 +186,8 @@ async def server_people() -> Dict[str, object]:
     return {"owner": owner_id, "names": names, "thumbs": thumbs}
 
 
-AVATAR_MAX_BYTES = 512 * 1024
+# Some plex.tv pictures are full-size uploads (2 MB seen); the browser keeps each a day.
+AVATAR_MAX_BYTES = 4 * 1024 * 1024
 AVATAR_HOPS = 3
 AVATAR_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
