@@ -274,6 +274,116 @@ def seed_access(conn: sqlite3.Connection, identity: str, status: str, name: str,
     return {"identity": identity, "status": status, "share_state": share_state}
 
 
+LOG_SOURCES = ("web", "plex", "local")
+REQUEST_FORMATS = ("ebook", "audiobook", "both")
+TITLE_MAX = 300
+CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _now(now: datetime | None) -> datetime:
+    return now or datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _stamp(at: datetime) -> str:
+    return at.strftime("%Y-%m-%d %H:%M:%S.000000")
+
+
+def _write(conn: sqlite3.Connection, statement: str, rows: list) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.executemany(statement, rows)
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
+def seed_log(conn: sqlite3.Connection, identity: str, book_key: str, minutes_ago: int, minutes: int,
+             source: str = "web", now: datetime | None = None) -> dict:
+    """Listening in the check-in log, as the player writes it: a play row, a
+    check-in every 10 s for `minutes`, then a pause, from `minutes_ago`
+    minutes ago. Insights reads it (the hourly rollup takes it in at its next
+    pass, if it is within two days of the last one)."""
+    require_reserved(identity)
+    if not BOOK_KEY.fullmatch(book_key):
+        raise DevkitError(f"not a book key: {book_key!r}")
+    if source not in LOG_SOURCES:
+        raise DevkitError(f"--source must be one of {', '.join(LOG_SOURCES)}")
+    if not 1 <= minutes <= 600 or minutes > minutes_ago:
+        raise DevkitError("--minutes must be 1 to 600 and no more than --minutes-ago")
+    start = _now(now) - timedelta(minutes=minutes_ago)
+    rows = [(identity, book_key, "1", 0, "devkit", "play" if s == 0 else "checkin",
+             _stamp(start + timedelta(seconds=s)), source) for s in range(0, minutes * 60, 10)]
+    rows.append((identity, book_key, "1", 0, "devkit", "pause", _stamp(start + timedelta(minutes=minutes)), source))
+    _write(conn, "INSERT INTO listening_log (identity, book_key, track_key, offset_ms, device, event, at, source) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    return {"identity": identity, "book_key": book_key, "rows": len(rows), "source": source}
+
+
+def seed_hour(conn: sqlite3.Connection, identity: str, book_key: str, hours_ago: int, minutes: int,
+              source: str = "web", now: datetime | None = None) -> dict:
+    """One hour of listening in listening_hourly, `hours_ago` hours ago (any
+    age, unlike the log), replacing that hour's row for the book and source."""
+    require_reserved(identity)
+    if not BOOK_KEY.fullmatch(book_key):
+        raise DevkitError(f"not a book key: {book_key!r}")
+    if source not in LOG_SOURCES:
+        raise DevkitError(f"--source must be one of {', '.join(LOG_SOURCES)}")
+    if hours_ago < 1 or not 1 <= minutes <= 60:
+        raise DevkitError("--hours-ago must be 1 or more and --minutes 1 to 60")
+    hour = (_now(now) - timedelta(hours=hours_ago)).replace(minute=0, second=0, microsecond=0)
+    _write(conn, "INSERT INTO listening_hourly (identity, hour, book_key, source, ms) VALUES (?, ?, ?, ?, ?) "
+                 "ON CONFLICT (identity, hour, book_key, source) DO UPDATE SET ms = excluded.ms",
+           [(identity, _stamp(hour), book_key, source, minutes * 60000)])
+    return {"identity": identity, "hour": _stamp(hour), "ms": minutes * 60000}
+
+
+def seed_request(conn: sqlite3.Connection, identity: str, title: str, fmt: str, days_ago: int,
+                 now: datetime | None = None) -> dict:
+    """A book request from a test identity, `days_ago` days ago. Its Chaptarr
+    id is devkit:<identity's number>; nothing is sent to Chaptarr."""
+    require_reserved(identity)
+    if not title or len(title) > TITLE_MAX or CONTROL.search(title):
+        raise DevkitError(f"--title must be 1 to {TITLE_MAX} characters with no control characters")
+    if fmt not in REQUEST_FORMATS:
+        raise DevkitError(f"--format must be one of {', '.join(REQUEST_FORMATS)}")
+    if days_ago < 0:
+        raise DevkitError("--days-ago cannot be negative")
+    at = _now(now) - timedelta(days=days_ago)
+    _write(conn, "INSERT INTO book_requesters (identity, foreign_id, title, format, requested_at) "
+                 "VALUES (?, ?, ?, ?, ?)", [(identity, "devkit:" + identity.split(":", 1)[1], title, fmt, _stamp(at))])
+    return {"identity": identity, "format": fmt, "requested_at": _stamp(at)}
+
+
+def seed_ebook(conn: sqlite3.Connection, identity: str, book_id: int, page: int, pages: int, days_ago: int,
+               now: datetime | None = None) -> dict:
+    """A place in a catalog ebook (its Books id), read `days_ago` days ago,
+    replacing any the identity has in that book."""
+    require_reserved(identity)
+    if book_id < 1 or pages < 0 or not 0 <= page <= pages or days_ago < 0:
+        raise DevkitError("--book-id must be 1 or more, --page 0 to --pages, --days-ago not negative")
+    at = _now(now) - timedelta(days=days_ago)
+    _write(conn, "INSERT INTO ebook_places (identity, book_id, page, pages, read_at, seen_at) VALUES (?, ?, ?, ?, ?, ?) "
+                 "ON CONFLICT (identity, book_id) DO UPDATE SET page = excluded.page, pages = excluded.pages, "
+                 "read_at = excluded.read_at, seen_at = excluded.seen_at",
+           [(identity, book_id, page, pages, _stamp(at), _stamp(_now(now)))])
+    return {"identity": identity, "book_id": book_id, "page": page, "pages": pages}
+
+
+def seed_reading(conn: sqlite3.Connection, identity: str, pages: int, days_ago: int,
+                 now: datetime | None = None) -> dict:
+    """Kavita's lifetime pages for a test identity as of `days_ago` days ago
+    (one row a day, replacing that day's). Two days make pages read."""
+    require_reserved(identity)
+    if pages < 0 or days_ago < 0:
+        raise DevkitError("--pages and --days-ago cannot be negative")
+    at = _now(now) - timedelta(days=days_ago)
+    _write(conn, "INSERT INTO reading_totals (identity, day, pages, words, hours, seen_at) VALUES (?, ?, ?, 0, 0, ?) "
+                 "ON CONFLICT (identity, day) DO UPDATE SET pages = excluded.pages, seen_at = excluded.seen_at",
+           [(identity, at.strftime("%Y-%m-%d"), pages, _stamp(at))])
+    return {"identity": identity, "day": at.strftime("%Y-%m-%d"), "pages": pages}
+
+
 # --- sessions (Redis) --------------------------------------------------------
 
 async def mint_session(role: str, identity: str, kavita_link: bool) -> str:
@@ -407,6 +517,38 @@ def build_parser() -> argparse.ArgumentParser:
     access.add_argument("--share-state", choices=SHARE_STATES)
     access.add_argument("--share-error")
 
+    log = commands.add_parser("seed-log", help="seed listening in the check-in log (Insights)")
+    log.add_argument("--identity", type=identity_arg, required=True)
+    log.add_argument("--book-key", required=True)
+    log.add_argument("--minutes-ago", type=int, required=True)
+    log.add_argument("--minutes", type=int, required=True)
+    log.add_argument("--source", choices=LOG_SOURCES, default="web")
+
+    hour = commands.add_parser("seed-hour", help="seed one hour of listening by the hour (Insights, any age)")
+    hour.add_argument("--identity", type=identity_arg, required=True)
+    hour.add_argument("--book-key", required=True)
+    hour.add_argument("--hours-ago", type=int, required=True)
+    hour.add_argument("--minutes", type=int, required=True)
+    hour.add_argument("--source", choices=LOG_SOURCES, default="web")
+
+    request = commands.add_parser("seed-request", help="seed a book request (Insights' requested then read)")
+    request.add_argument("--identity", type=identity_arg, required=True)
+    request.add_argument("--title", required=True)
+    request.add_argument("--format", choices=REQUEST_FORMATS, default="both")
+    request.add_argument("--days-ago", type=int, default=0)
+
+    ebook = commands.add_parser("seed-ebook", help="seed a place in a catalog ebook (Insights)")
+    ebook.add_argument("--identity", type=identity_arg, required=True)
+    ebook.add_argument("--book-id", type=int, required=True)
+    ebook.add_argument("--page", type=int, required=True)
+    ebook.add_argument("--pages", type=int, required=True)
+    ebook.add_argument("--days-ago", type=int, default=0)
+
+    reading = commands.add_parser("seed-reading", help="seed Kavita's lifetime pages on one day (Insights)")
+    reading.add_argument("--identity", type=identity_arg, required=True)
+    reading.add_argument("--pages", type=int, required=True)
+    reading.add_argument("--days-ago", type=int, default=0)
+
     commands.add_parser("cleanup", help="remove every row and session of the reserved test identities")
     return parser
 
@@ -449,6 +591,16 @@ def run(args: argparse.Namespace) -> int:
         elif args.command == "seed-access":
             print(json.dumps(seed_access(conn, args.identity, args.status, args.name, args.note,
                                          args.minutes_ago, args.share_state, args.share_error)))
+        elif args.command == "seed-log":
+            print(json.dumps(seed_log(conn, args.identity, args.book_key, args.minutes_ago, args.minutes, args.source)))
+        elif args.command == "seed-hour":
+            print(json.dumps(seed_hour(conn, args.identity, args.book_key, args.hours_ago, args.minutes, args.source)))
+        elif args.command == "seed-request":
+            print(json.dumps(seed_request(conn, args.identity, args.title, args.format, args.days_ago)))
+        elif args.command == "seed-ebook":
+            print(json.dumps(seed_ebook(conn, args.identity, args.book_id, args.page, args.pages, args.days_ago)))
+        elif args.command == "seed-reading":
+            print(json.dumps(seed_reading(conn, args.identity, args.pages, args.days_ago)))
         elif args.command == "cleanup":
             removed = delete_reserved_rows(conn)
             gone = asyncio.run(finish(purge_sessions()))

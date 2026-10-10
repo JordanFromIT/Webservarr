@@ -59,6 +59,14 @@ dk seed-access --identity plex:990011                       # pending
 dk seed-access --identity plex:990012 --status approved --share-state failed --share-error "Plex refused the share (HTTP 400)"
 dk seed-access --identity plex:990013 --status blocked
 
+# Insights (the admin's reading and listening page): listening, reading and requests.
+dk seed-log --identity plex:990011 --book-key 283644:1 --minutes-ago 90 --minutes 20      # within the last 48 hours
+dk seed-hour --identity plex:990011 --book-key 283644:1 --hours-ago 200 --minutes 45     # any age
+dk seed-request --identity plex:990011 --title "Dune" --format both --days-ago 3
+dk seed-ebook --identity plex:990011 --book-id 7 --page 40 --pages 300 --days-ago 40     # 40 days: abandoned
+dk seed-reading --identity plex:990011 --pages 100 --days-ago 2
+dk seed-reading --identity plex:990011 --pages 160 --days-ago 1                          # 60 pages read yesterday
+
 # Put the snapshot back exactly, check it matches, delete the kit's sessions and the snapshot.
 dk restore before-books
 

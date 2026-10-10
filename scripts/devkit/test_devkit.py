@@ -172,6 +172,75 @@ class AccessSeeding(WithDatabase):
         self.assertNotIn("access_requests", devkit.delete_reserved_rows(self.database()))
 
 
+INSIGHTS_TABLES = (
+    "CREATE TABLE listening_log (id INTEGER PRIMARY KEY, identity TEXT NOT NULL, book_key TEXT NOT NULL, "
+    "track_key TEXT NOT NULL, offset_ms INT NOT NULL, device TEXT NOT NULL, event TEXT NOT NULL, at TEXT NOT NULL, "
+    "source TEXT NOT NULL DEFAULT 'web')",
+    "CREATE TABLE listening_hourly (id INTEGER PRIMARY KEY, identity TEXT NOT NULL, hour TEXT NOT NULL, "
+    "book_key TEXT NOT NULL, source TEXT NOT NULL, ms INT NOT NULL, UNIQUE (identity, hour, book_key, source))",
+    "CREATE TABLE book_requesters (id INTEGER PRIMARY KEY, identity TEXT NOT NULL, foreign_id TEXT NOT NULL, "
+    "title TEXT NOT NULL, format TEXT NOT NULL, requested_at TEXT NOT NULL)",
+    "CREATE TABLE ebook_places (id INTEGER PRIMARY KEY, identity TEXT NOT NULL, book_id INT NOT NULL, page INT NOT NULL, "
+    "pages INT NOT NULL, read_at TEXT, seen_at TEXT NOT NULL, UNIQUE (identity, book_id))",
+    "CREATE TABLE reading_totals (id INTEGER PRIMARY KEY, identity TEXT NOT NULL, day TEXT NOT NULL, pages INT NOT NULL, "
+    "words INT NOT NULL, hours INT NOT NULL, seen_at TEXT NOT NULL, UNIQUE (identity, day))",
+)
+
+
+class InsightsSeeding(unittest.TestCase):
+    NOW = datetime(2026, 10, 10, 12, 0, 0)
+
+    def conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.isolation_level = None
+        for statement in INSIGHTS_TABLES:
+            conn.execute(statement)
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_listening_in_the_log_and_by_the_hour(self):
+        conn = self.conn()
+        devkit.seed_log(conn, "plex:990011", "283644:1", 30, 2, source="plex", now=self.NOW)
+        rows = conn.execute("SELECT event, at, source FROM listening_log ORDER BY at").fetchall()
+        self.assertEqual(len(rows), 13)                                # 12 rows 10 s apart, then the pause
+        self.assertEqual((rows[0][0], rows[0][1], rows[-1][0], rows[-1][1], rows[0][2]),
+                         ("play", "2026-10-10 11:30:00.000000", "pause", "2026-10-10 11:32:00.000000", "plex"))
+        devkit.seed_hour(conn, "plex:990011", "283644:1", 50, 30, now=self.NOW)
+        devkit.seed_hour(conn, "plex:990011", "283644:1", 50, 45, now=self.NOW)
+        self.assertEqual(conn.execute("SELECT hour, ms, source FROM listening_hourly").fetchall(),
+                         [("2026-10-08 10:00:00.000000", 2700000, "web")])
+
+    def test_requests_ebook_places_and_reading(self):
+        conn = self.conn()
+        devkit.seed_request(conn, "plex:990011", "W" * 300, "both", 3, now=self.NOW)
+        devkit.seed_ebook(conn, "plex:990011", 7, 40, 300, 2, now=self.NOW)
+        devkit.seed_ebook(conn, "plex:990011", 7, 60, 300, 1, now=self.NOW)
+        devkit.seed_reading(conn, "plex:990011", 120, 1, now=self.NOW)
+        devkit.seed_reading(conn, "plex:990011", 150, 1, now=self.NOW)
+        self.assertEqual(conn.execute("SELECT length(title), format, requested_at FROM book_requesters").fetchall(),
+                         [(300, "both", "2026-10-07 12:00:00.000000")])
+        self.assertEqual(conn.execute("SELECT book_id, page, read_at FROM ebook_places").fetchall(),
+                         [(7, 60, "2026-10-09 12:00:00.000000")])
+        self.assertEqual(conn.execute("SELECT day, pages FROM reading_totals").fetchall(), [("2026-10-09", 150)])
+
+    def test_refusals_write_nothing(self):
+        conn = self.conn()
+        refusals = (lambda: devkit.seed_log(conn, "plex:12345", "1:1", 10, 1),
+                    lambda: devkit.seed_log(conn, "plex:990011", "1:1", 1, 5),            # longer than it has been
+                    lambda: devkit.seed_log(conn, "plex:990011", "1:1", 10, 1, source="vinyl"),
+                    lambda: devkit.seed_hour(conn, "plex:990011", "1:1", 1, 61),
+                    lambda: devkit.seed_request(conn, "plex:990011", "", "both", 0),
+                    lambda: devkit.seed_request(conn, "plex:990011", "x\u0007y", "both", 0),
+                    lambda: devkit.seed_request(conn, "plex:990011", "x", "vinyl", 0),
+                    lambda: devkit.seed_ebook(conn, "plex:990011", 7, 400, 300, 0),
+                    lambda: devkit.seed_reading(conn, "oidc:990011", 5, 0))
+        for refuse in refusals:
+            with self.assertRaises(devkit.DevkitError):
+                refuse()
+        for table in ("listening_log", "listening_hourly", "book_requesters", "ebook_places", "reading_totals"):
+            self.assertEqual(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
+
+
 class SnapshotAndRestore(WithDatabase):
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp()) / "snaps"
