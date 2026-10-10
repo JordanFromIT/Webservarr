@@ -1605,6 +1605,14 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
    to it (ellipsis), so the note is still read on a phone. */
 .ws-wheel__text[data-noted] { display: flex; }
 .ws-wheel__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A line's action ("Added: ", js/event-log.js wheelLead) stays on screen in
+   its own box and only the words after it give way and slide (they are the
+   title then). The words take the row's room (the time keeps its place at
+   the end), so the action can be held to half of it: an action longer than
+   that, rare, gives way with an ellipsis rather than leave the words no
+   room. Its space after the colon is kept (pre), the gap it had before. */
+.ws-wheel__text[data-led] { display: flex; flex: 1 1 auto; }
+.ws-wheel__lead { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .ws-wheel__note { flex: none; white-space: pre; color: rgb(var(--color-text) / 0.7); }
 .ws-wheel__line[data-type="quiet"] .ws-wheel__text { color: rgb(var(--color-text) / 0.7); }
 .ws-wheel__time,

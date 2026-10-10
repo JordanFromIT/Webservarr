@@ -602,11 +602,15 @@ await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in 
   check('the tick is the theme\'s secondary text colour, greyed', rule && /^rgb\(var\(--color-text-secondary\) \/ 0\.\d+\)$/.test(rule[1]), rule && rule[1]);
   const muted = grab.querySelector('.ws-wheel__text .ws-wheel__note');
   const title = muted && muted.previousElementSibling;
-  check('the note is a span of its own after the title', muted && muted.textContent === ' · not guaranteed' && title && title.className === 'ws-wheel__title' && title.textContent === 'Downloading: Dune (2021)' && !muted.nextSibling);
+  check('the note is a span of its own after the title', muted && muted.textContent === ' · not guaranteed' && title && title.className === 'ws-wheel__title' && title.textContent === 'Dune (2021)' && !muted.nextSibling);
+  check('the action before it is its own box', title && title.previousElementSibling && title.previousElementSibling.className === 'ws-wheel__lead' && title.previousElementSibling.textContent === 'Downloading: ');
   const noteRule = THEME_CSS.match(/\.ws-wheel__note \{ flex: none; white-space: pre; color: ([^;]+); \}/);
   check('muted with a theme colour, and never cut: the title gives way to it', noteRule && /^rgb\(var\(--color-text\) \/ 0\.\d+\)$/.test(noteRule[1]) && /\.ws-wheel__text\[data-noted\] \{ display: flex; \}/.test(THEME_CSS) && /\.ws-wheel__title \{ min-width: 0; overflow: hidden; text-overflow: ellipsis; \}/.test(THEME_CSS), noteRule && noteRule[1]);
   check('the whole line reads as one in its title', grab.title === 'Downloading: Dune (2021) · not guaranteed', grab.title);
-  check('a line without a note is plain text', !added.querySelector('.ws-wheel__note') && !added.querySelector('.ws-wheel__title') && !added.querySelector('[data-noted]') && lineText(added) === 'Added: Severance S02E03');
+  check('a line without a note: no note, its action and its words', !added.querySelector('.ws-wheel__note') && !added.querySelector('[data-noted]') && lineText(added) === 'Added: Severance S02E03' &&
+    added.querySelector('.ws-wheel__lead').textContent === 'Added: ' && added.querySelector('.ws-wheel__title').textContent === 'Severance S02E03');
+  const plain = t.slots()[2];
+  check('a line without an action is plain text', !plain.querySelector('.ws-wheel__lead') && !plain.querySelector('.ws-wheel__title') && !plain.querySelector('[data-led]') && lineText(plain) === 'A note');
   check('no screen-reader prefix on library lines', !grab.querySelector('.sr-only'));
   await t.poll(answer('ok', [], [lib(22, 'Downloading: <b>x</b>', 0, '<i>not</i> guaranteed')].concat(t.feed.answer.items)));
   await t.clock.advance(800);
@@ -1108,6 +1112,7 @@ await run('a first page without the section: the first page with one is taken ov
 // ---- A line cut off slides to its end and back (WSUI.marquee) ----
 
 const LONG_GRAB = 'Downloading: The Fellowship of the Ring (2001) Extended Edition';
+const GRAB_WORDS = 'The Fellowship of the Ring (2001) Extended Edition';   // after its action
 const LONG_NOTE = 'Requests for 4K films are paused until the new disks arrive';
 const SLIDES = answer('ok', [], [
   note(1, 'New shelves on Books', 300),
@@ -1124,8 +1129,8 @@ await run('a line cut off slides; one that fits does not; its words are read onc
   const longNote = lineOf(t, 'Requests for 4K');
   const fits = lineOf(t, 'New shelves');
   check('the grab\'s title slides, its note stays put beside it', boxOf(grab).className === 'ws-wheel__title' && boxOf(grab).getAttribute('data-marquee') === 'run' &&
-    boxOf(grab).firstElementChild.className === 'ws-marquee__track' && boxOf(grab).textContent === LONG_GRAB && grab.querySelector('.ws-wheel__note').parentElement === grab.querySelector('.ws-wheel__text'));
-  check('the distance is how far the title runs past its box', boxOf(grab).style.getPropertyValue('--marquee-shift') === -(LONG_GRAB.length * 8 - BOX_PX) + 'px', boxOf(grab).style.getPropertyValue('--marquee-shift'));
+    boxOf(grab).firstElementChild.className === 'ws-marquee__track' && boxOf(grab).textContent === GRAB_WORDS && grab.querySelector('.ws-wheel__note').parentElement === grab.querySelector('.ws-wheel__text'));
+  check('the distance is how far the title runs past its box', boxOf(grab).style.getPropertyValue('--marquee-shift') === -(GRAB_WORDS.length * 8 - BOX_PX) + 'px', boxOf(grab).style.getPropertyValue('--marquee-shift'));
   check('a line without a note slides its whole text', boxOf(longNote).className === 'ws-wheel__text' && boxOf(longNote).getAttribute('data-marquee') === 'run');
   check('a line that fits does not move', !boxOf(fits).hasAttribute('data-marquee'));
   check('the words are there once, the screen reader\'s prefix with them', lineText(longNote) === LONG_NOTE && longNote.querySelector('.sr-only').textContent === 'Note: ' &&
@@ -1171,11 +1176,12 @@ await run('the lines slide in step: one beat, one speed, each its own distance, 
   const longNote = boxOf(lineOf(t, 'Requests for 4K'));
   const fits = boxOf(lineOf(t, 'New shelves'));
   const time = (b) => b.style.getPropertyValue('--marquee-time');
-  const far = (LONG_GRAB.length * 8 - BOX_PX);
-  // The grab's title runs furthest; the group's beat is its travel rounded
+  const far = (GRAB_WORDS.length * 8 - BOX_PX);
+  // The group's beat is the furthest line's travel rounded
   // up to half a second, plus the 1.75 s rest, there and back.
   const beatOf = (px) => (2 * (Math.ceil(px / 32 / 0.5) * 0.5 + 1.75)).toFixed(3) + 's';
-  const want = beatOf(far);
+  // The furthest is the note now: the grab's action stays out of its slide.
+  const want = beatOf(Math.max(far, LONG_NOTE.length * 8 - BOX_PX));
   // Each line's speed out, from its ease: its distance over its slide's
   // share of the beat; and when it sets off back (at half the beat).
   const ease = (b) => b.style.getPropertyValue('--marquee-ease').match(/^linear\(0, 1 ([\d.]+)%, 1 50%, 0 ([\d.]+)%, 0\)$/);
@@ -1193,7 +1199,7 @@ await run('the lines slide in step: one beat, one speed, each its own distance, 
   await t.poll(answer('ok', [], SLIDES.items.concat([lib(9, longest, 1)])));
   await t.clock.advance(3000);
   const added = boxOf(lineOf(t, 'Added: The Lord'));
-  const want2 = beatOf(longest.length * 8 - BOX_PX);
+  const want2 = beatOf((longest.length - 'Added: '.length) * 8 - BOX_PX);
   const moving = t.settled().map(boxOf).filter((b) => b.getAttribute('data-marquee') === 'run');
   check('the new line slides, in step', added.getAttribute('data-marquee') === 'run' && t.slides.startOf(added) === 0);
   check('every sliding line, old and new, on the same time', moving.length === 3 && moving.every((b) => time(b) === want2), moving.map(time).concat(want2));
@@ -1206,6 +1212,38 @@ await run('the lines slide in step: one beat, one speed, each its own distance, 
   t.swap();
   check('the next page: every line back on the beat at once, with no resize', moving.every((b) => b.isConnected && time(b) === want2 && t.slides.startOf(b) === 0),
     moving.map((b) => t.slides.startOf(b)));
+});
+
+await run('the action stays put: only the words after its colon slide', async (make) => {
+  check('split at the first colon a space follows', JSON.stringify(mod.wheelLead('Added: Dune (2021)')) === JSON.stringify({ lead: 'Added: ', rest: 'Dune (2021)' }) &&
+    mod.wheelLead('Heads up: the server: down').rest === 'the server: down');
+  check('a time is not an action, nor a colon with nothing on one side', mod.wheelLead('Maintenance at 2:00 AM') === null && mod.wheelLead('Plex is down') === null &&
+    mod.wheelLead('Added:') === null && mod.wheelLead(': x') === null && mod.wheelLead('') === null);
+  check('one space after the colon, as the line read before', mod.wheelLead('Added:   Dune').lead === 'Added: ' && mod.wheelLead('Added:\tDune').lead === 'Added: ');
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const grab = lineOf(t, 'Downloading');
+  const lead = grab.querySelector('.ws-wheel__lead');
+  check('the action is its own box, before the words and outside the slide', lead && lead.textContent === 'Downloading: ' && lead.nextElementSibling === boxOf(grab) &&
+    !lead.closest('[data-marquee]') && !lead.hasAttribute('data-marquee') && !lead.querySelector('.ws-marquee__track'));
+  check('the words after it slide, measured on their own box', boxOf(grab).getAttribute('data-marquee') === 'run' &&
+    boxOf(grab).style.getPropertyValue('--marquee-shift') === -(GRAB_WORDS.length * 8 - BOX_PX) + 'px');
+  check('read once, as before: action, words, note', lineText(grab) === LONG_GRAB + ' · not guaranteed' && t.section.textContent.split(GRAB_WORDS).length === 2);
+  check('the line is marked for the layout', grab.querySelector('.ws-wheel__text').hasAttribute('data-led'));
+  // A line rewritten without an action loses the lead and its mark.
+  const note3 = lineOf(t, 'Requests for 4K');
+  check('a line with no action slides whole, as before', !note3.querySelector('.ws-wheel__lead') && !note3.querySelector('[data-led]') && boxOf(note3).className === 'ws-wheel__text');
+  await t.poll(answer('ok', [], [SLIDES.items[0], lib(2, 'Grabbed for the long weekend with nothing to split', 20, 'not guaranteed'), SLIDES.items[2]]));
+  await t.clock.advance(2000);
+  const rewritten = lineOf(t, 'Grabbed for');
+  check('rewritten without an action: no lead, the title holds it all', rewritten === grab && !grab.querySelector('.ws-wheel__lead') &&
+    !grab.querySelector('[data-led]') && boxOf(grab).textContent === 'Grabbed for the long weekend with nothing to split');
+  // The layout: the action never shrinks, but is held to half the row.
+  const rule = (sel) => { const m = THEME_CSS.match(new RegExp(sel.replace(/[.[\]]/g, '\\$&') + ' \\{([^}]*)\\}')); return m ? m[1] : ''; };
+  const leadRule = rule('.ws-wheel__lead');
+  check('theme.css: the action keeps its width, up to half the row, then an ellipsis', /flex: none/.test(leadRule) && /max-width: 50%/.test(leadRule) &&
+    /overflow: hidden/.test(leadRule) && /text-overflow: ellipsis/.test(leadRule) && /white-space: pre/.test(leadRule), leadRule);
+  check('theme.css: a line with an action is a row that takes the room', /display: flex/.test(rule('.ws-wheel__text[data-led]')) && /flex: 1 1 auto/.test(rule('.ws-wheel__text[data-led]')));
 });
 
 await run('reduced motion: no line moves, and the ellipsis and the whole title stay', async (make) => {

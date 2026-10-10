@@ -149,6 +149,17 @@ function eventWords(ev) {
     return (WHEEL_SR_PREFIX[ev.type] || '') + ev.text + (ev.note ? ' · ' + ev.note : '');
 }
 
+// A line's action and the words after it: "Added: Dune (2021)" is the
+// lead "Added: " (one space after the colon, as the line collapsed it
+// before, so the gap reads the same) and "Dune (2021)". The feed sends each line as one string (the server
+// writes "<action>: <words>"), so the split is the first colon that a
+// space follows, which leaves a time like 2:00 alone. null: no such colon,
+// or nothing on either side of it.
+export function wheelLead(text) {
+    var m = /^([^\s][\s\S]*?:)(\s+)(\S[\s\S]*)$/.exec(text || '');
+    return m ? { lead: m[1] + ' ', rest: m[3] } : null;
+}
+
 function wheelTime(at) {
     var s = Math.max(0, Math.round((Date.now() - at) / 1000));
     if (s < 45) return 'just now';
@@ -212,21 +223,39 @@ export function createEventLog(section, env) {
             sr.textContent = prefix;
             text.appendChild(sr);
         }
+        // The action ("Added: ") stays put in its own box; only the words
+        // after it are the title, the part that gives way and slides.
+        var led = wheelLead(ev.text);
+        var words = led ? led.rest : ev.text;
+        if (led) {
+            text.setAttribute('data-led', '');
+            var lead = document.createElement('span');
+            lead.className = 'ws-wheel__lead';
+            lead.textContent = led.lead;
+            text.appendChild(lead);
+        } else {
+            text.removeAttribute('data-led');
+        }
         if (ev.note) {
             // The title gives way (ellipsis) and the note stays readable,
             // even on a phone.
             text.setAttribute('data-noted', '');
+        } else {
+            text.removeAttribute('data-noted');
+        }
+        if (ev.note || led) {
             var title = document.createElement('span');
             title.className = 'ws-wheel__title';
-            title.textContent = ev.text;
+            title.textContent = words;
             text.appendChild(title);
+        } else {
+            text.appendChild(document.createTextNode(ev.text));
+        }
+        if (ev.note) {
             var note = document.createElement('span');
             note.className = 'ws-wheel__note';
             note.textContent = ' · ' + ev.note;
             text.appendChild(note);
-        } else {
-            text.removeAttribute('data-noted');
-            text.appendChild(document.createTextNode(ev.text));
         }
         var time = el.querySelector('time');
         if (ev.at !== null) {
