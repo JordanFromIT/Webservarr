@@ -21,7 +21,9 @@ class LogoutRedirectTests(unittest.TestCase):
 
         self.Session = helpers.make_sessionmaker()
         self.db = self.Session()
-        for p in (mock.patch.object(session_manager, "get_session",
+        # The setup-redirect middleware reads the real database, not the override.
+        for p in (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                  mock.patch.object(session_manager, "get_session",
                                     mock.AsyncMock(return_value=OIDC_SESSION)),
                   mock.patch.object(session_manager, "delete_session", mock.AsyncMock())):
             p.start()
