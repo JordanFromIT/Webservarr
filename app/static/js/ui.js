@@ -388,10 +388,20 @@
   // { refresh(), enable(on), destroy() }: refresh after the words change
   // (new words start from the beginning), enable(false) holds it still with
   // the ellipsis back, destroy when the box is done with.
+  //
+  // opts.group (a name): the marquees of one group keep one beat, so rows
+  // read as one block. They share one slide time, long enough for the one
+  // that runs furthest (rounded up to a whole second, so a pixel or two
+  // does not retime them all), and each covers its own distance in it: all
+  // set off, rest and come back together. The beat is the page's clock
+  // (each slide's start time is the document timeline's zero), so a box
+  // that joins later, or gets new words, falls in step at once instead of
+  // starting over.
 
   var MARQUEE_PX_S = 32;      // the slide's speed, px a second
   var MARQUEE_REST_S = 1.75;  // the rest at each end, seconds
   var MARQUEE_MIN_PX = 2;     // cut off by less is rounding, not words missing
+  var MARQUEE_STEP_S = 1;     // a group's slide time is rounded up to this
   var marquees = [];
   var marqueeRO = null;
   var marqueeIO = null;
@@ -455,6 +465,18 @@
     var want = !m.dist ? null : m.inView && document.visibilityState !== 'hidden' ? 'run' : 'held';
     if (want === null) m.box.removeAttribute('data-marquee');
     else if (m.box.getAttribute('data-marquee') !== want) m.box.setAttribute('data-marquee', want);
+    if (want === 'run') marqueeBeat(m);
+  }
+
+  // A group's slide, moving, starts at the page's zero, so every box in it
+  // is at the same point of the same beat. Only while it runs: a held slide
+  // is paused by theme.css, and giving it a start time would play it. Back
+  // from held, it is put on the beat again here.
+  function marqueeBeat(m) {
+    if (!m.group || !m.track || typeof m.track.getAnimations !== 'function') return;
+    m.track.getAnimations().forEach(function (a) {
+      if (a.animationName === 'ws-marquee' && a.startTime !== 0) a.startTime = 0;
+    });
   }
 
   function marqueeStill(m) {
@@ -465,28 +487,50 @@
     if (was && m.onChange) m.onChange(false);
   }
 
+  // The timing of a slide that takes `travel` seconds one way: a rest at
+  // each end around it. Written only when it changes.
+  function marqueeTime(m, travel) {
+    var half = travel + MARQUEE_REST_S;             // one way, with a rest at both ends
+    var rest = (MARQUEE_REST_S / 2) / half * 100;   // each end's half of a rest, in %
+    var set = {
+      '--marquee-time': half.toFixed(3) + 's',
+      // The first rest is a whole one: half before the slide starts, half in it.
+      '--marquee-delay': (MARQUEE_REST_S / 2).toFixed(3) + 's',
+      '--marquee-ease': 'linear(0, 0 ' + rest.toFixed(2) + '%, 1 ' + (100 - rest).toFixed(2) + '%, 1)'
+    };
+    Object.keys(set).forEach(function (p) {
+      if (m.box.style.getPropertyValue(p) !== set[p]) m.box.style.setProperty(p, set[p]);
+    });
+  }
+
+  // A group's one slide time, from the box that runs furthest, given to
+  // every box of it that moves.
+  function marqueeGroupTime(group) {
+    if (!group) return;
+    var moving = marquees.filter(function (x) { return x.group === group && x.dist > 0; });
+    if (!moving.length) return;
+    var far = Math.max.apply(null, moving.map(function (x) { return x.dist; }));
+    var travel = Math.ceil(far / MARQUEE_PX_S / MARQUEE_STEP_S) * MARQUEE_STEP_S;
+    moving.forEach(function (x) { marqueeTime(x, travel); });
+  }
+
   // How far the words run past the box, and the slide that shows them.
   function marqueeApply(m) {
     var fresh = marqueeTrack(m);
-    if (!m.on || !m.box.isConnected || reducedMotion()) { marqueeStill(m); return; }
+    if (!m.on || !m.box.isConnected || reducedMotion()) { marqueeStill(m); marqueeGroupTime(m.group); return; }
     // The track's own width (a slide under way does not change it) or,
     // at rest, the box's scroll width: whichever is wider.
     var d = Math.max(m.box.scrollWidth, m.track.offsetWidth) - m.box.clientWidth;
-    if (!(d >= MARQUEE_MIN_PX)) { marqueeStill(m); return; }
+    if (!(d >= MARQUEE_MIN_PX)) { marqueeStill(m); marqueeGroupTime(m.group); return; }
     if (fresh || Math.abs(d - m.dist) >= 1) {
       var was = m.dist > 0;
-      var travel = d / MARQUEE_PX_S;
-      var half = travel + MARQUEE_REST_S;             // one way, with a rest at both ends
-      var rest = (MARQUEE_REST_S / 2) / half * 100;   // each end's half of a rest, in %
       var rtl = window.getComputedStyle && window.getComputedStyle(m.box).direction === 'rtl';
       m.dist = d;
       m.box.style.setProperty('--marquee-shift', (rtl ? d : -d) + 'px');
-      m.box.style.setProperty('--marquee-time', half.toFixed(3) + 's');
-      // The first rest is a whole one: half before the slide starts, half in it.
-      m.box.style.setProperty('--marquee-delay', (MARQUEE_REST_S / 2).toFixed(3) + 's');
-      m.box.style.setProperty('--marquee-ease', 'linear(0, 0 ' + rest.toFixed(2) + '%, 1 ' + (100 - rest).toFixed(2) + '%, 1)');
+      if (!m.group) marqueeTime(m, d / MARQUEE_PX_S);
       if (!was && m.onChange) m.onChange(true);
     }
+    marqueeGroupTime(m.group);
     marqueePaint(m);
   }
 
@@ -494,7 +538,7 @@
     var m = marqueeOf(box);
     if (m) { marqueeApply(m); return m.handle; }
     if (!marquees.length) marqueeWatch();
-    m = { box: box, track: null, on: true, inView: true, dist: 0, onChange: opts && opts.onChange };
+    m = { box: box, track: null, on: true, inView: true, dist: 0, onChange: opts && opts.onChange, group: opts && opts.group || null };
     marquees.push(m);
     m.handle = {
       refresh: function () { if (marquees.indexOf(m) !== -1) marqueeApply(m); },
@@ -509,6 +553,7 @@
         if (marqueeRO) marqueeRO.unobserve(box);
         if (marqueeIO) marqueeIO.unobserve(box);
         marqueeStill(m);
+        marqueeGroupTime(m.group);
         if (!marquees.length) marqueeUnwatch();
       }
     };

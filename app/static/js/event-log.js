@@ -23,8 +23,9 @@
 // Only the front line is in the accessibility tree; a new event is announced
 // once through the section's polite live region. Text is written with
 // textContent only. A line whose words are cut off slides slowly to their
-// end and back (WSUI.marquee); under reduced motion it keeps its ellipsis,
-// and its title holds the whole line either way.
+// end and back (WSUI.marquee), every such line in step with the others;
+// under reduced motion it keeps its ellipsis, and its title holds the whole
+// line either way.
 //
 // Library lines (Sonarr, Radarr and Chaptarr: "Added: Dune (2021)")
 // carry a grey tick, and a grab its muted " · not guaranteed".
@@ -188,7 +189,9 @@ export function createEventLog(section, env) {
     var heldTimer = null;
     // A line's words cut off slide to their end and back (env.marquee, ui.js
     // WSUI.marquee): one marquee per line, on the box that clips its words,
-    // made again whenever fill() writes them.
+    // made again whenever fill() writes them. The lines are one group, so
+    // they all slide out, rest and come back together, and a line written
+    // later falls in step with the rest.
     var scrolls = new Map();   // line element -> its marquee
 
     // What the wheel shows of `list`: following the newest, onWheel (an open
@@ -245,7 +248,7 @@ export function createEventLog(section, env) {
         if (typeof env.marquee !== 'function') return;
         unscroll(el);
         var box = el.querySelector('.ws-wheel__title') || el.querySelector('.ws-wheel__text');
-        if (box) scrolls.set(el, env.marquee(box));
+        if (box) scrolls.set(el, env.marquee(box, { group: 'event-log' }));
     }
 
     function unscroll(el) {

@@ -237,8 +237,19 @@ function marqueeLayout(win) {
     disconnect() { this.els.clear(); }
   };
   win.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+  // Each sliding track's one CSS animation, as the browser keeps it: its
+  // start time is null until something gives it one.
+  const anims = new Map();
+  win.Element.prototype.getAnimations = function () {
+    const box = this.parentElement;
+    if (!this.classList.contains('ws-marquee__track') || !box || !box.hasAttribute('data-marquee')) { anims.delete(this); return []; }
+    if (!anims.has(this)) anims.set(this, { animationName: 'ws-marquee', startTime: null });
+    return [anims.get(this)];
+  };
   win.eval(UI_JS);
   return {
+    // A box's slide's start time: undefined when it has no slide.
+    startOf: (box) => { const a = box.firstElementChild && box.firstElementChild.getAnimations()[0]; return a ? a.startTime : undefined; },
     // Every box being watched now.
     watched: () => (ro.all.length ? [...ro.all[ro.all.length - 1].els] : []),
     // The browser's resize report: every watched box measured again.
@@ -1135,7 +1146,7 @@ await run('live updates: rewritten words start over, a line that leaves stops, n
   await t.clock.advance(2000);
   const now = lineOf(t, 'Requests for 4K');
   check('the same line, its words rewritten', now === longNote && lineText(now) === edited);
-  check('a new track: the slide starts from the beginning, at the new distance', boxOf(now).firstElementChild !== oldTrack &&
+  check('a new track at the new distance, on the lines\' shared beat', boxOf(now).firstElementChild !== oldTrack && t.slides.startOf(boxOf(now)) === 0 &&
     boxOf(now).getAttribute('data-marquee') === 'run' && boxOf(now).style.getPropertyValue('--marquee-shift') === -(edited.length * 8 - BOX_PX) + 'px');
   check('still one marquee per line', t.slides.watched().length === 3, t.slides.watched().length);
   // Six new events, each turning the wheel a notch: the grab and the old notes go off the top.
@@ -1151,6 +1162,40 @@ await run('live updates: rewritten words start over, a line that leaves stops, n
   check('the new long lines slide', boxes.every((b) => b.getAttribute('data-marquee') === 'run'));
   t.ctl.abort();
   check('the owner\'s end stops every slide', t.slides.watched().length === 0 && boxes.every((b) => !b.hasAttribute('data-marquee')));
+});
+
+await run('the lines slide in step: one beat, each its own distance, a later line joins it', async (make) => {
+  const t = make({ answer: SLIDES, marquee: true });
+  await t.open();
+  const grab = boxOf(lineOf(t, 'Downloading'));
+  const longNote = boxOf(lineOf(t, 'Requests for 4K'));
+  const fits = boxOf(lineOf(t, 'New shelves'));
+  const time = (b) => b.style.getPropertyValue('--marquee-time');
+  const far = (LONG_GRAB.length * 8 - BOX_PX);
+  // The grab's title runs furthest; the group's slide is its travel rounded
+  // up to a whole second, with the 1.75 s of rests.
+  const want = (Math.ceil(far / 32) + 1.75).toFixed(3) + 's';
+  check('both cut-off lines share one slide time, from the furthest', time(grab) === want && time(longNote) === want, [time(grab), time(longNote), want]);
+  check('and one ease and delay', grab.style.getPropertyValue('--marquee-ease') === longNote.style.getPropertyValue('--marquee-ease') &&
+    grab.style.getPropertyValue('--marquee-delay') === longNote.style.getPropertyValue('--marquee-delay'));
+  check('each its own distance', grab.style.getPropertyValue('--marquee-shift') === -far + 'px' &&
+    longNote.style.getPropertyValue('--marquee-shift') === -(LONG_NOTE.length * 8 - BOX_PX) + 'px');
+  check('both started at the page\'s zero: in step', t.slides.startOf(grab) === 0 && t.slides.startOf(longNote) === 0);
+  check('the line that fits does not move or keep time', !fits.hasAttribute('data-marquee') && time(fits) === '' && t.slides.startOf(fits) === undefined);
+  // A new event, longer than any: every line takes its time, it starts in step.
+  const longest = 'Added: The Lord of the Rings: The Return of the King (2003) Extended Edition';
+  await t.poll(answer('ok', [], SLIDES.items.concat([lib(9, longest, 1)])));
+  await t.clock.advance(3000);
+  const added = boxOf(lineOf(t, 'Added: The Lord'));
+  const want2 = (Math.ceil((longest.length * 8 - BOX_PX) / 32) + 1.75).toFixed(3) + 's';
+  const moving = t.settled().map(boxOf).filter((b) => b.getAttribute('data-marquee') === 'run');
+  check('the new line slides, in step', added.getAttribute('data-marquee') === 'run' && t.slides.startOf(added) === 0);
+  check('every sliding line, old and new, on the same time', moving.length === 3 && moving.every((b) => time(b) === want2), moving.map(time).concat(want2));
+  check('every sliding line on the beat', moving.every((b) => t.slides.startOf(b) === 0));
+  // A soft navigation keeps them in step.
+  t.swap();
+  t.slides.resize();
+  check('the next page: all still on one time and the beat', moving.every((b) => b.isConnected && time(b) === want2 && t.slides.startOf(b) === 0));
 });
 
 await run('reduced motion: no line moves, and the ellipsis and the whole title stay', async (make) => {

@@ -11,6 +11,10 @@
 //    setting while the page is open is followed.
 //  * enable(false) stops it; destroy() undoes it, and the last one ends the
 //    observers and the listeners.
+//  * a group (opts.group) keeps one beat: one slide time from the box that
+//    runs furthest, each box its own distance, every running slide started
+//    at the page's zero (so a late box, or new words, fall in step); a
+//    held slide is left paused; boxes outside the group keep their own.
 //  * the placeholder: an overlay with the input's placeholder slides while
 //    the input is empty and unfocused, the input's own placeholder steps
 //    aside meanwhile; focus or text stops it; the visit's end undoes it.
@@ -90,9 +94,39 @@ function page(o = {}) {
   const remove = d.removeEventListener.bind(d);
   d.addEventListener = (type, fn, opts) => { docListeners.set(type, (docListeners.get(type) || 0) + 1); add(type, fn, opts); };
   d.removeEventListener = (type, fn, opts) => { docListeners.set(type, (docListeners.get(type) || 0) - 1); remove(type, fn, opts); };
+  // The browser's CSS animations, as a model: a track in a box marked
+  // data-marquee has its one ws-marquee slide; while held (paused by
+  // theme.css) its start time is unresolved, as a paused animation's is,
+  // and giving it one would play it (counted in playedHeld).
+  const anims = new Map();
+  let playedHeld = 0;
+  w.Element.prototype.getAnimations = function () {
+    const track = this;
+    const box = track.parentElement;
+    if (!track.classList.contains('ws-marquee__track') || !box || !box.hasAttribute('data-marquee')) { anims.delete(track); return []; }
+    let a = anims.get(track);
+    if (!a) {
+      let start = null;
+      a = { animationName: 'ws-marquee',
+            get startTime() { return start; },
+            set startTime(v) { if (v !== null && track.parentElement && track.parentElement.getAttribute('data-marquee') === 'held') playedHeld += 1; start = v; },
+            pause() { start = null; } };
+      anims.set(track, a);
+    }
+    if (box.getAttribute('data-marquee') === 'held') a.pause();
+    return [a];
+  };
   w.eval(UI);
   const t = {
     w, d, widths, motion, ros, ios, docListeners,
+    playedHeld: () => playedHeld,
+    // A box's slide's start time as the browser would have it: null for none yet.
+    startOf(box) {
+      const tr = box.firstElementChild;
+      if (!tr || !anims.has(tr)) return undefined;
+      const a = tr.getAnimations()[0];
+      return a ? a.startTime : undefined;
+    },
     ro: () => ros[ros.length - 1],
     io: () => ios[ios.length - 1],
     setHidden(v) { hidden = v; d.dispatchEvent(new w.Event('visibilitychange')); },
@@ -232,6 +266,81 @@ scenario('a box off the page is still; on the page again, a resize starts it', (
   t.ro().fire(b);
   check('back: moving', b.getAttribute('data-marquee') === 'run');
   m.destroy();
+});
+
+scenario('a group keeps one beat: one slide time, each its own distance, all started together', () => {
+  const t = page();
+  const g = { group: 'lines' };
+  const a = t.box(words(20), 100);           // 60px past
+  const b = t.box(words(30), 100);           // 140px past: the furthest
+  const fits = t.box(words(12), 100);
+  const solo = t.box(words(20), 100);        // 60px past, in no group
+  const ma = t.w.WSUI.marquee(a, g);
+  const mb = t.w.WSUI.marquee(b, g);
+  const mf = t.w.WSUI.marquee(fits, g);
+  const ms = t.w.WSUI.marquee(solo);
+  // 140px at 32 px/s is 4.375 s, rounded up to 5 s, plus a 1.75 s rest.
+  check('both cut-off lines slide', a.getAttribute('data-marquee') === 'run' && b.getAttribute('data-marquee') === 'run');
+  check('one slide time for the group, from the furthest, rounded up to a whole second', prop(a, '--marquee-time') === '6.750s' && prop(b, '--marquee-time') === '6.750s', [prop(a, '--marquee-time'), prop(b, '--marquee-time')]);
+  check('the same rests and delay for both', prop(a, '--marquee-ease') === prop(b, '--marquee-ease') && prop(a, '--marquee-delay') === '0.875s' && prop(b, '--marquee-delay') === '0.875s');
+  check('the rests are still 1.75 s at each end', prop(a, '--marquee-ease') === 'linear(0, 0 12.96%, 1 87.04%, 1)', prop(a, '--marquee-ease'));
+  check('each covers its own distance in it', prop(a, '--marquee-shift') === '-60px' && prop(b, '--marquee-shift') === '-140px');
+  check('the one that fits stays still', !fits.hasAttribute('data-marquee') && prop(fits, '--marquee-time') === '');
+  check('both slides start at the page\'s zero: in step', t.startOf(a) === 0 && t.startOf(b) === 0);
+  check('outside the group: its own time, its start left to the browser', prop(solo, '--marquee-time') === '3.625s' && t.startOf(solo) === undefined);
+
+  // A pixel or two does not retime the group.
+  t.widths.set(b, 101);
+  t.ro().fire(b);
+  check('139px past: the same whole-second beat', prop(a, '--marquee-time') === '6.750s' && prop(b, '--marquee-time') === '6.750s' && prop(b, '--marquee-shift') === '-139px');
+
+  // Held off screen, it is left paused; back on screen it falls in step.
+  t.io().fire(a, false);
+  check('held: paused, not given a start (that would play it)', a.getAttribute('data-marquee') === 'held' && t.startOf(a) === null && t.playedHeld() === 0);
+  t.widths.set(b, 102);
+  t.ro().fire(b);
+  t.setHidden(true);
+  check('a resize or the tab hidden meanwhile: still nothing held is played', t.playedHeld() === 0 && t.startOf(a) === null && t.startOf(b) === null);
+  t.setHidden(false);
+  t.io().fire(a, true);
+  check('back on screen: on the beat again', a.getAttribute('data-marquee') === 'run' && t.startOf(a) === 0);
+  t.setHidden(true);
+  t.setHidden(false);
+  check('the tab hidden and shown: both back on the beat', t.startOf(a) === 0 && t.startOf(b) === 0);
+
+  // A later, longer line: the group slows to its time; it starts in step.
+  const late = t.box(words(40), 100);        // 220px past: 6.875 s, so 7 s
+  const ml = t.w.WSUI.marquee(late, g);
+  check('a later line falls in step at once', late.getAttribute('data-marquee') === 'run' && t.startOf(late) === 0);
+  check('the group takes the new furthest one\'s time, all of it', [a, b, late].every((x) => prop(x, '--marquee-time') === '8.750s'), [a, b, late].map((x) => prop(x, '--marquee-time')));
+  check('each still its own distance', prop(late, '--marquee-shift') === '-220px' && prop(a, '--marquee-shift') === '-60px');
+
+  // New words: a new track, on the beat (not started over).
+  const track = a.firstElementChild;
+  a.textContent = words(24);
+  ma.refresh();
+  check('new words: a new track, started at the page\'s zero', a.firstElementChild !== track && t.startOf(a) === 0 && prop(a, '--marquee-shift') === '-92px');
+
+  // The furthest gone: the rest go back to their own beat.
+  ml.destroy();
+  check('the furthest gone: the group\'s time shrinks back', [a, b].every((x) => prop(x, '--marquee-time') === '6.750s'), [a, b].map((x) => prop(x, '--marquee-time')));
+  // One that stops fitting no longer sets the time.
+  t.widths.set(b, 300);
+  t.ro().fire(b);
+  check('the furthest now fits: still, and the time is the last one\'s', !b.hasAttribute('data-marquee') && prop(a, '--marquee-time') === '4.750s', prop(a, '--marquee-time'));
+  check('the solo box was never touched by the group', prop(solo, '--marquee-time') === '3.625s');
+  [ma, mb, mf, ms].forEach((m) => m.destroy());
+});
+
+scenario('a group under reduced motion: nothing moves, nothing is timed', () => {
+  const t = page({ reduced: true });
+  const a = t.box(words(20), 100);
+  const b = t.box(words(30), 100);
+  const ms = [a, b].map((x) => t.w.WSUI.marquee(x, { group: 'lines' }));
+  check('still, no timing', [a, b].every((x) => !x.hasAttribute('data-marquee') && prop(x, '--marquee-time') === '' && t.startOf(x) === undefined));
+  t.setReduced(false);
+  check('the setting turned off: both slide, in step', [a, b].every((x) => x.getAttribute('data-marquee') === 'run' && prop(x, '--marquee-time') === '6.750s' && t.startOf(x) === 0));
+  ms.forEach((m) => m.destroy());
 });
 
 // ---- The placeholder (Books' search) ----
