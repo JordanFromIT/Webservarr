@@ -567,7 +567,7 @@ export async function mount(ctx) {
       if (a.left < r.left || a.right > r.right) card.scrollIntoView({ block: 'nearest', inline: 'start' });
     }, { signal: signal });
     box.appendChild(row);
-    box.appendChild(el('p', 'mt-2 ' + SMALL, 'Plex app time is an estimate: each track counts at its full length. Ebook time is the reading Kavita measured. A session is a book on a day, or a day of reading.'));
+    box.appendChild(el('p', 'mt-2 ' + SMALL, 'Plex app time is an estimate: each track counts at its length, or until the person’s next track when that came sooner. Ebook time is the reading Kavita measured. A session is a book on a day, or a day of reading.'));
     ctx.setTimeout(showPagers, 0);
     return box;
   }

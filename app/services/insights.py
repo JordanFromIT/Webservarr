@@ -10,7 +10,8 @@ Where each figure comes from (spec section 4; the page labels the estimates):
   counts it (listening.listened_spans): listening_hourly for the hours the
   rollup holds, the log for the hours after them (listens).
 - Plex app listening: Plex's own history, one play per track, counted at the
-  track's length, an estimate. The web player reports to Plex too, so a play
+  track's length but never past the person's next play nor PLAY_MAX_MS, an
+  estimate (to_plays). The web player reports to Plex too, so a play
   is the web player's own, and left out, when the same person listened to the
   same book on the web around it (app_plays).
 - Reading: Kavita's lifetime totals as WebServarr read them each day
@@ -56,6 +57,7 @@ NOW_PAUSED = timedelta(minutes=10)
 CURRENT = timedelta(days=30)               # a current book was touched this recently
 ABANDONED = timedelta(days=30)             # an abandoned one has been untouched this long
 STARTED_MS = 5 * 60 * 1000                 # less than this into a book is a mis-tap (as book_discovery.LISTENER_MS)
+PLAY_MAX_MS = 4 * 60 * 60 * 1000           # one Plex play counts at most this: a long sitting, never a whole-book file
 ECHO_SLACK = timedelta(hours=1)
 ECHO_DAY = timedelta(days=1)               # web listening read this much before a period, for the echo rule
 CURRENT_MAX = 5
@@ -89,7 +91,7 @@ class Listen:
 
 @dataclass(frozen=True)
 class Play:
-    """One track played in a Plex app; `ms` is the track's length, the estimate."""
+    """One track played in a Plex app; `ms` is the time counted for it, the estimate (to_plays)."""
     identity: str
     book_key: str
     at: datetime
@@ -257,8 +259,8 @@ async def _people_answer(r) -> dict:
 
 
 async def plex_plays(r, owner: str) -> Optional[List[Play]]:
-    """Every play in the audiobook library, by person, counted at its track's
-    length (history cached PLAYS_TTL, lengths DURATIONS_TTL). [] with no
+    """Every play in the audiobook library, by person, counted as to_plays
+    says (history cached PLAYS_TTL, lengths DURATIONS_TTL). [] with no
     audiobook library; None while Plex can't be read."""
     from app.integrations import plex_player as pp
 
@@ -313,8 +315,14 @@ def listens(db: Session, since: Optional[datetime] = None) -> List[Listen]:
 def to_plays(events, owner: str, durations: Dict[str, int]) -> List[Play]:
     """Plex's history events (plex_player.play_events, as cached) as plays by
     identity. Plex numbers its server's owner 1 in its history: that is
-    `owner`'s plex.tv id; without it, the owner's plays are left out. A play
-    whose track's length is not known counts 0."""
+    `owner`'s plex.tv id; without it, the owner's plays are left out.
+
+    A play counts its track's length, but never more than the time until the
+    same person's next play (in any book) nor PLAY_MAX_MS. Plex logs a play
+    without saying how much was heard, and logs one each time a track is
+    started again: a whole book in one file, resumed three times in an hour,
+    would otherwise count three times its full length. A play whose track's
+    length is not known counts 0."""
     plays = []
     for e in events if isinstance(events, list) else []:
         if not isinstance(e, dict):
@@ -327,15 +335,20 @@ def to_plays(events, owner: str, durations: Dict[str, int]) -> List[Play]:
         if not account or at is None or not isinstance(book, str):
             continue
         ms = durations.get(str(e.get("track_key") or ""), 0) if isinstance(durations, dict) else 0
-        plays.append(Play("plex:" + account, book, at, ms if isinstance(ms, int) else 0))
+        plays.append(Play("plex:" + account, book, at, min(ms, PLAY_MAX_MS) if isinstance(ms, int) else 0))
+    order = sorted(range(len(plays)), key=lambda i: (plays[i].identity, plays[i].at))
+    for i, j in zip(order, order[1:]):
+        gap = plays[j].at - plays[i].at
+        if plays[i].identity == plays[j].identity and gap < timedelta(milliseconds=plays[i].ms):
+            plays[i] = Play(plays[i].identity, plays[i].book_key, plays[i].at, int(gap.total_seconds() * 1000))
     return plays
 
 
 def app_plays(plays: List[Play], web: List[Listen]) -> List[Play]:
     """The plays heard in a Plex app. The web player reports to Plex's
     timeline, so a play is its own, and left out, when the same person
-    listened to the same book on the web from the track's length before the
-    play, less ECHO_SLACK, to ECHO_SLACK after it."""
+    listened to the same book on the web from the play's counted time before
+    the play, less ECHO_SLACK, to ECHO_SLACK after it."""
     hours: Dict[Tuple[str, str], List[datetime]] = {}
     for listen in web:
         if listen.source == "web":

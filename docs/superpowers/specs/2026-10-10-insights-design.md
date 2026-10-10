@@ -93,7 +93,7 @@ page must label as an estimate. The phase says when it first appears.
 | 2 | Current books and progress | `listening_positions`, unfinished, touched in 30 days; Plex app plays in 30 days (no percent) | `ebook_places`, unfinished, read in 30 days | READY (audio), NEW TRACKING (ebook) | A, B |
 | 3 | Last active | Newest of: place saved, Plex play, Books visit (`book_visits`), request | `ebook_places.read_at` | READY, NEW TRACKING (ebook, requests) | A, B |
 | 4 | Personal history | All of the person's places, hourly listening, Plex plays, 12 weeks of bars | Their ebook places, latest Kavita totals | READY, ESTIMATE (Plex), NEW TRACKING (ebook) | A, B |
-| 5 | Hours listened, pages read over time | `listening_hourly` plus the log since the last rollup; Plex plays at track length | `reading_totals` day-to-day rise | READY, ESTIMATE (Plex, pages across gaps), NEW TRACKING (pages) | A, B |
+| 5 | Hours listened, pages read over time | `listening_hourly` plus the log since the last rollup; Plex plays at track length, capped (4.2) | `reading_totals` day-to-day rise | READY, ESTIMATE (Plex, pages across gaps), NEW TRACKING (pages) | A, B |
 | 6 | Active readers per week | Anyone with web time or a Plex play that week | Anyone whose pages rose or who read an ebook that week | READY, NEW TRACKING (ebook) | A, B |
 | 7 | Top books | Time (web plus Plex estimate) and people per book | People per ebook | READY, ESTIMATE (Plex) | A, B |
 | 8 | Top authors and series | As 7, grouped by the catalog's author and series | As 7 | READY | A, B |
@@ -128,12 +128,15 @@ straight from the log.
 Plex's own history (`/status/sessions/history/all`, read with the admin token, as
 `plex_player.play_history` already does for Popular) has one play per track: account id, album, disc,
 track and `viewedAt`. Insights counts each play at the track's length, from one read of every track in
-the audiobook library (`plex_player.track_durations`, new). That is an estimate: a play counts when Plex
-records it, whatever part of the track was heard, and a single-file book is one long play.
+the audiobook library (`plex_player.track_durations`, new), but never more than the time until the same
+person's next play (in any book) nor 4 hours. That is an estimate: a play counts when Plex records it,
+whatever part of the track was heard. Plex logs a play each time a track is started again, so without the
+cap a single-file book resumed three times in an hour counted three times its whole length (80 hours in
+one week on dev, found 2026-10-10).
 
 The web player also reports to Plex's timeline (`plex_player.timeline`), so some history plays are the
 web player's own. A play is left out as the web player's when the same person listened to the same book
-on the web at any time from the track's length before the play, less one hour, to one hour after it.
+on the web at any time from the play's counted time before the play, less one hour, to one hour after it.
 
 Plex numbers the server's owner `1` in its own history; every other account id is the plex.tv id. Task 4
 of the plan proves this read-only before anything relies on it, and maps `1` to the owner's plex.tv id

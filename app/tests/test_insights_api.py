@@ -99,6 +99,25 @@ class AppPlays(Base):
                          [(ME, 600000, datetime(2026, 10, 9, 20, 40)), (THEM, 0, datetime(2026, 10, 9, 21))])
         self.assertEqual(insights.to_plays(events[:1], "", {}), [])
 
+    def test_a_play_counts_no_more_than_until_the_next_one_nor_the_maximum(self):
+        # Seen on dev: a whole book in one 26 h file, played three times in an
+        # hour, counted 80 h. Plex logs a play each time a track is started again.
+        H = 3600000
+
+        def play(account, track, at):
+            return {"account": account, "book_key": "5:1", "track_key": track, "viewed_at": at}
+        events = [play("1", "21", "2026-10-09T11:14:00.000Z"),           # a chapter, nothing after it
+                  play("1", "20", "2026-10-09T11:12:00.000Z"),           # the whole-book file, 2 min before it
+                  play("1", "20", "2026-10-09T10:05:00.000Z"),
+                  play("1", "20", "2026-10-09T10:03:00.000Z"),
+                  play("2002", "20", "2026-10-09T10:04:00.000Z"),        # someone else's isolated play
+                  play("2002", "21", "2026-10-08T09:00:00.000Z")]        # a day before it: its full length
+        plays = insights.to_plays(events, "1001", {"20": 96 * H // 4 + 2 * H // 3, "21": 2052000})
+        self.assertEqual([(p.identity, p.ms) for p in plays],
+                         [(ME, 2052000), (ME, 2 * 60000), (ME, 67 * 60000), (ME, 2 * 60000),
+                          (THEM, insights.PLAY_MAX_MS), (THEM, 2052000)])
+        self.assertEqual(insights.PLAY_MAX_MS, 4 * H)
+
 
 class Now(Base):
     def test_playing_paused_and_left(self):
