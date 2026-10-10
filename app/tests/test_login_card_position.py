@@ -106,6 +106,19 @@ class Css(unittest.TestCase):
         self.assertIn('html[data-login-card="right"] footer { justify-content: end;', wide)
         self.assertNotIn("centre", wide)
 
+    def test_a_tall_card_never_touches_the_top_or_bottom(self):
+        # main grows with the card (body scrolls), so a request step taller
+        # than the screen sat flush against the top edge. Vertical room on
+        # main for every position and width, the notch included; the
+        # left/centre/right rules only ever set inline padding.
+        css = login_style()
+        outside = css.replace(wide_block(css), "")
+        self.assertIn("main { padding-block: max(1.5rem, env(safe-area-inset-top, 0px)) "
+                      "max(1.5rem, env(safe-area-inset-bottom, 0px)); }", outside)
+        self.assertNotRegex(wide_block(css), r"padding(-block|-top|-bottom)?:")
+        self.assertIn('<main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">',
+                      static_text("login.html"))
+
     def test_position_rules_never_touch_the_card_or_form(self):
         wide = wide_block(login_style())
         for sel in (".login-glass-card", "#loginForm", "#loginLoadHint", "backdrop", "visibility", "background",

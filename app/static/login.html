@@ -109,6 +109,13 @@
     @media (prefers-reduced-motion: reduce) {
       .backdrop-slide.is-moving, .backdrop-slide.is-solo { animation: none; }
     }
+    /* Room above and below the card. main grows with it and the page
+       scrolls, so a request step taller than the screen would otherwise sit
+       flush against the top edge (and under a phone's notch). Vertical only:
+       the card's left, centre and right places below set inline padding. */
+    main {
+      padding-block: max(1.5rem, env(safe-area-inset-top, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px));
+    }
     /* The card's place on a wide screen (Settings > Pages > Login page). The
        page renderer sets data-login-card="left" or "right" on the root; with no
        mark the card stays in the middle, as shipped. Only from 64rem:
