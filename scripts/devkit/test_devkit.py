@@ -3,6 +3,7 @@
 Stdlib only, no app needed: run from the repo root with
     python3 -m unittest discover -s scripts/devkit -t scripts/devkit
 """
+import re
 import sqlite3
 import sys
 import tempfile
@@ -119,6 +120,20 @@ class Cleanup(WithDatabase):
         for table in devkit.IDENTITY_TABLES:
             left = sorted(r[0] for r in conn.execute(f"SELECT identity FROM {table}"))
             self.assertEqual(left, ["local:7", "plex:12345", "plex:99001", "plex:990100"], table)
+
+
+class EveryIdentityTable(unittest.TestCase):
+    def test_cleanup_covers_every_table_keyed_by_identity(self):
+        # A table the kit misses keeps a test identity's rows after cleanup:
+        # book_visits did, and Insights listed the kit's sessions as people.
+        models = (Path(__file__).resolve().parents[2] / "app" / "models.py").read_text()
+        keyed = set()
+        for block in models.split("\nclass ")[1:]:
+            table = re.search(r'__tablename__ = "([a-z_]+)"', block)
+            if table and re.search(r"^    identity = Column", block, re.M):
+                keyed.add(table.group(1))
+        self.assertIn("book_visits", keyed)
+        self.assertEqual(sorted(keyed - set(devkit.IDENTITY_TABLES)), [])
 
 
 ACCESS = ("CREATE TABLE access_requests (id INTEGER PRIMARY KEY, plex_account_id TEXT UNIQUE NOT NULL, "

@@ -36,11 +36,15 @@ RESERVED_IDENTITY = re.compile(r"plex:9900[0-9]{2}")
 RESERVED_ACCOUNT_IDS = range(990000, 990100)
 DEFAULT_IDENTITY = {"admin": "plex:990001", "member": "plex:990002"}
 
-# Tables keyed by a listener's identity: what cleanup scrubs.
+# Tables keyed by a listener's identity: what cleanup scrubs. Every table with
+# an identity column in app/models.py is here (test_devkit checks), so a test
+# session leaves nothing behind: its Books visit in book_visits once listed
+# the kit's identities as people ("Account 0001") on Insights.
 IDENTITY_TABLES = ("listening_positions", "listening_log", "listening_claims",
                    "listening_dismissals", "player_prefs", "book_continue_hidden", "book_notice",
                    "listening_hourly", "book_requesters", "kavita_links", "reading_totals", "ebook_places",
-                   "reading_minutes")
+                   "reading_minutes", "book_visits", "book_list", "book_queue", "book_ratings",
+                   "listening_daily", "book_follows")
 # What snapshot saves unless told otherwise: the identity tables plus the
 # settings and the pairing choices that the Books checks change.
 DEFAULT_SNAPSHOT_TABLES = IDENTITY_TABLES + ("settings", "book_pair_overrides")
