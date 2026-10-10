@@ -988,7 +988,8 @@ export async function mount(ctx) {
       }
     }, { signal: signal });
     if (!done) {
-      WS.getJSON(NOTICE_PROBE_URL, { signal: signal }).then(function (data) {
+      // Through readLive, as every list is (on the visit's signal; quiet: it starts no hand-off).
+      readLive(NOTICE_PROBE_URL, true).then(function (data) {
         // Plex not answering: not known either way, so the memory stays as it is.
         const notes = data && Array.isArray(data.notes) ? data.notes : [];
         if (signal.aborted || notes.some(function (n) { return n && n.source === 'plex'; })) return;
