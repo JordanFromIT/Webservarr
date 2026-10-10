@@ -137,7 +137,7 @@ async def logout_redirect(
             authentik_url_setting.value
             if authentik_url_setting and authentik_url_setting.value
             else settings.authentik_url
-        )
+        ).rstrip("/")  # stored as typed; a doubled slash is Authentik's 404 page
         slug = (
             slug_setting.value
             if slug_setting and slug_setting.value
