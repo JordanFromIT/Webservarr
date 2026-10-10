@@ -1094,9 +1094,14 @@ export async function mount(ctx) {
       // Not on the visit's signal: the answer goes through if they leave at once.
       sendBooks('POST', NOTICE_URL, { state: 'seen' }).then(null, function () { /* the window is back next session */ });
       if (!signal.aborted) {
-        // In its place under the event log, coming in (books.html's page style).
+        // In its place by the Continue row, coming in (books.html's page style),
+        // and brought into view when it is not (under the row on a phone).
         notice.classList.add('is-arriving');
         notice.hidden = false;
+        const box = notice.getBoundingClientRect();
+        if (box.top < 0 || box.top > (window.innerHeight || 0) - 120) {
+          notice.scrollIntoView({ block: 'start', behavior: motionOff() ? 'auto' : 'smooth' });
+        }
       }
     }
     if (finished && win.guideWaiting && !signal.aborted) {
@@ -1106,16 +1111,17 @@ export async function mount(ctx) {
   }
 
   /** The guide after the window, but only once the person does something
-      (a tap, a key, a scroll, the card's Okay): until then the inline card
-      that just came in stays where they can read it, and the guide's first
-      spotlight does not scroll it away. */
+      (a tap, a key, a wheel or a swipe, the card's Okay): until then the
+      inline card that just came in stays where they can read it, and the
+      guide's first spotlight does not scroll it away. Not a scroll: bringing
+      the card into view is one. */
   function guideAfterFirstAct() {
     const waiting = new AbortController();
     const go = function () {
       waiting.abort();
       ctx.setTimeout(startGuide, 300);
     };
-    ['pointerdown', 'keydown', 'wheel', 'touchmove', 'scroll'].forEach(function (type) {
+    ['pointerdown', 'keydown', 'wheel', 'touchmove'].forEach(function (type) {
       document.addEventListener(type, go, { capture: true, passive: true, signal: waiting.signal });
     });
     signal.addEventListener('abort', function () { waiting.abort(); }, { once: true, signal: waiting.signal });

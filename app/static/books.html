@@ -117,10 +117,20 @@
     .bn-count.is-running::before { animation: none; }
   }
 
-  /* The inline notice: a quiet panel in the page, not frosted. Sized by its
-     own width: stacked when narrow; from 720px the buttons sit beside the
-     title and the words run in two columns. */
-  .bn-inline { container-type: inline-size; }
+  /* The inline notice: a quiet panel in the page, not frosted. One column:
+     the title, the words, then Okay and Don't show again at its foot. */
+  /* Wide: the card beside the Continue row, under Your stats, in its own
+     column (the row keeps the rest and scrolls as before); its room is held
+     from the first paint like the card's own. Narrower: under the row. */
+  .bn-area { container-type: inline-size; }
+  #booksNotice { scroll-margin-top: 72px; }
+  #booksNotice:not([hidden]), html[data-books-notice] #booksNotice { margin-bottom: 32px; }
+  @container (min-width: 912px) {
+    .bn-continue:has(> #booksNotice:not([hidden])), html[data-books-notice] .bn-continue {
+      display: grid; grid-template-columns: minmax(0, 1fr) 26rem; column-gap: 32px; align-items: start;
+    }
+    .bn-continue > #booksNotice { grid-column: 2; grid-row: 1; }
+  }
   /* Coming in when the first-visit window closes: the person's own action,
      so the page below may move. Reduced motion: a fade only. */
   .bn-inline.is-arriving { animation: bn-arrive 280ms ease-out both; }
@@ -131,7 +141,7 @@
   .bn-card-head .material-symbols-outlined { font-size: 20px; color: rgb(var(--color-accent)); }
   .bn-card-head h2 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; color: rgb(var(--color-text)); text-wrap: balance; }
   .bn-card-text { grid-area: text; min-width: 0; font-size: 14px; line-height: 20px; color: rgb(var(--color-text) / .8); }
-  .bn-card-text p { margin: 0 0 6px; text-wrap: pretty; }
+  .bn-card-text p { margin: 0 0 6px; max-width: 72ch; text-wrap: pretty; }
   .bn-card-text .bn-lead { color: rgb(var(--color-text)); font-weight: 500; }
   .bn-card-text .bn-list { margin: -2px 0 6px; gap: 0; }
   .bn-card-text > :last-child { margin-bottom: 0; }
@@ -144,13 +154,6 @@
   .bn-btn-primary:hover { background: rgb(var(--color-primary) / .9); }
   .bn-btn-quiet { background: transparent; color: rgb(var(--color-text) / .7); padding-inline: 12px; }
   .bn-btn-quiet:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
-  @container (min-width: 720px) {
-    .bn-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head actions" "text text"; align-items: center; padding: 14px 20px 16px; }
-    .bn-card-actions { flex-wrap: nowrap; }
-    .bn-btn { height: 36px; }
-    .bn-card-text { columns: 2; column-gap: 40px; }
-    .bn-card-text .bn-list { break-inside: avoid; }
-  }
   @media (prefers-reduced-motion: reduce) { .bn-btn { transition: none; } }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
@@ -171,40 +174,6 @@
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 <div class="max-w-[1200px] w-full mx-auto min-w-0 space-y-8">
 <!-- ws:event-log -->
-<!-- The audiobook notice, inline: every visit after the first-visit window
-     (#booksNoticeWindow) has been seen, until Don't show again. Okay hides it
-     for the rest of the browser session. What to show comes with the page
-     (the #ws-data block's books_notice, from the person's account, so it holds
-     on every device); theme-loader.js marks html[data-books-notice] on a full
-     load so its room is held from the first paint, and pages/books.js shows it
-     on every visit before its first await. The words are the window's too:
-     pages/books.js copies them in, with the Tickets link as plain words. The
-     section has no display utility (one would override hidden). -->
-<section id="booksNotice" class="bn-inline" hidden aria-labelledby="booksNoticeTitle">
-  <div class="bn-card">
-    <div class="bn-card-head">
-      <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
-      <h2 id="booksNoticeTitle">Before you start listening</h2>
-    </div>
-    <div id="booksNoticeWords" class="bn-card-text">
-      <p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-books-notice-site>this site</span>.</p>
-      <p>Audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
-      <ul class="bn-list">
-        <li>They don't save your progress reliably</li>
-        <li>Books show up as albums of tracks, with no series or reading order</li>
-        <li>They have fewer features than you get here</li>
-      </ul>
-      <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
-      <p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
-      <p>So I can keep improving it, I can see what's read and listened to here.</p>
-      <p>If something isn't right, please open a ticket on the <a href="/tickets" data-books-notice-tickets>Tickets page</a> with as much detail as you can.</p>
-    </div>
-    <div class="bn-card-actions">
-      <button id="booksNoticeOff" type="button" class="bn-btn bn-btn-quiet">Don't show again</button>
-      <button id="booksNoticeOkay" type="button" class="bn-btn bn-btn-primary ws-lift">Okay</button>
-    </div>
-  </div>
-</section>
 <div>
   <h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Books</h1>
   <p class="mt-2 text-body text-frosted-blue/70">Read and listen to everything in the library, and pick up where you left off.</p>
@@ -244,12 +213,53 @@
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
       <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. Always shown (the first-visit guide points at it). -->
-      <div id="continueHost" class="mb-8" aria-busy="true">
-        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
-        <div data-skel="row" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
-          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+      <!-- The Continue row and, beside it on a wide screen, the audiobook notice. -->
+      <div class="bn-area">
+      <div id="continueArea" class="bn-continue">
+        <div id="continueHost" class="mb-8" aria-busy="true">
+          <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
+          <div data-skel="row" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+            <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+          </div>
+          <p data-skel="empty" class="text-[15px] leading-6" aria-hidden="true">&nbsp;</p>
         </div>
-        <p data-skel="empty" class="text-[15px] leading-6" aria-hidden="true">&nbsp;</p>
+        <!-- The audiobook notice, inline: every visit after the first-visit window
+             (#booksNoticeWindow) has been closed, until Don't show again. Okay hides it
+             for the rest of the browser session. Wide: beside the Continue row, under
+             Your stats, one column of text; narrower: under the row, full width
+             (#continueArea, books.html's page style). What to show comes with the page
+             (the #ws-data block's books_notice, from the person's account, so it holds
+             on every device); theme-loader.js marks html[data-books-notice] on a full
+             load so its room is held from the first paint, and pages/books.js shows it
+             on every visit before its first await. The words are the window's too:
+             pages/books.js copies them in, with the Tickets link as plain words. The
+             section has no display utility (one would override hidden). -->
+        <section id="booksNotice" class="bn-inline" hidden aria-labelledby="booksNoticeTitle">
+          <div class="bn-card">
+            <div class="bn-card-head">
+              <span class="material-symbols-outlined" aria-hidden="true">headphones</span>
+              <h2 id="booksNoticeTitle">Before you start listening</h2>
+            </div>
+            <div id="booksNoticeWords" class="bn-card-text">
+              <p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-books-notice-site>this site</span>.</p>
+              <p>Audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
+              <ul class="bn-list">
+                <li>They don't save your progress reliably</li>
+                <li>Books show up as albums of tracks, with no series or reading order</li>
+                <li>They have fewer features than you get here</li>
+              </ul>
+              <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
+              <p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
+              <p>So I can keep improving it, I can see what's read and listened to here.</p>
+              <p>If something isn't right, please open a ticket on the <a href="/tickets" data-books-notice-tickets>Tickets page</a> with as much detail as you can.</p>
+            </div>
+            <div class="bn-card-actions">
+              <button id="booksNoticeOff" type="button" class="bn-btn bn-btn-quiet">Don't show again</button>
+              <button id="booksNoticeOkay" type="button" class="bn-btn bn-btn-primary ws-lift">Okay</button>
+            </div>
+          </div>
+        </section>
+      </div>
       </div>
       <!-- Up next and My list (pages/books.js): the person's own rows, held like Continue
            and written in the same frame. Up next's cards carry Play or Read and its moves. -->

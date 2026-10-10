@@ -1256,7 +1256,7 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   await t.clock.advance(100);
   await m;
   check('with the books: toolbar, notes, connect message and Continue all there', t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !t.hidden('#notes') && !t.hidden('#connectState') && !!t.q('#continueHost [data-continue]') && t.doc.documentElement.hasAttribute('data-books-continue'));
-  check('all of it, Continue included, sits above the books inside the library section (no element already shown has to move)', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => c.id); return kids.indexOf('continueHost') !== -1 && kids.indexOf('continueHost') < kids.indexOf('toolbar') && kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
+  check('all of it, Continue included (in its area with the audiobook notice), sits above the books inside the library section (no element already shown has to move)', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => (c.querySelector('#continueHost') ? 'continueHost' : c.id)); return kids.indexOf('continueHost') !== -1 && kids.indexOf('continueHost') < kids.indexOf('toolbar') && kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
   // A library that never answers does not keep the page a skeleton for ever.
   const never = deferred();
   const u = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => never.promise); } });
@@ -2878,7 +2878,7 @@ await run('after the window: the guide waits for the person\'s first act (a key,
   await left.clock.advance(15000);
   left.click('#booksNoticeWindowOkay');
   left.ctl.abort();
-  left.doc.dispatchEvent(new left.win.Event('scroll'));
+  left.doc.dispatchEvent(new left.win.Event('wheel'));
   await left.clock.advance(400);
   check('a visit that ended starts nothing', !tourOn(left));
   await finish(key, tap, left);
@@ -2906,7 +2906,10 @@ await run('the window and the first-visit guide never run at once: the guide wai
   check('closed: the inline card comes in and stays in view, no guide yet', !windowOn(t) && inlineOn(t) && !tourOn(t));
   t.doc.dispatchEvent(new t.win.Event('scroll'));
   await t.clock.advance(400);
-  check('the person scrolls: then it starts', tourOn(t));
+  check('a scroll alone (bringing the card into view is one) does not start it', !tourOn(t));
+  t.doc.dispatchEvent(new t.win.Event('wheel'));
+  await t.clock.advance(400);
+  check('the person turns the wheel: then it starts', tourOn(t));
   await finish(t);
 });
 
@@ -2918,7 +2921,7 @@ await run('the window: Okay that cannot be kept still closes it, and the guide s
   await t.clock.advance(400);
   check('closed, sent once, no error shown', !windowOn(t) && posts(t).length === 1 && t.toasts.length === 0);
   check('the inline card shows, and this session treats the window as seen', inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
-  t.doc.dispatchEvent(new t.win.Event('scroll'));
+  t.doc.dispatchEvent(new t.win.Event('wheel'));
   await t.clock.advance(400);
   check('the guide runs', tourOn(t));
   await finish(t);
@@ -2982,8 +2985,13 @@ await run('later visits: the inline card under the event log, from the first fra
   const [off, okay] = t.qa('#booksNotice .bn-card-actions button');
   check('Don\'t show again (quiet), then Okay (the one blue button)', off.textContent === 'Don\'t show again' && /bn-btn-quiet/.test(off.className) &&
     okay.textContent === 'Okay' && /bn-btn-primary/.test(okay.className) && off.type === 'button' && okay.type === 'button');
-  check('directly under the event log, above the page\'s title', /<!-- ws:event-log -->\s*<!--[\s\S]*?-->\s*<section id="booksNotice"/.test(BOOKS_HTML) &&
-    box.compareDocumentPosition(t.q('h1')) === 4);
+  check('with the Continue row: right after it, in the area that sets it beside the row when wide', box.parentElement === t.q('#continueArea') &&
+    box.previousElementSibling === t.q('#continueHost') && t.q('#continueArea').parentElement.classList.contains('bn-area'));
+  check('after the page\'s title and the search', t.q('h1').compareDocumentPosition(box) === 4 && t.q('#booksSearch').compareDocumentPosition(box) === 4);
+  check('one column, Okay and Don\'t show again at its foot: no two-column rule', !/columns: 2/.test(BOOKS_HTML) &&
+    t.q('#booksNotice .bn-card').lastElementChild.classList.contains('bn-card-actions'));
+  check('wide: beside the row in a column of its own, held from the first paint too',
+    /@container \(min-width: 912px\) \{\s*\.bn-continue:has\(> #booksNotice:not\(\[hidden\]\)\), html\[data-books-notice\] \.bn-continue \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) 26rem;/.test(BOOKS_HTML));
   check('the first paint\'s mark is the page\'s to take off', !t.doc.documentElement.hasAttribute('data-books-notice'));
   check('nothing is sent for showing it', posts(t).length === 0);
   await finish(t);
