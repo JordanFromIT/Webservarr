@@ -851,5 +851,51 @@ await run('Never opened with nothing in it says so', async (make) => {
   check('every book has been opened', rr(t.text('[data-ins-never]')).endsWith('Every book has been opened at least once.') && !t.q('#insNeverList'));
 });
 
+await run('a dialog closed and another opened before its close event lands: the new one still draws', async (make) => {
+  const slow = deferred();
+  const t = await mounted(make, { book: () => slow.promise.then(() => ({ body: BOOK_ANSWER })) });
+  const row = t.q(`[data-ins-person="${SAM}"]`);
+  row.focus();
+  row.click();
+  await flush();
+  t.q('[data-ins-close]').click();
+  const top = t.q('[data-ins-played="audiobooks"] [data-ins-book="1"]');
+  top.focus();
+  top.click();
+  // Chrome delivers a dialog's close event as a task of its own: a fast enough
+  // click (or a script) opens the next one first, and the event lands on it.
+  t.q('#insDetail').dispatchEvent(new t.win.Event('close'));
+  slow.resolve();
+  await flush();
+  check('the book is drawn, not left a skeleton', rr(t.text('#insDetailTitle')) === 'Dune' && !!t.q('#insDetailBody [data-ins-totals]'));
+  t.q('[data-ins-close]').click();
+  await flush();
+  check('Close still gives focus back to the book that opened it', t.doc.activeElement === top);
+});
+
+await run('a filter opened by a click hands focus back to its own button, where a click does not focus it', async (make) => {
+  const t = await mounted(make);
+  // ui.js's modal, as it is: focus goes back to whatever had it when the list opened.
+  t.win.WSUI = {
+    modal(overlay, opts) {
+      const previous = t.doc.activeElement;
+      opts.initial.focus();
+      const handle = { close() { opts.onClose(); if (previous && previous.focus) previous.focus(); } };
+      overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') handle.close(); });
+      return handle;
+    }
+  };
+  t.q('#insTopPlayedPeriod').focus();
+  const btn = t.q('#insHistoryMedia');
+  btn.click();          // as in Safari, the click leaves the focus where it was
+  await flush();
+  const list = menuOf(t, 'insHistoryMedia').querySelector('[role="listbox"]');
+  check('the list has the focus', t.doc.activeElement === list);
+  list.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await flush();
+  check('Escape gives focus back to the filter that opened it', !menuOf(t, 'insHistoryMedia') && t.doc.activeElement === btn);
+  delete t.win.WSUI;
+});
+
 console.log(`insights page: ${total - failed}/${total} checks pass`);
 process.exit(failed ? 1 : 0);

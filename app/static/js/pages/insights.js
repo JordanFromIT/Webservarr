@@ -816,7 +816,13 @@ export async function mount(ctx) {
   // Escape (the browser closes the dialog itself) gives focus back the same way.
   // Leaving the page swaps #wsPage out, dialog and all, which takes it off the
   // top layer; a late answer then draws nothing (state.detailGen, signal).
-  dialog.addEventListener('close', function () { state.detailGen += 1; giveFocusBack(); }, { signal: signal });
+  // The browser delivers the event as a task of its own, so a dialog opened
+  // again before it lands is the new one's: that one is left alone.
+  dialog.addEventListener('close', function () {
+    if (dialog.hasAttribute('open')) return;
+    state.detailGen += 1;
+    giveFocusBack();
+  }, { signal: signal });
   // A click on the dim area around the box (from sm up) lands on the dialog
   // itself, never on its content, and closes it.
   dialog.addEventListener('click', function (e) { if (e.target === dialog) closeDetail(); }, { signal: signal });
@@ -1630,6 +1636,9 @@ export async function mount(ctx) {
     btn.setAttribute('aria-controls', listId);
     signal.addEventListener('abort', function () { if (menu) menu.close(); }, { once: true, signal: ends.signal });
     if (window.WSUI && typeof window.WSUI.modal === 'function') {
+      // The stack hands focus back to whatever had it as the list opened. Safari
+      // never focuses a clicked button, so the button takes it first.
+      if (document.activeElement !== btn) btn.focus({ preventScroll: true });
       handle = window.WSUI.modal(overlay, { box: panel, initial: list, onClose: teardown });
       // The shared stack gives Escape, the focus kept inside and handed back, and
       // the router's close before it leaves. A popover is the list itself, not a
