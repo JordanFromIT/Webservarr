@@ -79,6 +79,24 @@ create routes are alive. A GET can't prove that a POST creates a share for the r
 right libraries, so build task 1 proves it once, against a test Plex account that Jordan provides
 (section 14).
 
+**Proof (build task 1, 2026-10-10).** Run from dev with the admin token, to Jordan's test account only:
+
+| What | Result |
+|---|---|
+| Create route that worked | A (v1 POST `plex.tv/api/servers/{mid}/shared_servers`), HTTP 200. The response body is XML, not JSON, so the share client confirms the share from `owned/pending` rather than parsing the reply. Route B (v2 POST `clients.plex.tv/api/v2/shared_servers`) was not needed and is untested |
+| Confirmed in `owned/pending` | Yes. Both `owned/pending` and `owned/accepted` are JSON lists of entries with the same fields: `accepted`, `acceptedAt`, `allLibraries`, `deletedAt`, `id`, `inviteToken`, `invited`, `invitedEmail`, `invitedId`, `lastSeenAt`, `leftAt`, `libraries`, `machineIdentifier`, `name`, `numLibraries`, `owned`, `owner`, `ownerId`, `searchEnabled`, `serverId`, `sharingSettings`. The account is named in `invitedEmail` and the `invited` object; `invitedId` equals `invited.id`, the account's plex.tv id (the same id its earlier share carried). `inviteToken` must never be logged |
+| Libraries on the entry | Exactly the one shared (`numLibraries` 1, `allLibraries` false) |
+| After acceptance | Moved to `owned/accepted`: yes, same share id, `acceptedAt` set |
+| Plex friend | Yes: `plex.tv/api/users` lists the account, and Jordan saw it in Plex Web as a friend with only the shared library. The account had an earlier share (since 2025-01), so this does not show whether a share alone creates a friend |
+| Sign-in with the test account | WebServarr let it in (callback 302, not admin). Authentik: sign-in succeeded; the account had existed since 2025-01, so this proves the share and WebServarr's membership gate, not brand-new enrollment (that stays with Task 2's screen check) |
+| Removed | Pending: Jordan removes it in Plex |
+
+Found on the way, for later: a 401 from `plex.tv/api/v2/user` during Authentik sign-in (a token
+plex.tv rejects) is answered as 503 "Plex didn't respond. Please try again." (`_fetch_plex_account`
+and `oidc_callback` in `app/routers/auth.py`), and is retried once. A 401 means the token is no
+good, not that Plex is down; it deserves its own "sign in with Plex again" answer and no retry. Not
+part of this feature.
+
 WebServarr's own membership gate is `_user_has_server_access` in `app/routers/auth.py`, used by both
 Authentik and Plex sign-in. It lists the servers the user's own token can see
 (`plex.tv/api/v2/resources`) and checks that the configured server's machine id is among them. An
