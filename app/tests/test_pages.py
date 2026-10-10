@@ -1070,6 +1070,21 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
         for cls in ("uppercase", "tracking-wider", "text-xs", "font-bold", "text-steel-blue"):
             self.assertNotIn(cls, classes)
 
+    def test_releases_link_is_the_same_button_as_make_a_request(self):
+        # Upcoming Releases' "View calendar" is Recent Requests' "Make a
+        # request" again: the same classes, last in the same wrapping header row.
+        page = static_text("index.html")
+        req = re.search(r'<a id="viewRequestsLink" href="/requests" class="([^"]*)">', page).group(1)
+        cal = re.search(r'<a id="viewCalendarLink" href="/calendar" class="([^"]*)">([^<]*)</a>', page)
+        self.assertIsNotNone(cal)
+        self.assertEqual(cal.group(2), "View calendar")
+        self.assertEqual(cal.group(1), req)
+        section = page[page.index('<section id="upcomingReleasesSection"'):page.index('<div id="releasesContainer">')]
+        row = re.search(r'<div class="([^"]*)">\s*<div class="flex items-center gap-3">', section).group(1).split()
+        for cls in ("flex", "flex-wrap", "items-center", "justify-between", "gap-x-4", "gap-y-2"):
+            self.assertIn(cls, row)
+        self.assertNotIn("View Calendar", page)
+
 
 class EventLogNeverMovesThePage(unittest.TestCase):
     """The event log (the status feed on a wheel), at the top of every shell

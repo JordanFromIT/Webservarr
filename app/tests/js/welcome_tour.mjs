@@ -2,7 +2,9 @@
 // real in happy-dom with theme-loader.js (WSAsk, WSPushOffer, the install
 // helpers), notifications.js (the push path, faked at the browser's edge: no
 // real push service, no real save) and Home's push banner:
-//  * the steps, in order, on a desktop and on a phone, and where each points
+//  * the steps, in order, on a desktop and on a phone, and where each points;
+//    the home screen is a phone's only (never a desktop's, nor its prompt), and
+//    its words never say install
 //  * shown once (webservarr_welcome_v2_seen); "Welcome tour" runs it again
 //  * the two offers: Not now asks again on the next load but not on a soft
 //    navigation; Don't ask me again needs its confirmation, then silences the
@@ -11,6 +13,8 @@
 //  * nothing offered where it cannot be: already allowed, no push, blocked
 //    (says how to unblock), already on the home screen
 //  * one ask per visit: the banner and the tour never both
+//  * Calendar points at Home's Upcoming Releases when its week has something,
+//    else at the Calendar entry in the nav
 //  * the tour ends with the visit; a plain tour (Books, the reader) is as before
 //
 // Run: node app/tests/js/welcome_tour.mjs (npm run test:js; CI js-checks).
@@ -58,7 +62,7 @@ function banner() {
 }
 
 /* The shell as the server renders it, in the parts the tour points at. */
-function shell({ booksInMore = false, eventLog = true } = {}) {
+function shell({ booksInMore = false, eventLog = true, releases = false } = {}) {
   const tab = (href, label) => `<li><a class="ws-navtab" href="${href}"><span class="ws-navtab-label">${label}</span></a></li>`;
   return `
 <aside id="desktopSidebar"><nav id="desktopNav">
@@ -82,6 +86,7 @@ function shell({ booksInMore = false, eventLog = true } = {}) {
   <div id="wsPage">
     <section id="wsEventLog"${eventLog ? '' : ' hidden'}><h2>Event log</h2></section>
     ${banner()}
+    <section id="upcomingReleasesSection" data-arrive="releases"${releases ? ' data-has-releases' : ''}><h3>Upcoming Releases</h3></section>
   </div>
 </main>`;
 }
@@ -90,7 +95,7 @@ function shell({ booksInMore = false, eventLog = true } = {}) {
    permission state and what this device remembers (store). */
 function browser({ width = 1440, ua = 'desktop', push = true, permission = 'default', answer = 'granted',
                    store = {}, standalone = false, user = { username: 'sam', has_email: true },
-                   booksInMore = false, eventLog = true, prompt = null } = {}) {
+                   booksInMore = false, eventLog = true, releases = false, prompt = null } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: width >= 1024 ? 900 : 844 });
   Object.defineProperty(w.navigator, 'userAgent', { value: UA[ua], configurable: true });
   if (ua === 'iphone') Object.defineProperty(w.navigator, 'standalone', { value: standalone, configurable: true });
@@ -133,7 +138,7 @@ function browser({ width = 1440, ua = 'desktop', push = true, permission = 'defa
   w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';
   w.eval(LOADER);
   w.WEBSERVARR_THEME = Object.assign({}, w.WEBSERVARR_THEME || {}, { app_name: 'Example Media', vapid_public_key: VAPID });
-  w.document.body.innerHTML = shell({ booksInMore, eventLog });
+  w.document.body.innerHTML = shell({ booksInMore, eventLog, releases });
   w.eval(NOTIFY);
   w.eval(TOUR);
   w.eval(WELCOME);
@@ -195,22 +200,25 @@ function walk(d) {
 
 // ---- The steps, in order ----
 
-await scenario('desktop: six steps, pointing at the header and the sidebar', async () => {
+const REL = '#upcomingReleasesSection[data-has-releases]';
+
+await scenario('desktop: five steps, pointing at the header and the sidebar, no home screen', async () => {
   const { w, d } = browser();
   visit(w);
   await wait(10);
   check('starts on a first visit', on(d));
   check('not quiet: the fog is on', !quiet(d));
   const steps = w.WSWelcome.steps().map((s) => s.target);
-  check('targets', JSON.stringify(steps) === JSON.stringify(['#wsEventLog', '#systemStatus', '#appHeader button[title="Notifications"]', null,
-                                                             '#desktopNav a[href="/calendar"]', '#desktopNav a[href="/books"]']), steps);
+  check('targets', JSON.stringify(steps) === JSON.stringify(['#wsEventLog', '#systemStatus', '#appHeader button[title="Notifications"]',
+                                                             REL, '#desktopNav a[href="/books"]']), steps);
   const seen = walk(d);
-  check('order', JSON.stringify(seen.map((s) => s.title)) ===
-        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Install as an app', 'Calendar', 'New: Books']), seen.map((s) => s.title));
+  check('order: Notifications straight to Calendar', JSON.stringify(seen.map((s) => s.title)) ===
+        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Calendar', 'New: Books']), seen.map((s) => s.title));
   check('no tab bar step on a wide screen', !seen.some((s) => s.title === 'Getting around'));
   check('the status step says click', /Click it for the live health/.test(seen[1].body));
   check('the notifications step offers', JSON.stringify(seen[2].actions) === JSON.stringify(['Turn on notifications', 'Not now', 'Don’t ask me again']), seen[2].actions);
-  check('the install step uses the site name', /Open Example Media in a window of its own/.test(seen[3].body), seen[3].body);
+  check('nothing about the home screen or installing', seen.every((s) => !/home screen|install/i.test(s.title + s.body + s.actions.join(' '))), seen);
+  check('a desktop is not left waiting to be asked', key(w, 'ws-install-ask') === null);
   check('the last step ends it', !on(d));
   check('seen', key(w, SEEN) === '1');
   await w.happyDOM.close();
@@ -220,7 +228,7 @@ await scenario('phone: seven steps, the top bar and the tab bar', async () => {
   const { w, d } = browser({ width: 390, ua: 'android' });
   const steps = w.WSWelcome.steps().map((s) => s.target);
   check('targets', JSON.stringify(steps) === JSON.stringify(['#wsEventLog', '#wsStatusChip', '#mobileTopBar button[title="Notifications"]', '#wsMoreBtn',
-                                                             '#wsTabList a[href="/calendar"]', '#wsTabList a[href="/books"]', '#wsTabBar']), steps);
+                                                             REL, '#wsTabList a[href="/books"]', '#wsTabBar']), steps);
   visit(w);
   await wait(10);
   const seen = walk(d);
@@ -228,6 +236,8 @@ await scenario('phone: seven steps, the top bar and the tab bar', async () => {
         JSON.stringify(['Event log', 'Service status', 'Notifications', 'Add to home screen', 'Calendar', 'New: Books', 'Getting around']), seen.map((s) => s.title));
   check('the status step says tap', /Tap it for the live health/.test(seen[1].body));
   check('the home screen offer', JSON.stringify(seen[3].actions) === JSON.stringify(['Add to home screen', 'Not now', 'Don’t ask me again']), seen[3].actions);
+  check('its words', seen[3].body === 'Open Example Media from your home screen, full screen like an app.', seen[3].body);
+  check('no install wording on a phone', seen.every((s) => !/install|app window/i.test(s.title + s.body + s.actions.join(' ') + s.list.join(' '))), seen);
   await w.happyDOM.close();
 });
 
@@ -237,6 +247,29 @@ await scenario('phone: a page the tab bar has no room for points at More', async
   check('More', books && books.target === '#wsMoreBtn', books && books.target);
   check('and says so', books && /Find it under More\.$/.test(books.body), books && books.body);
   await w.happyDOM.close();
+});
+
+await scenario('Calendar: Upcoming Releases when it has the week, else the nav entry', async () => {
+  for (const [width, ua, nav] of [[1440, 'desktop', '#desktopNav a[href="/calendar"]'], [390, 'android', '#wsTabList a[href="/calendar"]']]) {
+    const shown = browser({ width, ua, releases: true });
+    // happy-dom lays nothing out: give the section a box, as a browser would.
+    shown.d.getElementById('upcomingReleasesSection').getBoundingClientRect = () => ({ width: 800, height: 300, top: 0, left: 0, right: 800, bottom: 300 });
+    const cal = shown.w.WSWelcome.steps().find((s) => s.title === 'Calendar');
+    const v = Object.assign({}, cal, cal.view());
+    check(ua + ': the section first, the nav entry as its fallback', cal.target === REL && cal.fallback === nav, [cal.target, cal.fallback]);
+    check(ua + ': says the button is there', v.body === 'Upcoming movies and episodes, so you know what’s coming and when. Open the full calendar from here.', v.body);
+    await shown.w.happyDOM.close();
+
+    // Hidden by its Home setting (no box), or a week with nothing in it (no mark).
+    for (const opts of [{ releases: true }, { releases: false }]) {
+      const off = browser(Object.assign({ width, ua }, opts));
+      const step = off.w.WSWelcome.steps().find((s) => s.title === 'Calendar');
+      const ov = Object.assign({}, step, step.view());
+      check(ua + ': hidden or empty: the nav entry, the old words ' + JSON.stringify(opts),
+            ov.fallback === nav && ov.body === 'Upcoming movies and episodes, so you know what’s coming and when.', ov.body);
+      await off.w.happyDOM.close();
+    }
+  }
 });
 
 await scenario('an event log the admin switched off is not toured', async () => {
@@ -295,9 +328,8 @@ await scenario('Not now asks again on the next load, not on a soft navigation', 
   $(d, 'tourNext').click();
   check('on the offer', title(d) === 'Notifications');
   action(d, 'Not now').click();
-  check('moves on', title(d) === 'Install as an app');
+  check('moves on', title(d) === 'Calendar');
   check('remembered as later', key(first.w, 'ws-push-ask') === 'later');
-  action(d, 'Not now').click();
   while (on(d)) $(d, 'tourNext').click();
   check('the browser was never asked', first.calls.asked === 0);
   // A soft navigation away and back: the same document.
@@ -392,7 +424,7 @@ await scenario('Turn on runs the site’s own subscribe path and moves on at the
   check('the browser asked once', calls.asked === 1, calls.asked);
   check('subscribed and saved', calls.subscribed === 1 && calls.posts.length === 1 &&
         calls.posts[0].url === '/api/notifications/push-subscribe', calls.posts);
-  check('moved on', title(d) === 'Install as an app');
+  check('moved on', title(d) === 'Calendar');
   check('no longer waiting to ask', key(w, 'ws-push-ask') === null);
   $(d, 'tourBack').click();
   check('Back: allowed now, nothing to offer', title(d) === 'Notifications' && actions(d).length === 0);
@@ -408,7 +440,7 @@ await scenario('a refused browser question moves on and is not asked again', asy
   action(d, 'Turn on notifications').click();
   await wait(20);
   check('asked', calls.asked === 1);
-  check('moved on', title(d) === 'Install as an app');
+  check('moved on', title(d) === 'Calendar');
   check('the permission decides from now on', key(w, 'ws-push-ask') === null);
   await w.happyDOM.close();
 });
@@ -457,7 +489,8 @@ await scenario('Add to home screen: the menu steps where there is no prompt', as
   await wait(10);
   while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
   action(d, 'Add to home screen').click();
-  check('the steps', JSON.stringify(listed(d)) === JSON.stringify(['Open the browser menu more_vert', 'Tap Add to Home screen or Install app']), listed(d));
+  check('the steps', JSON.stringify(listed(d)) === JSON.stringify(['Open the browser menu more_vert', 'Tap Add to Home screen']), listed(d));
+  check('the words', body(d) === 'Add it from your browser’s menu:', body(d));
   check('Done and Not now', JSON.stringify(actions(d)) === JSON.stringify(['Done', 'Not now']), actions(d));
   action(d, 'Done').click();
   check('done', key(w, 'ws-install-ask') === 'done' && title(d) === 'Calendar');
@@ -514,9 +547,13 @@ await scenario('already allowed, no push, blocked, already installed', async () 
   }
   const app = browser({ standalone: true });
   const titles = app.w.WSWelcome.steps().map((s) => s.title || '');
-  check('installed: no install step', titles.length === 5 && titles.indexOf('') === -1, titles);
+  check('installed: no home screen step', titles.length === 5 && titles.indexOf('') === -1, titles);
   check('installed: nothing waiting', key(app.w, 'ws-install-ask') === null);
   await app.w.happyDOM.close();
+  const phoneApp = browser({ width: 390, ua: 'android', standalone: true });
+  const phoneTitles = phoneApp.w.WSWelcome.steps().map((s) => s.title || '');
+  check('a phone home-screen app: no home screen step', phoneTitles.indexOf('Add to home screen') === -1 && phoneTitles.indexOf('') === -1, phoneTitles);
+  await phoneApp.w.happyDOM.close();
 });
 
 // ---- One ask per visit ----
@@ -546,8 +583,22 @@ await scenario('the banner and the tour never both ask', async () => {
   visit(c.w);
   await wait(10);
   check('the home screen prompt', on(c.d) && title(c.d) === 'Add to home screen?' && quiet(c.d), on(c.d) && title(c.d));
+  check('its words', body(c.d) === 'Open Example Media from your home screen, full screen like an app.' &&
+        JSON.stringify(actions(c.d)) === JSON.stringify(['Add to home screen', 'Not now', 'Don’t ask me again']), [body(c.d), actions(c.d)]);
+  action(c.d, 'Don’t ask me again').click();
+  check('its confirmation', title(c.d) === 'Stop asking?' && body(c.d) === 'You can still add it from More.', body(c.d));
   check('one at a time: banner hidden', c.d.getElementById('pushPrompt').hidden);
   await c.w.happyDOM.close();
+
+  // The same on a desktop, or a tablet held wide: the home screen is never
+  // asked about there, even one left waiting from a phone-width visit.
+  for (const ua of ['desktop', 'iphone']) {
+    const e = browser({ ua, permission: 'granted', store: { [SEEN]: '1', 'ws-install-ask': 'later' } });
+    visit(e.w);
+    await wait(10);
+    check('no home screen prompt on a wide screen: ' + ua, !on(e.d), on(e.d) && title(e.d));
+    await e.w.happyDOM.close();
+  }
 });
 
 await scenario('home.js decides the banner first, marks it, then mounts the tour', async () => {

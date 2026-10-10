@@ -483,6 +483,16 @@ function buildReleases(container, releases) {
     var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     var i, j, cellDate, dateStr, isToday, dayReleases, rel, badge, name, nameText, empty;
 
+    // data-has-releases on the section: the week has something in it. The
+    // welcome tour (js/welcome.js) points its Calendar step here only then.
+    var inWeek = 0;
+    for (i = 0; i < 7; i++) {
+        cellDate = new Date(today);
+        cellDate.setDate(cellDate.getDate() + i);
+        inWeek += (grouped[_fmtDate(cellDate)] || []).length;
+    }
+    markReleases(container, inWeek > 0);
+
     if (isMobile) {
         // Mobile: vertical list grouped by day
         var list = document.createElement('div');
@@ -641,8 +651,14 @@ function buildReleases(container, releases) {
     }
 }
 
+function markReleases(container, any) {
+    var section = container.closest('section');
+    if (section) section.toggleAttribute('data-has-releases', any);
+}
+
 function releasesError(container) {
     while (container.firstChild) container.removeChild(container.firstChild);
+    markReleases(container, false);
     var errDiv = document.createElement('div');
     errDiv.className = 'text-center text-steel-blue py-8';
     var errIcon = document.createElement('span');

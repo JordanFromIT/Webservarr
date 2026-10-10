@@ -166,15 +166,15 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
      known from the first paint on a wide screen, while streams come and go,
      so nothing under it moves when it lands. -->
 <section id="upcomingReleasesSection" data-arrive="releases">
-<div class="flex items-center justify-between mb-6">
+<!-- The header row as Recent Requests has it: the link is the same primary
+     button as "Make a request", and wraps under the heading only where the
+     two cannot share a line. -->
+<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-6">
 <div class="flex items-center gap-3">
 <span id="iconSectionReleases" class="ws-section-icon material-symbols-outlined text-steel-blue">calendar_month</span>
 <h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
 </div>
-<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Calendar
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
+<a id="viewCalendarLink" href="/calendar" class="inline-flex items-center whitespace-nowrap bg-primary hover:bg-primary/90 text-bright px-4 py-1 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">View calendar</a>
 </div>
 <!-- From lg the skeleton is buildReleases' week: the day-name row and seven
      130px days, so the week lands without moving Active Streams under it.

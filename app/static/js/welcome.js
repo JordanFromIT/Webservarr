@@ -4,10 +4,11 @@
  * Shown once to everyone, new or not, the first time Home is opened on this
  * device after version 2 (localStorage webservarr_welcome_v2_seen). It runs on
  * the shared engine (js/tour.js) and walks the shell: the event log, the
- * service status, the bell (and an offer to turn on notifications), adding
- * the site to the home screen, the calendar, Books and, on a phone, the tab
- * bar. "Welcome tour" in the account menu and in More (/?welcome=1) runs
- * it again.
+ * service status, the bell (and an offer to turn on notifications), on a
+ * phone adding the site to the home screen, the calendar, Books and, on a
+ * phone, the tab bar. "Welcome tour" in the account menu and in More
+ * (/?welcome=1) runs it again. A wide screen is never offered the home
+ * screen, in the tour or in its small prompt.
  *
  * The two offers (notifications, home screen) keep their answer in
  * theme-loader.js WSAsk, which Home's push banner reads too:
@@ -35,12 +36,14 @@
   var PUSH_BASE = 'Updates on your requests, issues and tickets, server problems and announcements land here.';
   var PUSH_STOP = 'You can still turn notifications on from the bell, under Notification settings.';
   var IOS_STEPS = [['Tap ', 'ios_share', ' Share in the browser toolbar'], 'Tap Add to Home Screen'];
-  var PHONE_MENU_STEPS = [['Open the browser menu ', 'more_vert', ''], 'Tap Add to Home screen or Install app'];
-  var DESKTOP_MENU_STEPS = ['Open the browser menu, or the install icon in the address bar', 'Choose Install, if your browser offers it'];
+  var MENU_STEPS = [['Open the browser menu ', 'more_vert', ''], 'Tap Add to Home screen'];
+  var HOME_TITLE = 'Add to home screen';
+  var HOME_STOP = 'You can still add it from More.';
 
   function matches(q) {
     try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; }
   }
+  // A phone: the same test as the tab bar's "Getting around" step.
   function phone() { return !matches(LG); }
   function installed() { return typeof window.WSInstalled === 'function' && !!window.WSInstalled(); }
   function ios() { return typeof window.WSInstallIOS === 'function' && !!window.WSInstallIOS(); }
@@ -74,9 +77,11 @@
   }
 
   function pushAskable() { return pushKind() === 'offer' && ask().get('push') !== 'never'; }
+  // The home screen is offered on a phone only, and not from inside it.
+  function homeOffered() { return phone() && !installed(); }
   function installAskable() {
     var state = ask().get('install');
-    return !installed() && state !== 'never' && state !== 'done';
+    return homeOffered() && state !== 'never' && state !== 'done';
   }
 
   function bell() {
@@ -159,14 +164,10 @@
     ];
   }
 
-  function installStop() {
-    return phone() ? 'You can still add it from More.' : 'You can still install it from your browser’s menu.';
-  }
-
-  /* Add: the browser's own prompt where it has given us one (Chrome,
-     Android), else the steps to take in its menu. The step's buttons stay
-     usable meanwhile: the browser's prompt is its own dialog, and one that
-     never answers must not leave the tour stuck. */
+  /* Add to home screen: the browser's own prompt where it has given us one
+     (Chrome on Android), else the steps to take in its menu. The step's
+     buttons stay usable meanwhile: the browser's prompt is its own dialog,
+     and one that never answers must not leave the tour stuck. */
   function addIt(ctl) {
     var inst = window.WS && window.WS.install;
     if (window.WSInstallPrompt && inst && typeof inst.prompt === 'function') {
@@ -186,7 +187,7 @@
   function menuSteps(ctl) {
     ctl.update({
       body: 'Add it from your browser’s menu:',
-      list: phone() ? PHONE_MENU_STEPS : DESKTOP_MENU_STEPS,
+      list: MENU_STEPS,
       actions: [
         { label: 'Done', kind: 'primary', focus: true, run: function (c) { ask().set('install', 'done'); c.next(); } },
         { label: 'Not now', kind: 'quiet', run: later('install') }
@@ -217,30 +218,54 @@
     };
   }
 
+  /* Phone only (homeOffered): it points at More, which has the same row. */
   function installStep() {
     return {
-      target: phone() ? '#wsMoreBtn' : null,
+      target: '#wsMoreBtn',
       icon: 'add_to_home_screen',
+      title: HOME_TITLE,
       view: function () {
-        var onPhone = phone();
-        var title = onPhone ? 'Add to home screen' : 'Install as an app';
-        var body = onPhone ? 'Open ' + siteName() + ' from your home screen, full screen like an app.'
-                           : 'Open ' + siteName() + ' in a window of its own, like an app.';
+        var body = 'Open ' + siteName() + ' from your home screen, full screen like an app.';
         var state = ask().get('install');
         if (state === 'never' || state === 'done') {
-          return { title: title, body: body + (onPhone ? ' It’s under More whenever you want it.' : ' Your browser’s menu has it whenever you want it.'),
-                   list: ios() ? IOS_STEPS : null };
+          return { body: body + ' It’s under More whenever you want it.', list: ios() ? IOS_STEPS : null };
         }
         var rest = [
           { label: 'Not now', kind: 'quiet', focus: true, run: later('install') },
-          { label: 'Don’t ask me again', kind: 'link', run: confirmStop('install', installStop()) }
+          { label: 'Don’t ask me again', kind: 'link', run: confirmStop('install', HOME_STOP) }
         ];
         if (ios()) {
-          return { title: title, body: body + ' On an iPhone or iPad it’s also how you get notifications.', list: IOS_STEPS,
+          return { body: body + ' On an iPhone or iPad it’s also how you get notifications.', list: IOS_STEPS,
                    actions: [{ label: 'Done', kind: 'primary', run: function (c) { ask().set('install', 'done'); c.next(); } }].concat(rest) };
         }
-        return { title: title, body: body,
-                 actions: [{ label: onPhone ? 'Add to home screen' : 'Install app', kind: 'primary', run: addIt }].concat(rest) };
+        return { body: body, actions: [{ label: HOME_TITLE, kind: 'primary', run: addIt }].concat(rest) };
+      }
+    };
+  }
+
+  /* Calendar points at Home's Upcoming Releases, which has the button to the
+     full calendar, when the week there has something in it
+     (data-has-releases, pages/home.js). Hidden (its Home section is off),
+     empty or not yet in: the Calendar entry in the nav, as other pages. */
+  var RELEASES = '#upcomingReleasesSection[data-has-releases]';
+  var CAL_WORDS = 'Upcoming movies and episodes, so you know what’s coming and when.';
+  function releasesShown() {
+    var el = document.querySelector(RELEASES);
+    if (!el) return false;
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  function calendarStep() {
+    var at = navEntry('/calendar');
+    if (!at) return null;
+    return {
+      target: RELEASES,
+      fallback: at.target,
+      icon: 'calendar_month',
+      title: 'Calendar',
+      view: function () {
+        if (releasesShown()) return { body: CAL_WORDS + ' Open the full calendar from here.' };
+        return { body: CAL_WORDS + (at.more ? ' Find it under More.' : '') };
       }
     };
   }
@@ -265,11 +290,11 @@
     // On an iPhone or iPad in a browser tab, the home screen comes first:
     // notifications only work from there.
     var push = pushStep();
-    var home = installed() ? null : installStep();
+    var home = homeOffered() ? installStep() : null;
     if (home && ios()) list.push(home, push);
     else { list.push(push); if (home) list.push(home); }
 
-    var cal = navStep('/calendar', 'calendar_month', 'Calendar', 'Upcoming movies and episodes, so you know what’s coming and when.');
+    var cal = calendarStep();
     if (cal) list.push(cal);
     var books = navStep('/books', 'menu_book', 'New: Books', 'Read ebooks and listen to audiobooks right here. Each book keeps your place on every device.');
     if (books) list.push(books);
@@ -286,9 +311,10 @@
   }
 
   /* What a seen tour asks again this visit, if anything: the home screen
-     first on an iPhone or iPad tab (push needs it), else notifications. */
+     first on an iPhone or iPad tab (push needs it), else notifications. The
+     home screen only on a phone. */
   function waiting() {
-    var homeLater = ask().get('install') === 'later' && !installed();
+    var homeLater = ask().get('install') === 'later' && homeOffered();
     if (homeLater && ios()) return 'install';
     if (ask().get('push') === 'later' && pushKind() === 'offer') return 'push';
     return homeLater ? 'install' : null;
@@ -301,12 +327,7 @@
                actions: pushOffer() };
     }
     var step = installStep();
-    var view = step.view;
-    step.view = function () {
-      var v = view();
-      v.title = v.title + '?';
-      return v;
-    };
+    step.title = HOME_TITLE + '?';
     return step;
   }
 
