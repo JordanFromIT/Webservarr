@@ -350,7 +350,7 @@
     var m = WSSettings.metaFor(BLUR) || {};
     var lo = m.min != null ? Number(m.min) : 0, hi = m.max != null ? Number(m.max) : 32;
     var def = parseInt(m.default, 10);
-    if (isNaN(def)) def = 32;
+    if (isNaN(def)) def = 15;
     var s = String(v == null ? '' : v).trim();
     var n = parseInt(s, 10);
     if (isNaN(n) || String(Number(s)) !== String(n)) return def;      // "4.5", "4px", "1e1"
@@ -374,7 +374,7 @@
     shown.setAttribute('aria-hidden', 'true');
     top.appendChild(label);
     top.appendChild(shown);
-    var help = el('p', cls.help, '0 px is clear glass. The default is 32 px.');
+    var help = el('p', cls.help, '0 px is clear glass. The default is 15 px.');
     help.id = range.id + '-help';
     var err = el('p', cls.error + ' hidden');
     err.id = range.id + '-error';

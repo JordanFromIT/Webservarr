@@ -48,11 +48,14 @@ const page = hex('background');
 const primary = hex('primary');
 const secondary = hex('secondary');
 // The frost (theme.css .ws-frost): the icy tint, the secondary mixed 30%
-// toward the text colour, at 30%, over what is behind, with no floor.
+// toward the text colour, at the tint's own alpha (.25), over what is
+// behind, with no floor.
 const floor = (THEME.match(/--ws-frost-floor: ([\d.]+);/) || [])[1];
+const alpha = +(THEME.match(/\n  --ws-frost-tint: rgb\(var\(--color-secondary\) \/ (\.\d+)\);/) || [])[1];
+check('the tint is at .25', alpha === 0.25, alpha);
 const icy = tint(text, secondary, 0.3);
-const frost = tint(icy, tint(page, page, +floor), 0.3);
-const frostOverWhite = tint(icy, tint(page, '#FFFFFF', +floor), 0.3);
+const frost = tint(icy, tint(page, page, +floor), alpha);
+const frostOverWhite = tint(icy, tint(page, '#FFFFFF', +floor), alpha);
 const onPage = contrast(text, page);
 const onFrost = contrast(text, frost);
 check('the frost has no floor', floor === '0', floor);

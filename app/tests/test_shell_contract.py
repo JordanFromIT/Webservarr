@@ -589,13 +589,16 @@ class PhoneShellContract(unittest.TestCase):
 
     def test_the_tab_bar_wears_the_shared_frost(self):
         # On trial: the frost's own tokens, so the blur setting and the
-        # palette move it with every other frosted surface (the icy glass has
-        # no floor, so the 70% labels lose contrast over a bright poster).
+        # palette move it with every other frosted surface (the glass has no
+        # floor, so the 70% labels lose contrast over a bright poster). Docked
+        # to the bottom edge, it takes the slab turned over: the ring as a line
+        # along its top edge and the shadow mirrored upward.
         bar = "".join(css_rules(self.theme, ".ws-tabbar"))
-        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
+        self.assertIn("background: var(--ws-frost-ring-bar-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
                       "rgb(var(--color-background) / var(--ws-frost-floor));", bar)
-        self.assertIn("backdrop-filter: var(--ws-frost-blur);", bar)
+        self.assertIn("backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);", bar)
         self.assertIn("border-top: 1px solid var(--ws-frost-edge);", bar)
+        self.assertIn("box-shadow: var(--ws-frost-shadow-up);", bar)
         self.assertIn("color: rgb(var(--color-text) / .7);", bar)
 
     def test_sheet_motion_respects_reduced_motion(self):

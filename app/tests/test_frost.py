@@ -1,10 +1,13 @@
 """
 One frosted surface and one popover motion for everything that floats.
 
-The frost (theme.css .ws-frost and its --ws-frost-* tokens) is the icy glass
-the owner chose: the secondary colour mixed 30% toward the text colour, at
-30% (rgb(88 148 186 / .3) with the shipped palette), over the blur setting
-(32px by default), a text-colour edge at 12% and Tailwind's shadow-lg at .3.
+The frost (theme.css .ws-frost and its --ws-frost-* tokens) is the glass
+slab the owner chose (D8): the secondary colour mixed 30% toward the text
+colour, at 25% (rgb(88 148 186 / .25) with the shipped palette), over the
+blur setting (15px by default) with saturate(1.5) brightness(1.06), a 1px
+gradient ring drawn in the border's area, a lit rim, an inside thickness
+and a layered lift with a faint glow of the tint's colour. The phone tab
+bar takes it turned over (a top-edge line, the shadow mirrored upward).
 The sign-in card wears the same tokens. Every menu, popover, panel, sheet,
 dialog and toast wears it, and none carries a recipe of its own. There is no
 floor: nothing dark is laid under the tint, so over very bright art the light
@@ -36,9 +39,17 @@ def read(rel: str) -> str:
 
 
 def token(name: str) -> str:
-    m = re.search(r"\n  " + re.escape(name) + r": ([^;]+);", THEME)
+    """A token's value at :root (two-space indent), whitespace collapsed."""
+    m = re.search(r"\n  " + re.escape(name) + r":\s*([^;]+);", THEME)
     assert m, name
-    return m.group(1).strip()
+    return " ".join(m.group(1).split())
+
+
+def supported(feature: str) -> dict:
+    """The :root tokens a browser with `feature` gets (theme.css @supports)."""
+    m = re.search(r"@supports \(" + re.escape(feature) + r"\) \{\s*:root \{(.*?)\}\s*\}", THEME, flags=re.S)
+    assert m, feature
+    return {k: " ".join(v.split()) for k, v in re.findall(r"(--[\w-]+):\s*([^;]+);", m.group(1))}
 
 
 def default_rgb(name: str) -> tuple:
@@ -88,10 +99,12 @@ def frosted(behind, floor=0.0):
 
 def supported_tint() -> str:
     """The tint a browser with color-mix() gets (theme.css @supports)."""
-    m = re.search(r"@supports \(color: color-mix\(in srgb, red, blue\)\) \{\s*:root \{\s*"
-                  r"--ws-frost-tint: ([^;]+);\s*\}\s*\}", THEME)
-    assert m, "the color-mix() tint"
-    return m.group(1)
+    return supported("color: color-mix(in srgb, red, blue)")["--ws-frost-tint"]
+
+
+BACKDROP = "backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);"
+SLAB_BG = ("background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
+           "rgb(var(--color-background) / var(--ws-frost-floor));")
 
 
 # Every surface that floats over the page, and the text that shows its class.
@@ -141,33 +154,31 @@ class OneFrost(unittest.TestCase):
     def test_the_tokens_are_the_icy_glass(self):
         # The card wears the tokens themselves, so its blur follows the setting.
         card = re.search(r"\.login-glass-card \{([^}]*)\}", LOGIN).group(1)
-        self.assertIn("background: var(--ws-frost-tint);", card)
-        # The icy tint: the secondary mixed 30% toward the text colour, at 30%,
-        # from the palette's own tokens; without color-mix() the secondary at 30%.
-        self.assertEqual(supported_tint(), "color-mix(in srgb, rgb(var(--color-secondary) / .3) 70%, "
-                                           "rgb(var(--color-text) / .3))")
-        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .3)")
+        self.assertIn("background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));", card)
+        # The icy tint: the secondary mixed 30% toward the text colour, at 25%,
+        # from the palette's own tokens; without color-mix() the secondary at 25%.
+        self.assertEqual(supported_tint(), "color-mix(in srgb, rgb(var(--color-secondary) / .25) 70%, "
+                                           "rgb(var(--color-text) / .25))")
+        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .25)")
         self.assertEqual(tuple(round(c) for c in icy()), (88, 148, 186))
-        self.assertIn("-webkit-backdrop-filter: var(--ws-frost-blur);", card)
-        self.assertIn("\n      backdrop-filter: var(--ws-frost-blur);", card)
-        self.assertEqual(token("--ws-frost-blur"), "blur(32px)")
+        self.assertIn("-webkit-" + BACKDROP, card)
+        self.assertIn("\n      " + BACKDROP, card)
+        self.assertEqual(token("--ws-frost-blur"), "blur(15px)")
         self.assertIn("border: 1px solid var(--ws-frost-edge);", card)
         self.assertEqual(token("--ws-frost-edge"), "rgb(var(--color-text) / .12)")
         self.assertNotRegex(card, r"blur\(\d")
-        # The card's shadow is the frost's own (Tailwind's shadow-lg at .3), not a class.
+        # The card's shadow is the frost's own (the slab's), not a class.
         self.assertIn("box-shadow: var(--ws-frost-shadow);", card)
         self.assertNotRegex(LOGIN, r'class="[^"]*\blogin-glass-card\b[^"]*\bshadow-')
-        self.assertEqual(token("--ws-frost-shadow"), "0 10px 15px -3px rgb(0 0 0 / .3), 0 4px 6px -4px rgb(0 0 0 / .3)")
         # No floor, on a scrim or off it.
         self.assertEqual(token("--ws-frost-floor"), "0")
         self.assertEqual(token("--ws-frost-floor-on-scrim"), "0")
 
     def test_the_class_paints_only_the_tokens(self):
         rule = re.search(r"\n\.ws-frost \{([^}]*)\}", THEME).group(1)
-        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
-                      "rgb(var(--color-background) / var(--ws-frost-floor));", rule)
-        self.assertIn("-webkit-backdrop-filter: var(--ws-frost-blur);", rule)
-        self.assertIn("backdrop-filter: var(--ws-frost-blur);", rule)
+        self.assertIn(SLAB_BG, rule)
+        self.assertIn("-webkit-" + BACKDROP, rule)
+        self.assertIn("\n  " + BACKDROP, rule)
         self.assertIn("border-color: var(--ws-frost-edge);", rule)
         self.assertIn("box-shadow: var(--ws-frost-shadow);", rule)
         # On a scrim (a sheet, a dialog) the floor is the scrim's top-up.
@@ -190,23 +201,89 @@ class OneFrost(unittest.TestCase):
     def test_the_player_notices_paint_the_tokens(self):
         # The player's notices stack above its bar like toasts: the same frost.
         rule = css_rule(THEME, ".wsp-notice")
-        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
-                      "rgb(var(--color-background) / var(--ws-frost-floor));", rule)
-        self.assertIn("backdrop-filter: var(--ws-frost-blur);", rule)
+        self.assertIn(SLAB_BG, rule)
+        self.assertIn(BACKDROP, rule)
         self.assertIn("border: 1px solid var(--ws-frost-edge);", rule)
         self.assertIn("box-shadow: var(--ws-frost-shadow);", rule)
 
     def test_the_player_drop_down_paints_the_tokens(self):
         rule = css_rule(THEME, ".wsp-full.is-window")
-        self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
-                      "rgb(var(--color-background) / var(--ws-frost-floor));", rule)
-        self.assertIn("backdrop-filter: var(--ws-frost-blur);", rule)
+        self.assertIn(SLAB_BG, rule)
+        self.assertIn(BACKDROP, rule)
         self.assertIn("border: 1px solid var(--ws-frost-edge);", rule)
         self.assertIn("box-shadow: var(--ws-frost-shadow);", rule)
         # Its pointer is the same frost, cut to the half above the window's edge.
         caret = css_rule(THEME, ".wsp-full.is-window:not(.is-pip) .wsp-drop-caret")
         self.assertIn("clip-path: polygon(0 0, 100% 0, 0 100%);", caret)
         self.assertIn("var(--ws-frost-floor)", caret)
+        self.assertIn("background: var(--ws-frost-ring-layer), ", caret)
+
+
+class TheGlassSlab(unittest.TestCase):
+    """D8, the glass slab, at tint .25 and blur 15 with every strength at 100%:
+    the mockup's recipe() output, layer by layer."""
+
+    def test_backdrop_boost(self):
+        self.assertEqual(token("--ws-frost-boost"), "saturate(1.5) brightness(1.06)")
+
+    def test_the_ring_is_a_gradient_border_from_the_top_left(self):
+        self.assertEqual(token("--ws-frost-ring"),
+                         "linear-gradient(135deg, rgb(255 255 255 / .55), rgb(var(--color-text) / .165) 40%, "
+                         "rgb(var(--color-text) / .04) 75%)")
+        # Drawn in the border's own area: it follows every corner, stays put
+        # while a panel scrolls, and needs no pseudo-element (so an <input>,
+        # the Requests search field, takes it too).
+        sup = supported("background-clip: border-area")
+        self.assertEqual(sup["--ws-frost-ring-layer"], "var(--ws-frost-ring) border-box border-area")
+        self.assertEqual(sup["--ws-frost-ring-bar-layer"], "var(--ws-frost-ring-bar) border-box border-area")
+        # Where it draws, the flat edge gives way to it; elsewhere the layer is
+        # "none" and the flat edge (text at 12%) stays.
+        self.assertEqual(sup["--ws-frost-edge"], "transparent")
+        self.assertEqual(token("--ws-frost-ring-layer"), "none")
+        self.assertEqual(token("--ws-frost-ring-bar-layer"), "none")
+
+    def test_the_shadow_is_rim_thickness_lift_and_glow(self):
+        self.assertEqual(token("--ws-frost-shadow"), ", ".join([
+            "inset 0 1px 0 rgb(255 255 255 / .38)", "inset 1px 0 0 rgb(255 255 255 / .14)",
+            "inset 0 -1px 0 rgb(0 0 0 / .256)", "inset 0 -12px 24px -12px rgb(0 0 0 / .32)",
+            "inset 0 0 24px rgb(var(--color-text) / .07)",
+            "0 1px 2px rgb(0 0 0 / .4)", "0 6px 16px -4px rgb(0 0 0 / .32)", "0 24px 56px -16px rgb(0 0 0 / .5)",
+            "0 0 40px -8px var(--ws-frost-glow)"]))
+        # The glow is the tint's own colour (the same mix) at .14.
+        self.assertEqual(token("--ws-frost-glow"), "rgb(var(--color-secondary) / .14)")
+        self.assertEqual(supported("color: color-mix(in srgb, red, blue)")["--ws-frost-glow"],
+                         "color-mix(in srgb, rgb(var(--color-secondary) / .14) 70%, rgb(var(--color-text) / .14))")
+
+    def test_the_docked_bar_takes_it_turned_over(self):
+        self.assertEqual(token("--ws-frost-ring-bar"),
+                         "linear-gradient(90deg, rgb(255 255 255 / .44), rgb(var(--color-text) / .138) 50%, "
+                         "rgb(var(--color-text) / .04))")
+        self.assertEqual(token("--ws-frost-shadow-up"), ", ".join([
+            "inset 0 1px 0 rgb(255 255 255 / .38)", "inset 0 0 24px rgb(var(--color-text) / .07)",
+            "0 -1px 2px rgb(0 0 0 / .4)", "0 -6px 16px -4px rgb(0 0 0 / .32)", "0 -24px 56px -16px rgb(0 0 0 / .5)",
+            "0 0 40px -8px var(--ws-frost-glow)"]))
+        bar = re.search(r"\n\.ws-tabbar \{([^}]*)\}", THEME).group(1)
+        self.assertIn("background: var(--ws-frost-ring-bar-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), ", bar)
+        self.assertIn("border-top: 1px solid var(--ws-frost-edge);", bar)
+        self.assertIn("box-shadow: var(--ws-frost-shadow-up);", bar)
+
+    def test_no_sheen_grain_light_or_refraction(self):
+        css = re.sub(r"/\*.*?\*/", "", THEME, flags=re.S)
+        for gone in ("--ws-frost-sheen", "--ws-frost-grain", "--ws-frost-light", "feTurbulence", "feDisplacementMap"):
+            self.assertNotIn(gone, css)
+        # No pseudo-element draws any of it, so none can clash with a
+        # surface's own ::before or ::after.
+        self.assertFalse(re.search(r"\.ws-frost[^{,]*::(?:before|after)", css))
+
+    def test_the_search_field_wears_the_ring(self):
+        # The ring is a background layer clipped to the border's area, so the
+        # field needs its 1px border, and keeps the focus ring (the --ws-focus
+        # colour) over the slab's shadow.
+        for classes in surface_classes("Requests search bar"):
+            self.assertIn("ws-frost", classes)
+            self.assertIn("border", classes)
+            self.assertIn("focus:ring-focus", classes)
+        self.assertIn("--tw-shadow: var(--ws-frost-shadow);", re.search(r"\n\.ws-frost \{([^}]*)\}", THEME).group(1))
 
 
 class FrostContrast(unittest.TestCase):
