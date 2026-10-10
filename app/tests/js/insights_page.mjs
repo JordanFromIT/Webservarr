@@ -308,6 +308,28 @@ async function mounted(make, over) {
 }
 const rr = (n) => (n || '').replace(/\s+/g, ' ').trim();
 
+/** A filter's list, opened by its button; null when it is not open. */
+function menuOf(t, id) { return t.q(`[data-ins-menu="${id}"]`); }
+
+/** Pick a filter's choice the way a person does: open its list, click the choice. */
+async function pick(t, id, value) {
+  t.q('#' + id).click();
+  await flush();
+  const option = t.q(`[data-ins-menu="${id}"] [role="option"][data-value="${value}"]`);
+  if (!option) throw new Error(`no choice ${value} in ${id}`);
+  option.click();
+  await flush();
+}
+const choicesOf = async (t, id) => {
+  t.q('#' + id).click();
+  await flush();
+  const said = t.qa(`[data-ins-menu="${id}"] [role="option"]`).map((o) => o.textContent.replace(/^check/, ''));
+  const picked = t.qa(`[data-ins-menu="${id}"] [role="option"][aria-selected="true"]`).map((o) => o.getAttribute('data-value'));
+  t.q('#' + id).click();
+  await flush();
+  return { said, picked };
+};
+
 // ---------------------------------------------------------------------------
 
 await run('the skeletons hold the page, then each section arrives in one write, top down', async (make) => {
@@ -456,7 +478,8 @@ await run('Trends, Books and Habits draw under the period picker, 90 days first'
   check('the top lists are Top played now', !t.q('[data-ins-top]') && !!t.q('[data-ins-played="audiobooks"] [data-ins-book="1"]'));
   check('an empty column says so', rr(t.text('[data-ins-played="series"]')).includes('Nothing in this period.'));
   check('abandoned', rr(t.text('[data-ins-abandoned]')).includes('Emma') && rr(t.text('[data-ins-abandoned]')).includes('Kim · 12% · stopped in Chapter 7'));
-  check('never opened', rr(t.text('[data-ins-never]')).includes('3 books no one has opened, as far as WebServarr can tell.'));
+  check('never opened, named and explained', rr(t.text('[data-ins-never] h3')) === 'Never opened' &&
+    rr(t.text('[data-ins-never]')).includes('Books in the library that nobody has played or opened yet, on the site, in Plex apps or in the reader. Over all time, not only the period above.'));
   check('finish rate and drop-off', rr(t.text('[data-ins-finish]')).includes('3 started · 1 finished · 33% · most who stopped, stopped in Chapter 7 (2 people)'));
   check('the split in words', rr(t.text('[data-ins-split]')).includes('Web player 9 hr · Plex apps 3 hr (an estimate)'));
   const table = t.q('[data-ins-heatmap] table');
@@ -547,7 +570,7 @@ await run('the approved design: hatched estimates, each chart names its tallest 
   check('and has a Less to More key', /^Less\s*More$/.test(rr(t.text('[data-ins-heatmap] [data-ins-key]'))) && t.qa('[data-ins-heatmap] [data-ins-key] span.rounded-\\[3px\\]').length === 5);
   check('the busiest hour is the darkest cell', t.qa('[data-ins-heatmap] td.bg-frosted-blue').length === 1);
   check('an abandoned book says when it was last touched', /last touched \d{1,2} [A-Z][a-z]{2} \d{4}/.test(rr(t.text('[data-ins-abandoned]'))), rr(t.text('[data-ins-abandoned]')));
-  check('never opened says how many of them are listed', rr(t.text('[data-ins-never]')).includes('The newest 1 are listed.'));
+  check('never opened says how many of them are listed', rr(t.text('[data-ins-never-count]')) === '3 books, newest first. The newest 1 are listed.');
   check('a book with no library id is plain text, not a button', !t.q('[data-ins-requested] button[data-ins-book="null"]') &&
     t.qa('[data-ins-requested] button[data-ins-book]').length === 1);
 });
@@ -649,10 +672,8 @@ await run('Top users: its period asks again, and nobody in it says so', async (m
   const t = await mounted(make, { topUsers: () => ({ body: answer }) });
   check('the last 7 days first, in this time zone', /^\/api\/admin\/insights\/top-users\?period=7d(&tz=.+)?$/.test(t.net.urls('/api/admin/insights/top-users')[0] || ''));
   answer = Object.assign({}, TOP_USERS_ANSWER, { people: [] });
-  const select = t.q('#insTopUsersPeriod');
-  select.value = '90d';
-  select.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insTopUsersPeriod', '90d');
+  check('the button says the choice', rr(t.text('#insTopUsersPeriod')).startsWith('Last 90 days'));
   check('asked for 90 days', /period=90d/.test(t.net.urls('/api/admin/insights/top-users')[1] || ''));
   check('nobody, in words', rr(t.text('#insTopUsers [data-ins-empty]')) === 'No one listened or read in the last 90 days.');
   check('the other sections were not asked again', t.net.urls('/api/admin/insights/history').length === 1 && t.net.urls('/api/admin/insights/trends').length === 1);
@@ -680,29 +701,21 @@ await run('History: stacked bars on an axis of time, the legend and the totals',
 
 await run('History: media redraws what was read; whose and the period ask again', async (make) => {
   const t = await mounted(make);
-  const media = t.q('#insHistoryMedia');
-  media.value = 'ebook';
-  media.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insHistoryMedia', 'ebook');
   check('ebooks alone, nothing asked', t.net.urls('/api/admin/insights/history').length === 1 &&
     t.qa('[data-ins-bars] .ins-bar').length === 1 && t.qa('[data-ins-bars] .ins-bar.bg-media-book').length === 1);
   check('its legend and totals follow', rr(t.text('[data-ins-legend]')) === 'Ebooks (Kavita’s count)' && rr(t.text('[data-ins-totals-line]')) === 'TotalsEbooks 2 hr');
-  const whose = t.q('#insHistoryPerson');
-  const names = Array.from(whose.options).map((o) => o.textContent);
-  check('whose: everyone, then each person by name, from People', names.join('|') === `All users|${MARKUP}|Sam` && whose.value === '', names);
-  whose.value = SAM;
-  whose.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  const whose = await choicesOf(t, 'insHistoryPerson');
+  check('whose: everyone, then each person by name, from People', whose.said.join('|') === `All users|${MARKUP}|Sam` && whose.picked.join() === '', whose);
+  await pick(t, 'insHistoryPerson', SAM);
+  check('the button says whose', rr(t.text('#insHistoryPerson')).startsWith('Sam'));
   check('one person’s history is asked for by key', new RegExp(`^/api/admin/insights/history\\?period=30d&person=${SAM}(&tz=.+)?$`).test(t.net.urls('/api/admin/insights/history')[1] || ''),
     t.net.urls('/api/admin/insights/history'));
   check('and drawn still showing ebooks alone', t.qa('[data-ins-bars] .ins-bar.ins-site').length === 0);
-  const period = t.q('#insHistoryPeriod');
-  period.value = '7d';
-  period.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insHistoryPeriod', '7d');
   check('the period asks again, for the same person', /period=7d&person=a{24}/.test(t.net.urls('/api/admin/insights/history')[2] || ''));
-  const odd = t.q('#insTopPlayedPerson');
-  check('Top played’s whose filter has everyone too, and kept everyone', odd.options.length === 3 && odd.value === '');
+  const odd = await choicesOf(t, 'insTopPlayedPerson');
+  check('Top played’s whose filter has everyone too, and kept everyone', odd.said.length === 3 && odd.picked.join() === '', odd);
 });
 
 await run('Top played: four columns with banners, covers from this origin only, books open', async (make) => {
@@ -729,28 +742,23 @@ await run('Top played: four columns with banners, covers from this origin only, 
   t.q('[data-ins-close]').click();
   await flush();
   check('Close gives focus back to the row', t.doc.activeElement === dune);
-  const whose = t.q('#insTopPlayedPerson');
-  whose.value = SAM;
-  whose.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insTopPlayedPerson', SAM);
   check('one person’s Top played is asked for', new RegExp(`person=${SAM}`).test(t.net.urls('/api/admin/insights/top-played')[1] || ''));
-  const period = t.q('#insTopPlayedPeriod');
-  period.value = 'all';
-  period.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insTopPlayedPeriod', 'all');
   check('the period asks again', /period=all&person=a{24}/.test(t.net.urls('/api/admin/insights/top-played')[2] || ''));
 });
 
 await run('the filters are quiet controls, each with a name, and a failing section offers Try again', async (make) => {
   const t = await mounted(make, { history: () => ({ status: 500, body: {} }) });
-  const selects = t.qa('#wsPage select');
-  check('six filters, each labelled', selects.length === 6 && selects.every((s) => !!t.q(`label[for="${s.id}"]`)));
-  check('none is a blue primary', selects.every((s) => !/bg-primary/.test(s.className)));
+  check('no native select is left', t.qa('#wsPage select').length === 0);
+  const filters = t.qa('#wsPage [data-ins-filter]');
+  check('six filters, buttons that open a list, each named by its label and its choice', filters.length === 6 && filters.every((b) =>
+    b.tagName === 'BUTTON' && b.getAttribute('aria-haspopup') === 'listbox' && b.getAttribute('aria-expanded') === 'false' &&
+    b.getAttribute('aria-labelledby') === `${b.id}Label ${b.id}Value` && !!t.q(`#${b.id}Label`) && !!t.q(`#${b.id}Value`)));
+  check('none is a blue primary; each is rounded on the theme', filters.every((b) => !/bg-primary/.test(b.className) &&
+    /rounded-\[10px\]/.test(b.className) && /bg-frosted-blue\/\[0\.07\]/.test(b.className)));
   check('the history failed alone', !!t.q('#insHistory [data-ins-failed]') && t.qa('[data-ins-played]').length === 4 && t.qa('[data-ins-user]').length === 3);
-  const media = t.q('#insHistoryMedia');
-  media.value = 'web';
-  media.dispatchEvent(new t.win.Event('change'));
-  await flush();
+  await pick(t, 'insHistoryMedia', 'web');
   check('media with nothing read draws nothing and asks nothing', !!t.q('#insHistory [data-ins-failed]') && t.net.urls('/api/admin/insights/history').length === 1);
 });
 
@@ -775,6 +783,72 @@ await run('Right now names the Plex app and the page being read', async (make) =
   const items = t.qa('[data-ins-now]').map((n) => rr(n.querySelector('div').textContent));
   check('a Plex app by its name', items[0] === 'KimEmmaPlaying · in Plexamp', items);
   check('a reader with its page', items[1] === 'SamUlyssesin the reader · page 40', items);
+});
+
+await run('a filter’s list: themed, keyboard, Escape, and the focus back on its button', async (make) => {
+  const t = await mounted(make);
+  const btn = t.q('#insHistoryPeriod');
+  btn.focus();
+  btn.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  await flush();
+  const layer = menuOf(t, 'insHistoryPeriod');
+  const list = layer && layer.querySelector('[role="listbox"]');
+  check('the arrow key opens the list, on the frosted surface, rounded', !!list && !!layer.querySelector('.ws-frost') &&
+    /rounded-/.test(layer.querySelector('.ws-frost').className));
+  check('the button says it is open and which list it opened', btn.getAttribute('aria-expanded') === 'true' && btn.getAttribute('aria-controls') === list.id);
+  check('the list is named by the filter’s label', list.getAttribute('aria-labelledby') === 'insHistoryPeriodLabel');
+  check('the list has the focus, on the choice in use', t.doc.activeElement === list &&
+    t.q('#' + list.getAttribute('aria-activedescendant')).getAttribute('data-value') === '30d');
+  check('the choice in use is marked for everyone, not by colour alone', list.querySelectorAll('[aria-selected="true"]').length === 1 &&
+    list.querySelector('[aria-selected="true"] .material-symbols-outlined').textContent === 'check');
+  const key = (k) => list.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: k, bubbles: true }));
+  key('ArrowDown');
+  check('down moves the highlight', t.q('#' + list.getAttribute('aria-activedescendant')).getAttribute('data-value') === '90d');
+  key('End');
+  check('End goes to the last', t.q('#' + list.getAttribute('aria-activedescendant')).getAttribute('data-value') === 'all');
+  key('l');
+  check('a letter jumps to a choice that starts with it', t.q('#' + list.getAttribute('aria-activedescendant')).getAttribute('data-value') === '7d');
+  key('Enter');
+  await flush();
+  check('Enter picks it and asks again', /period=7d/.test(t.net.urls('/api/admin/insights/history')[1] || ''));
+  check('the list is gone and the button says the choice', !menuOf(t, 'insHistoryPeriod') && btn.getAttribute('aria-expanded') === 'false' &&
+    rr(t.text('#insHistoryPeriodValue')) === 'Last 7 days');
+  check('the focus is back on the button', t.doc.activeElement === btn);
+  btn.click();
+  await flush();
+  const again = menuOf(t, 'insHistoryPeriod');
+  again.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await flush();
+  check('Escape closes it without a change, the focus back on the button', !menuOf(t, 'insHistoryPeriod') &&
+    t.net.urls('/api/admin/insights/history').length === 2 && t.doc.activeElement === btn);
+  t.q('#insTopPlayedPeriod').click();
+  await flush();
+  t.q('#insHistoryMedia').click();
+  await flush();
+  check('one list open at a time', !menuOf(t, 'insTopPlayedPeriod') && !!menuOf(t, 'insHistoryMedia'));
+  t.q('#insHistoryMedia').click();
+  await flush();
+  check('its button closes it again', !menuOf(t, 'insHistoryMedia'));
+});
+
+await run('Never opened: the newest ten, then the rest on asking', async (make) => {
+  const many = Array.from({ length: 14 }, (_, i) => ({ book_id: 100 + i, title: 'Book ' + i, author: 'A', added_at: '2026-10-01T00:00:00.000Z' }));
+  const t = await mounted(make, { books: () => ({ body: Object.assign({}, BOOKS_ANSWER, { never_opened: { count: 14, items: many } }) }) });
+  const rows = () => t.qa('#insNeverList > li').filter((li) => !li.classList.contains('hidden')).length;
+  check('ten show', t.qa('#insNeverList > li').length === 14 && rows() === 10);
+  check('all of them are counted', rr(t.text('[data-ins-never-count]')) === '14 books, newest first.');
+  const more = t.q('[data-ins-never-more]');
+  check('a neutral button offers the rest', !!more && rr(more.textContent) === 'Show all 14' && more.getAttribute('aria-expanded') === 'false' &&
+    more.getAttribute('aria-controls') === 'insNeverList' && !/bg-primary/.test(more.className));
+  more.click();
+  check('and shows them', rows() === 14 && more.getAttribute('aria-expanded') === 'true' && rr(more.textContent) === 'Show fewer');
+  more.click();
+  check('and hides them again', rows() === 10);
+});
+
+await run('Never opened with nothing in it says so', async (make) => {
+  const t = await mounted(make, { books: () => ({ body: Object.assign({}, BOOKS_ANSWER, { never_opened: { count: 0, items: [] } }) }) });
+  check('every book has been opened', rr(t.text('[data-ins-never]')).endsWith('Every book has been opened at least once.') && !t.q('#insNeverList'));
 });
 
 console.log(`insights page: ${total - failed}/${total} checks pass`);

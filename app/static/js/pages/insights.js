@@ -53,6 +53,18 @@ const SPANS = ['7d', '30d', '90d', '1y', 'all'];
 const SPAN_WORDS = { '7d': 'in the last 7 days', '30d': 'in the last 30 days', '90d': 'in the last 90 days',
   '1y': 'in the last year', all: 'yet' };
 const MEDIA = ['all', 'web', 'plex', 'ebook'];
+// The filters' choices, as each one's list says them (the markup says the first one chosen).
+const SPAN_CHOICES = [['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['90d', 'Last 90 days'], ['1y', 'Last year'], ['all', 'All time']];
+const MEDIA_CHOICES = [['all', 'All media'], ['web', 'Audiobooks on the site'], ['plex', 'Audiobooks in Plex apps'], ['ebook', 'Ebooks']];
+const EVERYONE = [['', 'All users']];
+// A filter's list: a popover from MENU_WIDE up, a bottom sheet below, as the
+// Books sort is (pages/books.js openSort), on the theme's .ws-pop and .ws-sheet.
+const MENU_WIDE = '(min-width: 640px)';
+const MENU_CLOSE_MS = 160;         // theme.css .ws-pop's 140ms close, and a frame
+const TYPEAHEAD_MS = 500;          // letters typed within this of each other are one search
+const OPTION = 'flex min-h-12 sm:min-h-10 cursor-pointer items-center gap-3 rounded-[10px] px-3 text-[15px] text-frosted-blue';
+// Never opened: this many show until the rest are asked for.
+const NEVER_SHOWN = 10;
 // The three kinds of time, bottom to top in a history bar: how each is drawn
 // as a mark (.ins-site, the hatched estimate, the book colour) and as a top
 // user's tinted row (insights.html), and how each is said.
@@ -236,6 +248,12 @@ function coverOf(url) {
 
 function hourLabel(h) { return (h < 10 ? '0' : '') + h + ':00'; }
 
+function clamp(n, low, high) { return Math.max(low, Math.min(high, n)); }
+
+function motionOff() {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
@@ -384,18 +402,22 @@ export async function mount(ctx) {
 
   // ---- People ----
 
-  /** Everyone, by name, in the whose filters of the history and Top played. */
+  /** Everyone, by name, in the person filters of the history and Top played.
+      A filter whose person is no longer listed goes back to everyone. */
   function fillPeople(list) {
     const sorted = list.slice().sort(function (a, b) { return text(a.name).localeCompare(text(b.name)); });
-    root.querySelectorAll('[data-ins-people]').forEach(function (select) {
-      const keep = select.value;
-      while (select.options.length > 1) select.remove(1);
-      sorted.forEach(function (p) {
-        const option = el('option', '', text(p.name));
-        option.value = p.key;
-        select.appendChild(option);
-      });
-      select.value = sorted.some(function (p) { return p.key === keep; }) ? keep : '';
+    const choices = EVERYONE.concat(sorted.map(function (p) { return [p.key, text(p.name)]; }));
+    root.querySelectorAll('[data-ins-people]').forEach(function (btn) {
+      const f = filters[btn.id];
+      if (!f) return;
+      f.choices = choices;
+      const kept = choices.some(function (c) { return c[0] === f.value; });
+      if (kept) showChoice(f);
+      else {
+        f.value = '';
+        showChoice(f);
+        f.choose('');
+      }
     });
   }
 
@@ -1132,22 +1154,49 @@ export async function mount(ctx) {
     cols.appendChild(fin);
     box.appendChild(cols);
 
-    const never = el('section', 'mt-8');
+    // Never opened: the whole library, not the period, so it says so, under a rule
+    // of its own; the newest NEVER_SHOWN show until the rest are asked for.
+    const never = el('section', 'mt-8 border-t border-frosted-blue/10 pt-6');
     never.setAttribute('data-ins-never', '');
     never.appendChild(el('h3', H3, 'Never opened'));
     const nv = data.never_opened && typeof data.never_opened === 'object' ? data.never_opened : {};
     const count = num(nv.count);
-    never.appendChild(el('p', SMALL, count.toLocaleString() + (count === 1 ? ' book' : ' books') +
-      ' no one has opened, as far as WebServarr can tell.'));
+    never.appendChild(el('p', SMALL, 'Books in the library that nobody has played or opened yet, on the site, in Plex apps or in the reader. ' +
+      'Over all time, not only the period above.'));
     const items = Array.isArray(nv.items) ? nv.items.filter(Boolean) : [];
+    if (!count) {
+      never.appendChild(el('p', MUTED + ' mt-2', 'Every book has been opened at least once.'));
+    } else {
+      const said = count.toLocaleString() + (count === 1 ? ' book, ' : ' books, ') + 'newest first' +
+        (count > items.length ? '. The newest ' + items.length.toLocaleString() + ' are listed.' : '.');
+      const sum = el('p', 'mt-1 ' + SMALL, said);
+      sum.setAttribute('data-ins-never-count', '');
+      never.appendChild(sum);
+    }
     if (items.length) {
       const list = el('ul', 'mt-2 grid divide-y divide-frosted-blue/10 lg:grid-cols-2 lg:gap-x-10 lg:divide-y-0');
-      items.forEach(function (b) {
-        list.appendChild(bookItem(b.book_id, text(b.title), [text(b.author), b.added_at ? 'added ' + dayLabel(b.added_at) : '']
-          .filter(Boolean).join(' · ')));
+      list.id = 'insNeverList';
+      items.forEach(function (b, i) {
+        const li = bookItem(b.book_id, text(b.title), [text(b.author), b.added_at ? 'added ' + dayLabel(b.added_at) : '']
+          .filter(Boolean).join(' · '));
+        if (i >= NEVER_SHOWN) li.classList.add('hidden');
+        list.appendChild(li);
       });
       never.appendChild(list);
-      if (count > items.length) never.appendChild(el('p', 'mt-2 ' + SMALL, 'The newest ' + items.length.toLocaleString() + ' are listed.'));
+      if (items.length > NEVER_SHOWN) {
+        const more = el('button', NEUTRAL + ' mt-3', 'Show all ' + items.length.toLocaleString());
+        more.type = 'button';
+        more.setAttribute('aria-expanded', 'false');
+        more.setAttribute('aria-controls', list.id);
+        more.setAttribute('data-ins-never-more', '');
+        more.addEventListener('click', function () {
+          const open = more.getAttribute('aria-expanded') !== 'true';
+          Array.prototype.slice.call(list.children, NEVER_SHOWN).forEach(function (li) { li.classList.toggle('hidden', !open); });
+          more.setAttribute('aria-expanded', String(open));
+          more.textContent = open ? 'Show fewer' : 'Show all ' + items.length.toLocaleString();
+        }, { signal: signal });
+        never.appendChild(more);
+      }
     }
     box.appendChild(never);
     return box;
@@ -1382,28 +1431,255 @@ export async function mount(ctx) {
       whose(state.played.person)), drawTopPlayed);
   }
 
-  /** A filter: its choice, kept when it is one of `allowed`, then `then`. */
-  function filter(id, allowed, choose, then) {
-    const select = $(id);
-    select.addEventListener('change', function () {
-      if (allowed && allowed.indexOf(select.value) === -1) return;
-      choose(select.value);
-      then();
+  // ---- The filters: a button that opens a list of its choices ----
+
+  const filters = {};
+  let menu = null;
+
+  /** The button says the choice in use. */
+  function showChoice(f) {
+    const found = f.choices.find(function (c) { return c[0] === f.value; }) || f.choices[0];
+    $(f.btn.id + 'Value').textContent = found ? found[1] : '';
+    f.btn.setAttribute('data-value', f.value);
+  }
+
+  /** A filter: its button, its choices, then what a new choice does. */
+  function filter(id, choices, choose, then) {
+    const btn = $(id);
+    const f = {
+      btn: btn, choices: choices, value: btn.getAttribute('data-value') || '',
+      choose: function (v) { choose(v); then(); }
+    };
+    filters[id] = f;
+    showChoice(f);
+    btn.addEventListener('click', function () { openMenu(f); }, { signal: signal });
+    btn.addEventListener('keydown', function (e) {
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.altKey) { e.preventDefault(); openMenu(f); }
     }, { signal: signal });
+  }
+
+  function wide() {
+    return typeof window.matchMedia === 'function' && window.matchMedia(MENU_WIDE).matches;
+  }
+
+  /**
+   * A filter's list (a listbox): the choice in use is marked with a check and
+   * starts highlighted; the arrows, Home and End move the highlight, letters
+   * jump to a choice, Enter or Space picks, Escape (WSUI.modal) and Tab close
+   * it, and the focus goes back to the button. From MENU_WIDE up it is a
+   * small popover under the button; below, a bottom sheet titled as the filter.
+   */
+  function openMenu(f) {
+    const btn = f.btn;
+    if (menu) {
+      const same = menu.btn === btn;
+      menu.close();
+      if (same) return;
+    }
+    const isWide = wide();
+    const ends = new AbortController();
+    const listId = btn.id + 'List';
+    const labelId = btn.id + 'Label';
+
+    let overlay, panel;
+    const list = el('ul', 'group/menu focus:outline-none ' + (isWide ? 'p-2' : 'pb-2'));
+    list.id = listId;
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-labelledby', labelId);
+    list.tabIndex = 0;
+    if (isWide) {
+      overlay = el('div', 'fixed inset-0 z-[95]');
+      overlay.setAttribute('data-pop-layer', '');
+      panel = el('div', 'ws-pop ws-frost absolute overflow-y-auto overscroll-contain rounded-2xl border custom-scrollbar');
+      panel.appendChild(list);
+    } else {
+      overlay = el('div', 'ws-sheet z-[95]');
+      overlay.appendChild(el('div', 'ws-sheet-scrim'));
+      panel = el('div', 'ws-sheet-panel ws-frost focus:outline-none');
+      const head = el('div', 'ws-sheet-head');
+      const grip = el('span', 'ws-sheet-grip');
+      grip.setAttribute('aria-hidden', 'true');
+      head.appendChild(grip);
+      // The sheet's title: the filter's name after its section's ("History: period" is Period).
+      const named = ($(labelId).textContent || '').split(': ').pop();
+      const title = el('h2', 'ws-sheet-title', named.charAt(0).toUpperCase() + named.slice(1));
+      title.id = listId + '-title';
+      head.appendChild(title);
+      const close = el('button', 'ws-sheet-close');
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Close');
+      close.appendChild(icon('close', 'text-[24px]'));
+      close.addEventListener('click', function () { menu.close(); }, { signal: ends.signal });
+      head.appendChild(close);
+      panel.appendChild(head);
+      panel.setAttribute('aria-labelledby', title.id);
+      panel.appendChild(list);
+    }
+    overlay.appendChild(panel);
+    overlay.setAttribute('data-ins-menu', btn.id);
+
+    const shown = f.choices.map(function (c, n) {
+      const picked = c[0] === f.value;
+      const li = el('li', OPTION + (picked ? ' font-semibold' : ''));
+      li.id = listId + '-' + n;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', picked ? 'true' : 'false');
+      li.setAttribute('data-value', c[0]);
+      li.appendChild(icon('check', 'shrink-0 text-[20px] ' + (picked ? 'text-frosted-blue' : 'invisible')));
+      li.appendChild(el('span', 'min-w-0 flex-1 truncate', c[1]));
+      list.appendChild(li);
+      return { value: c[0], words: c[1].toLowerCase(), node: li };
+    });
+    let active = -1;
+    function setActive(i) {
+      active = clamp(i, 0, shown.length - 1);
+      shown.forEach(function (o, n) {
+        // The highlight, and a ring on it while the list has the keyboard's focus.
+        o.node.classList.toggle('bg-frosted-blue/10', n === active);
+        o.node.classList.toggle('group-focus-visible/menu:outline', n === active);
+        o.node.classList.toggle('group-focus-visible/menu:outline-2', n === active);
+        o.node.classList.toggle('group-focus-visible/menu:-outline-offset-2', n === active);
+        o.node.classList.toggle('group-focus-visible/menu:outline-focus', n === active);
+        o.node.classList.toggle('hover:bg-frosted-blue/[0.07]', n !== active);
+      });
+      list.setAttribute('aria-activedescendant', shown[active].node.id);
+      const node = shown[active].node;
+      if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
+    }
+
+    function pick(i) {
+      const o = shown[i];
+      if (!o) return;
+      // Chosen before the list goes, so the button already says it when the focus lands back on it.
+      const changed = o.value !== f.value;
+      f.value = o.value;
+      showChoice(f);
+      menu.close();
+      if (changed) f.choose(o.value);
+    }
+
+    let typed = '';
+    let typedAt = 0;
+    list.addEventListener('keydown', function (e) {
+      if (e.isComposing) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'Home' || e.key === 'PageUp') { e.preventDefault(); setActive(0); }
+      else if (e.key === 'End' || e.key === 'PageDown') { e.preventDefault(); setActive(shown.length - 1); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(active); }
+      else if (e.key === 'Tab' && isWide) { menu.close(); }
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Type-ahead: the next choice starting with what was typed; the same letter again moves on.
+        const now = Date.now();
+        typed = now - typedAt > TYPEAHEAD_MS ? e.key.toLowerCase() : typed + e.key.toLowerCase();
+        typedAt = now;
+        const same = typed.split('').every(function (c) { return c === typed[0]; });
+        const want = same ? typed[0] : typed;
+        for (let step = same ? 1 : 0; step <= shown.length; step++) {
+          const n = (active + step) % shown.length;
+          if (shown[n].words.indexOf(want) === 0) { setActive(n); break; }
+        }
+      }
+    }, { signal: ends.signal });
+    list.addEventListener('click', function (e) {
+      const li = e.target && e.target.closest ? e.target.closest('[role="option"]') : null;
+      if (li) pick(shown.map(function (o) { return o.node; }).indexOf(li));
+    }, { signal: ends.signal });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || (e.target.classList && e.target.classList.contains('ws-sheet-scrim'))) menu.close();
+    }, { signal: ends.signal });
+
+    let handle = null;
+    let gone = false;
+    function teardown() {
+      if (gone) return;
+      gone = true;
+      ends.abort();
+      btn.setAttribute('aria-expanded', 'false');
+      btn.removeAttribute('aria-controls');
+      if (menu && menu.overlay === overlay) menu = null;
+      // A list on its way out is no longer the filter's, even while it fades.
+      overlay.removeAttribute('data-ins-menu');
+      if (overlay.contains(document.activeElement)) btn.focus({ preventScroll: true });
+      const remove = function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+      if (motionOff()) { remove(); return; }
+      overlay.inert = true;
+      if (isWide) panel.classList.remove('is-open');
+      else {
+        overlay.classList.remove('is-open');
+        overlay.classList.add('is-closing');
+      }
+      window.setTimeout(remove, MENU_CLOSE_MS);
+    }
+    menu = {
+      btn: btn,
+      overlay: overlay,
+      close: function () { if (handle) handle.close(); else teardown(); }
+    };
+
+    document.body.appendChild(overlay);
+    if (isWide) {
+      placeMenu(panel, btn);
+      void panel.offsetWidth;
+      panel.classList.add('is-open');
+    } else {
+      void panel.offsetWidth;
+      overlay.classList.add('is-open');
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-controls', listId);
+    signal.addEventListener('abort', function () { if (menu) menu.close(); }, { once: true, signal: ends.signal });
+    if (window.WSUI && typeof window.WSUI.modal === 'function') {
+      handle = window.WSUI.modal(overlay, { box: panel, initial: list, onClose: teardown });
+      // The shared stack gives Escape, the focus kept inside and handed back, and
+      // the router's close before it leaves. A popover is the list itself, not a
+      // dialog around one; the phone's sheet is a dialog titled as the filter.
+      if (isWide) { panel.removeAttribute('role'); panel.removeAttribute('aria-modal'); }
+    } else {
+      list.focus();
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); menu.close(); }
+      }, { signal: ends.signal });
+    }
+    setActive(Math.max(0, shown.findIndex(function (o) { return o.value === f.value; })));
+  }
+
+  /** A filter's popover under its button, on the button's side of the window; above it when there is more room there. */
+  function placeMenu(panel, btn) {
+    const r = btn.getBoundingClientRect();
+    const w = Math.min(Math.max(224, r.width), window.innerWidth - 32);
+    const left = r.left + r.width / 2 > window.innerWidth / 2 ? r.right - w : r.left;
+    panel.style.left = clamp(left, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
+    panel.style.width = w + 'px';
+    const below = window.innerHeight - r.bottom - 24;
+    const above = r.top - 24;
+    if (below >= 160 || below >= above) {
+      panel.style.top = (r.bottom + 8) + 'px';
+      panel.style.maxHeight = Math.min(448, below) + 'px';
+    } else {
+      panel.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+      panel.style.maxHeight = Math.min(448, above) + 'px';
+    }
   }
 
   function busy(id) { $(id).setAttribute('aria-busy', 'true'); }
 
-  filter('insTopUsersPeriod', SPANS, function (v) { state.topUsers = v; }, function () { busy('insTopUsers'); loadTopUsers(); });
-  filter('insHistoryPeriod', SPANS, function (v) { state.history.period = v; }, function () { busy('insHistory'); loadHistory(); });
-  filter('insHistoryPerson', null, function (v) { state.history.person = /^[0-9a-f]{24}$/.test(v) ? v : ''; },
+  // Each choice is checked again before it is used: a period or a media from its list, a person by the shape of a key.
+  function oneOf(allowed, v, fallback) { return allowed.indexOf(v) === -1 ? fallback : v; }
+  function personKey(v) { return /^[0-9a-f]{24}$/.test(v) ? v : ''; }
+  filter('insTopUsersPeriod', SPAN_CHOICES, function (v) { state.topUsers = oneOf(SPANS, v, '7d'); },
+    function () { busy('insTopUsers'); loadTopUsers(); });
+  filter('insHistoryPeriod', SPAN_CHOICES, function (v) { state.history.period = oneOf(SPANS, v, '30d'); },
+    function () { busy('insHistory'); loadHistory(); });
+  filter('insHistoryPerson', EVERYONE, function (v) { state.history.person = personKey(v); },
     function () { busy('insHistory'); loadHistory(); });
   // What the history shows is drawn again from what was read; nothing is asked for.
-  filter('insHistoryMedia', MEDIA, function (v) { state.history.media = v; }, function () {
+  filter('insHistoryMedia', MEDIA_CHOICES, function (v) { state.history.media = oneOf(MEDIA, v, 'all'); }, function () {
     if (state.history.data) setBody('insHistory', historyBody(state.history.data));
   });
-  filter('insTopPlayedPeriod', SPANS, function (v) { state.played.period = v; }, function () { busy('insTopPlayed'); loadPlayed(); });
-  filter('insTopPlayedPerson', null, function (v) { state.played.person = /^[0-9a-f]{24}$/.test(v) ? v : ''; },
+  filter('insTopPlayedPeriod', SPAN_CHOICES, function (v) { state.played.period = oneOf(SPANS, v, '30d'); },
+    function () { busy('insTopPlayed'); loadPlayed(); });
+  filter('insTopPlayedPerson', EVERYONE, function (v) { state.played.person = personKey(v); },
     function () { busy('insTopPlayed'); loadPlayed(); });
 
   // ---- Boot ----

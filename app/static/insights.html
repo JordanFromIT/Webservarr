@@ -40,8 +40,6 @@
   /* Top played: each column's banner is its top item's cover, blurred and
      dimmed under the column's name. */
   .ins-banner-art { filter: blur(10px) saturate(1.15); transform: scale(1.2); }
-  /* A filter is as wide as its choice, as Plex's are (where the browser can). */
-  #wsPage select[data-ins-filter] { field-sizing: content; }
   .ins-banner-dim { background: linear-gradient(rgb(var(--color-background) / .45), rgb(var(--color-background) / .7)); }
 </style>
 </head>
@@ -72,8 +70,8 @@
     <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <h2 id="insTopUsersTitle" class="text-xl font-bold leading-snug text-frosted-blue">Top users</h2>
       <div class="flex items-center gap-1">
-        <label for="insTopUsersPeriod" class="sr-only">Top users: period</label>
-        <select id="insTopUsersPeriod" data-ins-filter="top-users-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d" selected>Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+        <span id="insTopUsersPeriodLabel" class="sr-only">Top users: period</span>
+        <button id="insTopUsersPeriod" type="button" data-ins-filter="top-users-period" data-value="7d" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insTopUsersPeriodLabel insTopUsersPeriodValue" class="inline-flex h-10 min-w-0 items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insTopUsersPeriodValue" class="truncate">Last 7 days</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
         <button type="button" data-ins-page="-1" aria-label="Show earlier people" aria-controls="insTopUsers" aria-disabled="true" class="ws-lift inline-flex size-9 items-center justify-center rounded-btn text-frosted-blue hover:bg-frosted-blue/[0.07] aria-disabled:cursor-default aria-disabled:opacity-35 aria-disabled:hover:bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
           <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
         </button>
@@ -90,13 +88,13 @@
   <section id="insHistory" data-arrive="ins-history" aria-labelledby="insHistoryTitle" aria-busy="true" class="mt-12">
     <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <h2 id="insHistoryTitle" class="text-xl font-bold leading-snug text-frosted-blue">Listening and reading history</h2>
-      <div class="flex flex-wrap items-center gap-1 max-sm:-ml-3">
-        <label for="insHistoryMedia" class="sr-only">History: what to show</label>
-        <select id="insHistoryMedia" data-ins-filter="history-media" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="all" selected>All media</option><option value="web">Audiobooks on the site</option><option value="plex">Audiobooks in Plex apps</option><option value="ebook">Ebooks</option></select>
-        <label for="insHistoryPerson" class="sr-only">History: whose</label>
-        <select id="insHistoryPerson" data-ins-filter="history-person" data-ins-people class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus max-w-[12rem]"><option value="" selected>All users</option></select>
-        <label for="insHistoryPeriod" class="sr-only">History: period</label>
-        <select id="insHistoryPeriod" data-ins-filter="history-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <span id="insHistoryMediaLabel" class="sr-only">History: media</span>
+        <button id="insHistoryMedia" type="button" data-ins-filter="history-media" data-value="all" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insHistoryMediaLabel insHistoryMediaValue" class="inline-flex h-10 min-w-0 items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insHistoryMediaValue" class="truncate">All media</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
+        <span id="insHistoryPersonLabel" class="sr-only">History: person</span>
+        <button id="insHistoryPerson" type="button" data-ins-filter="history-person" data-value="" data-ins-people aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insHistoryPersonLabel insHistoryPersonValue" class="inline-flex h-10 min-w-0 max-w-[14rem] items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insHistoryPersonValue" class="truncate">All users</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
+        <span id="insHistoryPeriodLabel" class="sr-only">History: period</span>
+        <button id="insHistoryPeriod" type="button" data-ins-filter="history-period" data-value="30d" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insHistoryPeriodLabel insHistoryPeriodValue" class="inline-flex h-10 min-w-0 items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insHistoryPeriodValue" class="truncate">Last 30 days</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
       </div>
     </div>
     <div data-ins-body aria-hidden="true" class="mt-4"><div class="skel h-[360px] rounded-card"></div></div>
@@ -105,11 +103,11 @@
   <section id="insTopPlayed" data-arrive="ins-top-played" aria-labelledby="insTopPlayedTitle" aria-busy="true" class="mt-12">
     <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <h2 id="insTopPlayedTitle" class="text-xl font-bold leading-snug text-frosted-blue">Top played</h2>
-      <div class="flex flex-wrap items-center gap-1 max-sm:-ml-3">
-        <label for="insTopPlayedPerson" class="sr-only">Top played: whose</label>
-        <select id="insTopPlayedPerson" data-ins-filter="top-played-person" data-ins-people class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus max-w-[12rem]"><option value="" selected>All users</option></select>
-        <label for="insTopPlayedPeriod" class="sr-only">Top played: period</label>
-        <select id="insTopPlayedPeriod" data-ins-filter="top-played-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <span id="insTopPlayedPersonLabel" class="sr-only">Top played: person</span>
+        <button id="insTopPlayedPerson" type="button" data-ins-filter="top-played-person" data-value="" data-ins-people aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insTopPlayedPersonLabel insTopPlayedPersonValue" class="inline-flex h-10 min-w-0 max-w-[14rem] items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insTopPlayedPersonValue" class="truncate">All users</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
+        <span id="insTopPlayedPeriodLabel" class="sr-only">Top played: period</span>
+        <button id="insTopPlayedPeriod" type="button" data-ins-filter="top-played-period" data-value="30d" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="insTopPlayedPeriodLabel insTopPlayedPeriodValue" class="inline-flex h-10 min-w-0 items-center justify-between gap-1 rounded-[10px] bg-frosted-blue/[0.07] pl-4 pr-2 text-[15px] text-frosted-blue transition-colors hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"><span id="insTopPlayedPeriodValue" class="truncate">Last 30 days</span><span class="material-symbols-outlined shrink-0 text-frosted-blue/70" aria-hidden="true">expand_more</span></button>
       </div>
     </div>
     <div data-ins-body aria-hidden="true" class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
