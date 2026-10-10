@@ -633,15 +633,17 @@ function onward(list, newest = {}) {
     return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
   };
   const frost = rule('.ws-frost');
-  check('the shared frost is the search bar\'s first glass: 25% secondary over a 4px blur, an accent edge',
-    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.25\)/.test(css) && /--ws-frost-blur: blur\(4px\)/.test(css) &&
-    /--ws-frost-edge: rgb\(var\(--color-accent\) \/ \.2\)/.test(css) &&
+  check('the shared frost is the icy glass: the secondary mixed 30% toward the text colour at 30% over a 32px blur, a light edge',
+    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.3\)/.test(css) &&
+    /--ws-frost-tint: color-mix\(in srgb, rgb\(var\(--color-secondary\) \/ \.3\) 70%, rgb\(var\(--color-text\) \/ \.3\)\)/.test(css) &&
+    /--ws-frost-blur: blur\(32px\)/.test(css) &&
+    /--ws-frost-edge: rgb\(var\(--color-text\) \/ \.12\)/.test(css) &&
     /-webkit-backdrop-filter: var\(--ws-frost-blur\)/.test(frost) && /\bbackdrop-filter: var\(--ws-frost-blur\)/.test(frost) &&
     /rgb\(var\(--color-background\) \/ var\(--ws-frost-floor\)\)/.test(frost), frost);
-  // The floor keeps the panel's words at 4.5:1 over a white poster; a
-  // sheet's scrim has dimmed the page by .7 already (app/tests/test_frost.py).
-  check('every frosted surface sits on a .76 floor', /--ws-frost-floor: \.76;/.test(css));
-  check('a frosted sheet on a .2 floor over its scrim', /--ws-frost-floor-on-scrim: \.2;/.test(css) &&
+  // No floor, by the owner's choice: over very bright art the panel's words
+  // lose contrast; a sheet keeps only its scrim (app/tests/test_frost.py).
+  check('every frosted surface has no floor', /--ws-frost-floor: 0;/.test(css));
+  check('a frosted sheet adds no floor over its scrim', /--ws-frost-floor-on-scrim: 0;/.test(css) &&
     /:is\(\.ws-sheet-panel, \.ws-dialog-box, \[data-dialog-box\]\)\.ws-frost \{ --ws-frost-floor: var\(--ws-frost-floor-on-scrim\); \}/.test(css));
   check('popovers, menus, dialogs and sheets share one themed scrollbar',
     /:is\(\.ws-pop, \.ws-dialog-box, \[data-dialog-box\], \.ws-sheet-panel, \.ws-frost\) \* \{\s*scrollbar-width: thin;\s*scrollbar-color: rgb\(var\(--color-accent\) \/ \.5\) transparent;/.test(css) &&

@@ -1,6 +1,6 @@
 """
 The frosted glass's blur is a theme setting (theme.frost_blur, whole px from
-0 to 32, shipped as 4: the sign-in card's original glass).
+0 to 32, shipped as 32: the icy glass's own blur).
 
 It reaches the page through the theme engine's one chain: the registry, the
 branding payload, the page's #ws-theme (--ws-frost-blur, so the first paint
@@ -40,15 +40,15 @@ class TheSetting(unittest.TestCase):
     def test_registry_row(self):
         d = REGISTRY[KEY]
         self.assertEqual((d.type, d.default, d.min, d.max, d.public, d.allow_empty),
-                         ("int", "4", 0, 32, True, False))
+                         ("int", "32", 0, 32, True, False))
         for ok in ("0", "4", "16", "32"):
             self.assertIsNone(settings_registry.validate_value(KEY, ok), ok)
         for bad in ("-1", "33", "4.5", "4px", "", "lots"):
             self.assertIsNotNone(settings_registry.validate_value(KEY, bad), bad)
 
     def test_seeded_and_served_as_the_default(self):
-        self.assertEqual(seed.DEFAULT_SETTINGS[KEY][0], "4")
-        self.assertEqual(BRANDING_DEFAULTS[KEY], "4")
+        self.assertEqual(seed.DEFAULT_SETTINGS[KEY][0], "32")
+        self.assertEqual(BRANDING_DEFAULTS[KEY], "32")
 
     def test_an_existing_install_gets_it_and_keeps_its_own_value(self):
         Session = make_session_factory()
@@ -59,7 +59,7 @@ class TheSetting(unittest.TestCase):
                     db.add(Setting(key=key, value=value, description=desc))
             db.commit()
             seed.seed_default_settings(db)
-            self.assertEqual(db.query(Setting).filter(Setting.key == KEY).one().value, "4")
+            self.assertEqual(db.query(Setting).filter(Setting.key == KEY).one().value, "32")
             db.query(Setting).filter(Setting.key == KEY).one().value = "12"
             db.commit()
             seed.seed_default_settings(db)
@@ -68,21 +68,21 @@ class TheSetting(unittest.TestCase):
             db.close()
 
     def test_the_payload_is_a_whole_number_inside_the_bounds(self):
-        self.assertEqual(payload()["frost_blur"], 4)
+        self.assertEqual(payload()["frost_blur"], 32)
         self.assertEqual(payload({KEY: "16"})["frost_blur"], 16)
         self.assertEqual(payload({KEY: "0"})["frost_blur"], 0)
         self.assertEqual(payload({KEY: "99"})["frost_blur"], 32)      # a hand-edited row is held in bounds
         self.assertEqual(payload({KEY: "-5"})["frost_blur"], 0)
         for junk in ("", "4px", "blur(9px)", "x;}"):
-            self.assertEqual(payload({KEY: junk})["frost_blur"], 4, junk)
+            self.assertEqual(payload({KEY: junk})["frost_blur"], 32, junk)
 
     def test_ws_theme_writes_the_token(self):
-        self.assertEqual(self.ws_theme()["--ws-frost-blur"], "blur(4px)")
+        self.assertEqual(self.ws_theme()["--ws-frost-blur"], "blur(32px)")
         self.assertEqual(self.ws_theme({KEY: "16"})["--ws-frost-blur"], "blur(16px)")
         self.assertEqual(self.ws_theme({KEY: "0"})["--ws-frost-blur"], "blur(0px)")
 
     def test_ws_theme_is_safe_for_any_dict_it_is_handed(self):
-        for odd, want in ((None, 4), ("16", 4), (True, 4), (7.5, 4), (-3, 0), (500, 32), (9, 9)):
+        for odd, want in ((None, 32), ("16", 32), (True, 32), (7.5, 32), (-3, 0), (500, 32), (9, 9)):
             style = pages.theme_style(dict(payload(), frost_blur=odd))
             self.assertIn(f"--ws-frost-blur:blur({want}px)", style, odd)
 
@@ -102,7 +102,7 @@ class TheSetting(unittest.TestCase):
 class TheChain(unittest.TestCase):
     def test_the_stylesheet_default_has_no_specificity(self):
         root = declared(blocks(THEME, ":where(:root)")[0])
-        self.assertEqual(root["--ws-frost-blur"], "blur(4px)")
+        self.assertEqual(root["--ws-frost-blur"], "blur(32px)")
         for body in blocks(THEME, ":root"):
             self.assertNotIn("--ws-frost-blur", declared(body))
 
@@ -119,8 +119,8 @@ class TheChain(unittest.TestCase):
         self.assertIn("backdrop-filter: var(--ws-frost-blur);", rule)
         card = re.search(r"\.login-glass-card \{([^}]*)\}", LOGIN).group(1)
         self.assertIn("backdrop-filter: var(--ws-frost-blur);", card)
-        self.assertNotIn("blur(4px)", LOGIN)
-        self.assertEqual(THEME.count("blur(4px)"), 1, "only the default")
+        self.assertNotIn("blur(32px)", LOGIN)
+        self.assertEqual(THEME.count("blur(32px)"), 1, "only the default")
 
 
 class AppearanceOffersIt(unittest.TestCase):
@@ -169,7 +169,7 @@ class AppearanceOffersIt(unittest.TestCase):
         # The words are the tab's own.
         for words in ("Menus, pop-ups, dialogs and the sign-in card are frosted glass. "
                       "Choose how much they blur what is behind them.",
-                      "0 px is clear glass. The original is 4 px."):
+                      "0 px is clear glass. The default is 32 px."):
             self.assertIn(words, card)
             self.assertIn(words.split(". ")[0], APPEARANCE)
 

@@ -155,7 +155,7 @@ _FROST = _REGISTRY["theme.frost_blur"]
 
 def frost_blur(branding: dict) -> int:
     """The frosted surfaces' blur in px: the payload's whole number inside the
-    registry's bounds, else the registry default (the sign-in card's 4)."""
+    registry's bounds, else the registry default (32, the icy glass)."""
     v = branding.get("frost_blur")
     if isinstance(v, bool) or not isinstance(v, int):
         return int(_FROST.default)

@@ -13,17 +13,17 @@
       background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);
     }
     /* Light glass over the rotating artwork: the site's frost tokens
-       (theme.css), the Requests search bar's blue tint and the accent edge,
+       (theme.css), the icy tint, the light edge and the frost's shadow,
        with the blur from Settings > Appearance like every other frosted
        surface. The owner asked for the card to be clearly see-through, so
-       the art behind it stays recognisable rather than frosted away: no
-       dark underlay (that was judged too solid), only the page's own
+       no dark underlay (that was judged too solid), only the page's own
        overlay under it. */
     .login-glass-card {
       background: var(--ws-frost-tint);
       -webkit-backdrop-filter: var(--ws-frost-blur);
       backdrop-filter: var(--ws-frost-blur);
       border: 1px solid var(--ws-frost-edge);
+      box-shadow: var(--ws-frost-shadow);
     }
     /* Small text on the glass. The card is this translucent on purpose, so
        over bright or busy artwork it is the text that has to carry itself:
@@ -48,7 +48,7 @@
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       .login-glass-card {
         background:
-          linear-gradient(rgb(var(--color-secondary) / 0.25), rgb(var(--color-secondary) / 0.25)),
+          linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)),
           rgb(var(--color-background) / 0.8);
       }
     }
@@ -174,7 +174,7 @@
 <!-- Main Content Container -->
 <main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">
 <!-- Login Card -->
-<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
+<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 flex flex-col items-center">
 <!-- Logo Section -->
 <div class="mb-8 w-full flex flex-col items-center">
 <img id="loginLogo" alt="Logo" class="h-48 w-auto object-contain border-none mb-2 hidden"/>

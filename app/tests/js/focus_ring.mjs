@@ -1,9 +1,11 @@
 // One focus colour site-wide (theme.css --ws-focus, Tailwind "focus"), at
 // least 3:1 against what it is drawn on:
 //  * the token is the text colour, and the shipped palette's text colour is
-//    over 3:1 on the page and on the frost at its brightest (a white poster
-//    under the .76 floor and the 25% secondary tint), where the primary blue
-//    it replaced was 2.8:1 and about 1.2:1 (appearance.js's own WCAG maths);
+//    over 3:1 on the page and on the frost over the page (the icy tint, no
+//    floor), where the primary blue it replaced was 2.8:1 (appearance.js's
+//    own WCAG maths). Over very bright art the floorless frost gives the ring
+//    up (about 1.1:1 over white), the trade the owner chose; that is pinned
+//    below so a change to it is noticed;
 //  * every :focus-visible outline in theme.css and the pages' own <style>
 //    blocks, and the fields' focus ring, use the token;
 //  * no markup or script asks for a focus outline, ring or border in any
@@ -45,16 +47,20 @@ const text = hex('text');
 const page = hex('background');
 const primary = hex('primary');
 const secondary = hex('secondary');
-// The frost at its brightest: white under the page colour's .76 floor, then
-// the secondary at 25% over that (theme.css .ws-frost).
-const floor = (THEME.match(/--ws-frost-floor: (\.\d+);/) || [])[1];
-const frost = tint(secondary, tint(page, '#FFFFFF', +floor), 0.25);
+// The frost (theme.css .ws-frost): the icy tint, the secondary mixed 30%
+// toward the text colour, at 30%, over what is behind, with no floor.
+const floor = (THEME.match(/--ws-frost-floor: ([\d.]+);/) || [])[1];
+const icy = tint(text, secondary, 0.3);
+const frost = tint(icy, tint(page, page, +floor), 0.3);
+const frostOverWhite = tint(icy, tint(page, '#FFFFFF', +floor), 0.3);
 const onPage = contrast(text, page);
 const onFrost = contrast(text, frost);
+check('the frost has no floor', floor === '0', floor);
 check('the ring is over 3:1 on the page', onPage >= 3, onPage);
-check('and over 3:1 on the frost over white', onFrost >= 3, [frost, onFrost]);
-check('(the primary blue it replaced was under 3:1 on both)', contrast(primary, page) < 3 && contrast(primary, frost) < 3,
-  [contrast(primary, page), contrast(primary, frost)]);
+check('and over 3:1 on the frost over the page', onFrost >= 3, [frost, onFrost]);
+check('(the primary blue it replaced was under 3:1 on the page)', contrast(primary, page) < 3, contrast(primary, page));
+check('over white the floorless frost gives the ring up (the chosen trade)', contrast(text, frostOverWhite) < 1.2,
+  [frostOverWhite, contrast(text, frostOverWhite)]);
 
 // ---- Every focus rule uses it ----
 const rules = THEME.split('\n').filter((l) => /:focus(-visible)?\b[^{]*\{[^}]*outline: 2px solid/.test(l));

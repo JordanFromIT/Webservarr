@@ -213,9 +213,9 @@ def _build() -> List[SettingDef]:
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
         # The frosted surfaces' blur (menus, pop-ups, dialogs, toasts and the
-        # sign-in card): the page renderer writes it as --ws-frost-blur. 4 is
-        # the sign-in card's original glass.
-        _int("theme.frost_blur", "4", "How much frosted surfaces blur what is behind them, in pixels", 0, 32,
+        # sign-in card): the page renderer writes it as --ws-frost-blur. 32 is
+        # the icy glass's own blur (theme.css Frosted surfaces).
+        _int("theme.frost_blur", "32", "How much frosted surfaces blur what is behind them, in pixels", 0, 32,
              public=True),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),
         # ---- Sign-in ----

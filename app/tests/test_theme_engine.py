@@ -241,7 +241,7 @@ class DerivedStatusText(unittest.TestCase):
         for s in ("ok", "warn", "err"):
             self.assertEqual(got.get(f"--ws-status-{s}-text"), self.MIX.format(s=s), s)
         # Same specificity as the preview card's fallback, so it must come later.
-        self.assertGreater(THEME.index("@supports (color: color-mix("), THEME.index("[data-ws-theme-preview] {"))
+        self.assertGreater(THEME.index("@supports (color: color-mix(in srgb, red 50%, blue))"), THEME.index("[data-ws-theme-preview] {"))
 
     def test_no_css_paints_words_in_a_pure_status_colour(self):
         # One exception, and it is not words: the icon on Home's pinned rows

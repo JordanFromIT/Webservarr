@@ -589,8 +589,8 @@ class PhoneShellContract(unittest.TestCase):
 
     def test_the_tab_bar_wears_the_shared_frost(self):
         # On trial: the frost's own tokens, so the blur setting and the
-        # palette move it with every other frosted surface, and its floor keeps
-        # the 70% labels at 4.5:1 over a white poster.
+        # palette move it with every other frosted surface (the icy glass has
+        # no floor, so the 70% labels lose contrast over a bright poster).
         bar = "".join(css_rules(self.theme, ".ws-tabbar"))
         self.assertIn("background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
                       "rgb(var(--color-background) / var(--ws-frost-floor));", bar)

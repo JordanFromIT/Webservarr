@@ -69,14 +69,15 @@
 
   /* How much every frosted surface blurs what is behind it (Settings >
      Appearance > Frosted glass); the rest of the frost is under "Frosted
-     surfaces" below. 4px is the sign-in card's original glass. */
-  --ws-frost-blur: blur(4px);
+     surfaces" below. 32px is the icy glass's own blur. */
+  --ws-frost-blur: blur(32px);
 
   /* The one focus colour: every :focus-visible ring, every field's focus
      ring and the Tailwind "focus" colour (outline-focus, ring-focus). It is
      the text colour, which contrasts with the page by construction and keeps
-     well over 3:1 on the frost (whose floor holds even 70% text at 4.5:1);
-     the primary blue was 2.8:1 on black and about 1.2:1 on the frost. */
+     well over 3:1 on the frost over the page and over dark art (over very
+     bright art the floorless frost gives that up, see Frosted surfaces);
+     the primary blue was 2.8:1 on black. */
   --ws-focus: var(--color-text);
 }
 
@@ -1014,10 +1015,10 @@ html[data-shell="hidden"] .ws-toasts { inset-block-start: calc(env(safe-area-ins
  * player bar (--ws-safe-bottom). Pages run edge to edge (viewport-fit=cover),
  * so a phone held sideways keeps its content clear of the notch.
  *
- * The tab bar wears the shared frost (Frosted surfaces, below: the
- * secondary colour at 25% over the floor, the blur setting, the accent
- * edge), on trial. Its floor holds the 70% labels at 4.5:1 over a white
- * poster at any blur. It drops the frost's drop shadow: the bar is docked to
+ * The tab bar wears the shared frost (Frosted surfaces, below: the icy
+ * tint, the blur setting, the light edge), on trial. Like every frosted
+ * surface it has no floor, so over a bright poster its 70% labels lose
+ * contrast (a choice, see Frosted surfaces). It drops the frost's drop shadow: the bar is docked to
  * the bottom edge, not floating. The active tab (aria-current) has a filled icon on a primary pill and a
  * bolder label: shape and weight as well as colour. Tabs are a full 64px
  * tall. Text from the theme only: the text colour at 100 and 70%, and the
@@ -1189,39 +1190,43 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  *
  * One recipe for everything that floats over the page (menus, popovers,
  * panels, sheets, dialogs, toasts, the Requests search bar, the sign-in
- * card): the secondary colour at 25% over a blur of what is behind, an edge
- * in the accent at 20% and a deep shadow (Tailwind's shadow-2xl). The 25% is
- * the Requests search bar's first glass (bg-cornflower-ocean/25), the blue
- * the owner asked to have back everywhere; at 10% the panes read as grey.
- * It is the operator's secondary colour, so another palette's frost takes
- * that palette's hue. The sign-in card (login.html .login-glass-card) wears
+ * card, the phone tab bar): the icy glass the owner chose. The tint is the
+ * secondary colour mixed 30% toward the text colour, at 30%: with the
+ * shipped palette rgb(88 148 186 / .3), a paler, colder blue than the
+ * secondary alone. Both ends are palette colours, so another palette's
+ * frost takes that palette's own icy hue. A browser without color-mix()
+ * gets the plain secondary at 30%, still the palette's hue. The edge is the
+ * text colour at 12%, a thin light rim, and the shadow is Tailwind's
+ * shadow-lg at .3. The sign-in card (login.html .login-glass-card) wears
  * these tokens too.
  *
  * The blur is a setting (Settings > Appearance, theme.frost_blur): the page
  * renderer writes --ws-frost-blur into #ws-theme, which comes before this
- * file, so its default (4px) is with the colours' in :where(:root) at the
+ * file, so its default (32px) is with the colours' in :where(:root) at the
  * top, and loses to it.
  *
- * The floor. The sign-in card sits on that page's dark overlay (the page
- * colour at .4 to .9), so the art behind it is always dimmed first; menus
- * float straight over posters, and the bare glass over a white poster is
- * 1.2:1 for the text. So every frosted surface has a floor, a dim of the page
- * colour under the tint: .76 is the least that keeps text at 70% of the text
- * colour (the dimmest any of them uses) at 4.5:1 over white, the brightest
- * thing that can be behind it, whatever the blur. Over the page colour the
- * floor changes nothing, so there every surface is the bar's first glass.
- * A sheet or a dialog sits on a scrim that has dimmed the page by .7
- * already, so it needs only .2 more to come level: the same depth, not a
- * second recipe. A frosted sheet's head paints nothing of its own, so it is
- * one pane with the rest. After .ws-sheet-panel and .ws-sheet-head, so a
- * frosted sheet takes the frost.
+ * No floor. The glass lays nothing dark under the tint, so what is behind
+ * shows through at its own brightness, only blurred. That is a trade the
+ * owner made knowingly: over very bright art the light text loses contrast
+ * (about 1.1:1 over pure white), and nothing here puts it back. Over the
+ * page colour and over dark art the text reads as before. A sheet or a
+ * dialog keeps only its scrim's dimming (the page colour at .7) and adds
+ * none of its own. --ws-frost-floor stays a token (at 0) so a later recipe
+ * can bring a floor back in one place. A frosted sheet's head paints
+ * nothing of its own, so it is one pane with the rest. After
+ * .ws-sheet-panel and .ws-sheet-head, so a frosted sheet takes the frost.
  */
 :root {
-  --ws-frost-tint: rgb(var(--color-secondary) / .25);
-  --ws-frost-edge: rgb(var(--color-accent) / .2);
-  --ws-frost-shadow: 0 25px 50px -12px rgb(0 0 0 / .25);
-  --ws-frost-floor: .76;
-  --ws-frost-floor-on-scrim: .2;
+  --ws-frost-tint: rgb(var(--color-secondary) / .3);
+  --ws-frost-edge: rgb(var(--color-text) / .12);
+  --ws-frost-shadow: 0 10px 15px -3px rgb(0 0 0 / .3), 0 4px 6px -4px rgb(0 0 0 / .3);
+  --ws-frost-floor: 0;
+  --ws-frost-floor-on-scrim: 0;
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / .3) 70%, rgb(var(--color-text) / .3));
+  }
 }
 .ws-frost {
   background: linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
