@@ -32,6 +32,10 @@ TIMEOUT = 10.0
 PLEX_TV = "https://plex.tv"
 CLIENTS = "https://clients.plex.tv"
 
+# share_server's reasons that need more of the admin than a share by hand.
+NO_USERNAME = "This Plex account has no username, so nothing was sent. Invite it in Plex by its email"
+WRONG_ACCOUNT = "Plex sent the invite to a different Plex account. Remove that invite in Plex"
+
 
 class PlexShareUnavailable(Exception):
     """Plex isn't set up, didn't answer, or answered with something unusable.
@@ -96,15 +100,38 @@ async def _sections(client: httpx.AsyncClient, server: PlexServer) -> List[Dict[
     return out
 
 
-async def _find(client: httpx.AsyncClient, server: PlexServer, plex_account_id: str) -> Optional[str]:
+class Entry(NamedTuple):
+    """One share of our server, as far as this module reads it."""
+    state: str          # "accepted" or "pending"
+    share_id: str       # Plex's id for the share
+    invited_id: str     # the plex.tv account id the share is for
+    names: frozenset    # the invited account's username, title and email, casefolded
+
+
+async def _entries(client: httpx.AsyncClient, server: PlexServer) -> List[Entry]:
+    """Every share of our server, accepted then pending."""
+    out = []
     for state in ("accepted", "pending"):
         data = await _get_json(client, f"{CLIENTS}/api/v2/shared_servers/owned/{state}", server)
         for entry in data if isinstance(data, list) else []:
-            if (isinstance(entry, dict)
-                    and str(entry.get("invitedId") or "") == str(plex_account_id)
-                    and str(entry.get("machineIdentifier") or "") == server.machine_id):
-                return state
+            if not isinstance(entry, dict) or str(entry.get("machineIdentifier") or "") != server.machine_id:
+                continue
+            invited = entry.get("invited") if isinstance(entry.get("invited"), dict) else {}
+            names = (entry.get("invitedEmail"), invited.get("username"), invited.get("title"), invited.get("email"))
+            out.append(Entry(state, str(entry.get("id") or ""), str(entry.get("invitedId") or ""),
+                             frozenset(str(n).casefold() for n in names if isinstance(n, str) and n)))
+    return out
+
+
+def _state_for(entries: List[Entry], plex_account_id: str) -> Optional[str]:
+    for entry in entries:
+        if entry.invited_id == str(plex_account_id):
+            return entry.state
     return None
+
+
+async def _find(client: httpx.AsyncClient, server: PlexServer, plex_account_id: str) -> Optional[str]:
+    return _state_for(await _entries(client, server), plex_account_id)
 
 
 async def list_libraries() -> List[Dict[str, str]]:
@@ -140,24 +167,40 @@ async def share_server(account: Dict[str, str], section_keys: List[str]) -> Tupl
     libraries whose section keys are given. ("existing", None) when Plex
     already has a share for the account (no POST); ("shared", None) when
     Plex lists the new share for exactly this account; else ("failed",
-    a short reason). Never raises for Plex trouble."""
+    a short reason). Never raises for Plex trouble, and never deletes a
+    share: a stray invite is reported, for the admin to remove in Plex.
+
+    Route A invites by username, so an empty username (the account has none;
+    a display name is not one) is never sent. And since a username can
+    change hands, a new share that names the username but is for a
+    different plex.tv account is WRONG_ACCOUNT, not a missing confirmation."""
     account_id = str(account["plex_account_id"])
+    username = str(account.get("plex_username") or "")
     try:
         server = await _server()
         async with _client() as client:
-            if await _find(client, server, account_id):
+            before = await _entries(client, server)
+            if _state_for(before, account_id):
                 return "existing", None
+            if not username:
+                return "failed", NO_USERNAME
             by_key = {s["key"]: s["id"] for s in await _sections(client, server)}
             ids = [by_key[k] for k in section_keys if k in by_key]
             if not ids or len(ids) != len(section_keys):
                 return "failed", "Those libraries aren't on the server any more"
             try:
-                resp = await _create(client, server, str(account["plex_username"]), ids)
+                resp = await _create(client, server, username, ids)
             except httpx.HTTPError:
                 return "failed", "Plex didn't answer the share"
             if resp.status_code not in (200, 201):
                 return "failed", f"Plex refused the share (HTTP {resp.status_code})"
-            if await _find(client, server, account_id) is None:
+            after = await _entries(client, server)
+            seen = {(e.share_id, e.invited_id) for e in before}
+            if any((e.share_id, e.invited_id) not in seen and e.invited_id != account_id
+                   and username.casefold() in e.names for e in after):
+                logger.warning("Plex share: the invite went to a different Plex account")
+                return "failed", WRONG_ACCOUNT
+            if _state_for(after, account_id) is None:
                 return "failed", "Plex didn't confirm the share"
             return "shared", None
     except PlexShareUnavailable as exc:

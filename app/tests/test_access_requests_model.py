@@ -232,5 +232,24 @@ class Tidy(WithDatabase):
         self.assertEqual(svc.TIDY_INTERVAL, 3600)
 
 
+class UsernameFlagMigration(WithDatabase):
+    def test_an_existing_table_gets_the_column_once_and_old_rows_count_as_usernames(self):
+        from sqlalchemy import text
+        from app.seed import migrate_access_request_username_flag
+        self.row("1", "pending")
+        self.db.execute(text("ALTER TABLE access_requests DROP COLUMN has_plex_username"))   # the old shape
+        self.db.commit()
+        with self.assertLogs("app.seed", level="INFO"):
+            migrate_access_request_username_flag(self.db)
+        with self.assertNoLogs("app.seed", level="INFO"):
+            migrate_access_request_username_flag(self.db)      # once: nothing left to do
+        self.db.expire_all()
+        self.assertIs(self.db.query(AccessRequest).one().has_plex_username, True)
+
+    def test_startup_runs_it(self):
+        from app import database
+        self.assertIn("migrate_access_request_username_flag(db)", inspect.getsource(database))
+
+
 if __name__ == "__main__":
     unittest.main()

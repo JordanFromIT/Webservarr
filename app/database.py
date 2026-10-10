@@ -96,7 +96,7 @@ def init_db():
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_home_services_off_v1, migrate_books_catalog_v2,
         migrate_books_nav_v1, migrate_page_order_books_v1, migrate_book_announced, migrate_welcome_post_v2,
-        migrate_status_feed_fields, migrate_status_preferences,
+        migrate_status_feed_fields, migrate_status_preferences, migrate_access_request_username_flag,
     )
     db = SessionLocal()
     try:
@@ -118,6 +118,8 @@ def init_db():
         migrate_book_announced(db)
         # The status feed's queries (and the poller's) select its columns.
         migrate_status_feed_fields(db)
+        # Every access_requests query selects has_plex_username.
+        migrate_access_request_username_flag(db)
         migrate_requests_rename(db)
         migrate_overseerr_to_seerr(db)
         seed_default_settings(db)

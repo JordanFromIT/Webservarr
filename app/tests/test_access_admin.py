@@ -161,6 +161,25 @@ class AdminRoutes(SettingsGateBase):
         self.assertEqual((r.status_code, r.json()["status"], r.json()["share_state"], r.json()["share_error"]),
                          (200, "approved", "failed", "Plex refused the share (HTTP 400)"))
 
+    def test_a_display_name_is_never_sent_as_the_username(self):
+        rid = self.add("5551", "pending", has_plex_username=False)
+        self.assertEqual(self.approve(rid).status_code, 200)
+        self.share.assert_awaited_once_with({"plex_account_id": "5551", "plex_username": ""}, ["1"])
+
+    def test_an_invite_to_another_account_tells_the_admins(self):
+        rid = self.add("5551", "pending")
+        self.share.return_value = ("failed", plex_share.WRONG_ACCOUNT)
+        told = mock.AsyncMock(return_value=1)
+        with mock.patch.object(svc, "notify_wrong_account", told):
+            r = self.approve(rid)
+            self.assertEqual((r.status_code, r.json()["share_state"], r.json()["share_error"]),
+                             (200, "failed", plex_share.WRONG_ACCOUNT))
+            self.assertEqual(told.await_args.args[2].id, rid)
+            told.reset_mock()
+            self.share.return_value = ("failed", "Plex didn't confirm the share")
+            self.approve(self.add("5552", "pending"))
+            told.assert_not_awaited()      # only a stray invite rings the bell
+
     def test_approve_refusals(self):
         rid = self.add("1", "pending")
         for keys in ([], ["9"], ["abc"], ["1", "x"]):

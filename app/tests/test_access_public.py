@@ -344,7 +344,7 @@ class Identify(Harness):
             self.assertIn(part, cookie)
         ticket = r.cookies.get(access.TICKET_COOKIE)
         stored = json.loads(self.redis.data[f"access_ticket:{plex_auth._hash_pin_nonce(ticket)}"])
-        self.assertEqual(stored, {"plex_account_id": "5551", "plex_username": "newperson",
+        self.assertEqual(stored, {"plex_account_id": "5551", "plex_username": "newperson", "has_plex_username": True,
                                   "plex_email": "new@example.com",
                                   "plex_avatar_url": "https://plex.tv/users/abc/avatar?c=1"})
         self.assertNotIn(f"access_pin:{PIN}", self.redis.data)   # the PIN is used up
@@ -381,6 +381,26 @@ class Submit(Harness):
         self.assertEqual((again.status_code, again.json()["detail"]), (400, access.TIMED_OUT))
         self.assertEqual([(r.plex_account_id, r.status, r.name) for r in self.rows()], [("5551", "pending", "New Person")])
         self.notify.assert_awaited_once()
+
+    def test_a_display_name_is_kept_but_marked_as_no_username(self):
+        # No Plex username: the card and Settings show the title, but the row
+        # says it is not a username, so approving never invites by it.
+        for account in (dict(ACCOUNT), dict(ACCOUNT, id=6662, username="", title="Sam's Display Name")):
+            self.accounts = [account]
+
+            async def flow(c):
+                return await self.submit(c, await self.ticket(c))
+            self.assertEqual(self.drive(flow).json(), {"state": "pending", "sent": True})
+        self.assertEqual(sorted((r.plex_account_id, r.plex_username, r.has_plex_username) for r in self.rows()),
+                         [("5551", "newperson", True), ("6662", "Sam's Display Name", False)])
+
+    def test_a_ticket_from_before_the_flag_never_counts_as_a_username(self):
+        db = self.Session()
+        try:
+            _, row = svc.place(db, {"plex_account_id": "5551", "plex_username": "old"}, "N", "n", svc.now_utc())
+            self.assertFalse(row.has_plex_username)
+        finally:
+            db.close()
 
     def test_no_or_forged_or_expired_ticket(self):
         async def flow(c):

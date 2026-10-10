@@ -8,6 +8,7 @@ is admin only through the email allowlist is not.
 import asyncio
 import re
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -27,8 +28,11 @@ if HAVE_APP:
     from app.services import access_requests as svc
     from app.services import admin_contacts
     from app.tests import helpers
+    from app.tests import test_access_public as public
     from app.tests.test_plex_pin_claim import NONCE, PIN
     from app.tests.test_ticket_claim_signin import FakeRedis, _SignInHarness
+    from app.utils import utc_iso
+    REAL_NOTIFY = svc.notify_admins
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 OWNER = {"is_admin": "true", "plex_account_id": "7"}
@@ -181,7 +185,7 @@ class Notify(unittest.TestCase):
 
     def test_the_owners_contacts_get_a_bell_and_one_push(self):
         self.assertEqual(self.notify(), 2)
-        ref = f"access:{self.row.id}"
+        ref = f"access:{self.row.id}:{utc_iso(self.row.created_at)}"   # per request: ids are reused
         self.assertEqual(self.bells(), [
             ("jordan@authentik.example", "access", "Access request", "newperson asked for access", ref),
             ("owner@plex.example", "access", "Access request", "newperson asked for access", ref)])
@@ -212,6 +216,18 @@ class Notify(unittest.TestCase):
         self.assertEqual(self.notify(), 1)
         self.assertEqual(self.push.await_args.args[0], ["owner@plex.example"])
 
+    def test_a_wrong_account_invite_is_its_own_bell_and_push(self):
+        self.notify()
+        self.assertEqual(asyncio.run(svc.notify_wrong_account(self.redis, self.db, self.row)), 2)
+        self.assertEqual(asyncio.run(svc.notify_wrong_account(self.redis, self.db, self.row)), 0)   # once
+        wrong = [b for b in self.bells() if b[2] != "Access request"]
+        body = "Approving newperson sent a Plex invite to a different Plex account. Remove it in Plex."
+        self.assertEqual([b[1:4] for b in wrong], [("access", "Check your Plex invites", body)] * 2)
+        self.assertEqual(len({b[4] for b in self.bells()}), 2)
+        self.assertEqual(self.push.await_count, 2)
+        self.assertEqual(self.push.await_args.args[1:], ("Check your Plex invites", body, "access",
+                                                         "/settings#access-requests"))
+
     def test_no_owner_means_no_notice_and_no_error(self):
         self.owner.return_value = None
         with self.assertLogs("app.services.access_requests", level="WARNING") as logs:
@@ -224,6 +240,76 @@ class Notify(unittest.TestCase):
         self.push.side_effect = RuntimeError("push service down")
         self.assertEqual(self.notify(), 2)
         self.assertEqual(len(self.bells()), 2)
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class AReusedIdStillNotifies(public.Harness if HAVE_APP else unittest.TestCase):
+    """access_requests.id has no AUTOINCREMENT, so once the newest row is
+    deleted (the tidy, Unblock, or a cooled-down denial replaced) the next
+    request gets the same id. Its bell and push still go out: the bell's
+    reference is per request, not per id. Through the real routes and
+    notify_admins; only the owner lookup and the push are stubbed."""
+
+    def setUp(self):
+        super().setUp()
+        self.pushes = mock.AsyncMock()
+        for p in (mock.patch.object(svc, "notify_admins", REAL_NOTIFY),
+                  mock.patch.object(oidc_auth, "_fetch_owner_account", mock.AsyncMock(return_value={"id": 7})),
+                  mock.patch("app.services.push.dispatch_push", self.pushes)):
+            p.start()
+            self.addCleanup(p.stop)
+        db = self.Session()
+        db.add(AdminContact(plex_account_id="7", notify_email="admin@example.com", seen_at=svc.now_utc()))
+        db.commit()
+        db.close()
+
+    def ask(self):
+        async def flow(c):
+            return await self.submit(c, await self.ticket(c))
+        r = self.drive(flow)
+        self.assertEqual(r.json(), {"state": "pending", "sent": True}, r.text)
+
+    def assert_two_notices_for_one_id(self):
+        db = self.Session()
+        try:
+            ids = {row.id for row in db.query(AccessRequest).all()}
+            refs = [n.reference_id for n in db.query(Notification).all()]
+        finally:
+            db.close()
+        self.assertEqual(len(ids), 1)          # the id was reused
+        self.assertEqual(len(refs), 2, refs)   # and still a second bell
+        self.assertEqual(len(set(refs)), 2, refs)
+        self.assertEqual(self.pushes.await_count, 2)
+
+    def test_after_the_tidy_another_person_is_notified(self):
+        self.ask()
+        db = self.Session()
+        svc.mark_approved(db, db.query(AccessRequest).one(), ["1"], "plex:7", svc.now_utc() - timedelta(days=31))
+        self.assertEqual(svc.tidy(db, svc.now_utc()), 1)
+        db.close()
+        self.accounts = [dict(public.ACCOUNT, id=6662, username="someoneelse")]
+        self.ask()
+        self.assert_two_notices_for_one_id()
+
+    def test_after_block_and_unblock_the_same_person_is_notified(self):
+        self.ask()
+        db = self.Session()
+        row = db.query(AccessRequest).one()
+        svc.deny(db, row, True, "plex:7", svc.now_utc())
+        db.delete(row)                         # what Unblock does
+        db.commit()
+        db.close()
+        self.ask()
+        self.assert_two_notices_for_one_id()
+
+    def test_after_a_cooldown_the_same_person_is_notified(self):
+        self.ask()
+        db = self.Session()
+        svc.deny(db, db.query(AccessRequest).one(), False, "plex:7",
+                 svc.now_utc() - svc.COOLDOWN - timedelta(minutes=1))
+        db.close()
+        self.ask()                             # place() swaps the cooled-down row
+        self.assert_two_notices_for_one_id()
 
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")

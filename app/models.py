@@ -205,6 +205,9 @@ class AccessRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     plex_account_id = Column(String(32), unique=True, nullable=False)
     plex_username = Column(String(100), nullable=False)
+    # False when the account had no Plex username and plex_username holds its
+    # display name: the share invites by username, so it then sends nothing.
+    has_plex_username = Column(Boolean, nullable=False, default=True, server_default=text("1"))
     plex_email = Column(String(254), nullable=False, default="", server_default="")
     plex_avatar_url = Column(String(500), nullable=False, default="", server_default="")
     name = Column(String(80), nullable=False)

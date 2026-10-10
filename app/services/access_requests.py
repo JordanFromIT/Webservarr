@@ -142,6 +142,7 @@ def place(db: Session, account: Dict[str, str], name: str, note: str,
     new = AccessRequest(
         plex_account_id=str(account["plex_account_id"]),
         plex_username=str(account.get("plex_username") or "")[:100],
+        has_plex_username=account.get("has_plex_username") is True,
         plex_email=str(account.get("plex_email") or "")[:254],
         plex_avatar_url=safe_avatar_url(account.get("plex_avatar_url")),
         name=name, note=note, status="pending", created_at=now,
@@ -173,6 +174,15 @@ def tidy(db: Session, now: datetime) -> int:
     return gone
 
 
+def _bell_reference(kind: str, row: AccessRequest) -> str:
+    """The bell's dedup reference for one request. The id alone is not
+    enough: access_requests has no AUTOINCREMENT, so after the newest row is
+    deleted (the tidy, Unblock, or place() replacing a cooled-down denial)
+    the next request reuses its id, and an id-only reference would match the
+    old bell and send nothing. The creation time tells the two apart."""
+    return f"{kind}:{row.id}:{utc_iso(row.created_at)}"
+
+
 async def notify_admins(r, db: Session, row: AccessRequest) -> int:
     """File an "access" bell for every admin contact of the account that owns
     the admin token, and push it to their devices (spec section 8). The admin
@@ -180,13 +190,27 @@ async def notify_admins(r, db: Session, row: AccessRequest) -> int:
     bells were filed. Never raises: a notice that can't go out must not fail
     the request, and the Settings badge still counts it. The note is never
     in a bell or a push."""
+    return await _tell_admins(r, db, row, "Access request", f"{row.plex_username} asked for access",
+                              _bell_reference("access", row))
+
+
+async def notify_wrong_account(r, db: Session, row: AccessRequest) -> int:
+    """Tell the admins, as notify_admins does, that approving this request
+    sent a Plex invite to a different Plex account, which they must remove
+    in Plex themselves (WebServarr never deletes a share)."""
+    return await _tell_admins(
+        r, db, row, "Check your Plex invites",
+        f"Approving {row.plex_username} sent a Plex invite to a different Plex account. Remove it in Plex.",
+        _bell_reference("access-wrong-account", row))
+
+
+async def _tell_admins(r, db: Session, row: AccessRequest, title: str, body: str, reference: str) -> int:
     # At call time: the poller imports this module, and the auth router the app.
     from app.routers.auth import _fetch_owner_account
     from app.services import admin_contacts
     from app.services.notification_poller import _create_notification_once
     from app.services.push import dispatch_push
 
-    title, body = "Access request", f"{row.plex_username} asked for access"
     try:
         owner = await _fetch_owner_account(db) or {}
         # The id _is_plex_server_owner compares a signing-in account with.
@@ -196,7 +220,7 @@ async def notify_admins(r, db: Session, row: AccessRequest) -> int:
             return 0
         told = []
         for email in admin_contacts.emails_for(db, owner_id):
-            if await _create_notification_once(r, db, email, "access", title, body, f"access:{row.id}"):
+            if await _create_notification_once(r, db, email, "access", title, body, reference):
                 told.append(email)
     except Exception as exc:
         logger.warning("Access request %s: the admin notice failed: %s", row.id, type(exc).__name__)

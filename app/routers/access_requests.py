@@ -210,13 +210,16 @@ async def identify(request: Request, body: IdentifyBody, response: Response, db:
     await r.delete(pin_key)
     response.delete_cookie(key=PIN_COOKIE, path=COOKIE_PATH)
 
-    username = str(account.get("username") or account.get("title") or "")[:100]
+    # Shown and stored either way, but only a real username is ever sent to
+    # Plex as the invite's address: a display name could be someone else's.
+    plex_username = str(account.get("username") or "")[:100]
+    username = plex_username or str(account.get("title") or "")[:100]
     avatar = svc.safe_avatar_url(account.get("thumb"))
     state = {"state": "member"} if membership == "member" else await _account_state(db, account_id)
     if state["state"] == "new":
         ticket = secrets.token_urlsafe(32)
         await r.setex(f"access_ticket:{_hash(ticket)}", TICKET_TTL, json.dumps({
-            "plex_account_id": account_id, "plex_username": username,
+            "plex_account_id": account_id, "plex_username": username, "has_plex_username": bool(plex_username),
             "plex_email": str(account.get("email") or "")[:254], "plex_avatar_url": avatar,
         }))
         response.set_cookie(key=TICKET_COOKIE, value=ticket, max_age=TICKET_TTL, httponly=True,
@@ -333,10 +336,13 @@ async def approve_access_request(request_id: int, body: ApproveBody, current_use
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ANSWERED)
         svc.mark_approved(db, row, keys, account_identity(current_user), svc.now_utc())
         state, error = await plex_share.share_server(
-            {"plex_account_id": row.plex_account_id, "plex_username": row.plex_username}, keys)
+            {"plex_account_id": row.plex_account_id,
+             "plex_username": row.plex_username if row.has_plex_username else ""}, keys)
         svc.record_share(db, row, state, error)
     finally:
         await r.delete(claim)
+    if error == plex_share.WRONG_ACCOUNT:
+        await svc.notify_wrong_account(r, db, row)
     logger.info("Access request %s approved: account=%s share=%s", row.id, row.plex_account_id, state)
     return svc.admin_view(row)
 

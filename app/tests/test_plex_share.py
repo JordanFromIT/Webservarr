@@ -33,9 +33,11 @@ class FakePlex:
     """plex.tv as far as the client uses it. A POST that succeeds adds the
     share to the pending list (unless confirm is False)."""
 
-    def __init__(self, accepted=(), pending=(), post_status=201, confirm=True, post_error=None, listing_status=200):
+    def __init__(self, accepted=(), pending=(), post_status=201, confirm=True, post_error=None, listing_status=200,
+                 invited_id=5551):
         self.accepted, self.pending = list(accepted), list(pending)
         self.post_status, self.confirm, self.post_error = post_status, confirm, post_error
+        self.invited_id = invited_id   # the account Plex gives the invite to
         self.listing_status = listing_status
         self.calls, self.posted = [], []
 
@@ -53,7 +55,11 @@ class FakePlex:
             if self.post_error:
                 raise self.post_error
             if self.post_status in (200, 201) and self.confirm:
-                self.pending.append({"invitedId": 5551, "machineIdentifier": MID, "inviteToken": "INVITE-SECRET"})
+                sent = self.posted[-1]["shared_server"]["invited_email"]
+                self.pending.append({"id": 700 + len(self.posted), "invitedId": self.invited_id,
+                                     "invited": {"id": self.invited_id, "username": sent, "title": sent},
+                                     "invitedEmail": "whoever@example.com", "machineIdentifier": MID,
+                                     "inviteToken": "INVITE-SECRET"})
             return httpx.Response(self.post_status, json={"inviteToken": "INVITE-SECRET", "id": 1})
         raise AssertionError(f"unexpected Plex call: {request.method} {url}")
 
@@ -138,6 +144,31 @@ class ShareClient(unittest.TestCase):
             self.assertNotIn(ADMIN_TOKEN, reason)
             self.assertNotIn("INVITE-SECRET", reason)
             self.assertLessEqual(len(reason), 200)
+
+    def test_no_username_means_no_post(self):
+        self.use(FakePlex())
+        state = asyncio.run(plex_share.share_server({"plex_account_id": "5551", "plex_username": ""}, ["1"]))
+        self.assertEqual(state, ("failed", plex_share.NO_USERNAME))
+        self.assertEqual(self.posts(), [])
+        # A share Plex already has is still found.
+        self.use(FakePlex(pending=[{"invitedId": 5551, "machineIdentifier": MID}]))
+        state = asyncio.run(plex_share.share_server({"plex_account_id": "5551", "plex_username": ""}, ["1"]))
+        self.assertEqual(state, ("existing", None))
+        self.assertEqual(self.posts(), [])
+
+    def test_an_invite_that_lands_on_another_account_is_reported_and_left_alone(self):
+        self.use(FakePlex(invited_id=6662))
+        self.assertEqual(self.share(), ("failed", plex_share.WRONG_ACCOUNT))
+        self.assertEqual(len(self.posts()), 1)
+        self.assertEqual({c[0] for c in self.plex.calls}, {"GET", "POST"})   # never a DELETE
+        self.assertNotIn("INVITE-SECRET", plex_share.WRONG_ACCOUNT)
+
+    def test_an_older_share_for_another_account_with_that_name_is_not_blamed(self):
+        older = {"id": 5, "invitedId": 6662, "invited": {"username": "NewPerson"}, "machineIdentifier": MID}
+        self.use(FakePlex(pending=[older], confirm=False))
+        self.assertEqual(self.share(), ("failed", "Plex didn't confirm the share"))
+        self.use(FakePlex(pending=[older]))
+        self.assertEqual(self.share(), ("shared", None))
 
     def test_list_libraries(self):
         self.use(FakePlex())

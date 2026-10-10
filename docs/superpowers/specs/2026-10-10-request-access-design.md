@@ -112,7 +112,8 @@ creates it on existing databases, so no migration is needed.
 |---|---|---|
 | `id` | Integer PK | |
 | `plex_account_id` | String(32), unique, not null | The immutable plex.tv account id. This is the key for "one open request" and for the cooldown |
-| `plex_username` | String(100), not null | As Plex reported it when the request was made |
+| `plex_username` | String(100), not null | As Plex reported it when the request was made; the `title` when the account has no username |
+| `has_plex_username` | Boolean, not null, default true | False when `plex_username` is a display name. Approve then sends no invite (section 7). Added by `migrate_access_request_username_flag` on databases that already had the table |
 | `plex_email` | String(254), not null, default "" | |
 | `plex_avatar_url` | String(500), not null, default "" | Stored only if it is `https://` on `plex.tv` or a subdomain of it; otherwise "" |
 | `name` | String(80), not null | From the form |
@@ -135,6 +136,10 @@ creates it on existing databases, so no migration is needed.
 
 If a submit finds a `denied` row whose cooldown has ended but which the tidy hasn't deleted yet, it
 deletes that row and creates a new one.
+
+The id has no AUTOINCREMENT, so once the newest row is deleted the next request reuses its id. The
+admin's bell is therefore filed under `access:{id}:{created_at}`, not the id alone, or the reused id
+would match the old bell and no bell or push would go out.
 
 **Never stored anywhere:** the requester's Plex token (not in the database, Redis, logs, responses or
 the browser), their IP address, and the PIN nonce in plain form.
@@ -269,6 +274,15 @@ The module rules:
   for example "Plex refused the share (HTTP 400)" or "Plex didn't confirm the share".
 - Fields such as `inviteToken` and `accessToken` in Plex responses are never read into memory past the
   parse, and never logged or saved.
+- Route A addresses the invite by username, so two guards sit around it (final fix wave, 2026-10-10):
+  - Identify stores the Plex `title` when the account has no `username`, for display, and marks the
+    row (`has_plex_username` false). Approving such a row sends no POST: the share is `failed` with
+    "This Plex account has no username, so nothing was sent. Invite it in Plex by its email".
+  - The client lists our server's shares before and after the POST. A new entry that names the
+    username but carries a different `invitedId` means the invite went to another account (the
+    username changed hands, say). The share is `failed` with "Plex sent the invite to a different Plex
+    account. Remove that invite in Plex", and every admin gets an `access` bell and push saying so.
+    WebServarr never deletes it: the admin removes it in Plex.
 
 ## 8. Notifications
 
@@ -421,6 +435,11 @@ tab's visible text, so the two match). The panel, top to bottom:
   sends the token to the configured Plex server's `/identity` (the admin-set `integration.plex.url`,
   TLS not verified on that LAN hop), as sign-in already does. There are no user-supplied URLs, so
   there is no SSRF surface.
+- **Share by username:** route A's invite names a username, which can change hands, so the share
+  could reach a different account. The guards in section 7 stop a display name being sent and catch
+  an invite that lands on another `invitedId`, but only after it is sent. Route B (v2, addressed by
+  `invitedId`) would remove the risk at the source; it is the stronger fix, pending a live proof
+  (section 13, risk 5).
 - **Audit scope:** the three public routes, the identify flow and the callback page's `for=access`
   branch go on the v2.0 audit list.
 
@@ -481,6 +500,11 @@ tab's visible text, so the two match). The panel, top to bottom:
 4. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A
    sends what python-plexapi sends. Task 1 records whether the test account ends up as a Plex friend,
    so Jordan can decide whether that matters.
+5. **Route A invites by username.** If a username has changed hands since the request, the invite
+   reaches someone else. The share client now detects that after the POST and tells the admin (section
+   7), but cannot prevent it. Route B, the v2 `POST clients.plex.tv/api/v2/shared_servers` with
+   `invitedId`, addresses the verified account id directly and is the stronger fix. It needs one live
+   proof against the test account, with Jordan present, before the client switches to it.
 
 ## 14. Build order
 

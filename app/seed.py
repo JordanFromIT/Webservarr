@@ -361,6 +361,29 @@ def migrate_status_feed_fields(db: Session) -> None:
     db.commit()
 
 
+def migrate_access_request_username_flag(db: Session) -> None:
+    """One-time migration: add access_requests.has_plex_username in existing
+    databases. Rows already there read as a real username (what approving
+    them assumed until now). Guarded by PRAGMA table_info and idempotent,
+    like migrate_status_feed_fields: a worker that loses the race to the
+    other one ignores its "duplicate column" error.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(access_requests)"))}
+    if not columns or "has_plex_username" in columns:
+        return  # no table yet (create_all makes it with the column), or done
+    try:
+        db.execute(text("ALTER TABLE access_requests ADD COLUMN has_plex_username BOOLEAN NOT NULL DEFAULT 1"))
+        db.commit()
+        logger.info("Added access_requests.has_plex_username")
+    except OperationalError as exc:
+        db.rollback()
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
 STATUS_PREFERENCES_MARKER = "migration.status_preferences_v1"
 
 
