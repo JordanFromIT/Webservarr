@@ -556,10 +556,15 @@ export async function mount(ctx) {
     row.setAttribute('aria-label', 'Top users, most time first');
     list.forEach(function (p) { row.appendChild(userCard(p)); });
     row.addEventListener('scroll', showPagers, { signal: signal, passive: true });
-    // A card reached by Tab comes fully into the row (the browser leaves one that peeks in half hidden).
+    // A card reached by Tab comes fully into the row: the browser leaves one
+    // that peeks in half hidden, so a clipped card is brought to the row's
+    // start, which is where the row snaps.
     row.addEventListener('focusin', function (e) {
       const card = e.target && e.target.closest ? e.target.closest('li') : null;
-      if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (!card || typeof card.scrollIntoView !== 'function') return;
+      const a = card.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      if (a.left < r.left || a.right > r.right) card.scrollIntoView({ block: 'nearest', inline: 'start' });
     }, { signal: signal });
     box.appendChild(row);
     box.appendChild(el('p', 'mt-2 ' + SMALL, 'Plex app time is an estimate: each track counts at its full length. Ebook time is the reading Kavita measured. A session is a book on a day, or a day of reading.'));
