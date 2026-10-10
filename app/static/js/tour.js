@@ -31,6 +31,10 @@
  *             promise it returns keeps the buttons disabled until it settles.
  *   view(ctl) a function returning any of the fields above, read each time
  *             the step is drawn, so a step can depend on what was answered
+ *   align     'start' for a section that may be taller than the screen: it
+ *             is scrolled up to just under the bubble, which sits above it,
+ *             so its heading stays in view and the spotlight runs on down
+ *             the screen (else every target is scrolled to the middle)
  * The controls, live only while that step is on screen:
  *   ctl.next(), ctl.back(), ctl.finish()
  *   ctl.update(fields)  redraw this step in place with fields laid over it
@@ -112,6 +116,12 @@
   }
 
   function q(id) { return document.getElementById(id); }
+
+  // The bubble's distance from its target, the least room it keeps from the
+  // screen's edges, and the spotlight's padding round the target.
+  var GAP = 16;
+  var MARGIN = 12;
+  var PAD = 8;
 
   // A step's own buttons, by kind. Literal class lists, so Tailwind compiles them.
   var ACTION_CLASS = {
@@ -226,8 +236,8 @@
 
       var bw = bubble.offsetWidth || 336;
       var bh = bubble.offsetHeight || 160;
-      var gap = 16;
-      var margin = 12;
+      var gap = GAP;
+      var margin = MARGIN;
 
       /* A step with nothing to point at - an opening welcome, or a target that
          is not on the page this time - dims the whole screen and sits the
@@ -249,7 +259,7 @@
       spot.classList.remove('tour-spotlight-empty');
       arrow.style.display = '';
 
-      var pad = 8;
+      var pad = PAD;
       var r = el.getBoundingClientRect();
 
       moveTo(spot, r.left - pad, r.top - pad);
@@ -258,8 +268,10 @@
       spot.style.opacity = '1';
 
       var side, top, left;
+      // align 'start' scrolled the room above the target for the bubble.
+      var above = s.align === 'start' && r.top - gap - bh > margin;
 
-      if (r.bottom + gap + bh < window.innerHeight - margin) {
+      if (!above && r.bottom + gap + bh < window.innerHeight - margin) {
         side = 'bottom';                       // bubble sits below, arrow on top
         top = r.bottom + gap;
         left = r.left + r.width / 2 - bw / 2;
@@ -426,6 +438,21 @@
       say.textContent = placed ? (inPlace ? '' : s.title + '. ') + s.body : '';
     }
 
+    /* The target into view: to the middle of the screen, or (align 'start')
+       with its top just under the bubble, which position() then puts above
+       it. A scroll margin the size of the bubble's room says where, in
+       whichever box scrolls; the browser reads it when the scroll is asked
+       for, so it goes straight back. */
+    function scrollToTarget(el, start) {
+      var behavior = reducedMotion() ? 'auto' : 'smooth';
+      if (!start) { el.scrollIntoView({ block: 'center', behavior: behavior }); return; }
+      var room = MARGIN + (q('tourBubble').offsetHeight || 160) + GAP + PAD;
+      var was = el.style.scrollMarginTop;
+      el.style.scrollMarginTop = room + 'px';
+      el.scrollIntoView({ block: 'start', behavior: behavior });
+      el.style.scrollMarginTop = was;
+    }
+
     function render() {
       override = null;
       paint(false);
@@ -438,7 +465,7 @@
       }
 
       var el = targetFor(s);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      if (el && el.scrollIntoView) scrollToTarget(el, s.align === 'start');
       // Let the scroll settle before measuring, or the bubble lands where the
       // target used to be.
       clearTimeout(placeTimer);

@@ -5,8 +5,8 @@
  * device after version 2 (localStorage webservarr_welcome_v2_seen). It runs on
  * the shared engine (js/tour.js) and walks the shell: the event log, the
  * service status, the bell (and an offer to turn on notifications), on a
- * phone adding the site to the home screen, the calendar, Books and, on a
- * phone, the tab bar. "Welcome tour" in the account menu and in More
+ * phone adding the site to the home screen, Home's news, the calendar, Books
+ * and, on a phone, the tab bar. "Welcome tour" in the account menu and in More
  * (/?welcome=1) runs it again. A wide screen is never offered the home
  * screen.
  *
@@ -33,6 +33,8 @@
   var REPLAY = 'welcome';  // /?welcome=1, the menus' "Welcome tour"
 
   var PUSH_BASE = 'Updates on your requests, issues and tickets, server problems and announcements land here.';
+  // Said on every version of the step: where the choice of what arrives is.
+  var PUSH_CHOOSE = 'You can choose which ones you get: open the bell and pick Notification settings.';
   // Said by the bell's notice too (theme-loader.js WSAsk.words).
   var WORDS = (window.WSAsk && window.WSAsk.words) || {};
   var PUSH_STOP = WORDS.PUSH_STOP;
@@ -183,16 +185,17 @@
       title: 'Notifications',
       view: function () {
         var kind = pushKind();
+        var base = PUSH_BASE + ' ' + PUSH_CHOOSE;
         if (kind === 'offer' && ask().get('push') !== 'never') {
-          return { body: PUSH_BASE + ' Want them on this device too, even with the page closed?', actions: pushOffer() };
+          return { body: base + ' Want them on this device too, even with the page closed?', actions: pushOffer() };
         }
         if (kind === 'blocked') {
-          return { body: PUSH_BASE + ' ' + WORDS.PUSH_BLOCKED };
+          return { body: base + ' ' + WORDS.PUSH_BLOCKED };
         }
         if (kind === 'ios') {
-          return { body: PUSH_BASE + ' ' + WORDS.PUSH_IOS };
+          return { body: base + ' ' + WORDS.PUSH_IOS };
         }
-        return { body: PUSH_BASE + ' To choose what you get, open the bell and pick Notification settings.' };
+        return { body: base };
       }
     };
   }
@@ -222,15 +225,31 @@
     };
   }
 
+  /* Home's News & Updates, when it has posts for this person: the server
+     writes the cards (app/home_news.py) and pages/home.js keeps them, each
+     with its data-news-title. Switched off (no box), empty ("No news posts
+     yet"), not loaded or failed: no step. align 'start' (js/tour.js): the
+     section is scrolled up under the bubble, so a long one keeps its heading
+     in view and runs on down the screen. */
+  var NEWS = '[data-arrive="news"]';
+  function newsStep() {
+    var el = document.querySelector(NEWS);
+    if (!el || !el.querySelector('[data-news-title]')) return null;
+    var r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return null;
+    return { target: NEWS, align: 'start', icon: 'newspaper', title: 'News & Updates',
+             body: 'Announcements and updates from the admin. View all has the older posts.' };
+  }
+
   /* Calendar points at Home's Upcoming Releases, which has the button to the
      full calendar, when the week there has something in it
-     (data-has-releases, pages/home.js). A busy week on a phone is taller
-     than the screen: then only its header (the heading and View calendar),
-     so the button is in view. Hidden (its Home section is off), empty or not
-     yet in: the Calendar entry in the nav, as other pages. */
+     (data-has-releases, pages/home.js): the whole section, the heading and
+     every day's releases. align 'start' (js/tour.js): it is scrolled up
+     under the bubble, so a busy week on a phone, taller than the screen,
+     keeps its heading and View calendar in view and runs on down the
+     screen. Hidden (its Home section is off), empty or not yet in: the
+     Calendar entry in the nav, as other pages. */
   var RELEASES = '#upcomingReleasesSection[data-has-releases]';
-  var RELEASES_HEAD = RELEASES + ' #releasesHead';
-  var BUBBLE_ROOM = 240;   // the bubble, its gap and the bars, beside the spotlight
   var CAL_WORDS = 'Upcoming movies and episodes, so you know what’s coming and when.';
   function releasesBox() {
     var el = document.querySelector(RELEASES);
@@ -241,21 +260,17 @@
   function calendarStep() {
     var at = navEntry('/calendar');
     if (!at) return null;
-    var step = {
+    return {
       target: RELEASES,
       fallback: at.target,
+      align: 'start',
       icon: 'calendar_month',
       title: 'Calendar',
       view: function () {
         if (releasesBox()) return { body: CAL_WORDS + ' Open the full calendar from here.' };
         return { body: CAL_WORDS + (at.more ? ' Find it under More.' : '') };
-      },
-      before: function () {
-        var r = releasesBox();
-        step.target = r && r.height + BUBBLE_ROOM > window.innerHeight ? RELEASES_HEAD : RELEASES;
       }
     };
-    return step;
   }
 
   function navStep(href, icon, title, body) {
@@ -270,7 +285,7 @@
     var list = [];
     if (eventLogShown()) {
       list.push({ target: '#wsEventLog', icon: 'history', title: 'Event log',
-                  body: 'A quick look around, starting here. The event log shows what’s happening: new movies and episodes, filled requests, outages and notes from the admin. Scroll it to see older events.' });
+                  body: 'A quick look around, starting here. The event log shows what’s happening: requests, new movies, episodes and books, fixed issues and outages. Scroll it to see older events.' });
     }
     list.push({ target: onPhone ? '#wsStatusChip' : '#systemStatus', icon: 'monitor_heart', title: 'Service status',
                 body: 'Shows at a glance whether everything is up. ' + (onPhone ? 'Tap' : 'Click') + ' it for the live health of each service.' });
@@ -282,9 +297,12 @@
     if (home && ios()) list.push(home, push);
     else { list.push(push); if (home) list.push(home); }
 
+    // Home's sections in the order the page has them: News above Upcoming Releases.
+    var news = newsStep();
+    if (news) list.push(news);
     var cal = calendarStep();
     if (cal) list.push(cal);
-    var books = navStep('/books', 'menu_book', 'New: Books', 'Read ebooks and listen to audiobooks right here. Each book keeps your place on every device.');
+    var books = navStep('/books', 'menu_book', 'Books', 'Read ebooks and listen to audiobooks right here. Each book keeps your place on every device.');
     if (books) list.push(books);
     if (onPhone && document.getElementById('wsTabBar')) {
       list.push({ target: '#wsTabBar', icon: 'travel_explore', title: 'Getting around',

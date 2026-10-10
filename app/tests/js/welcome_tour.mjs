@@ -20,8 +20,13 @@
 //  * nothing offered where it cannot be: already allowed, no push, blocked
 //    (says how to unblock), already on the home screen
 //  * one ask per visit: the banner and the tour never both
-//  * Calendar points at Home's Upcoming Releases when its week has something,
-//    else at the Calendar entry in the nav
+//  * News points at Home's News & Updates when it has posts (off or empty: no
+//    step), before Calendar as the page has them
+//  * Calendar points at the whole of Home's Upcoming Releases when its week
+//    has something, else at the Calendar entry in the nav; both sections are
+//    scrolled up under the bubble (tour.js align 'start')
+//  * the words: the event log's (no notes from the admin), the bell's way to
+//    choose what arrives on every version of the notifications step, Books
 //  * the tour ends with the visit; a plain tour (Books, the reader) is as before
 //
 // Run: node app/tests/js/welcome_tour.mjs (npm run test:js; CI js-checks).
@@ -68,8 +73,17 @@ function banner() {
   return INDEX.match(/<section\b[^>]*id="pushPrompt"[\s\S]*?<\/section>/)[0];
 }
 
+/* Home's News & Updates as the server writes it: 'posts' (two cards, each
+   with its data-news-title) or 'empty' (its "No news posts yet"). */
+function newsSection(kind) {
+  const card = (t) => `<div class="news-card"><h4 data-news-title>${t}</h4><p>Words.</p></div>`;
+  const inner = kind === 'posts' ? card('Server move on Sunday') + card('New books shelf')
+    : '<div class="text-center"><p>No news posts yet.</p></div>';
+  return `<section data-arrive="news"><h3>News &amp; Updates</h3><a href="/news" id="newsViewAll">View all</a><div id="newsContainer">${inner}</div></section>`;
+}
+
 /* The shell as the server renders it, in the parts the tour points at. */
-function shell({ booksInMore = false, eventLog = true, releases = false } = {}) {
+function shell({ booksInMore = false, eventLog = true, releases = false, news = '' } = {}) {
   const tab = (href, label) => `<li><a class="ws-navtab" href="${href}"><span class="ws-navtab-label">${label}</span></a></li>`;
   return `
 <aside id="desktopSidebar"><nav id="desktopNav">
@@ -93,6 +107,7 @@ function shell({ booksInMore = false, eventLog = true, releases = false } = {}) 
   <div id="wsPage">
     <section id="wsEventLog"${eventLog ? '' : ' hidden'}><h2>Event log</h2></section>
     ${banner()}
+    ${news ? newsSection(news) : ''}
     <section id="upcomingReleasesSection" data-arrive="releases"${releases ? ' data-has-releases' : ''}><div id="releasesHead"><h3>Upcoming Releases</h3><a href="/calendar">View calendar</a></div></section>
   </div>
 </main>`;
@@ -102,7 +117,7 @@ function shell({ booksInMore = false, eventLog = true, releases = false } = {}) 
    permission state and what this device remembers (store). */
 function browser({ width = 1440, ua = 'desktop', push = true, permission = 'default', answer = 'granted',
                    store = {}, standalone = false, user = { username: 'sam', has_email: true },
-                   booksInMore = false, eventLog = true, releases = false, prompt = null, unread = 0 } = {}) {
+                   booksInMore = false, eventLog = true, releases = false, news = '', prompt = null, unread = 0 } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: width >= 1024 ? 900 : 844 });
   Object.defineProperty(w.navigator, 'userAgent', { value: UA[ua], configurable: true });
   if (ua === 'iphone') Object.defineProperty(w.navigator, 'standalone', { value: standalone, configurable: true });
@@ -147,7 +162,7 @@ function browser({ width = 1440, ua = 'desktop', push = true, permission = 'defa
   w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';
   w.eval(LOADER);
   w.WEBSERVARR_THEME = Object.assign({}, w.WEBSERVARR_THEME || {}, { app_name: 'Example Media', vapid_public_key: VAPID });
-  w.document.body.innerHTML = shell({ booksInMore, eventLog, releases });
+  w.document.body.innerHTML = shell({ booksInMore, eventLog, releases, news });
   w.eval(NOTIFY);
   w.eval(TOUR);
   w.eval(WELCOME);
@@ -250,7 +265,7 @@ await scenario('desktop: five steps, pointing at the header and the sidebar, no 
                                                              REL, '#desktopNav a[href="/books"]']), steps);
   const seen = walk(d);
   check('order: Notifications straight to Calendar', JSON.stringify(seen.map((s) => s.title)) ===
-        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Calendar', 'New: Books']), seen.map((s) => s.title));
+        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Calendar', 'Books']), seen.map((s) => s.title));
   check('no tab bar step on a wide screen', !seen.some((s) => s.title === 'Getting around'));
   check('the status step says click', /Click it for the live health/.test(seen[1].body));
   check('the notifications step offers', JSON.stringify(seen[2].actions) === JSON.stringify(['Turn on notifications', 'Not now', 'Don’t ask me again']), seen[2].actions);
@@ -270,7 +285,7 @@ await scenario('phone: seven steps, the top bar and the tab bar', async () => {
   await wait(10);
   const seen = walk(d);
   check('order', JSON.stringify(seen.map((s) => s.title)) ===
-        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Add to home screen', 'Calendar', 'New: Books', 'Getting around']), seen.map((s) => s.title));
+        JSON.stringify(['Event log', 'Service status', 'Notifications', 'Add to home screen', 'Calendar', 'Books', 'Getting around']), seen.map((s) => s.title));
   check('the status step says tap', /Tap it for the live health/.test(seen[1].body));
   check('the home screen offer', JSON.stringify(seen[3].actions) === JSON.stringify(['Add to home screen', 'Not now', 'Don’t ask me again']), seen[3].actions);
   check('its words', seen[3].body === 'Open Example Media from your home screen, full screen like an app.', seen[3].body);
@@ -280,7 +295,7 @@ await scenario('phone: seven steps, the top bar and the tab bar', async () => {
 
 await scenario('phone: a page the tab bar has no room for points at More', async () => {
   const { w } = browser({ width: 390, ua: 'android', booksInMore: true });
-  const books = w.WSWelcome.steps().find((s) => s.title === 'New: Books');
+  const books = w.WSWelcome.steps().find((s) => s.title === 'Books');
   check('More', books && books.target === '#wsMoreBtn', books && books.target);
   check('and says so', books && /Find it under More\.$/.test(books.body), books && books.body);
   await w.happyDOM.close();
@@ -295,11 +310,12 @@ await scenario('Calendar: Upcoming Releases when it has the week, else the nav e
     const v = Object.assign({}, cal, cal.view());
     check(ua + ': the section first, the nav entry as its fallback', cal.target === REL && cal.fallback === nav, [cal.target, cal.fallback]);
     check(ua + ': says the button is there', v.body === 'Upcoming movies and episodes, so you know what’s coming and when. Open the full calendar from here.', v.body);
-    cal.before();
-    check(ua + ': a week that fits: the whole section', cal.target === REL, cal.target);
+    check(ua + ': scrolled up under the bubble', cal.align === 'start', cal.align);
+    // A busy week, taller than the screen: still the whole section (the
+    // heading and every day's releases), never only its header.
     shown.d.getElementById('upcomingReleasesSection').getBoundingClientRect = () => ({ width: 374, height: 1400, top: 0, left: 0, right: 374, bottom: 1400 });
-    cal.before();
-    check(ua + ': taller than the screen: its header, with the button', cal.target === REL + ' #releasesHead', cal.target);
+    const tall = shown.w.WSWelcome.steps().find((s) => s.title === 'Calendar');
+    check(ua + ': taller than the screen: still the whole section', tall.target === REL && typeof tall.before !== 'function', [tall.target, typeof tall.before]);
     await shown.w.happyDOM.close();
 
     // Hidden by its Home setting (no box), or a week with nothing in it (no mark).
@@ -319,6 +335,79 @@ await scenario('an event log the admin switched off is not toured', async () => 
   const titles = w.WSWelcome.steps().map((s) => s.title || '');
   check('no event log step', titles.indexOf('Event log') === -1 && titles[0] === 'Service status', titles);
   await w.happyDOM.close();
+});
+
+await scenario('News: Home’s News & Updates when it has posts, before Calendar', async () => {
+  const NEWS = '[data-arrive="news"]';
+  const box = (d) => {
+    d.querySelector(NEWS).getBoundingClientRect = () => ({ width: 540, height: 560, top: 270, left: 860, right: 1400, bottom: 830 });
+  };
+  for (const [width, ua, order] of [
+    [1440, 'desktop', ['Event log', 'Service status', 'Notifications', 'News & Updates', 'Calendar', 'Books']],
+    [390, 'android', ['Event log', 'Service status', 'Notifications', 'Add to home screen', 'News & Updates', 'Calendar', 'Books', 'Getting around']]
+  ]) {
+    const { w, d } = browser({ width, ua, news: 'posts' });
+    box(d);
+    const step = w.WSWelcome.steps().find((s) => s.title === 'News & Updates');
+    check(ua + ': the whole section', step && step.target === NEWS && !step.fallback, step);
+    check(ua + ': scrolled up under the bubble', step && step.align === 'start', step && step.align);
+    check(ua + ': its words', step && step.body === 'Announcements and updates from the admin. View all has the older posts.', step && step.body);
+    check(ua + ': its icon', step && step.icon === 'newspaper', step && step.icon);
+    visit(w);
+    await wait(10);
+    const seen = walk(d);
+    check(ua + ': in page order, before Calendar', JSON.stringify(seen.map((s) => s.title)) === JSON.stringify(order), seen.map((s) => s.title));
+    await w.happyDOM.close();
+  }
+  // Switched off (display:none, no box), or no posts for this person: no step.
+  for (const [what, news, laid] of [['off', 'posts', false], ['empty', 'empty', true], ['absent', '', false]]) {
+    const { w, d } = browser({ news });
+    if (laid) box(d);
+    const titles = w.WSWelcome.steps().map((s) => s.title);
+    check('no news step: ' + what, titles.indexOf('News & Updates') === -1 &&
+          titles[titles.indexOf('Notifications') + 1] === 'Calendar', titles);
+    await w.happyDOM.close();
+  }
+});
+
+await scenario('the words: the event log, the bell’s choice, Books', async () => {
+  const { w, d } = browser({ width: 390, ua: 'android', booksInMore: true });
+  const steps = w.WSWelcome.steps();
+  const log = steps.find((s) => s.title === 'Event log');
+  check('the event log says what it shows', log.body === 'A quick look around, starting here. The event log shows what’s happening: requests, new movies, episodes and books, fixed issues and outages. Scroll it to see older events.', log.body);
+  check('no notes from the admin', !/admin|notes?\b/i.test(log.body), log.body);
+  const books = steps.find((s) => s.target === '#wsMoreBtn' && s.icon === 'menu_book');
+  check('Books is called Books', books && books.title === 'Books', books && books.title);
+  visit(w);
+  await wait(10);
+  const seen = walk(d);
+  check('every title plain words, none "New:"', seen.every((s) => !/^New:/.test(s.title)), seen.map((s) => s.title));
+  check('no dashes in any step', seen.every((s) => !/[\u2013\u2014]/.test(s.title + s.body + s.actions.join(' ') + s.list.join(' '))), seen);
+  await w.happyDOM.close();
+});
+
+await scenario('Notifications: every version says where to choose what arrives', async () => {
+  const CHOOSE = 'You can choose which ones you get: open the bell and pick Notification settings.';
+  const BASE = 'Updates on your requests, issues and tickets, server problems and announcements land here. ' + CHOOSE;
+  const view = (opts) => {
+    const { w } = browser(opts);
+    const step = w.WSWelcome.steps().find((s) => s.title === 'Notifications');
+    const v = Object.assign({}, step, step.view());
+    w.happyDOM.close();
+    return v;
+  };
+  const offer = view({});
+  check('offered: the choice, then the question', offer.body === BASE + ' Want them on this device too, even with the page closed?', offer.body);
+  check('offered: the same three answers', JSON.stringify(offer.actions.map((a) => a.label)) === JSON.stringify(['Turn on notifications', 'Not now', 'Don’t ask me again']),
+        offer.actions.map((a) => a.label));
+  const granted = view({ permission: 'granted' });
+  check('allowed: the choice', granted.body === BASE && !granted.actions, granted.body);
+  const blocked = view({ permission: 'denied' });
+  check('blocked: the choice, then how to unblock', blocked.body.indexOf(BASE + ' This browser is blocking notifications') === 0, blocked.body);
+  const ios = view({ width: 390, ua: 'iphone', push: false });
+  check('iPhone tab: the choice, then the home screen app', ios.body.indexOf(BASE + ' On an iPhone or iPad') === 0, ios.body);
+  const stopped = view({ store: { 'ws-push-ask': 'never' } });
+  check('asked not to: the choice, no offer', stopped.body === BASE && !stopped.actions, stopped.body);
 });
 
 // ---- Shown once ----
@@ -570,7 +659,7 @@ await scenario('an iPhone in Safari: the home screen first, with its steps', asy
   const seen = walk(d);
   const titles = seen.map((s) => s.title);
   check('order', JSON.stringify(titles) ===
-        JSON.stringify(['Event log', 'Service status', 'Add to home screen', 'Notifications', 'Calendar', 'New: Books', 'Getting around']), titles);
+        JSON.stringify(['Event log', 'Service status', 'Add to home screen', 'Notifications', 'Calendar', 'Books', 'Getting around']), titles);
   const home = seen[2];
   check('the two Share steps', JSON.stringify(home.list) === JSON.stringify(['Tap ios_share Share in the browser toolbar', 'Tap Add to Home Screen']), home.list);
   check('Done, Not now, Don’t ask me again', JSON.stringify(home.actions) === JSON.stringify(['Done', 'Not now', 'Don’t ask me again']), home.actions);
@@ -1035,6 +1124,42 @@ await scenario('a plain tour is unchanged', async () => {
   check('Got it on the last', $(d, 'tourNext').textContent === 'Got it');
   $(d, 'tourNext').click();
   check('finished and seen', !on(d) && key(w, 'plain_seen') === '1');
+  ctl.abort();
+  await w.happyDOM.close();
+});
+
+await scenario('align start: a section scrolled up under the bubble, which sits above it', async () => {
+  const { w, d } = browser({ width: 390, ua: 'android', releases: true });
+  const ctl = new w.AbortController();
+  const sec = d.getElementById('upcomingReleasesSection');
+  const log = d.getElementById('wsEventLog');
+  const calls = [];
+  for (const el of [sec, log]) {
+    el.scrollIntoView = (opts) => calls.push({ id: el.id, block: opts && opts.block, margin: el.style.scrollMarginTop });
+  }
+  // After the scroll: the section's top under the bubble's room, and far
+  // taller than the screen (844).
+  sec.getBoundingClientRect = () => ({ width: 358, height: 1005, top: 196, left: 16, right: 374, bottom: 1201 });
+  log.getBoundingClientRect = () => ({ width: 358, height: 150, top: 60, left: 16, right: 374, bottom: 210 });
+  const t = w.WebServarrTour.init({ seenKey: 'align_seen', signal: ctl.signal, steps: [
+    { target: '#wsEventLog', icon: 'history', title: 'One', body: 'First.' },
+    { target: '#upcomingReleasesSection', align: 'start', icon: 'calendar_month', title: 'Two', body: 'Second.' }
+  ] });
+  t.start();
+  $(d, 'tourNext').click();
+  check('a plain step: to the middle', calls[0] && calls[0].id === 'wsEventLog' && calls[0].block === 'center' && calls[0].margin === '', calls[0]);
+  // happy-dom lays nothing out: the bubble is its 160px stand-in, so the room
+  // above is 12 + 160 + 16 + 8.
+  check('align start: to the top, under the bubble’s room', calls[1] && calls[1].block === 'start' && calls[1].margin === '196px', calls[1]);
+  check('the scroll margin goes straight back', sec.style.scrollMarginTop === '', sec.style.scrollMarginTop);
+  await wait(450);
+  check('the whole section lit, past the bottom of the screen', $(d, 'tourSpotlight').style.height === (1005 + 16) + 'px', $(d, 'tourSpotlight').style.height);
+  check('the bubble above it', $(d, 'tourArrow').getAttribute('data-side') === 'top', $(d, 'tourArrow').getAttribute('data-side'));
+  // A short week with room under it too: the bubble still goes above, where
+  // the scroll made its room.
+  sec.getBoundingClientRect = () => ({ width: 358, height: 200, top: 196, left: 16, right: 374, bottom: 396 });
+  w.dispatchEvent(new w.Event('resize'));
+  check('a short section: the bubble still above', $(d, 'tourArrow').getAttribute('data-side') === 'top', $(d, 'tourArrow').getAttribute('data-side'));
   ctl.abort();
   await w.happyDOM.close();
 });
