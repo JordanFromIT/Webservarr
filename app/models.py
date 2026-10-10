@@ -366,8 +366,9 @@ class WikiPage(Base):
 
 # ---- Audiobook player ----
 # Every row is keyed by the listener's account identity (tickets.account_identity,
-# "plex:<id>"), never the username. Queries in app/services/listening.py always
-# filter by the session's identity, so a listener only ever sees their own rows.
+# "plex:<id>"), never the username. The player's queries (app/services/listening.py)
+# always filter by the session's identity, so a listener only ever sees their own
+# rows; the admin sees everyone's on the Insights page (app/services/insights.py).
 
 class ListeningPosition(Base):
     """Where one listener is in one book: the last stored check-in."""
@@ -686,9 +687,10 @@ class BookRating(Base):
 
 
 # ---- Books discovery (app/services/book_discovery.py) ----
-# Keyed by account identity like the rest of Books. Nothing here is ever sent
-# to anyone but the person it belongs to, except popularity, which is a count
-# per book (never who) and never below book_discovery.POPULAR_MIN.
+# Keyed by account identity like the rest of Books. A member only ever sees
+# their own, and popularity, which is a count per book (never who) and never
+# below book_discovery.POPULAR_MIN. As with the player's rows,
+# the admin sees everyone's on the Insights page (app/services/insights.py).
 
 class BookVisit(Base):
     """When one person last opened Books, and the visit before that (the New

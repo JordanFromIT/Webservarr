@@ -250,7 +250,7 @@ await run('the skeleton holds the page, then one write replaces what follows the
   const m = t.mount();
   await flush();
   check('the skeleton is shown and busy', t.q('#statsView').getAttribute('aria-busy') === 'true' && t.qa('#statsRest .skel').length > 4 && rest.getAttribute('aria-hidden') === 'true');
-  check('the heading and its line are there from the first paint', rr(heading.textContent) === 'Your stats' && rr(line.textContent) === 'Only you can see these.');
+  check('the heading and its line are there from the first paint', rr(heading.textContent) === 'Your stats' && rr(line.textContent) === 'You and the admin can see these.');
   slow.resolve();
   await t.clock.advance(1600);
   await m;

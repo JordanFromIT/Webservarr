@@ -4,7 +4,8 @@ player preferences.
 
 Every function takes the listener's account identity (tickets.account_identity,
 "plex:<id>") and every query filters by it, so a listener can only read and
-write their own rows. Never the username.
+write their own rows. Never the username. The admin's Insights page reads
+everyone's, through app/services/insights.py.
 
 Positions. Each page session sends a random id (psid) and numbers its
 check-ins (seq). An older seq from the page session that wrote the stored row

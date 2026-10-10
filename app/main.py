@@ -26,7 +26,7 @@ from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
 from app import home_event_log, home_news, web_analytics
-from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery, access_requests
+from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery, access_requests, insights
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services import book_requests as book_requests_service
@@ -410,6 +410,7 @@ app.include_router(admin_settings.router, prefix="/api/admin", tags=["Admin sett
 app.include_router(admin_integrations.router, prefix="/api/admin", tags=["Admin integrations"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(access_requests.admin_router, prefix="/api/admin", tags=["Admin access requests"])
+app.include_router(insights.router, prefix="/api/admin/insights", tags=["Admin insights"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
 app.include_router(branding.router, prefix="/api", tags=["Branding"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
