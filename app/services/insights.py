@@ -693,3 +693,320 @@ def person_view(db: Session, src: Sources, identity: str, zone) -> dict:
             "books": [_book_row(r) for r in listed[:LIST_MAX]],
             "requests": requested(db, src, identity=identity),
             "unavailable": list(src.unavailable), "tracking": tracking(db)}
+
+
+# --- Trends -------------------------------------------------------------------------------
+
+def _bucket(day: date, unit: str) -> date:
+    if unit == "day":
+        return day
+    if unit == "week":
+        return _monday(day)
+    return day.replace(day=1)
+
+
+def _next(day: date, unit: str) -> date:
+    if unit == "day":
+        return day + timedelta(days=1)
+    if unit == "week":
+        return day + timedelta(weeks=1)
+    return (day.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def _span(first: date, last: date, unit: str) -> List[date]:
+    """The starts of every bucket from the one holding `first` to the one holding `last`."""
+    out, day = [], _bucket(first, unit)
+    while day <= last:
+        out.append(day)
+        day = _next(day, unit)
+    return out
+
+
+def reading_pages(db: Session, since: Optional[datetime] = None) -> Dict[Tuple[str, date], int]:
+    """Pages read per person per UTC day: the rise in Kavita's lifetime total
+    from the person's previous row (spec 4.3). Across a gap of days the rise
+    lands on the later day, an estimate; a total that went down counts nothing."""
+    R = ReadingTotal
+    out: Dict[Tuple[str, date], int] = {}
+    previous: Dict[str, int] = {}
+    for identity, day, pages in db.query(R.identity, R.day, R.pages).order_by(R.identity, R.day):
+        if identity in previous and pages > previous[identity] and (since is None or day >= since.date()):
+            out[(identity, day)] = pages - previous[identity]
+        previous[identity] = pages
+    return out
+
+
+def _top(rows: Iterable[dict], name_of) -> List[dict]:
+    """Rows of {"info", "ms", "people"} grouped by a name (book_catalog.name_key), most listened first."""
+    groups: Dict[str, dict] = {}
+    for row in rows:
+        name = name_of(row["info"])
+        if not name or not name.strip():
+            continue
+        group = groups.setdefault(book_catalog.name_key(name), {"name": name, "ms": 0, "people": set()})
+        group["ms"] += row["ms"]
+        group["people"] |= row["people"]
+    ranked = sorted(groups.values(), key=lambda g: (-g["ms"], -len(g["people"]), g["name"].casefold()))
+    return [{"name": g["name"], "listened_ms": g["ms"], "people": len(g["people"])} for g in ranked[:TOP]]
+
+
+def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
+    """Spec section 7, Trends: listening per bucket (web, and Plex apps as an
+    estimate) with pages read beside it (null before any reading is kept);
+    people active each week; the top books, authors and series by time
+    listened, then by people. Buckets and weeks are in `zone`."""
+    now = src.now
+    since = since_of(period, now)
+    unit = BUCKETS[period]
+    web = [x for x in src.listens if since is None or x.hour >= _hour(since)]
+    plays = [x for x in src.plays or () if since is None or x.at >= since]
+    pages = reading_pages(db, since)
+    ebooks = [e for e in ebook_rows(db) if e.started and (since is None or e.at >= since)]
+    today = _local(now, zone).date()
+    seen_days = ([_local(x.hour, zone).date() for x in web] + [_local(x.at, zone).date() for x in plays]
+                 + [day for (_identity, day) in pages])
+    first = _local(since, zone).date() if since is not None else min(seen_days, default=today)
+
+    starts = _span(first, today, unit)
+    series = {s: {"web_ms": 0, "plex_ms": 0, "pages": 0} for s in starts}
+
+    def add(day: date, what: str, amount: int) -> None:
+        start = _bucket(day, unit)
+        if start in series:
+            series[start][what] += amount
+
+    for x in web:
+        add(_local(x.hour, zone).date(), "web_ms", x.ms)
+    for x in plays:
+        add(_local(x.at, zone).date(), "plex_ms", x.ms)
+    for (_identity, day), amount in pages.items():
+        add(day, "pages", amount)
+    has_reading = db.query(ReadingTotal.id).first() is not None
+
+    weeks = _span(first, today, "week")[-104:]
+    active = {w: set() for w in weeks}
+
+    def mark(day: date, identity: str) -> None:
+        week = _monday(day)
+        if week in active:
+            active[week].add(identity)
+
+    for x in web:
+        if x.ms:
+            mark(_local(x.hour, zone).date(), x.identity)
+    for x in plays:
+        mark(_local(x.at, zone).date(), x.identity)
+    for (identity, day), _amount in pages.items():
+        mark(day, identity)
+    for e in ebooks:
+        mark(_local(e.at, zone).date(), e.identity)
+
+    infos = audio_books(db, {x.book_key for x in web} | {x.book_key for x in plays})
+    ebook_infos = catalog_books(db, {e.book_id for e in ebooks})
+    per_book: Dict[tuple, dict] = {}
+
+    def tally(ident: tuple, info: BookInfo, identity: str, ms: int) -> None:
+        row = per_book.setdefault(ident, {"info": info, "ms": 0, "people": set()})
+        row["ms"] += ms
+        row["people"].add(identity)
+
+    for x in web:
+        info = infos[x.book_key]
+        tally(_ident(info, x.book_key), info, x.identity, x.ms)
+    for x in plays:
+        info = infos[x.book_key]
+        tally(_ident(info, x.book_key), info, x.identity, x.ms)
+    for e in ebooks:
+        if e.book_id in ebook_infos:
+            tally(("book", e.book_id), ebook_infos[e.book_id], e.identity, 0)
+    ranked = sorted(per_book.values(), key=lambda r: (-r["ms"], -len(r["people"]), r["info"].title.casefold()))
+    return {"period": period, "bucket": unit,
+            "buckets": [{"start": s.isoformat(), "web_ms": series[s]["web_ms"], "plex_ms": series[s]["plex_ms"],
+                         "pages": series[s]["pages"] if has_reading else None} for s in starts],
+            "active": [{"week": w.isoformat(), "people": len(active[w])} for w in weeks],
+            "top_books": [{"book_id": r["info"].book_id, "title": r["info"].title, "author": r["info"].author,
+                           "listened_ms": r["ms"], "people": len(r["people"])} for r in ranked[:TOP]],
+            "top_authors": _top(per_book.values(), lambda info: info.author),
+            "top_series": _top(per_book.values(), lambda info: info.series),
+            "unavailable": list(src.unavailable), "tracking": tracking(db)}
+
+
+# --- Books ---------------------------------------------------------------------------------
+
+def books_view(db: Session, src: Sources, period: str) -> dict:
+    """Spec section 7, Books: abandoned places (unfinished, untouched for
+    ABANDONED, at least STARTED_MS in for audio), the live books no one has
+    opened (newest added first), and the finish rate of every book two or
+    more people started in the period (their place moved in it), with the
+    chapter DROP_OFF_MIN or more of the abandoned ones stopped in."""
+    now = src.now
+    since = since_of(period, now)
+    cutoff = now - ABANDONED
+    places = audio_places(db)
+    ebooks = ebook_rows(db)
+    plays = src.plays or []
+    infos = audio_books(db, {p.book_key for p in places} | {p.book_key for p in plays}
+                        | {x.book_key for x in src.listens})
+    ebook_infos = catalog_books(db, {e.book_id for e in ebooks})
+    names = names_of(db, {p.identity for p in places} | {e.identity for e in ebooks}, src.names)
+
+    abandoned = []
+    for p in places:
+        if not p.finished and p.updated_at < cutoff and p.book_ms >= STARTED_MS:
+            info = infos[p.book_key]
+            abandoned.append({"key": identity_key(p.identity), "name": names[p.identity], "book_id": info.book_id,
+                              "title": info.title, "format": "audio", "percent": p.percent,
+                              "chapter": p.chapter or None, "last": p.updated_at})
+    for e in ebooks:
+        if not e.finished and e.started and e.at < cutoff and e.book_id in ebook_infos:
+            info = ebook_infos[e.book_id]
+            abandoned.append({"key": identity_key(e.identity), "name": names[e.identity], "book_id": info.book_id,
+                              "title": info.title, "format": "ebook", "percent": e.percent, "chapter": None,
+                              "last": e.at})
+    abandoned.sort(key=lambda a: a["last"], reverse=True)
+
+    opened = {info.book_id for info in infos.values() if info.book_id is not None} | {e.book_id for e in ebooks}
+    never = [(book_id, title, author, added) for book_id, title, author, added in
+             db.query(Book.id, Book.title, Book.author, Book.added_at).filter(Book.merged_into.is_(None))
+             if book_id not in opened]
+    never.sort(key=lambda r: (r[3] or datetime.min, r[0]), reverse=True)
+
+    per_book: Dict[tuple, dict] = {}
+
+    def row_for(ident: tuple, info: BookInfo) -> dict:
+        return per_book.setdefault(ident, {"info": info, "started": set(), "finished": set(), "stops": Counter()})
+
+    for p in places:
+        if (p.book_ms < STARTED_MS and not p.finished) or (since is not None and p.updated_at < since):
+            continue
+        info = infos[p.book_key]
+        row = row_for(_ident(info, p.book_key), info)
+        row["started"].add(p.identity)
+        if p.finished:
+            row["finished"].add(p.identity)
+        elif p.updated_at < cutoff and p.chapter:
+            row["stops"][p.chapter] += 1
+    for e in ebooks:
+        if not e.started or e.book_id not in ebook_infos or (since is not None and e.at < since):
+            continue
+        row = row_for(("book", e.book_id), ebook_infos[e.book_id])
+        row["started"].add(e.identity)
+        if e.finished:
+            row["finished"].add(e.identity)
+    finish = []
+    for row in per_book.values():
+        started = len(row["started"])
+        if started < 2:
+            continue
+        chapter, count = (row["stops"].most_common(1) or [(None, 0)])[0]
+        finish.append({"book_id": row["info"].book_id, "title": row["info"].title, "author": row["info"].author,
+                       "started": started, "finished": len(row["finished"]),
+                       "rate": round(100 * len(row["finished"]) / started),
+                       "drop_off": {"chapter": chapter, "people": count} if count >= DROP_OFF_MIN else None})
+    finish.sort(key=lambda f: (-f["started"], f["rate"], f["title"].casefold()))
+    return {"abandoned": [dict({k: v for k, v in a.items() if k != "last"}, last_at=utc_iso(a["last"]))
+                          for a in abandoned[:LIST_MAX]],
+            "never_opened": {"count": len(never),
+                             "items": [{"book_id": b, "title": t, "author": a or "", "added_at": utc_iso(added)}
+                                       for b, t, a, added in never[:NEVER_OPENED_MAX]]},
+            "finish": finish[:LIST_MAX],
+            "unavailable": list(src.unavailable), "tracking": tracking(db)}
+
+
+def book_view(db: Session, src: Sources, book_id: int) -> Optional[dict]:
+    """Spec section 7, one book: everyone's progress, time and finish in it
+    (all its editions and its ebook), its totals and drop-off chapter, and
+    who asked for it (by folded title). None for an id that is no book's;
+    a merged book's id answers for the book it became."""
+    book, survivor = book_catalog.resolve_book(db, book_id)
+    if book is None and survivor is not None:
+        book = db.get(Book, survivor)
+    if book is None:
+        return None
+    keys = {k for (k,) in db.query(BookAudioEdition.plex_book_key).filter(BookAudioEdition.book_id == book.id)}
+    places = audio_places(db, keys=keys)
+    ebooks = ebook_rows(db, book_ids=[book.id])
+    mine = [x for x in src.listens if x.book_key in keys]
+    plays = [x for x in src.plays or () if x.book_key in keys]
+    people: Dict[str, dict] = {}
+
+    def row_for(identity: str, fmt: str) -> dict:
+        row = people.setdefault(identity, {"formats": [], "percent": None, "finished": False, "listened_ms": 0,
+                                           "plex_ms": 0, "last": None})
+        if fmt not in row["formats"]:
+            row["formats"].append(fmt)
+        return row
+
+    def touch(row: dict, at: Optional[datetime]) -> None:
+        if at is not None and (row["last"] is None or at > row["last"]):
+            row["last"] = at
+
+    for p in places:
+        row = row_for(p.identity, "audio")
+        if p.percent is not None:
+            row["percent"] = max(row["percent"] or 0, p.percent)
+        row["finished"] = row["finished"] or p.finished
+        touch(row, p.updated_at)
+    for x in mine:
+        row = row_for(x.identity, "audio")
+        row["listened_ms"] += x.ms
+        touch(row, x.hour)
+    for x in plays:
+        row = row_for(x.identity, "audio")
+        row["plex_ms"] += x.ms
+        touch(row, x.at)
+    for e in ebooks:
+        row = row_for(e.identity, "ebook")
+        if e.percent is not None:
+            row["percent"] = max(row["percent"] or 0, e.percent)
+        row["finished"] = row["finished"] or e.finished
+        touch(row, e.at)
+
+    asked = [r for r in db.query(BookRequester).order_by(BookRequester.requested_at.desc())
+             if book_catalog.fold(r.title) == book_catalog.fold(book.title)]
+    names = names_of(db, set(people) | {r.identity for r in asked}, src.names)
+    cutoff = src.now - ABANDONED
+    stops = Counter(p.chapter for p in places
+                    if not p.finished and p.updated_at < cutoff and p.book_ms >= STARTED_MS and p.chapter)
+    started = {p.identity for p in places if p.book_ms >= STARTED_MS or p.finished} | {
+        e.identity for e in ebooks if e.started}
+    finished = {p.identity for p in places if p.finished} | {e.identity for e in ebooks if e.finished}
+    chapter, count = (stops.most_common(1) or [(None, 0)])[0]
+    listed = sorted(people.items(), key=lambda item: item[1]["last"] or datetime.min, reverse=True)
+    return {"book_id": book.id, "title": book.title, "author": book.author or "", "series": book.series or "",
+            "formats": (["ebook"] if book.kavita_chapter_id is not None else []) + (["audio"] if keys else []),
+            "people": [{"key": identity_key(identity), "name": names[identity], "formats": row["formats"],
+                        "percent": row["percent"], "finished": row["finished"], "listened_ms": row["listened_ms"],
+                        "plex_ms": row["plex_ms"], "last_at": utc_iso(row["last"])}
+                       for identity, row in listed[:LIST_MAX]],
+            "totals": {"started": len(started), "finished": len(finished),
+                       "rate": round(100 * len(finished) / len(started)) if started else 0,
+                       "listened_ms": sum(x.ms for x in mine), "plex_ms": sum(x.ms for x in plays)},
+            "drop_off": {"chapter": chapter, "people": count} if count >= DROP_OFF_MIN else None,
+            "requested_by": [{"key": identity_key(r.identity), "name": names[r.identity],
+                              "requested_at": utc_iso(r.requested_at)} for r in asked[:LIST_MAX]],
+            "unavailable": list(src.unavailable)}
+
+
+# --- Habits --------------------------------------------------------------------------------
+
+def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
+    """Spec section 7, Habits: the web and Plex app split (Plex an estimate),
+    the time-of-day heatmap (7 x 24, Monday first, in `zone`; an hour of web
+    listening lands on the local hour its UTC hour starts in) and requested
+    then read (the newest LIST_MAX requests in the period)."""
+    since = since_of(period, src.now)
+    web = [x for x in src.listens if since is None or x.hour >= _hour(since)]
+    plays = [x for x in src.plays or () if since is None or x.at >= since]
+    heat = [[0] * 24 for _ in range(7)]
+    for x in web:
+        local = _local(x.hour, zone)
+        heat[local.weekday()][local.hour] += x.ms
+    for x in plays:
+        local = _local(x.at, zone)
+        heat[local.weekday()][local.hour] += x.ms
+    asked = requested(db, src, since=since)
+    return {"split": {"web_ms": sum(x.ms for x in web), "plex_ms": sum(x.ms for x in plays)},
+            "heatmap": heat,
+            "requested": {"total": len(asked), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
+            "unavailable": list(src.unavailable), "tracking": tracking(db)}

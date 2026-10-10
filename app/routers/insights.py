@@ -14,7 +14,7 @@ import functools
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -121,3 +121,65 @@ async def person(request: Request, key: str = Query(..., pattern=KEY_PATTERN),
             raise HTTPException(status_code=404, detail=NOT_HERE)
         return insights.person_view(db, src, identity, zone)
     return await _answer(r, f"person:{key}:{zone}", build)
+
+
+TZ_MAX = 64
+
+
+@router.get("/trends")
+@limiter.limit(LIMIT)
+@_db_503
+async def trends(request: Request, period: Period = "90d", tz: Optional[str] = Query(None, max_length=TZ_MAX),
+                 _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Listening and reading over the period, active people per week, the top books, authors and series."""
+    zone = _zone(tz)
+    r = await _redis()
+
+    async def build():
+        src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
+        return insights.trends_view(db, src, period, zone)
+    return await _answer(r, f"trends:{period}:{zone}", build)
+
+
+@router.get("/books")
+@limiter.limit(LIMIT)
+@_db_503
+async def books(request: Request, period: Period = "90d",
+                _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Abandoned, never opened, and finish rate with the drop-off chapter."""
+    r = await _redis()
+
+    async def build():
+        return insights.books_view(db, await _sources(db, r), period)
+    return await _answer(r, f"books:{period}", build)
+
+
+@router.get("/book/{book_id}")
+@limiter.limit(LIMIT)
+@_db_503
+async def book(request: Request, book_id: int = Path(..., ge=1, le=2_147_483_647),
+               _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """One book, everyone in it; 404 for an id that is no book's."""
+    r = await _redis()
+
+    async def build():
+        body = insights.book_view(db, await _sources(db, r), book_id)
+        if body is None:
+            raise HTTPException(status_code=404, detail=NOT_HERE)
+        return body
+    return await _answer(r, f"book:{book_id}", build)
+
+
+@router.get("/habits")
+@limiter.limit(LIMIT)
+@_db_503
+async def habits(request: Request, period: Period = "90d", tz: Optional[str] = Query(None, max_length=TZ_MAX),
+                 _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """The web and Plex split, the time-of-day heatmap and requested then read."""
+    zone = _zone(tz)
+    r = await _redis()
+
+    async def build():
+        src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
+        return insights.habits_view(db, src, period, zone)
+    return await _answer(r, f"habits:{period}:{zone}", build)
