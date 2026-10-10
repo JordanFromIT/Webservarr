@@ -218,7 +218,9 @@ class Routes(Base):
         for p in (mock.patch.object(session_manager, "get_redis", mock.AsyncMock(return_value=self.redis)),
                   mock.patch("app.routers.setup.is_setup_completed", return_value=True),
                   mock.patch.object(insights, "plex_people", self.people),
-                  mock.patch.object(insights, "plex_plays", self.plays)):
+                  mock.patch.object(insights, "plex_plays", self.plays),
+                  mock.patch.object(insights, "plex_sessions", mock.AsyncMock(return_value=[])),
+                  mock.patch.object(insights, "reading_now", mock.AsyncMock(return_value=[]))):
             p.start()
             self.addCleanup(p.stop)
         self.addCleanup(helpers.reset_overrides)

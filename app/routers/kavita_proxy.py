@@ -852,6 +852,21 @@ def _remember_kavita_account(session: dict, account) -> None:
         db.close()
 
 
+async def _note_reading(user: Dict[str, str], body: bytes) -> None:
+    """Note a reader save for the admin's Insights (only the book's numbers
+    and the time, five minutes, in Redis). Best effort: never fails the save."""
+    from redis.exceptions import RedisError
+    from app.routers.tickets import account_identity
+    from app.services import insights
+
+    try:
+        r = await session_manager.get_redis()
+    except (RedisError, OSError) as exc:
+        logger.info("Reading note skipped: %s", type(exc).__name__)
+        return
+    await insights.note_reading(r, account_identity(user), body)
+
+
 @router.api_route(
     "/kavita/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -943,6 +958,9 @@ async def kavita_proxy(
         await upstream.aclose()
         await client.aclose()
         raise HTTPException(status_code=401, detail="Kavita session expired")
+    if request.method == "POST" and path.lower() == "api/reader/progress" and 200 <= upstream.status_code < 300:
+        # Kavita took a reader save: Insights' Right now shows who is reading (spec 4.5).
+        await _note_reading(current_user, body)
 
     response_headers = {
         k: v

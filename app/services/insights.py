@@ -76,6 +76,10 @@ PLAYS_TTL = 10 * 60
 DURATIONS_TTL = 6 * 60 * 60
 PEOPLE_TTL = 60 * 60
 PEOPLE_KEY = "people:v2"                   # v2 carries the pictures (plex_share.server_people's thumbs)
+SESSIONS_TTL = 15
+READING_TTL = 5 * 60
+READING_PREFIX = CACHE_PREFIX + "reading:"
+WEB_PLAYER = "WebServarr"                  # plex_player.PRODUCT: the web player's own Plex session
 
 
 @dataclass(frozen=True)
@@ -279,6 +283,71 @@ async def plex_plays(r, owner: str) -> Optional[List[Play]]:
         logger.info("Plex's history could not be read for Insights: %s", type(exc).__name__)
         return None
     return to_plays(events, owner, lengths)
+
+
+async def plex_sessions(r) -> Optional[list]:
+    """Plex apps playing in the audiobook library now (plex.audiobook_sessions),
+    cached SESSIONS_TTL. [] with no audiobook library; None while Plex can't be read."""
+    from app.integrations import plex
+    from app.integrations import plex_player as pp
+
+    if not pp.player_on():
+        return []
+    found = await cache_get(r, "sessions")
+    if found is None:
+        try:
+            found = await plex.audiobook_sessions(pp._admin()["section"])
+        except plex.PlexSessionsUnavailable as exc:
+            logger.info("Plex sessions could not be read for Insights: %s", exc)
+            return None
+        await cache_set(r, "sessions", found, SESSIONS_TTL)
+    return found
+
+
+def _id(value) -> Optional[int]:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+async def note_reading(r, identity: str, body: bytes, now: Optional[datetime] = None) -> None:
+    """Note that `identity` just saved their place in WebServarr's reader (the
+    reader's progress body: volumeId, chapterId, pageNum), for Right now.
+    Only those three numbers and the time are kept, for READING_TTL seconds,
+    under the person's opaque key. Anything else is ignored."""
+    if r is None or not identity:
+        return
+    try:
+        sent = json.loads(body or b"null")
+    except ValueError:
+        return
+    if not isinstance(sent, dict) or _id(sent.get("chapterId")) is None:
+        return
+    page = sent.get("pageNum")
+    note = {"identity": identity, "volume_id": _id(sent.get("volumeId")), "chapter_id": sent["chapterId"],
+            "page": page if isinstance(page, int) and not isinstance(page, bool) and page >= 0 else None,
+            "at": utc_iso(now or now_utc())}
+    try:
+        await r.set(READING_PREFIX + identity_key(identity), json.dumps(note), ex=READING_TTL)
+    except RedisError as exc:
+        logger.info("Insights could not note reading: %s", type(exc).__name__)
+
+
+async def reading_now(r) -> list:
+    """Everyone noted reading in the last READING_TTL (note_reading)."""
+    if r is None:
+        return []
+    found = []
+    try:
+        async for key in r.scan_iter(match=READING_PREFIX + "*", count=200):
+            raw = await r.get(key.decode() if isinstance(key, bytes) else key)
+            try:
+                note = json.loads(raw) if raw else None
+            except ValueError:
+                note = None
+            if isinstance(note, dict) and note.get("identity"):
+                found.append(note)
+    except RedisError as exc:
+        logger.info("Insights could not read who is reading: %s", type(exc).__name__)
+    return found
 
 
 # --- Listening ---------------------------------------------------------------------
@@ -577,10 +646,14 @@ def requested(db: Session, src: Sources, identity: Optional[str] = None,
 
 # --- Right now -----------------------------------------------------------------------
 
-def now_view(db: Session, names: Dict[str, str], now: datetime) -> dict:
-    """Who is listening in the web player now: a place saved in the last
-    NOW_PAUSED whose latest log row is not a leave or an end; playing when it
-    was saved in the last NOW_PLAYING by a playing event, else paused."""
+def now_view(db: Session, names: Dict[str, str], now: datetime, sessions: Optional[list] = (),
+             reading: Iterable[dict] = (), owner: str = "") -> dict:
+    """Who is listening or reading now. The web player: a place saved in the
+    last NOW_PAUSED whose latest log row is not a leave or an end; playing
+    when it was saved in the last NOW_PLAYING by a playing event, else
+    paused. Plex apps: `sessions` (plex_sessions; None while Plex can't be
+    read), less the web player's own. The reader: `reading` (reading_now).
+    Plex's account 1 is `owner`'s plex.tv id."""
     P, L = ListeningPosition, ListeningLog
     recent = (db.query(P.identity, P.book_key, P.updated_at, P.book_ms, P.book_duration_ms, P.device)
               .filter(P.updated_at >= now - NOW_PAUSED).all())
@@ -604,8 +677,36 @@ def now_view(db: Session, names: Dict[str, str], now: datetime) -> dict:
                       "title": info.title, "author": info.author, "format": "audio", "where": "web",
                       "state": "playing" if playing else "paused", "device": device or "",
                       "percent": _percent(ms, total), "updated_at": utc_iso(at)})
+    for s in sessions or ():
+        account = owner if s.get("account") == "1" else s.get("account")
+        if not account or s.get("product") == WEB_PLAYER:
+            continue
+        identity = "plex:" + account
+        info = audio_books(db, [s["book_key"]])[s["book_key"]]
+        title = info.title if info.book_id is not None else (s.get("album") or info.title)
+        people.update(names_of(db, [identity], names))
+        found.append({"key": identity_key(identity), "name": people[identity], "book_id": info.book_id,
+                      "title": title, "author": info.author or s.get("author") or "", "format": "audio",
+                      "where": "plex", "state": "playing" if s.get("state") == "playing" else "paused",
+                      "device": s.get("product") or "", "percent": None, "updated_at": utc_iso(now)})
+    reading_list = []
+    for note in reading:
+        identity = note.get("identity") or ""
+        book = None
+        if note.get("volume_id"):
+            book = db.query(Book).filter(Book.kavita_volume_id == note["volume_id"], Book.merged_into.is_(None)).first()
+        if book is None and note.get("chapter_id"):
+            book = db.query(Book).filter(Book.kavita_chapter_id == note["chapter_id"], Book.merged_into.is_(None)).first()
+        if not identity or book is None:
+            continue
+        people.update(names_of(db, [identity], names))
+        reading_list.append({"key": identity_key(identity), "name": people[identity], "book_id": book.id,
+                             "title": book.title, "author": book.author or "", "format": "ebook", "where": "reader",
+                             "page": note.get("page"), "percent": None, "updated_at": note.get("at")})
     found.sort(key=lambda item: (item["state"] != "playing", item["name"].casefold()))
-    return {"listening": found, "reading": [], "unavailable": [], "checked_at": utc_iso(now)}
+    reading_list.sort(key=lambda item: item["name"].casefold())
+    return {"listening": found, "reading": reading_list, "unavailable": [] if sessions is not None else ["plex"],
+            "checked_at": utc_iso(now)}
 
 
 # --- People ----------------------------------------------------------------------------

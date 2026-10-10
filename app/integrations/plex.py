@@ -4,6 +4,7 @@ Fetches active streams for dashboard display.
 """
 
 import logging
+import re
 import xml.etree.ElementTree as ET
 import httpx
 from app.integrations import config as integration_config
@@ -263,6 +264,57 @@ async def get_active_streams() -> list:
         logger.error("Plex integration error: %s", str(e))
         return []
 
+
+
+class PlexSessionsUnavailable(Exception):
+    """Plex isn't set up, didn't answer, or sent something unreadable. Fixed text."""
+
+
+def _whole(value) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def audiobook_sessions(section: str) -> list:
+    """What Plex apps are playing in the audiobook library now: the Track
+    elements of the server's /status/sessions in library `section`, read with
+    the admin token, for the admin's Insights: [{"account", "book_key",
+    "title", "album", "author", "offset_ms", "duration_ms", "state",
+    "product"}]. `account` is Plex's own (the owner is "1"). The web player's
+    own session (product WebServarr) is listed too; the caller leaves it out.
+    get_active_streams, the dashboard's video list, is unchanged. Raises
+    PlexSessionsUnavailable."""
+    config = _get_config()
+    if not config["url"] or not config["token"]:
+        raise PlexSessionsUnavailable("Plex is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(f"{config['url']}/status/sessions", headers={"X-Plex-Token": config["token"]})
+    except httpx.HTTPError:
+        raise PlexSessionsUnavailable("Plex didn't answer") from None
+    if resp.status_code != 200:
+        raise PlexSessionsUnavailable(f"Plex answered HTTP {resp.status_code}")
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        raise PlexSessionsUnavailable("Plex sent something unreadable") from None
+    found = []
+    for track in root.findall("Track"):
+        album = track.get("parentRatingKey") or ""
+        user = track.find("User")
+        player = track.find("Player")
+        account = (user.get("id") if user is not None else "") or ""
+        if track.get("librarySectionID") != section or not re.fullmatch(r"[0-9]{1,20}", album) or not account:
+            continue
+        found.append({"account": account, "book_key": f"{album}:{_whole(track.get('parentIndex')) or 1}",
+                      "title": track.get("title") or "", "album": track.get("parentTitle") or "",
+                      "author": track.get("grandparentTitle") or "",
+                      "offset_ms": _whole(track.get("viewOffset")), "duration_ms": _whole(track.get("duration")),
+                      "state": (player.get("state") if player is not None else "") or "playing",
+                      "product": (player.get("product") if player is not None else "") or ""})
+    return found
 
 async def get_thumbnail(path: str, width: int = 300, height: int = 170, fill: bool = True) -> tuple:
     """

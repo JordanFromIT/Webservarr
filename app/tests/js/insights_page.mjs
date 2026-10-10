@@ -767,5 +767,15 @@ await run('Kavita’s reading minutes show where ebook time does, as Kavita’s 
   check('and in the legend', rr(t.text('[data-ins-weekly]')).includes('Ebooks (Kavita’s count)'));
 });
 
+await run('Right now names the Plex app and the page being read', async (make) => {
+  const t = await mounted(make, { now: () => ({ body: {
+    listening: [{ key: KIM, name: 'Kim', book_id: 2, title: 'Emma', format: 'audio', where: 'plex', state: 'playing', device: 'Plexamp', percent: null }],
+    reading: [{ key: SAM, name: 'Sam', book_id: 3, title: 'Ulysses', format: 'ebook', where: 'reader', page: 40, percent: null }],
+    unavailable: [] } }) });
+  const items = t.qa('[data-ins-now]').map((n) => rr(n.querySelector('div').textContent));
+  check('a Plex app by its name', items[0] === 'KimEmmaPlaying · in Plexamp', items);
+  check('a reader with its page', items[1] === 'SamUlyssesin the reader · page 40', items);
+});
+
 console.log(`insights page: ${total - failed}/${total} checks pass`);
 process.exit(failed ? 1 : 0);

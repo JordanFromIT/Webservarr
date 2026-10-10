@@ -343,7 +343,9 @@ export async function mount(ctx) {
     body.appendChild(el('p', 'break-words text-[15px] leading-6 text-frosted-blue', text(item.title)));
     const bits = [];
     if (audio) bits.push(item.state === 'playing' ? 'Playing' : 'Paused');
-    bits.push(item.where === 'plex' ? 'in a Plex app' : (audio ? 'in the web player' : 'in the reader'));
+    if (item.where === 'plex') bits.push('in ' + (text(item.device) || 'a Plex app'));
+    else bits.push(audio ? 'in the web player' : 'in the reader');
+    if (typeof item.page === 'number') bits.push('page ' + item.page.toLocaleString());
     if (typeof item.percent === 'number') bits.push(item.percent + '% through');
     body.appendChild(el('p', SMALL, bits.join(' · ')));
     li.appendChild(body);

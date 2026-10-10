@@ -93,11 +93,14 @@ async def _answer(r, key: str, build) -> dict:
 @limiter.limit(LIMIT)
 @_db_503
 async def now(request: Request, _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    """Who is listening or reading right now (spec section 7): {"listening",
-    "reading", "unavailable", "checked_at"}. Not kept: the page asks every 30 s."""
+    """Who is listening or reading right now (spec section 7): the web player,
+    Plex apps and WebServarr's reader, as {"listening", "reading",
+    "unavailable", "checked_at"}. Not kept: the page asks every 30 s."""
     r = await _redis()
-    _owner, names = await insights.plex_people(r)
-    return insights.now_view(db, names, insights.now_utc())
+    owner, names = await insights.plex_people(r)
+    sessions = await insights.plex_sessions(r)
+    reading = await insights.reading_now(r)
+    return insights.now_view(db, names, insights.now_utc(), sessions=sessions, reading=reading, owner=owner)
 
 
 @router.get("/people")
