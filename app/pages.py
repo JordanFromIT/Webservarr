@@ -732,12 +732,13 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str, 
     if logo:
         # A fixed box: an unsized image would push the whole nav down the
         # moment it arrived on a cold load (the one layout shift the shell had).
-        # Named: 96px tall over the name. Alone: the sidebar's width less 12px
-        # a side (the block's 24px padding, less 12) and 144px tall, 8px of it
-        # taken from the padding above and below, so the block stays 176px
-        # tall, as it is named (96 + 12 + the name's line, near enough). A wide
-        # logo fills the width; a tall one stops at 144px (object-contain).
-        box = "w-full h-24 mb-3" if named else "-mx-3 -my-2 w-[calc(100%+1.5rem)] max-w-none h-36"
+        # Named: 96px tall over the name. Alone: the sidebar's whole width
+        # inside its border (the block's 24px padding a side given back) and
+        # 144px tall, 8px of it taken from the padding above and below, so the
+        # block stays 176px tall, as it is named (96 + 12 + the name's line,
+        # near enough). A wide logo fills the width; a tall one stops at 144px
+        # (object-contain).
+        box = "w-full h-24 mb-3" if named else "-mx-6 -my-2 w-[calc(100%+3rem)] max-w-none h-36"
         logo_html = (
             f'<img src="{html.escape(logo, quote=True)}" alt="{logo_alt}" '
             f'class="{box} rounded-lg object-contain">'

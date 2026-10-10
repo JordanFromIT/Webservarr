@@ -22,8 +22,8 @@ from app.tests.test_pages import branding, data_of, render, static_text
 
 KEY = "branding.show_name"
 OFF = {KEY: "false"}
-# The lone logo's box (show_name off): the sidebar's width less 12px a side, 144px tall.
-ALONE = "-mx-3 -my-2 w-[calc(100%+1.5rem)] max-w-none h-36"
+# The lone logo's box (show_name off): the sidebar's whole width inside its border, 144px tall.
+ALONE = "-mx-6 -my-2 w-[calc(100%+3rem)] max-w-none h-36"
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 
 
@@ -99,18 +99,19 @@ class Sidebar(unittest.TestCase):
         self.assertNotIn("<x>", block)
 
     def test_off_the_logo_takes_the_sidebar_width_and_the_nav_stays_put(self):
-        # Drawbridge [41]: the lone logo runs to 12px from each side of the
-        # sidebar (the block's 24px padding, less 12) and 144px tall, 8px of
-        # it from the padding above and below: the block stays 24 + 128 + 24.
+        # The lone logo runs the sidebar's whole width inside its border (the
+        # block's 24px padding a side given back; it was 12px in from each
+        # side) and 144px tall, 8px of it from the padding above and below:
+        # the block stays 24 + 128 + 24.
         sidebar = re.search(r'<div class="p-6 flex flex-col items-center" data-ws-brand>',
                             render(b=branding(**OFF)))
         self.assertIsNotNone(sidebar, "the block's own padding is unchanged")
-        self.assertEqual(ALONE.split(), ["-mx-3", "-my-2", "w-[calc(100%+1.5rem)]", "max-w-none", "h-36"])
+        self.assertEqual(ALONE.split(), ["-mx-6", "-my-2", "w-[calc(100%+3rem)]", "max-w-none", "h-36"])
         app_css = open(os.path.join(STATIC, "css", "app.css"), encoding="utf-8").read()
         # The compiled utilities exist (Tailwind emits only literal classes).
-        for rule in (".-mx-3{margin-left:-.75rem;margin-right:-.75rem}",
+        for rule in (".-mx-6{margin-left:-1.5rem;margin-right:-1.5rem}",
                      ".-my-2{margin-top:-.5rem;margin-bottom:-.5rem}",
-                     ".w-\\[calc\\(100\\%\\+1\\.5rem\\)\\]{width:calc(100% + 1.5rem)}",
+                     ".w-\\[calc\\(100\\%\\+3rem\\)\\]{width:calc(100% + 3rem)}",
                      ".max-w-none{max-width:none}", ".h-36{height:9rem}"):
             self.assertIn(rule, app_css, rule)
 
