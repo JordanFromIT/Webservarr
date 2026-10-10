@@ -76,6 +76,8 @@ PLAYS_TTL = 10 * 60
 DURATIONS_TTL = 6 * 60 * 60
 PEOPLE_TTL = 60 * 60
 PEOPLE_KEY = "people:v2"                   # v2 carries the pictures (plex_share.server_people's thumbs)
+OWNER_KEY = "owner"                        # the owner plex.tv last gave, for while it can't be read
+OWNER_TTL = 90 * 24 * 60 * 60
 SESSIONS_TTL = 15
 READING_TTL = 5 * 60
 READING_PREFIX = CACHE_PREFIX + "reading:"
@@ -231,12 +233,29 @@ async def cache_set(r, key: str, value, ttl: int) -> None:
         logger.info("Insights cache write failed: %s", type(exc).__name__)
 
 
-async def plex_people(r) -> Tuple[str, Dict[str, str]]:
+async def plex_people(r, db: Optional[Session] = None) -> Tuple[str, Dict[str, str]]:
     """(the owner's plex.tv id, {plex.tv id: name}) from plex.tv, cached for
-    PEOPLE_TTL; ("", {}) while plex.tv can't be read: names then fall back to
-    short_name, and the owner's plays (Plex's account 1) are left out."""
+    PEOPLE_TTL. While plex.tv can't be read the names are {} (they
+    fall back to short_name) and the owner is known_owner, so the owner's
+    plays and sessions (Plex's account 1) still count; "" only when nothing
+    says who the owner is."""
     found = await _people_answer(r)
-    return str(found.get("owner") or ""), dict(found.get("names") or {})
+    owner = str(found.get("owner") or "")
+    names = dict(found.get("names") or {})
+    return owner or await known_owner(r, db), names
+
+
+async def known_owner(r, db: Optional[Session]) -> str:
+    """The server owner's plex.tv id without asking plex.tv: the one it last
+    gave (OWNER_KEY), else the Plex account of the newest admin sign-in
+    while only the owner can be admin (admin_contacts.owner_account); ""
+    when neither is known."""
+    from app.services import admin_contacts
+
+    kept = await cache_get(r, OWNER_KEY)
+    if isinstance(kept, str) and kept:
+        return kept
+    return admin_contacts.owner_account(db) if db is not None else ""
 
 
 async def plex_thumbs(r) -> Dict[str, str]:
@@ -259,13 +278,17 @@ async def _people_answer(r) -> dict:
             logger.info("plex.tv people could not be read for Insights: %s", type(exc).__name__)
             return {}
         await cache_set(r, PEOPLE_KEY, found, PEOPLE_TTL)
+        if isinstance(found, dict) and found.get("owner"):
+            await cache_set(r, OWNER_KEY, str(found["owner"]), OWNER_TTL)
     return found if isinstance(found, dict) else {}
 
 
 async def plex_plays(r, owner: str) -> Optional[List[Play]]:
     """Every play in the audiobook library, by person, counted as to_plays
     says (history cached PLAYS_TTL, lengths DURATIONS_TTL). [] with no
-    audiobook library; None while Plex can't be read."""
+    audiobook library; None while Plex can't be read, and while the owner
+    isn't known (plex_people) but has plays: those can't be put to anyone,
+    so the answer says Plex is unavailable rather than leave them out."""
     from app.integrations import plex_player as pp
 
     try:
@@ -281,6 +304,9 @@ async def plex_plays(r, owner: str) -> Optional[List[Play]]:
         return []
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         logger.info("Plex's history could not be read for Insights: %s", type(exc).__name__)
+        return None
+    if not owner and any(isinstance(e, dict) and str(e.get("account") or "") == "1" for e in events or ()):
+        logger.info("The Plex server owner isn't known, so Insights can't count their plays")
         return None
     return to_plays(events, owner, lengths)
 
@@ -654,7 +680,8 @@ def now_view(db: Session, names: Dict[str, str], now: datetime, sessions: Option
     when it was saved in the last NOW_PLAYING by a playing event, else
     paused. Plex apps: `sessions` (plex_sessions; None while Plex can't be
     read), less the web player's own. The reader: `reading` (reading_now).
-    Plex's account 1 is `owner`'s plex.tv id."""
+    Plex's account 1 is `owner`'s plex.tv id; while that isn't known, the
+    owner's sessions are left out and the answer says Plex is unavailable."""
     P, L = ListeningPosition, ListeningLog
     recent = (db.query(P.identity, P.book_key, P.updated_at, P.book_ms, P.book_duration_ms, P.device)
               .filter(P.updated_at >= now - NOW_PAUSED).all())
@@ -668,6 +695,7 @@ def now_view(db: Session, names: Dict[str, str], now: datetime, sessions: Option
     infos = audio_books(db, [row[1] for row in recent])
     people = names_of(db, who, names)
     found = []
+    unattributed = False
     for identity, key, at, ms, total, device in recent:
         event = last_event.get((identity, key))
         if event in ("leave", "end"):
@@ -680,7 +708,10 @@ def now_view(db: Session, names: Dict[str, str], now: datetime, sessions: Option
                       "percent": _percent(ms, total), "updated_at": utc_iso(at)})
     for s in sessions or ():
         account = owner if s.get("account") == "1" else s.get("account")
-        if not account or s.get("product") == WEB_PLAYER:
+        if s.get("product") == WEB_PLAYER:
+            continue
+        if not account:
+            unattributed = unattributed or s.get("account") == "1"
             continue
         identity = "plex:" + account
         info = audio_books(db, [s["book_key"]])[s["book_key"]]
@@ -706,8 +737,8 @@ def now_view(db: Session, names: Dict[str, str], now: datetime, sessions: Option
                              "page": note.get("page"), "percent": None, "updated_at": note.get("at")})
     found.sort(key=lambda item: (item["state"] != "playing", item["name"].casefold()))
     reading_list.sort(key=lambda item: item["name"].casefold())
-    return {"listening": found, "reading": reading_list, "unavailable": [] if sessions is not None else ["plex"],
-            "checked_at": utc_iso(now)}
+    return {"listening": found, "reading": reading_list,
+            "unavailable": ["plex"] if sessions is None or unattributed else [], "checked_at": utc_iso(now)}
 
 
 # --- People ----------------------------------------------------------------------------

@@ -69,7 +69,7 @@ async def _redis():
 async def _sources(db: Session, r, since=None) -> insights.Sources:
     """What an answer is worked out from. Web listening is read from a day
     before `since`, so the echo rule sees the hours just before the period."""
-    owner, names = await insights.plex_people(r)
+    owner, names = await insights.plex_people(r, db)
     plays = await insights.plex_plays(r, owner)
     web = insights.listens(db, None if since is None else since - insights.ECHO_DAY)
     unavailable = ([] if plays is not None else ["plex"]) + (["kavita"] if insights_kavita.last_error(db) else [])
@@ -97,7 +97,7 @@ async def now(request: Request, _admin: dict = Depends(require_admin), db: Sessi
     Plex apps and WebServarr's reader, as {"listening", "reading",
     "unavailable", "checked_at"}. Not kept: the page asks every 30 s."""
     r = await _redis()
-    owner, names = await insights.plex_people(r)
+    owner, names = await insights.plex_people(r, db)
     sessions = await insights.plex_sessions(r)
     reading = await insights.reading_now(r)
     return insights.now_view(db, names, insights.now_utc(), sessions=sessions, reading=reading, owner=owner)

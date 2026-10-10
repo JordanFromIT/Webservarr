@@ -17,7 +17,7 @@ from typing import List
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import AdminContact
+from app.models import AdminContact, Setting
 from app.utils import identity_email
 
 
@@ -51,3 +51,16 @@ def emails_for(db: Session, owner_account_id) -> List[str]:
         return []
     rows = db.query(AdminContact.notify_email).filter(AdminContact.plex_account_id == owner).all()
     return sorted({email for (email,) in rows if email})
+
+
+def owner_account(db: Session) -> str:
+    """The Plex account id of the newest admin sign-in recorded, which is the
+    server owner's while sign-in makes no one else admin: no verified-email
+    allowlist (system.admin_email) is set, so auth._is_plex_server_owner
+    grants admin only on the owner's id. "" otherwise, or with no sign-in
+    recorded. Insights uses it to know the owner while plex.tv is down."""
+    allowlist = db.query(Setting.value).filter(Setting.key == "system.admin_email").scalar()
+    if allowlist:
+        return ""
+    row = db.query(AdminContact.plex_account_id).order_by(AdminContact.seen_at.desc()).first()
+    return str(row[0]) if row else ""

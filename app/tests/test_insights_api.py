@@ -4,6 +4,7 @@ sections 3, 4, 6, 7 and 10): web listening by hour, Plex app plays without the
 web player's own, names, the Right now, People and person answers through the
 admin-only routes, and the wording that tells people the admin can see.
 """
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -278,6 +279,74 @@ class Routes(Base):
         found = set(_admin_operations())
         for path in ("/api/admin/insights/now", "/api/admin/insights/people", "/api/admin/insights/person"):
             self.assertIn(("get", path), found)
+
+
+class OwnerWhilePlexTvIsDown(Base):
+    """Spec section 11: plex.tv down changes the names, never whose time counts.
+    Plex numbers the owner 1 in its history and sessions."""
+
+    def setUp(self):
+        super().setUp()
+        from app.integrations import plex_player as pp
+        from app.integrations import plex_share
+        self.plex_share = plex_share
+        self.people = mock.AsyncMock(return_value={"owner": "1001", "names": {"1001": "Owner"}, "thumbs": {}})
+        events = [{"account": "1", "book_key": "5:1", "track_key": "11", "viewed_at": NOW - timedelta(hours=3)},
+                  {"account": "2002", "book_key": "5:1", "track_key": "11", "viewed_at": NOW - timedelta(hours=2)}]
+        for p in (mock.patch.object(plex_share, "server_people", self.people),
+                  mock.patch.object(pp, "play_events", mock.AsyncMock(return_value=events)),
+                  mock.patch.object(pp, "track_durations", mock.AsyncMock(return_value={"11": 1800000}))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def plex_down(self):
+        self.people.side_effect = self.plex_share.PlexShareUnavailable("Plex didn't answer")
+
+    def sources(self, r=None):
+        from app.routers import insights as router
+        return asyncio.run(router._sources(self.db, r))
+
+    def test_the_owner_plex_tv_last_gave_is_kept(self):
+        from app.tests.test_ticket_claim_signin import FakeRedis
+        r = FakeRedis()
+        self.assertIn(ME, {p.identity for p in self.sources(r).plays})
+        r.data.pop(insights.CACHE_PREFIX + insights.PEOPLE_KEY)        # the hour's names have gone
+        self.plex_down()
+        src = self.sources(r)
+        self.assertEqual(sorted((p.identity, p.ms) for p in src.plays), [(ME, 1800000), (THEM, 1800000)])
+        self.assertEqual(src.unavailable, [])
+
+    def test_without_redis_the_admin_sign_in_names_the_owner(self):
+        from app.models import AdminContact
+        self.add(AdminContact(plex_account_id="1001", notify_email="admin@example.test", seen_at=NOW))
+        self.plex_down()
+        src = self.sources()
+        self.assertEqual(sorted(p.identity for p in src.plays), [ME, THEM])
+        self.assertEqual(src.unavailable, [])
+        view = insights.people_view(self.db, src)
+        self.assertEqual({p["name"]: p["plex_ms_30d"] for p in view["people"]},
+                         {"Account 1001": 1800000, "Account 2002": 1800000})
+
+    def test_an_owner_no_record_names_makes_plex_unavailable(self):
+        from app.models import AdminContact
+        # With the email allowlist set, an admin sign-in need not be the owner's.
+        self.add(AdminContact(plex_account_id="3003", notify_email="admin@example.test", seen_at=NOW),
+                 Setting(key="system.admin_email", value="admin@example.test"))
+        self.plex_down()
+        src = self.sources()
+        self.assertIsNone(src.plays)
+        self.assertEqual(src.unavailable, ["plex"])
+
+    def test_right_now_says_plex_is_unavailable_for_a_session_no_one_can_be_named_for(self):
+        self.book(1, "Dune", keys=["5:1"])
+        sessions = [{"account": "1", "book_key": "5:1", "album": "Dune", "state": "playing", "product": "Plexamp"},
+                    {"account": "2002", "book_key": "5:1", "album": "Dune", "state": "paused", "product": "Plexamp"}]
+        got = insights.now_view(self.db, {}, NOW, sessions=sessions, owner="")
+        self.assertEqual([i["key"] for i in got["listening"]], [identity_key(THEM)])
+        self.assertEqual(got["unavailable"], ["plex"])
+        got = insights.now_view(self.db, {}, NOW, sessions=sessions, owner="1001")
+        self.assertEqual(len(got["listening"]), 2)
+        self.assertEqual(got["unavailable"], [])
 
 
 class Wording(unittest.TestCase):
