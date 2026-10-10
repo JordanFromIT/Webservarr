@@ -1,6 +1,8 @@
 # Request access from the sign-in page
 
-Status: designed 2026-10-10; decisions approved by Jordan in chat. Not built. This feature adds public
+Status: designed 2026-10-10; decisions approved by Jordan in chat. Amended 2026-10-10: the admin's
+notifications find the admin by Plex account id, not by email (section 8). Not built. The build plan is
+`docs/superpowers/plans/2026-10-10-request-access.md`. This feature adds public
 routes, so it joins the v2.0 security audit scope (roadmap step 6). The audit stays on hold until Jordan
 says it is ready.
 
@@ -118,6 +120,8 @@ deletes that row and creates a new one.
 
 **Never stored anywhere:** the requester's Plex token (not in the database, Redis, logs, responses or
 the browser), their IP address, and the PIN nonce in plain form.
+
+Section 8 adds a second small table, `admin_contacts`, which says where the admin's notifications go.
 
 ## 5. Settings keys
 
@@ -244,9 +248,31 @@ The module rules:
 
 ## 8. Notifications
 
-- **Recipients:** the email of the plex.tv account that owns the admin token (the same account that
-  `_is_plex_server_owner` makes admin by id), plus `system.admin_email` when it is set. Duplicates and
-  empty values are dropped, using `identity_email`.
+- **Who the admin is.** Bell rows and push subscriptions are filed under the email of the signed-in
+  session (`identity_email`). An admin who signs in through Authentik carries Authentik's email claim,
+  which need not be the plex.tv owner's email. So the admin is never found by comparing emails. The
+  rule is the one sign-in already uses to make someone admin: the immutable Plex account id of the
+  account that owns the admin token (`_is_plex_server_owner`).
+- **Admin contacts.** A small table, `admin_contacts`, joins that id to the key the bell uses. Each
+  sign-in (Authentik and Plex direct) whose session is admin and carries a Plex account id records one
+  row, or refreshes its `seen_at`. Recording never blocks a sign-in. A session without an email or
+  without a Plex account id records nothing.
+
+  | Column | Type | Notes |
+  |---|---|---|
+  | `plex_account_id` | String(32), primary key (with `notify_email`) | The session's Plex account id |
+  | `notify_email` | String(200), primary key (with `plex_account_id`) | `identity_email` of the session's email: the key its bell and push use |
+  | `seen_at` | DateTime, not null | The last sign-in that recorded it |
+
+- **Recipients:** when a request comes in, WebServarr reads the owner's account id from the admin token
+  (the same plex.tv call `_is_plex_server_owner` makes) and sends to every `notify_email` recorded for
+  that id. No email is compared with another email anywhere in this path.
+  - An admin who signed in two ways (two emails) is reached at both.
+  - Someone who is admin only through the `system.admin_email` allowlist has a different Plex account
+    id, so they get no bell or push. They see the Settings badge.
+  - If the owner lookup fails, no bell or push goes out for that request (logged by request id). The
+    badge still counts it.
+  - Until the admin signs in once after this ships, there is no contact row, and only the badge shows.
 - **Bell:** a `Notification` row per recipient, with category `access`, title "Access request", body
   "<username> asked for access" and `reference_id` `access:<id>`. Rows go through the existing dedup
   and preference checks.
@@ -377,7 +403,9 @@ accessible name is "Access requests, 3 waiting". The panel, top to bottom:
   - Token sentinel: never in Redis keys or values, the database, captured logs or responses.
   - Share client against an `httpx.MockTransport` with a catch-all that fails: `existing` (no POST),
     `shared` (POST plus a confirming listing), and `failed` (a 4xx or 5xx, and no confirming listing).
-  - Notifications: recipients, dedup, and no note in the push.
+  - Notifications: recipients come from `admin_contacts` by the owner's Plex account id, never by
+    comparing emails (an admin whose Authentik email differs from the plex.tv email is still reached,
+    and an allowlist-only admin is not); dedup; and no note in the push.
 - **happy-dom (`app/tests/js/login_request.mjs`, `settings_access.mjs`):**
   - Every card transition, focus on the heading, the live region text, the back links and the
     browser's Back.
@@ -402,19 +430,17 @@ accessible name is "Access requests, 3 waiting". The panel, top to bottom:
    checking is off since the August 2026 friends retirement). Before the build, confirm this
    read-only in Authentik's admin UI or API: the Plex source's enrollment flow, user matching mode and
    allowed servers. Change nothing.
-3. **Admin notification address.** The admin's session email (from Authentik's email claim) must equal
-   the owner's plex.tv email or `system.admin_email`, or the bell and push won't reach them. Confirm
-   on dev, read-only, comparing for equality without printing either value.
-4. **Invite acceptance.** Until the person accepts the invite, both Authentik and WebServarr refuse
+3. **Invite acceptance.** Until the person accepts the invite, both Authentik and WebServarr refuse
    them. The S4 and S5 wording covers this. Plex's own email is the only reminder.
-5. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A
+4. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A
    sends what python-plexapi sends. Task 1 records whether the test account ends up as a Plex friend,
    so Jordan can decide whether that matters.
 
 ## 14. Build order
 
 1. **Plex proof**, with Jordan and a test Plex account he provides:
-   - Run the read-only Authentik and notification-address checks (risks 2 and 3).
+   - Run the read-only Authentik check (risk 2). The admin's notification address needs no check:
+     section 8 finds the admin by Plex account id, not by email.
    - Share once from dev through route A, or B if A fails, and confirm it in `owned/pending`.
    - Jordan accepts the invite on the test account; confirm that WebServarr's gate and Authentik
      sign-in pass.
