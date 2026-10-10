@@ -248,7 +248,7 @@ scenario('enable(false) holds it still; destroy() undoes it; the last one ends t
   check('the other runs on', b.getAttribute('data-marquee') === 'run');
   mb.destroy();
   check('the last gone: the observers end', !t.ros[0].live && !t.ios[0].live);
-  check('and the listeners', t.docListeners.get('visibilitychange') === 0 && t.motion.listeners.length === 0);
+  check('and the listeners', t.docListeners.get('visibilitychange') === 0 && t.docListeners.get('animationstart') === 0 && t.motion.listeners.length === 0);
   const c = t.box(words(20), 100);
   const mc = t.w.WSUI.marquee(c);
   check('a new one after that watches again', t.ros.length === 2 && t.ro().live && c.getAttribute('data-marquee') === 'run');
@@ -307,6 +307,22 @@ scenario('a group keeps one beat: one slide time, each its own distance, all sta
   t.setHidden(true);
   t.setHidden(false);
   check('the tab hidden and shown: both back on the beat', t.startOf(a) === 0 && t.startOf(b) === 0);
+
+  // The browser starts a slide again on its own (its box moved, or was
+  // hidden and shown): its animationstart puts it back on the beat.
+  const restart = (box, name = 'ws-marquee') => {
+    const tr = box.firstElementChild;
+    if (box.hasAttribute('data-marquee')) tr.getAnimations()[0].startTime = 4321;
+    const e = new t.w.Event('animationstart', { bubbles: true });
+    Object.defineProperty(e, 'animationName', { value: name });
+    tr.dispatchEvent(e);
+  };
+  restart(b, 'ws-other');
+  check('another animation starting is not the marquee\'s', t.startOf(b) === 4321);
+  restart(b);
+  check('a slide restarted by the browser: back on the beat', t.startOf(b) === 0);
+  restart(solo);
+  check('a slide in no group is left to the browser', t.startOf(solo) === 4321);
 
   // A later, longer line: the group slows to its time; it starts in step.
   const late = t.box(words(40), 100);        // 220px past: 6.875 s, so 7 s

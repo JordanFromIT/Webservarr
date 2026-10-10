@@ -436,6 +436,15 @@
     if (marqueeMotion && marqueeMotion.addEventListener) marqueeMotion.addEventListener('change', marqueeAll);
     // The web font arriving changes how wide the words are.
     if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', marqueeAll);
+    document.addEventListener('animationstart', marqueeRestarted);
+  }
+
+  // A slide the browser started again on its own (its box moved in the page,
+  // or was hidden and shown) goes back on its group's beat.
+  function marqueeRestarted(e) {
+    if (e.animationName !== 'ws-marquee' || !e.target) return;
+    var m = marqueeOf(e.target.parentNode);
+    if (m && m.box.getAttribute('data-marquee') === 'run') marqueeBeat(m);
   }
 
   function marqueeUnwatch() {
@@ -446,6 +455,7 @@
     if (marqueeMotion && marqueeMotion.removeEventListener) marqueeMotion.removeEventListener('change', marqueeAll);
     marqueeMotion = null;
     if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', marqueeAll);
+    document.removeEventListener('animationstart', marqueeRestarted);
   }
 
   // The box's contents as its one track. New contents get a new track, so

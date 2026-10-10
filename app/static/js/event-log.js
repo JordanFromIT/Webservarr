@@ -742,7 +742,14 @@ export function createEventLog(section, env) {
         }
     }
 
-    return { render: render, refreshTimes: refreshTimes, toLatest: toLatest };
+    // The section was moved (a soft navigation put it in the new page): the
+    // browser restarts a moved line's slide from its beginning, so each is
+    // measured again and put back on the lines' shared beat.
+    function moved() {
+        scrolls.forEach(function (m) { m.refresh(); });
+    }
+
+    return { render: render, refreshTimes: refreshTimes, toLatest: toLatest, moved: moved };
 }
 
 // Polled with the shell's other live parts; a copy read this long ago is
@@ -807,7 +814,10 @@ export function startEventLog(env) {
             load();
             return;
         }
-        if (copy !== section) copy.replaceWith(section);
+        if (copy !== section) {
+            copy.replaceWith(section);
+            log.moved();
+        }
         if (env.now() - readAt > STALE_MS) load();
     }
 

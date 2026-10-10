@@ -1192,10 +1192,13 @@ await run('the lines slide in step: one beat, each its own distance, a later lin
   check('the new line slides, in step', added.getAttribute('data-marquee') === 'run' && t.slides.startOf(added) === 0);
   check('every sliding line, old and new, on the same time', moving.length === 3 && moving.every((b) => time(b) === want2), moving.map(time).concat(want2));
   check('every sliding line on the beat', moving.every((b) => t.slides.startOf(b) === 0));
-  // A soft navigation keeps them in step.
+  // A soft navigation moves the section into the new page, and the browser
+  // restarts a moved slide from its beginning (no resize is reported: the
+  // boxes keep their size). The lines are put back on the beat at once.
+  moving.forEach((b) => { b.firstElementChild.getAnimations()[0].startTime = 123456; });
   t.swap();
-  t.slides.resize();
-  check('the next page: all still on one time and the beat', moving.every((b) => b.isConnected && time(b) === want2 && t.slides.startOf(b) === 0));
+  check('the next page: every line back on the beat at once, with no resize', moving.every((b) => b.isConnected && time(b) === want2 && t.slides.startOf(b) === 0),
+    moving.map((b) => t.slides.startOf(b)));
 });
 
 await run('reduced motion: no line moves, and the ellipsis and the whole title stay', async (make) => {
