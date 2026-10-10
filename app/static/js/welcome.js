@@ -164,15 +164,26 @@
   }
 
   /* Add: the browser's own prompt where it has given us one (Chrome,
-     Android), else the steps to take in its menu. */
+     Android), else the steps to take in its menu. The step's buttons stay
+     usable meanwhile: the browser's prompt is its own dialog, and one that
+     never answers must not leave the tour stuck. */
   function addIt(ctl) {
     var inst = window.WS && window.WS.install;
     if (window.WSInstallPrompt && inst && typeof inst.prompt === 'function') {
-      return inst.prompt().then(function (outcome) {
-        ask().set('install', outcome === 'accepted' ? 'done' : 'later');
-        ctl.next();
+      inst.prompt().then(function (outcome) {
+        if (outcome === 'accepted' || outcome === 'dismissed') {
+          ask().set('install', outcome === 'accepted' ? 'done' : 'later');
+          ctl.next();
+        } else {
+          menuSteps(ctl);      // nothing was shown after all
+        }
       });
+      return;
     }
+    menuSteps(ctl);
+  }
+
+  function menuSteps(ctl) {
     ctl.update({
       body: 'Add it from your browser’s menu:',
       list: phone() ? PHONE_MENU_STEPS : DESKTOP_MENU_STEPS,

@@ -425,6 +425,32 @@ await scenario('Add to home screen: the browser’s own prompt where there is on
   await w.happyDOM.close();
 });
 
+await scenario('a browser prompt that never answers leaves the step usable', async () => {
+  const { w, d } = browser({ width: 390, ua: 'android', prompt: 'accepted' });
+  w.WS.install.prompt = () => new Promise(() => {});
+  visit(w);
+  await wait(10);
+  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  action(d, 'Add to home screen').click();
+  await wait(10);
+  check('buttons not held', !action(d, 'Not now').disabled);
+  action(d, 'Not now').click();
+  check('Not now still moves on', title(d) === 'Calendar' && key(w, 'ws-install-ask') === 'later');
+  await w.happyDOM.close();
+});
+
+await scenario('a browser prompt that shows nothing falls back to the menu steps', async () => {
+  const { w, d } = browser({ width: 390, ua: 'android', prompt: 'accepted' });
+  w.WS.install.prompt = () => Promise.resolve(null);
+  visit(w);
+  await wait(10);
+  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  action(d, 'Add to home screen').click();
+  await wait(10);
+  check('the steps', listed(d).length === 2 && JSON.stringify(actions(d)) === JSON.stringify(['Done', 'Not now']), actions(d));
+  await w.happyDOM.close();
+});
+
 await scenario('Add to home screen: the menu steps where there is no prompt', async () => {
   const { w, d } = browser({ width: 390, ua: 'android' });
   visit(w);
