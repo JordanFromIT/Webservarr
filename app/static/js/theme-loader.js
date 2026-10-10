@@ -189,6 +189,9 @@
  *            never a soft navigation)
  *   'never'  "Don't ask me again", confirmed: nothing asks again
  *   'done'   (install only) added, or the steps to add it were shown
+ * and kind 'blocked' (ws-push-blocked-seen), the bell's "notifications are
+ * blocked" notice: 'shown' once it has been shown, so it is not shown on
+ * every load; 'later' after its Not now, so the next visit shows it again.
  * WSAsk.snoozed(kind): set to 'later' during this load of the document, so
  * nothing asks about it again until the next one. Every set() and
  * markAsked() is announced as a ws:ask event on document, for the bell.
@@ -207,7 +210,7 @@
  */
 (function () {
   'use strict';
-  var KEYS = { push: 'ws-push-ask', install: 'ws-install-ask' };
+  var KEYS = { push: 'ws-push-ask', install: 'ws-install-ask', blocked: 'ws-push-blocked-seen' };
   var WELCOME_SEEN = 'webservarr_welcome_v2_seen';
   var askedBy = '';
 

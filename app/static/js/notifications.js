@@ -447,6 +447,8 @@
   // one notice per visit: notifications first, except on an iPhone or iPad
   // in a browser tab, where the home screen comes first (push needs it), as
   // in the tour. The home screen never on a wide screen or from inside it.
+  // Blocked in the browser, the notice says how to unblock it once; it comes
+  // back on a later visit only after its Not now (WSAsk 'blocked').
   //
   // It lives only here: never in the server's list, never marked read there.
   // It counts as one unread in the badge until the list is opened or the
@@ -459,6 +461,7 @@
   var _noticeView = '';       // '' | 'confirm' | 'menu' | 'error'
   var _noticeError = '';
   var _noticeBusy = false;
+  var _blockedShown = false;  // the blocked notice is this visit's one
 
   // Literal class lists, so Tailwind compiles them.
   var NOTICE_BTN = {
@@ -476,6 +479,9 @@
     if (state === 'never') return false;
     if (kind === 'install') return state !== 'done' && a.homeOffered();
     var push = a.pushKind();
+    // Blocked in the browser: said once, then again only after its Not now
+    // (WSAsk 'blocked': 'shown' until a Not now makes it 'later').
+    if (push === 'blocked' && !_blockedShown && a.get('blocked') === 'shown') return false;
     return push !== 'granted' && push !== 'unsupported';
   }
 
@@ -487,6 +493,12 @@
       var order = a && a.pushKind() === 'ios' ? ['install', 'push'] : ['push', 'install'];
       for (var i = 0; i < order.length && !_noticeKind; i++) {
         if (noticeAllowed(order[i])) _noticeKind = order[i];
+      }
+      // Chosen, and it is the blocked one: recorded as shown, so a person
+      // who leaves it be is not shown it again on the next load.
+      if (_noticeKind === 'push' && a.pushKind() === 'blocked') {
+        _blockedShown = true;
+        a.set('blocked', 'shown');
       }
     }
     return _noticeKind && noticeAllowed(_noticeKind) ? _noticeKind : '';
@@ -585,6 +597,9 @@
       });
       buttons.push(b);
       if (a.kind === 'link') { link = b; return; }
+      // A quiet button that leads the row (no primary beside it) sits on the
+      // words' edge: its padding is pulled back out to the left.
+      if (a.kind === 'quiet' && !row.firstChild) b.classList.add('-ms-2.5');
       row.appendChild(b);
       if (a.focus && !wanted) wanted = b;
     });
@@ -615,6 +630,8 @@
     _noticeUnread = false;
     _noticeBusy = false;
     if (asker() && kind) asker().set(kind, value);
+    // The blocked notice's Not now: shown again on the next visit.
+    if (asker() && _blockedShown && value === 'later') asker().set('blocked', 'later');
     renderNotice();
     drawBadge();
   }

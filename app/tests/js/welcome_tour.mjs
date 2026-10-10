@@ -395,6 +395,7 @@ await scenario('Not now asks again on the next load, not on a soft navigation', 
   check('the notice heads the list', notice(n) && notice(n).parentElement.parentElement.firstChild === notice(n).parentElement);
   check('its words', noticeTitle(n) === 'Turn on notifications' && noticeBody(n) === PUSH_WORDS, [noticeTitle(n), noticeBody(n)]);
   check('its buttons', JSON.stringify(noticeActions(n)) === JSON.stringify(PUSH_OFFER), noticeActions(n));
+  check('Not now beside Turn on keeps its place', !noticeAction(n, 'Not now').classList.contains('-ms-2.5'));
   check('real buttons', Array.from(notice(n).querySelectorAll('button')).every((b) => b.type === 'button'));
   check('a labelled group', notice(n).getAttribute('role') === 'group' && notice(n).getAttribute('aria-labelledby') === 'wsNoticeTitle');
   await wait(450);
@@ -782,16 +783,73 @@ await scenario('Turn on: a failure says why and keeps the buttons', async () => 
 await scenario('blocked: how to unblock, no Turn on', async () => {
   const { w, d } = browser({ store: LATER, permission: 'denied' });
   await bellUp(w);
+  check('counted in the badge', badge(d) === '1', badge(d));
+  check('recorded as shown on its first visit', key(w, 'ws-push-blocked-seen') === 'shown');
   await openBell(d);
   check('the words', noticeTitle(d) === 'Notifications are blocked' &&
         noticeBody(d) === 'This browser is blocking notifications from this site. To get them here, allow notifications in the browser’s site settings, then reload the page.', [noticeTitle(d), noticeBody(d)]);
   check('the tour says the same', /allow notifications in the browser’s site settings, then reload the page\.$/.test(
     Object.assign({}, w.WSWelcome.steps().find((s) => s.title === 'Notifications')).view().body));
   check('Not now and Don’t ask me again', JSON.stringify(noticeActions(d)) === JSON.stringify(['Not now', 'Don’t ask me again']), noticeActions(d));
+  check('a lone Not now sits on the words’ edge', noticeAction(d, 'Not now').classList.contains('-ms-2.5'));
   noticeAction(d, 'Don’t ask me again').click();
   noticeAction(d, 'Stop asking').click();
   check('silenced', key(w, 'ws-push-ask') === 'never' && !notice(d));
   await w.happyDOM.close();
+});
+
+await scenario('blocked: shown once, again only after its Not now', async () => {
+  const load = async (store) => {
+    const b = browser({ store, permission: 'denied' });
+    await bellUp(b.w);
+    return b;
+  };
+  // Never answered by the tour either ('' ): the first load says it.
+  const first = await load({ [SEEN]: '1' });
+  check('first load: shown', badge(first.d) === '1');
+  await openBell(first.d);
+  check('first load: the blocked words', noticeTitle(first.d) === 'Notifications are blocked');
+  const ignored = Object.assign({}, first.w.localStorage);
+  await first.w.happyDOM.close();
+
+  // Left alone (the list opened, nothing pressed): not on the next load.
+  const second = await load(ignored);
+  check('ignored: not shown again', badge(second.d) === '', badge(second.d));
+  await openBell(second.d);
+  check('ignored: not in the list', !notice(second.d));
+  await second.w.happyDOM.close();
+
+  // Not now: back on the next visit, once.
+  const third = await load(Object.assign({}, ignored, { 'ws-push-blocked-seen': '' }));
+  await openBell(third.d);
+  check('shown again when unseen', noticeTitle(third.d) === 'Notifications are blocked');
+  noticeAction(third.d, 'Not now').click();
+  check('Not now: gone for this visit', !notice(third.d) && key(third.w, 'ws-push-blocked-seen') === 'later' && key(third.w, 'ws-push-ask') === 'later');
+  const afterLater = Object.assign({}, third.w.localStorage);
+  await third.w.happyDOM.close();
+
+  const fourth = await load(afterLater);
+  check('after Not now: shown on the next visit', badge(fourth.d) === '1', badge(fourth.d));
+  check('and recorded as shown again', key(fourth.w, 'ws-push-blocked-seen') === 'shown');
+  await openBell(fourth.d);
+  check('the same notice', noticeTitle(fourth.d) === 'Notifications are blocked');
+  const ignoredAgain = Object.assign({}, fourth.w.localStorage);
+  await fourth.w.happyDOM.close();
+
+  const fifth = await load(ignoredAgain);
+  check('left alone again: not shown', badge(fifth.d) === '', badge(fifth.d));
+  await fifth.w.happyDOM.close();
+
+  // Don't ask me again: never, even with the marker cleared.
+  const never = await load({ [SEEN]: '1', 'ws-push-ask': 'never' });
+  check('never: not shown', badge(never.d) === '');
+  await never.w.happyDOM.close();
+
+  // Not blocked: the marker plays no part in the normal reminder.
+  const normal = browser({ store: { [SEEN]: '1', 'ws-push-ask': 'later', 'ws-push-blocked-seen': 'shown' } });
+  await bellUp(normal.w);
+  check('a normal reminder ignores the marker', badge(normal.d) === '1', badge(normal.d));
+  await normal.w.happyDOM.close();
 });
 
 await scenario('an iPhone in Safari: the home screen first, then why push needs it', async () => {
@@ -814,6 +872,7 @@ await scenario('an iPhone in Safari: the home screen first, then why push needs 
         /only arrive in the home screen app: add it/.test(noticeBody(push.d)), [noticeTitle(push.d), noticeBody(push.d)]);
   check('with the steps to add it', noticeList(push.d).length === 2, noticeList(push.d));
   check('no Turn on in a Safari tab', JSON.stringify(noticeActions(push.d)) === JSON.stringify(['Not now', 'Don’t ask me again']), noticeActions(push.d));
+  check('its lone Not now sits on the words’ edge', noticeAction(push.d, 'Not now').classList.contains('-ms-2.5'));
   await push.w.happyDOM.close();
 });
 
