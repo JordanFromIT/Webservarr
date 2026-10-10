@@ -539,5 +539,26 @@ await run('a book opened from a person moves focus to Close, inside the dialog',
   check('focus stays in the dialog', t.doc.activeElement === t.q('[data-ins-close]'));
 });
 
+await run('a start counted from Plex app time says it is an estimate', async (make) => {
+  const t = await mounted(make, {
+    books: () => ({ body: Object.assign({}, BOOKS_ANSWER, { finish: [Object.assign({}, BOOKS_ANSWER.finish[0], { started_plex: 1 })] }) }),
+    book: () => ({ body: Object.assign({}, BOOK_ANSWER, { totals: Object.assign({}, BOOK_ANSWER.totals, { started_plex: 1 }) }) })
+  });
+  check('in the finish list', rr(t.text('[data-ins-finish]')).includes('3 started (1 from Plex app time, an estimate) · 1 finished · 33%'));
+  t.q('[data-ins-finish] [data-ins-book="1"]').click();
+  await flush();
+  const totals = rr(t.text('[data-ins-totals]'));
+  check('in the book', totals.includes('Started (1 from Plex app time, an estimate)3') && totals.includes('Finish rate (an estimate)33%'), totals);
+});
+
+await run('a book with no start from Plex app time keeps its plain labels', async (make) => {
+  const t = await mounted(make);
+  check('the finish list', !rr(t.text('[data-ins-finish]')).includes('Plex app time'));
+  t.q('[data-ins-finish] [data-ins-book="1"]').click();
+  await flush();
+  const totals = rr(t.text('[data-ins-totals]'));
+  check('the book', totals.includes('Started3Finished1Finish rate33%'), totals);
+});
+
 console.log(`insights page: ${total - failed}/${total} checks pass`);
 process.exit(failed ? 1 : 0);

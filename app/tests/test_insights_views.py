@@ -88,8 +88,20 @@ class Books(Base):
         self.assertEqual(got["never_opened"]["count"], 2)
         self.assertEqual([b["title"] for b in got["never_opened"]["items"]], ["Walden", "Ulysses"])
         self.assertEqual(got["finish"], [{"book_id": 1, "title": "Dune", "author": "An Author", "started": 3,
-                                          "finished": 1, "rate": 33,
+                                          "started_plex": 0, "finished": 1, "rate": 33,
                                           "drop_off": {"chapter": "Chapter 7", "people": 2}}])
+
+    def test_plex_app_listening_starts_a_book_in_the_period(self):
+        self.book(1, "Dune", keys=["5:1", "5:2"])
+        self.place(ME, "5:1", NOW - timedelta(days=2), ms=1200000)
+        plays = [insights.Play(THEM, "5:1", NOW - timedelta(days=3), 180000),       # two tracks, two editions:
+                 insights.Play(THEM, "5:2", NOW - timedelta(days=3), 180000),       # 6 min in all, a start
+                 insights.Play(ME, "5:1", NOW - timedelta(days=2), 3600000),        # already started on the web
+                 insights.Play("plex:3003", "5:1", NOW - timedelta(days=3), 240000),     # 4 min, a mis-tap
+                 insights.Play("plex:4004", "5:1", NOW - timedelta(days=60), 3600000)]   # before the period
+        got = insights.books_view(self.db, self.src(plays=plays), "30d")
+        self.assertEqual([(f["title"], f["started"], f["started_plex"], f["finished"], f["rate"])
+                          for f in got["finish"]], [("Dune", 2, 1, 0, 0)])
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -104,11 +116,20 @@ class BookDetail(Base):
         got = insights.book_view(self.db, self.src(plays=[], names={"1001": "Sam"}), 1)
         self.assertEqual([(p["name"], p["percent"], p["listened_ms"]) for p in got["people"]],
                          [("Sam", 50, 3600000), ("Account 2002", 2, 0)])
-        self.assertEqual(got["totals"], {"started": 2, "finished": 0, "rate": 0, "listened_ms": 3600000,
-                                         "plex_ms": 0})
+        self.assertEqual(got["totals"], {"started": 2, "started_plex": 0, "finished": 0, "rate": 0,
+                                         "listened_ms": 3600000, "plex_ms": 0})
         self.assertIsNone(got["drop_off"])                       # one person is not a drop-off point
         self.assertEqual([r["name"] for r in got["requested_by"]], ["Account 2002"])
         self.assertIsNone(insights.book_view(self.db, self.src(plays=[]), 99))
+
+    def test_plex_app_listening_counts_as_a_start(self):
+        self.book(1, "Dune", keys=["5:1"])
+        self.place(ME, "5:1", NOW - timedelta(days=1), ms=60000)                 # a mis-tap, not a start
+        plays = [insights.Play(THEM, "5:1", NOW - timedelta(days=5, hours=n), 3600000) for n in range(80)]
+        plays.append(insights.Play(ME, "5:1", NOW - timedelta(days=1), 120000))  # 2 min: still a mis-tap
+        got = insights.book_view(self.db, self.src(plays=plays), 1)
+        self.assertEqual(got["totals"], {"started": 1, "started_plex": 1, "finished": 0, "rate": 0,
+                                         "listened_ms": 0, "plex_ms": 80 * 3600000 + 120000})
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

@@ -405,6 +405,11 @@ export async function mount(ctx) {
     });
   }
 
+  // Plex's history has no place in a book: a start from Plex app time alone is an estimate.
+  function fromPlex(count) {
+    return num(count) ? ' (' + num(count) + ' from Plex app time, an estimate)' : '';
+  }
+
   /** One figure: what it is, then the number (shown above its words). */
   function figure(value, label) {
     const dl = el('dl', 'flex flex-col-reverse');
@@ -724,7 +729,7 @@ export async function mount(ctx) {
     } else {
       const list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
       finish.forEach(function (f) {
-        let words = num(f.started) + ' started · ' + num(f.finished) + ' finished · ' + num(f.rate) + '%';
+        let words = num(f.started) + ' started' + fromPlex(f.started_plex) + ' · ' + num(f.finished) + ' finished · ' + num(f.rate) + '%';
         if (f.drop_off && text(f.drop_off.chapter)) {
           words += ' · most who stopped, stopped in ' + f.drop_off.chapter + ' (' + people(f.drop_off.people) + ')';
         }
@@ -887,9 +892,9 @@ export async function mount(ctx) {
     const t = data.totals && typeof data.totals === 'object' ? data.totals : {};
     const row = el('div', 'mt-4 grid grid-cols-2 gap-x-8 gap-y-4 sm:flex sm:flex-wrap sm:gap-x-12');
     row.setAttribute('data-ins-totals', '');
-    row.appendChild(figure(num(t.started).toLocaleString(), 'Started'));
+    row.appendChild(figure(num(t.started).toLocaleString(), 'Started' + fromPlex(t.started_plex)));
     row.appendChild(figure(num(t.finished).toLocaleString(), 'Finished'));
-    row.appendChild(figure(num(t.rate) + '%', 'Finish rate'));
+    row.appendChild(figure(num(t.rate) + '%', 'Finish rate' + (num(t.started_plex) ? ' (an estimate)' : '')));
     row.appendChild(figure(duration(t.listened_ms), 'In the web player'));
     if (num(t.plex_ms)) row.appendChild(figure(duration(t.plex_ms), 'In Plex apps (an estimate)'));
     box.appendChild(row);

@@ -330,6 +330,20 @@ def app_plays(plays: List[Play], web: List[Listen]) -> List[Play]:
     return kept
 
 
+def plex_started(plays: Iterable[Play], ident_of) -> Dict[tuple, Set[str]]:
+    """{book ident: the people whose Plex app time in it, all editions
+    together, is STARTED_MS or more}. Plex's history has no place in the
+    book, so this start is an estimate and never a finish."""
+    heard: Counter = Counter()
+    for play in plays:
+        heard[(ident_of(play.book_key), play.identity)] += play.ms
+    out: Dict[tuple, Set[str]] = {}
+    for (ident, identity), ms in heard.items():
+        if ms >= STARTED_MS:
+            out.setdefault(ident, set()).add(identity)
+    return out
+
+
 # --- People, books and places -----------------------------------------------------
 
 def short_name(identity: str) -> str:
@@ -847,8 +861,10 @@ def books_view(db: Session, src: Sources, period: str) -> dict:
     """Spec section 7, Books: abandoned places (unfinished, untouched for
     ABANDONED, at least STARTED_MS in for audio), the live books no one has
     opened (newest added first), and the finish rate of every book two or
-    more people started in the period (their place moved in it), with the
-    chapter DROP_OFF_MIN or more of the abandoned ones stopped in."""
+    more people started in the period (their place moved in it, or their
+    Plex app time in it reached STARTED_MS, an estimate counted in
+    started_plex), with the chapter DROP_OFF_MIN or more of the abandoned
+    ones stopped in."""
     now = src.now
     since = since_of(period, now)
     cutoff = now - ABANDONED
@@ -884,7 +900,8 @@ def books_view(db: Session, src: Sources, period: str) -> dict:
     per_book: Dict[tuple, dict] = {}
 
     def row_for(ident: tuple, info: BookInfo) -> dict:
-        return per_book.setdefault(ident, {"info": info, "started": set(), "finished": set(), "stops": Counter()})
+        return per_book.setdefault(ident, {"info": info, "started": set(), "finished": set(), "plex": set(),
+                                           "stops": Counter()})
 
     for p in places:
         if (p.book_ms < STARTED_MS and not p.finished) or (since is not None and p.updated_at < since):
@@ -903,6 +920,12 @@ def books_view(db: Session, src: Sources, period: str) -> dict:
         row["started"].add(e.identity)
         if e.finished:
             row["finished"].add(e.identity)
+    in_period = [x for x in plays if since is None or x.at >= since]
+    by_ident = {_ident(infos[x.book_key], x.book_key): infos[x.book_key] for x in in_period}
+    for ident, heard in plex_started(in_period, lambda key: _ident(infos[key], key)).items():
+        row = row_for(ident, by_ident[ident])
+        row["plex"] |= heard - row["started"]
+        row["started"] |= heard
     finish = []
     for row in per_book.values():
         started = len(row["started"])
@@ -910,7 +933,7 @@ def books_view(db: Session, src: Sources, period: str) -> dict:
             continue
         chapter, count = (row["stops"].most_common(1) or [(None, 0)])[0]
         finish.append({"book_id": row["info"].book_id, "title": row["info"].title, "author": row["info"].author,
-                       "started": started, "finished": len(row["finished"]),
+                       "started": started, "started_plex": len(row["plex"]), "finished": len(row["finished"]),
                        "rate": round(100 * len(row["finished"]) / started),
                        "drop_off": {"chapter": chapter, "people": count} if count >= DROP_OFF_MIN else None})
     finish.sort(key=lambda f: (-f["started"], f["rate"], f["title"].casefold()))
@@ -925,7 +948,8 @@ def books_view(db: Session, src: Sources, period: str) -> dict:
 
 def book_view(db: Session, src: Sources, book_id: int) -> Optional[dict]:
     """Spec section 7, one book: everyone's progress, time and finish in it
-    (all its editions and its ebook), its totals and drop-off chapter, and
+    (all its editions and its ebook), its totals (a start from Plex app time
+    alone is an estimate, counted in started_plex) and drop-off chapter, and
     who asked for it (by folded title). None for an id that is no book's;
     a merged book's id answers for the book it became."""
     book, survivor = book_catalog.resolve_book(db, book_id)
@@ -980,6 +1004,8 @@ def book_view(db: Session, src: Sources, book_id: int) -> Optional[dict]:
                     if not p.finished and p.updated_at < cutoff and p.book_ms >= STARTED_MS and p.chapter)
     started = {p.identity for p in places if p.book_ms >= STARTED_MS or p.finished} | {
         e.identity for e in ebooks if e.started}
+    from_plex = plex_started(plays, lambda _key: book.id).get(book.id, set()) - started
+    started |= from_plex
     finished = {p.identity for p in places if p.finished} | {e.identity for e in ebooks if e.finished}
     chapter, count = (stops.most_common(1) or [(None, 0)])[0]
     listed = sorted(people.items(), key=lambda item: item[1]["last"] or datetime.min, reverse=True)
@@ -989,7 +1015,7 @@ def book_view(db: Session, src: Sources, book_id: int) -> Optional[dict]:
                         "percent": row["percent"], "finished": row["finished"], "listened_ms": row["listened_ms"],
                         "plex_ms": row["plex_ms"], "last_at": utc_iso(row["last"])}
                        for identity, row in listed[:LIST_MAX]],
-            "totals": {"started": len(started), "finished": len(finished),
+            "totals": {"started": len(started), "started_plex": len(from_plex), "finished": len(finished),
                        "rate": round(100 * len(finished) / len(started)) if started else 0,
                        "listened_ms": sum(x.ms for x in mine), "plex_ms": sum(x.ms for x in plays)},
             "drop_off": {"chapter": chapter, "people": count} if count >= DROP_OFF_MIN else None,
