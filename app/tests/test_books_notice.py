@@ -74,6 +74,10 @@ class NoticeState(unittest.TestCase):
 class NoticeRoute(unittest.TestCase):
     def setUp(self):
         self.Session = helpers.make_sessionmaker()
+        # The setup gate reads the real settings table: past setup, as on a running site.
+        p = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        p.start()
+        self.addCleanup(p.stop)
         self.addCleanup(helpers.reset_overrides)
 
     def client(self, user):
