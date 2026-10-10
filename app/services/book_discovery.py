@@ -189,7 +189,7 @@ def store_popularity(db: Session, plays: Optional[list], now: Optional[datetime]
 async def refresh(now: Optional[datetime] = None) -> None:
     """The leader's hourly pass: popularity (Plex's history read first; when
     it cannot be read, WebServarr's own data alone) and the listening
-    rollup."""
+    rollup by day and by hour."""
     now = now or _now()
     try:
         plays = await pp.play_history(now - POPULAR_WINDOW)
@@ -202,6 +202,7 @@ async def refresh(now: Optional[datetime] = None) -> None:
         try:
             store_popularity(db, plays, now)
             listening.roll_up(db, now)
+            listening.roll_up_hours(db, now)
         except BaseException:
             db.rollback()
             raise

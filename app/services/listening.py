@@ -33,7 +33,9 @@ the save's own transaction, and the claims table's key lets SQLite itself
 refuse a second claim (claim_link).
 
 The log keeps every stored check-in for the history view and is pruned after
-LOG_DAYS. Pruning runs at startup and then at most once a day, piggybacked on
+LOG_DAYS. Before rows go, the log is rolled up by day (listening_daily) and by
+hour, book and source (listening_hourly, for the admin's Insights page).
+Pruning runs at startup and then at most once a day, piggybacked on
 check-ins; the last run is a settings row (PRUNED_AT_KEY) rather than a module
 variable, because uvicorn runs two workers that share nothing but the database
 and Redis.
@@ -308,7 +310,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
             kept_ms = row.book_duration_ms
             db.rollback()
             db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                                device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
+                                device=device, device_id=device_id, event=event, at=now, source=source,
+                                **logged(kept_ms)))
             claim()
             db.commit()
             return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict, **claimed}
@@ -326,7 +329,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     if about["book_ms"] is not None and about["book_duration_ms"] is None:
         kept_ms = db.query(P.book_duration_ms).filter(*mine).scalar()
     db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                        device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
+                        device=device, device_id=device_id, event=event, at=now, source=source,
+                        **logged(kept_ms)))
     claim()
     db.commit()
 
@@ -866,6 +870,13 @@ ROLLED_THROUGH_KEY = "listening.rolled_through"
 ROLLED_LOG_ID_KEY = "listening.rolled_log_id"
 # A day is rolled up only once its last row's gap can no longer be followed by a new row.
 ROLL_MARGIN = timedelta(minutes=1)
+# Internal row, as ROLLED_THROUGH_KEY: where listening_hourly ends (the end,
+# exclusive, of the last hour rolled up), ISO 8601 UTC.
+HOURS_THROUGH_KEY = "listening.hours_through"
+# Hours this close before the marker are worked out again on every pass, so
+# check-ins that arrive late (a phone that synced afterwards) still count.
+HOURS_REDO = timedelta(hours=48)
+HOURLY_KEEP_DAYS = 730
 
 
 def listened_spans(rows) -> list:
@@ -1026,17 +1037,80 @@ def roll_up(db: Session, now: Optional[datetime] = None) -> int:
     return len(totals) + len(late)
 
 
+def _hour(at: datetime) -> datetime:
+    return at.replace(minute=0, second=0, microsecond=0)
+
+
+def hours_through(db: Session) -> Optional[datetime]:
+    """Where listening_hourly ends (the end of its last hour, naive UTC), or None before the first rollup."""
+    row = db.query(Setting.value).filter(Setting.key == HOURS_THROUGH_KEY).first()
+    return _parse_stamp(row[0]) if row else None
+
+
+def roll_up_hours(db: Session, now: Optional[datetime] = None) -> int:
+    """Roll the log up into listening_hourly: per listener, UTC hour, book
+    and source, the time listened (listened_spans, the wall time Your stats
+    counts). Every complete hour from HOURS_REDO before the marker on is
+    worked out again from the log and replaces what was there; an hour older
+    than that is final. The first pass starts at the oldest log row, so the
+    whole log is rolled up at once. Returns how many hour rows were written.
+    Safe with two workers: the first statement is a write, so SQLite's write
+    lock is held before the marker is read."""
+    from app.models import ListeningHourly
+
+    now = _naive_utc(now)
+    end = _hour(now - ROLL_MARGIN)
+    H, L = ListeningHourly, ListeningLog
+    db.query(H).filter(H.id < 0).delete(synchronize_session=False)
+    done = hours_through(db)
+    if done is None:
+        oldest = db.query(func.min(L.at)).scalar()
+        start = _hour(oldest) if oldest is not None else end
+    else:
+        start = min(done, end) - HOURS_REDO
+    if start >= end:
+        db.commit()
+        return 0
+    rows = (db.query(L.identity, L.at, L.event, L.book_key, L.source)
+            .filter(L.at >= start, L.at < end + LISTEN_GAP)
+            .order_by(L.identity, L.at, L.id).all())
+    by_identity: dict = {}
+    for identity, at, event, book, source in rows:
+        by_identity.setdefault(identity, []).append((at, event, book, source))
+    totals: dict = {}
+    for identity, mine in by_identity.items():
+        spans = listened_spans((at, event, book) for at, event, book, _source in mine)
+        for (at, book, ms), (_at, _event, _book, source) in zip(spans, mine):
+            if ms and at < end:
+                key = (identity, _hour(at), book, source or "web")
+                totals[key] = totals.get(key, 0) + ms
+    db.query(H).filter(H.hour >= start, H.hour < end).delete(synchronize_session=False)
+    for (identity, hour, book, source), ms in totals.items():
+        db.add(H(identity=identity, hour=hour, book_key=book, source=source, ms=ms))
+    _put_marker(db, HOURS_THROUGH_KEY, utc_iso(end), "Listening rolled up by hour through (internal)")
+    db.commit()
+    return len(totals)
+
+
 def prune_log(db: Session, now: Optional[datetime] = None) -> int:
     """Delete log rows older than LOG_DAYS; returns how many. Positions stay.
-    The days about to go are rolled up first (roll_up), and nothing after
-    the last rolled-up day is ever deleted, so all-time totals survive."""
+    The days and hours about to go are rolled up first (roll_up,
+    roll_up_hours), and nothing after the last rolled-up day, or within
+    HOURS_REDO before the hourly marker, is ever deleted, so all-time totals
+    and the hours survive. Hour rows older than HOURLY_KEEP_DAYS go too."""
+    from app.models import ListeningHourly
+
     now = _naive_utc(now)
     roll_up(db, now)
-    cutoff = now - timedelta(days=LOG_DAYS)
+    roll_up_hours(db, now)
     done = rolled_through(db)
     kept_from = datetime.combine(done + timedelta(days=1), datetime.min.time()) if done else datetime.min
-    cutoff = min(cutoff, kept_from)
+    hours = hours_through(db)
+    hours_kept_from = hours - HOURS_REDO if hours is not None else datetime.min
+    cutoff = min(now - timedelta(days=LOG_DAYS), kept_from, hours_kept_from)
     n = db.query(ListeningLog).filter(ListeningLog.at < cutoff).delete(synchronize_session=False)
+    db.query(ListeningHourly).filter(ListeningHourly.hour < now - timedelta(days=HOURLY_KEEP_DAYS)).delete(
+        synchronize_session=False)
     # SQLite numbers a new row one above the highest id left, so once the
     # newest rows are gone, ids at or below the log id marker come round
     # again: lower it, or roll_up would take those rows for ones it had seen.

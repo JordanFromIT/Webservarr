@@ -181,6 +181,30 @@ def migrate_listening_book_fields(db: Session) -> None:
             db.commit()
 
 
+def migrate_listening_log_source(db: Session) -> None:
+    """One-time migration: add listening_log.source in existing databases.
+
+    Every row logged before it came from the web player, the only writer of
+    the log, so existing rows take 'web'. Guarded by PRAGMA table_info and
+    idempotent, like migrate_listening_device_id; a worker that loses the
+    race to the other one ignores its "duplicate column" error.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(listening_log)"))}
+    if not columns or "source" in columns:
+        return  # no table yet (create_all makes it with the column) or done
+    try:
+        db.execute(text("ALTER TABLE listening_log ADD COLUMN source VARCHAR(10) NOT NULL DEFAULT 'web'"))
+        db.commit()
+        logger.info("Added listening_log.source")
+    except OperationalError as exc:
+        db.rollback()
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
 def migrate_books_catalog_v2(db: Session) -> None:
     """One-time migration for databases that made the Books catalog tables
     in an earlier shape (the ebook was a whole Kavita series; a book held one

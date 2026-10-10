@@ -92,7 +92,8 @@ def init_db():
         migrate_nav_sublabels_v2, migrate_home_sublabel_v3, migrate_wiki_sublabel_v4,
         migrate_ticket_creator_email, migrate_ticket_identity, migrate_drop_push_username_rows,
         migrate_user_uid, migrate_local_usernames_snapshot, migrate_listening_device_id,
-        migrate_listening_book_fields, migrate_listening_claims, migrate_no_email_identity,
+        migrate_listening_book_fields, migrate_listening_log_source, migrate_listening_claims,
+        migrate_no_email_identity,
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_home_services_off_v1, migrate_books_catalog_v2,
         migrate_books_nav_v1, migrate_page_order_books_v1, migrate_book_announced, migrate_welcome_post_v2,
@@ -111,6 +112,8 @@ def init_db():
         # time, length, chapter, work key and narrator columns.
         migrate_listening_device_id(db)
         migrate_listening_book_fields(db)
+        # The log says where each check-in came from (Insights' web and Plex split).
+        migrate_listening_log_source(db)
         # One successor per earlier copy: the links rows hold get their claims.
         migrate_listening_claims(db)
         migrate_books_catalog_v2(db)

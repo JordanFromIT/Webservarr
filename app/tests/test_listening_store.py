@@ -62,7 +62,7 @@ class Tables(StoreBase):
         cols = {c["name"] for c in insp.get_columns("listening_log")}
         self.assertEqual(cols, {"id", "identity", "book_key", "track_key", "offset_ms", "device", "device_id",
                                 "event", "at", "book_ms", "book_duration_ms", "chapter_label", "work_key",
-                                "narrator"})
+                                "narrator", "source"})
         self.assertIn(["identity", "book_key", "at"],
                       [i["column_names"] for i in insp.get_indexes("listening_log")])
         self.assertIn(["identity", "work_key"],
@@ -943,7 +943,7 @@ class BookFieldsMigration(unittest.TestCase):
         import logging
         from sqlalchemy import text
         from sqlalchemy.orm import sessionmaker
-        from app.seed import migrate_listening_book_fields
+        from app.seed import migrate_listening_book_fields, migrate_listening_log_source
         db = sessionmaker(bind=self.old_file_db())()
         try:
             with self.assertLogs("app.seed", level=logging.INFO):
@@ -961,6 +961,7 @@ class BookFieldsMigration(unittest.TestCase):
                 "book_title FROM listening_positions")).one()), (10, None, None, None, None, None, None, None))
             self.assertEqual(tuple(db.execute(text("SELECT event, book_ms, work_key FROM listening_log")).one()),
                              ("pause", None, None))
+            migrate_listening_log_source(db)
             # The store works on the upgraded tables: the old row reads with
             # nulls, and a new save and a lookup work.
             pos = listening.get_position(db, "plex:1", "5:1")
@@ -1826,7 +1827,7 @@ class ManualFlagMigration(unittest.TestCase):
         import logging
         from sqlalchemy import text
         from sqlalchemy.orm import sessionmaker
-        from app.seed import migrate_listening_book_fields
+        from app.seed import migrate_listening_book_fields, migrate_listening_log_source
         db = sessionmaker(bind=self.old_file_db())()
         try:
             with self.assertLogs("app.seed", level=logging.INFO) as logs:
@@ -1842,6 +1843,7 @@ class ManualFlagMigration(unittest.TestCase):
             self.assertEqual(tuple(db.execute(text("SELECT earlier_key, holder_key, state, manual "
                                                    "FROM listening_claims")).one()),
                              ("300:1", "400:1", "verified", None))
+            migrate_listening_log_source(db)
             # The store works on the upgraded tables.
             checkin(db, identity="plex:1", book="410:1", author="Cal Penn")
             self.assertIs(listening.claim_link(db, "plex:1", "410:1", "301:1", True, manual=True), True)

@@ -477,6 +477,9 @@ class ListeningLog(Base):
     chapter_label = Column(String(200), nullable=True)
     work_key = Column(String(32), nullable=True)
     narrator = Column(String(200), nullable=True)
+    # Where the check-in came from, as ListeningPosition.source: web, plex or
+    # local. Rows logged before this column existed are all the web player's.
+    source = Column(String(10), nullable=False, default="web", server_default="web")
 
     def __repr__(self):
         return f"<ListeningLog(id={self.id}, event='{self.event}')>"
@@ -729,6 +732,28 @@ class ListeningDaily(Base):
 
     def __repr__(self):
         return f"<ListeningDaily(identity='{self.identity}', day={self.day})>"
+
+
+class ListeningHourly(Base):
+    """One person's listening in one book in one UTC hour, by where it was
+    heard, rolled up from listening_log (listening.roll_up_hours) so the
+    admin's Insights page has time of day, books and the web and Plex split
+    past the log's LOG_DAYS. Kept listening.HOURLY_KEEP_DAYS."""
+    __tablename__ = "listening_hourly"
+    __table_args__ = (
+        UniqueConstraint("identity", "hour", "book_key", "source", name="uq_listening_hourly"),
+        Index("ix_listening_hourly_hour", "hour"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    hour = Column(DateTime, nullable=False)                         # naive UTC, the hour's start
+    book_key = Column(String(64), nullable=False)
+    source = Column(String(10), nullable=False, default="web")
+    ms = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<ListeningHourly(identity='{self.identity}', hour={self.hour})>"
 
 
 class BookFollow(Base):
