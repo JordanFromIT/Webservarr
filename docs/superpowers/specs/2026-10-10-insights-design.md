@@ -1,6 +1,6 @@
 # Insights: reading and listening across everyone
 
-Status: designed 2026-10-10; decisions approved by Jordan in chat. Not built. The build plan is
+Status: designed 2026-10-10; decisions approved by Jordan in chat. Built and live-checked on dev 2026-10-10 (390 and 1440, keyboard, admin and member; Plexamp and the reader not live-verified). The build plan is
 `docs/superpowers/plans/2026-10-10-insights.md`. This feature adds admin routes that read everyone's
 reading and listening, so it joins the v2.0 security audit scope (roadmap step 6). The audit is not part
 of this plan and stays on hold until Jordan says it is ready.
