@@ -2663,7 +2663,7 @@ export async function mount(ctx) {
   /** A search: the rows above the search and the library under it step aside for the results. */
   function setSearching(on) {
     state.searching = on;
-    $('shelves').classList.toggle('hidden', on);
+    $('browseRows').classList.toggle('hidden', on);
     $('libraryBody').classList.toggle('hidden', on);
     $('searchSection').classList.toggle('hidden', !on);
   }

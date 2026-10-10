@@ -535,12 +535,12 @@ await run('search waits a moment after the last key, and the newest word wins', 
   await t.clock.advance(1);
   check('one search goes out after 300 ms', t.net.urls('/api/books/search').length === 1 && t.net.urls('/api/books/search')[0] === '/api/books/search?q=dune&limit=60', t.net.urls('/api/books/search'));
   await t.clock.advance(50);
-  check('the results take the place of the rows and the library, under the search', t.hidden('#shelves') && t.hidden('#libraryBody') && !t.hidden('#searchSection') && !t.hidden('#searchGrid') &&
+  check('the results take the place of the rows and the library, under the search', t.hidden('#browseRows') && t.hidden('#libraryBody') && !t.hidden('#searchSection') && !t.hidden('#searchGrid') &&
     !t.hidden('#searchRow') && !t.hidden('#browseArea') && inOrder(t, '#searchRow', '#libraryBody', '#searchSection'));
   check('with the same cards', t.cards('searchGrid').length === 1 && t.cards('searchGrid')[0].getAttribute('href') === '/books/1');
   check('and a count a screen reader hears', t.text('#searchStatus') === '1 book found' && t.q('#searchStatus').getAttribute('role') === 'status');
   t.type('');
-  check('clearing the box brings the library back at once', !t.hidden('#shelves') && !t.hidden('#libraryBody') && t.hidden('#searchSection'));
+  check('clearing the box brings the library back at once', !t.hidden('#browseRows') && !t.hidden('#libraryBody') && t.hidden('#searchSection'));
   t.type('d u');
   t.type('');
   await t.clock.advance(400);
@@ -3009,8 +3009,8 @@ current = 'the inline card is gone, and Recently added sits beside Continue';
   check('the search row (with Your stats) sits right above the library\'s filters', d.getElementById('searchRow').nextElementSibling === d.getElementById('libraryBody') &&
     d.getElementById('libraryBody').querySelector('#toolbarSkel') === d.getElementById('libraryBody').firstElementChild &&
     d.getElementById('searchRow').contains(d.getElementById('statsLink')) && d.getElementById('searchRow').contains(d.getElementById('helpBtn')));
-  check('after every row above the library', !!(d.getElementById('shelves').compareDocumentPosition(d.getElementById('searchRow')) & 4) &&
-    d.getElementById('shelves').contains(d.getElementById('popularHost')));
+  check('after every row above the library', !!(d.getElementById('browseRows').compareDocumentPosition(d.getElementById('searchRow')) & 4) &&
+    d.getElementById('browseRows').contains(d.getElementById('popularHost')));
   check('its look is unchanged: the same row of controls', /^mb-6 flex items-center gap-2$/.test(d.getElementById('searchRow').className));
   win.happyDOM.close();
 }

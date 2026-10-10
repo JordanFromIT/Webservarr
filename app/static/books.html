@@ -105,10 +105,11 @@
   @keyframes bn-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
   /* Don't show again: the quiet button, with a thin line under its words
      that grows over its own, longer wait and is gone once it works. Its
-     width holds "Don't show again (30)", so it never jumps either. */
+     width holds "Don't show again (30)" (12em of the button's 15px type,
+     its padding included), so it never jumps either. */
   .bn-count.bn-count-quiet {
     --bn-wait: 30s;
-    min-width: 0; padding-inline: 12px;
+    min-width: 12em; padding-inline: 12px;
     background: transparent; box-shadow: none;
     color: rgb(var(--color-text) / .75);
     transition: background-color 150ms ease-out, color 150ms ease-out;
@@ -176,8 +177,8 @@
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
       <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. Always shown (the first-visit guide points at it). -->
-      <!-- The rows above the library (#shelves): the search hides them while there is a search. -->
-      <div id="shelves">
+      <!-- The rows above the library (#browseRows): the search hides them while there is a search. -->
+      <div id="browseRows">
       <!-- The Continue row and Recently added: beside it on a wide screen, under it
            otherwise (books.html's page style, .books-top). -->
       <div class="books-top-area">
