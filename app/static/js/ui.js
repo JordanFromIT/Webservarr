@@ -487,7 +487,7 @@
     if (was && m.onChange) m.onChange(false);
   }
 
-  // The timing of a slide that takes `travel` seconds one way: a rest at
+  // The timing of a slide that takes travel seconds one way: a rest at
   // each end around it. Written only when it changes.
   function marqueeTime(m, travel) {
     var half = travel + MARQUEE_REST_S;             // one way, with a rest at both ends
