@@ -21,6 +21,7 @@ from app.limiter import limiter
 from app.models import Setting
 from app.integrations import seerr
 from app.routers.tickets import claim_legacy_tickets
+from app.services import admin_contacts
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -522,6 +523,13 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             claim_legacy_tickets(db, session_data)
         except Exception as e:
             logger.warning("Claiming legacy tickets failed (sign-in continues): %s", e)
+        # Where this admin's notices go: the Plex account id that made them
+        # admin and the email their bell is filed under (request access spec,
+        # section 8). Never a reason to refuse the sign-in.
+        try:
+            admin_contacts.remember(db, session_data)
+        except Exception as e:
+            logger.warning("Recording the admin's notice address failed (sign-in continues): %s", type(e).__name__)
 
         logger.info(
             "OIDC login successful: %s (admin=%s)",

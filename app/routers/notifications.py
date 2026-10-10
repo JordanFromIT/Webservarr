@@ -36,6 +36,9 @@ class PreferencesUpdate(BaseModel):
     ticket: Optional[bool] = None
     # "New in your series" (app/services/book_discovery.py).
     books: Optional[bool] = None
+    # A new request for access (Settings > Access requests). Only admins
+    # are ever sent it; notifications.js shows its toggle to admins only.
+    access: Optional[bool] = None
 
 
 # Caps on what a push subscription may store, well above what browsers send
@@ -64,7 +67,7 @@ class PushSubscribeRequest(BaseModel):
 
 # --- Helpers ---
 
-NOTIFICATION_CATEGORIES = ("request", "issue", "status", "news", "ticket", "books")
+NOTIFICATION_CATEGORIES = ("request", "issue", "status", "news", "ticket", "books", "access")
 
 
 def _email_hash(email: str) -> str:

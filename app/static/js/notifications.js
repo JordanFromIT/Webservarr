@@ -26,7 +26,8 @@
     status: 'health_metrics',
     news: 'newspaper',
     ticket: 'confirmation_number',
-    books: 'menu_book'
+    books: 'menu_book',
+    access: 'person_add'
   };
   var CATEGORY_URLS = {
     request: '/requests',
@@ -35,7 +36,8 @@
     status: '/status',
     news: '/',
     ticket: '/tickets',
-    books: '/books'
+    books: '/books',
+    access: '/settings#access-requests'
   };
   var CATEGORY_LABELS = {
     request: 'Requests',
@@ -43,7 +45,8 @@
     status: 'Server status',
     news: 'Announcements',
     ticket: 'Ticket replies and updates',
-    books: 'New books in your series'
+    books: 'New books in your series',
+    access: 'Access requests'
   };
 
   // ---- Helpers ----
@@ -752,11 +755,14 @@
     body.id = 'notifPrefsBody';
 
     // Category toggles: every category the server sends (NOTIFICATION_CATEGORIES)
-    var categories = ['request', 'issue', 'status', 'news', 'ticket', 'books'];
+    var categories = ['request', 'issue', 'status', 'news', 'ticket', 'books', 'access'];
     // Books only on a site that has books (features.books_configured).
     var features = (((window.WS_DATA || {}).branding || {}).features) || {};
+    // Access requests only go to admins, so only an admin gets the toggle.
+    var isAdmin = !!(((window.WS_DATA || {}).user || {}).is_admin);
     categories.forEach(function(cat) {
       if (cat === 'books' && features.books_configured === false) return;
+      if (cat === 'access' && !isAdmin) return;
       var row = createEl('div', 'flex items-center justify-between py-2');
 
       var labelArea = createEl('div', 'flex items-center gap-3');

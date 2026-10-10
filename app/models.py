@@ -219,6 +219,20 @@ class AccessRequest(Base):
     cooldown_until = Column(DateTime, nullable=True)            # denied: decided_at plus 30 days
 
 
+class AdminContact(Base):
+    """Where an admin's notices go (spec 2026-10-10-request-access-design.md,
+    section 8): the Plex account id that made a session admin, and the email
+    its bell and push are filed under (utils.identity_email of the session's
+    email). The admin is found by this account id, never by comparing
+    emails. app/services/admin_contacts.py owns it."""
+
+    __tablename__ = "admin_contacts"
+
+    plex_account_id = Column(String(32), primary_key=True)
+    notify_email = Column(String(200), primary_key=True)
+    seen_at = Column(DateTime, nullable=False)
+
+
 class PushSubscription(Base):
     """Browser push notification subscriptions."""
     __tablename__ = "push_subscriptions"

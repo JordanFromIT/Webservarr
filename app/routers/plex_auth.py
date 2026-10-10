@@ -31,6 +31,7 @@ from app.routers.auth import (
     _user_has_server_access,
 )
 from app.routers.tickets import claim_legacy_tickets
+from app.services import admin_contacts
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -376,6 +377,13 @@ async def plex_callback(
         claim_legacy_tickets(db, session_data)
     except Exception as e:
         logger.warning("Claiming legacy tickets failed (sign-in continues): %s", e)
+    # Where this admin's notices go: the Plex account id that made them
+    # admin and the email their bell is filed under (request access spec,
+    # section 8). Never a reason to refuse the sign-in.
+    try:
+        admin_contacts.remember(db, session_data)
+    except Exception as e:
+        logger.warning("Recording the admin's notice address failed (sign-in continues): %s", type(e).__name__)
 
     logger.info("Plex PIN login successful: %s (admin=%s)", email, is_admin)
 

@@ -6,6 +6,7 @@ The router (app/routers/access_requests.py) talks to Plex and Redis and
 holds the submit lock; this module decides. Times are naive UTC, as every
 stored timestamp is.
 """
+import logging
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.models import AccessRequest, Setting
 from app.utils import utc_iso
+
+logger = logging.getLogger(__name__)
 
 COOLDOWN = timedelta(days=30)        # a denied account may ask again after this
 APPROVED_KEPT = timedelta(days=30)   # approved rows are tidied away after this
@@ -167,3 +170,39 @@ def tidy(db: Session, now: datetime) -> int:
              .delete(synchronize_session=False))
     db.commit()
     return gone
+
+
+async def notify_admins(r, db: Session, row: AccessRequest) -> int:
+    """File an "access" bell for every admin contact of the account that owns
+    the admin token, and push it to their devices (spec section 8). The admin
+    is found by Plex account id, never by comparing emails. Returns how many
+    bells were filed. Never raises: a notice that can't go out must not fail
+    the request, and the Settings badge still counts it. The note is never
+    in a bell or a push."""
+    # At call time: the poller imports this module, and the auth router the app.
+    from app.routers.auth import _fetch_owner_account
+    from app.services import admin_contacts
+    from app.services.notification_poller import _create_notification_once
+    from app.services.push import dispatch_push
+
+    title, body = "Access request", f"{row.plex_username} asked for access"
+    try:
+        owner = await _fetch_owner_account(db) or {}
+        # The id _is_plex_server_owner compares a signing-in account with.
+        owner_id = str(owner.get("id") or owner.get("uuid") or "")
+        if not owner_id:
+            logger.warning("Access request %s: the server owner couldn't be read; no notice sent", row.id)
+            return 0
+        told = []
+        for email in admin_contacts.emails_for(db, owner_id):
+            if await _create_notification_once(r, db, email, "access", title, body, f"access:{row.id}"):
+                told.append(email)
+    except Exception as exc:
+        logger.warning("Access request %s: the admin notice failed: %s", row.id, type(exc).__name__)
+        return 0
+    if told:
+        try:
+            await dispatch_push(told, title, body, "access", "/settings#access-requests")
+        except Exception as exc:
+            logger.warning("Access request %s: the push failed: %s", row.id, type(exc).__name__)
+    return len(told)
