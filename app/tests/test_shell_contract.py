@@ -845,7 +845,9 @@ class SharedLiveParts(unittest.TestCase):
                                r"window\.dispatchEvent\(new CustomEvent\('ws:swap', \{ detail: \{ root: fresh \} \}\)\);")
         log = (STATIC / "js" / "event-log.js").read_text(encoding="utf-8")
         self.assertIn("env.target.addEventListener('ws:swap', function (e) { adopt(e.detail && e.detail.root); },", log)
-        self.assertIn("if (copy !== section) copy.replaceWith(section);", log)
+        # The live section takes the copy's place; its sliding lines, restarted
+        # by the move, are put back on their shared beat (log.moved()).
+        self.assertRegex(log, r"if \(copy !== section\) \{\s*copy\.replaceWith\(section\);\s*log\.moved\(\);\s*\}")
 
     def test_no_page_module_owns_them(self):
         for p in sorted((STATIC / "js" / "pages").glob("*.js")):
