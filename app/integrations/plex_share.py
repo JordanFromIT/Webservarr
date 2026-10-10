@@ -69,16 +69,18 @@ def _client() -> httpx.AsyncClient:
 
 
 async def _get_json(client: httpx.AsyncClient, url: str, server: PlexServer):
+    # "from None": httpx errors name the URL, which holds the machine id, so
+    # none is chained where a logged traceback would print it.
     try:
         resp = await client.get(url, headers=server.headers)
-    except httpx.HTTPError as exc:
-        raise PlexShareUnavailable("Plex didn't answer") from exc
+    except httpx.HTTPError:
+        raise PlexShareUnavailable("Plex didn't answer") from None
     if resp.status_code != 200:
         raise PlexShareUnavailable(f"Plex answered HTTP {resp.status_code}")
     try:
         return resp.json()
-    except ValueError as exc:
-        raise PlexShareUnavailable("Plex sent something unreadable") from exc
+    except ValueError:
+        raise PlexShareUnavailable("Plex sent something unreadable") from None
 
 
 async def _sections(client: httpx.AsyncClient, server: PlexServer) -> List[Dict[str, str]]:

@@ -5,6 +5,7 @@ client can never reach the real plex.tv here.
 """
 import asyncio
 import json
+import traceback
 import unittest
 from unittest import mock
 
@@ -153,6 +154,53 @@ class ShareClient(unittest.TestCase):
         self.use(FakePlex(listing_status=500))
         with self.assertRaises(plex_share.PlexShareUnavailable):
             asyncio.run(plex_share.find_share("5551"))
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class NothingLeaksThroughAnError(unittest.TestCase):
+    """A PlexShareUnavailable that escapes the module carries no httpx error
+    (whose text names the URL, so the machine id), not even in a traceback.
+    The fake's errors and bodies name the machine id and the token on purpose."""
+
+    @staticmethod
+    def fail_with(failure):
+        def handler(request):
+            leak = f"{request.url} {request.headers.get('x-plex-token')}"
+            if failure == "connect":
+                raise httpx.ConnectError(f"cannot reach {leak}", request=request)
+            if failure == "timeout":
+                raise httpx.ReadTimeout(f"timed out on {leak}", request=request)
+            if failure == "unreadable":
+                return httpx.Response(200, text=f"<MediaContainer>{leak}</MediaContainer>")
+            return httpx.Response(503, text=leak)
+        return handler
+
+    def caught(self, failure, call):
+        server = plex_share.PlexServer(MID, {"Accept": "application/json", "X-Plex-Token": ADMIN_TOKEN})
+        with mock.patch.object(plex_share, "_server", mock.AsyncMock(return_value=server)), \
+             mock.patch.object(plex_share, "_client", lambda: httpx.AsyncClient(
+                 transport=httpx.MockTransport(self.fail_with(failure)), timeout=plex_share.TIMEOUT)):
+            with self.assertRaises(plex_share.PlexShareUnavailable) as caught:
+                asyncio.run(call())
+        return caught.exception
+
+    def test_each_failure_path(self):
+        expected = {"connect": "Plex didn't answer", "timeout": "Plex didn't answer",
+                    "non-200": "Plex answered HTTP 503", "unreadable": "Plex sent something unreadable"}
+        calls = {"list_libraries": plex_share.list_libraries, "find_share": lambda: plex_share.find_share("5551")}
+        for failure, text in expected.items():
+            for name, call in calls.items():
+                with self.subTest(failure=failure, call=name):
+                    exc = self.caught(failure, call)
+                    self.assertEqual(str(exc), text)
+                    self.assertIsNone(exc.__cause__)
+                    if failure == "non-200":   # raised outside any except: nothing to suppress
+                        self.assertIsNone(exc.__context__)
+                    else:
+                        self.assertTrue(exc.__suppress_context__)
+                    shown = "".join(traceback.format_exception(exc))
+                    self.assertNotIn(MID, shown)
+                    self.assertNotIn(ADMIN_TOKEN, shown)
 
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
