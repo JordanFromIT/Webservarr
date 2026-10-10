@@ -6,6 +6,8 @@
 //  * a second initNotifications() (the shell is not run again on a soft
 //    navigation, but nothing else stops a caller) starts no second poll and
 //    wires the bell once.
+//  * with no WSAsk on the page, the badge is the server's count and the list
+//    has no ask notice (welcome_tour.mjs covers the notice itself).
 //
 // Run: node app/tests/js/notifications_poll.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
@@ -78,6 +80,12 @@ await wait(20);
 check('a second init starts no second poll', intervals.filter((i) => i.ms === 30000).length === 1, intervals.map((i) => i.ms));
 check('and asks nothing more', counts() === 3, counts());
 check('the bell carries one badge', d.querySelector('button[title="Notifications"]').querySelectorAll('span.absolute').length === 1);
+// No WSAsk on the page (theme-loader.js): no ask notice, the count is the server's.
+check('the badge is the server count alone', d.querySelector('button[title="Notifications"] span.absolute').textContent === '2');
+w.WS.popOpen = w.WS.popOpen || ((el) => el.classList.remove('hidden'));
+d.querySelector('button[title="Notifications"]').click();
+await wait(10);
+check('no notice in the list', !d.querySelector('[data-ws-notice]'));
 
 await w.happyDOM.abort();
 w.close();

@@ -6,9 +6,16 @@
 //    the home screen is a phone's only (never a desktop's, nor its prompt), and
 //    its words never say install
 //  * shown once (webservarr_welcome_v2_seen); "Welcome tour" runs it again
-//  * the two offers: Not now asks again on the next load but not on a soft
-//    navigation; Don't ask me again needs its confirmation, then silences the
-//    tour's prompt and the banner too
+//  * the two offers: Not now asks again on the next load (a notice in the
+//    bell's list, never a bubble) but not on a soft navigation; Don't ask me
+//    again needs its confirmation, then silences the bell's notice and the
+//    banner too
+//  * the bell's notice (notifications.js): a tap on the bell never starts a
+//    tour or a bubble; shown only when WSAsk allows it; Turn on, Not now and
+//    Don't ask me again (with its confirmation); the blocked and iPhone
+//    words; the home screen on a phone only; one notice per visit; one
+//    unread in the badge until the list is opened or it is answered; it
+//    outlives a soft navigation and nothing it leaves starts a bubble
 //  * an iPhone in a Safari tab: the home screen first, notifications after
 //  * nothing offered where it cannot be: already allowed, no push, blocked
 //    (says how to unblock), already on the home screen
@@ -95,11 +102,11 @@ function shell({ booksInMore = false, eventLog = true, releases = false } = {}) 
    permission state and what this device remembers (store). */
 function browser({ width = 1440, ua = 'desktop', push = true, permission = 'default', answer = 'granted',
                    store = {}, standalone = false, user = { username: 'sam', has_email: true },
-                   booksInMore = false, eventLog = true, releases = false, prompt = null } = {}) {
+                   booksInMore = false, eventLog = true, releases = false, prompt = null, unread = 0 } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: width >= 1024 ? 900 : 844 });
   Object.defineProperty(w.navigator, 'userAgent', { value: UA[ua], configurable: true });
   if (ua === 'iphone') Object.defineProperty(w.navigator, 'standalone', { value: standalone, configurable: true });
-  const calls = { asked: 0, subscribed: 0, posts: [], prompted: 0, toasts: [] };
+  const calls = { asked: 0, subscribed: 0, posts: [], prompted: 0, toasts: [], fetched: [] };
   if (push) {
     const sub = {
       endpoint: 'https://push.example.test/ep/1',
@@ -123,8 +130,10 @@ function browser({ width = 1440, ua = 'desktop', push = true, permission = 'defa
     delete w.Notification;
   }
   w.fetch = (url, init) => {
+    calls.fetched.push(((init && init.method) || 'GET') + ' ' + url);
     if (init && init.method === 'POST') calls.posts.push({ url, body: JSON.parse(init.body) });
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    const body = String(url).indexOf('/api/notifications/unread-count') === 0 ? { count: unread } : {};
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
   };
   w.matchMedia = (q) => {
     let matches = false;
@@ -145,6 +154,13 @@ function browser({ width = 1440, ua = 'desktop', push = true, permission = 'defa
   w.console.error = () => {};
   w.console.warn = () => {};
   w.WSUI = { toast: (text) => calls.toasts.push(text) };
+  // The shell's helpers notifications.js leans on (shell.js): no poll timer,
+  // and the drop-down's open and close as plain class switches.
+  w.WS = Object.assign(w.WS || {}, {
+    poll: () => () => {},
+    popOpen: (el) => { el.classList.remove('hidden'); el.classList.add('is-open'); },
+    popClose: (el) => { el.classList.remove('is-open'); el.classList.add('hidden'); }
+  });
   if (prompt) {
     w.WSInstallPrompt = {};
     w.WS = Object.assign(w.WS || {}, { install: { prompt: () => { calls.prompted += 1; w.WSInstallPrompt = null; return Promise.resolve(prompt); } } });
@@ -186,6 +202,27 @@ const action = (d, label) => Array.from($(d, 'tourActions').querySelectorAll('bu
 const listed = (d) => Array.from($(d, 'tourList').querySelectorAll('li')).map((li) => li.textContent.replace(/\s+/g, ' ').trim());
 const continueShown = (d) => $(d, 'tourNext').style.display !== 'none';
 const key = (w, k) => w.localStorage.getItem(k);
+
+/* The bell (notifications.js), as the shell starts it once per document. */
+async function bellUp(w) {
+  w.initNotifications();
+  await wait(10);
+}
+const bellBtn = (d, phone = false) => d.querySelector((phone ? '#mobileTopBar' : '#appHeader') + ' button[title="Notifications"]');
+const openBell = async (d, phone = false) => { bellBtn(d, phone).click(); await wait(10); };
+const listOpen = (d) => !!d.querySelector('.ws-pop.is-open');
+const badge = (d, phone = false) => {
+  const b = bellBtn(d, phone).querySelector('span.absolute');
+  return b && b.style.display !== 'none' ? b.textContent : '';
+};
+const notice = (d) => d.querySelector('[data-ws-notice]');
+const noticeTitle = (d) => (notice(d) ? notice(d).querySelector('#wsNoticeTitle').textContent : '');
+const noticeBody = (d) => (notice(d) ? notice(d).querySelector('#wsNoticeTitle').nextElementSibling.textContent : '');
+const noticeActions = (d) => (notice(d) ? Array.from(notice(d).querySelectorAll('button')).map((b) => b.textContent) : []);
+const noticeAction = (d, label) => Array.from(notice(d).querySelectorAll('button')).find((b) => b.textContent === label);
+const noticeList = (d) => (notice(d) ? Array.from(notice(d).querySelectorAll('li')).map((li) => li.textContent.replace(/\s+/g, ' ').trim()) : []);
+const PUSH_WORDS = 'Get updates on your requests and server problems on this device, even with the page closed.';
+const PUSH_OFFER = ['Turn on', 'Not now', 'Don’t ask me again'];
 
 /* Walks the tour with Continue (or a step's Not now), noting each step. */
 function walk(d) {
@@ -344,20 +381,31 @@ await scenario('Not now asks again on the next load, not on a soft navigation', 
   const store = Object.assign({}, first.w.localStorage);
   await first.w.happyDOM.close();
 
-  // The next full load (or sign-in): the tour's own small prompt.
+  // The next full load (or sign-in): a notice in the bell's list, no bubble.
   const next = browser({ store });
+  await bellUp(next.w);
   visit(next.w);
-  await wait(10);
+  await wait(450);
   const n = next.d;
-  check('asks again, once', on(n) && title(n) === 'Turn on notifications?', on(n) && title(n));
-  check('quiet: no fog, no Skip, no dots', quiet(n) && $(n, 'tourSkip').hidden && $(n, 'tourFoot').style.display === 'none');
-  check('a quiet prompt is not modal', !$(n, 'tourBubble').hasAttribute('aria-modal'));
+  check('no bubble over the page', !on(n));
   check('the banner stays away', $(n, 'pushPrompt').hidden);
-  n.dispatchEvent(new next.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  check('Escape closes it, still later', !on(n) && key(next.w, 'ws-push-ask') === 'later');
+  check('the bell hints at it', badge(n) === '1', badge(n));
+  await openBell(n);
+  check('the list opens', listOpen(n));
+  check('the notice heads the list', notice(n) && notice(n).parentElement.parentElement.firstChild === notice(n).parentElement);
+  check('its words', noticeTitle(n) === 'Turn on notifications' && noticeBody(n) === PUSH_WORDS, [noticeTitle(n), noticeBody(n)]);
+  check('its buttons', JSON.stringify(noticeActions(n)) === JSON.stringify(PUSH_OFFER), noticeActions(n));
+  check('real buttons', Array.from(notice(n).querySelectorAll('button')).every((b) => b.type === 'button'));
+  check('a labelled group', notice(n).getAttribute('role') === 'group' && notice(n).getAttribute('aria-labelledby') === 'wsNoticeTitle');
+  await wait(450);
+  check('still no bubble after the tap', !on(n));
+  noticeAction(n, 'Not now').click();
+  check('Not now: gone, still later', !notice(n) && key(next.w, 'ws-push-ask') === 'later');
+  check('the list stays open', listOpen(n));
+  check('the badge has nothing for it', badge(n) === '', badge(n));
   visit(next.w);
-  await wait(10);
-  check('and not again in this visit', !on(n));
+  await wait(450);
+  check('and not again in this visit', !on(n) && !notice(n));
   await next.w.happyDOM.close();
 });
 
@@ -374,29 +422,39 @@ await scenario('closing the tour early is a Not now for both offers', async () =
 
 // ---- Don't ask me again ----
 
-await scenario('Don’t ask me again confirms, then silences the tour and the banner', async () => {
+await scenario('Don’t ask me again confirms, then silences the bell, the tour and the banner', async () => {
   const { w, d } = browser({ store: { [SEEN]: '1', 'ws-push-ask': 'later' } });
+  await bellUp(w);
   visit(w);
-  await wait(10);
-  check('the small prompt', title(d) === 'Turn on notifications?');
-  action(d, 'Don’t ask me again').click();
-  check('a confirmation first', title(d) === 'Stop asking?' && /from the bell, under Notification settings/.test(body(d)), body(d));
-  check('Stop asking and Cancel', JSON.stringify(actions(d)) === JSON.stringify(['Stop asking', 'Cancel']), actions(d));
+  await openBell(d);
+  check('the notice', noticeTitle(d) === 'Turn on notifications');
+  noticeAction(d, 'Don’t ask me again').click();
+  check('a confirmation first', noticeTitle(d) === 'Stop asking?' && /from the bell, under Notification settings/.test(noticeBody(d)), noticeBody(d));
+  check('Stop asking and Cancel', JSON.stringify(noticeActions(d)) === JSON.stringify(['Stop asking', 'Cancel']), noticeActions(d));
+  check('focus on Cancel (Enter never stops anything)', d.activeElement === noticeAction(d, 'Cancel'), d.activeElement && d.activeElement.textContent);
+  check('the change is said', /^Stop asking\?\. /.test(notice(d).querySelector('[aria-live]').textContent));
   check('nothing recorded yet', key(w, 'ws-push-ask') === 'later');
-  action(d, 'Cancel').click();
-  check('Cancel puts the offer back', title(d) === 'Turn on notifications?' && actions(d).length === 3);
-  action(d, 'Don’t ask me again').click();
-  action(d, 'Stop asking').click();
+  check('the list stays open through it', listOpen(d));
+  noticeAction(d, 'Cancel').click();
+  check('Cancel puts the offer back', noticeTitle(d) === 'Turn on notifications' && noticeActions(d).length === 3);
+  check('focus back on Don’t ask me again', d.activeElement === noticeAction(d, 'Don’t ask me again'), d.activeElement && d.activeElement.textContent);
+  noticeAction(d, 'Don’t ask me again').click();
+  noticeAction(d, 'Stop asking').click();
   check('recorded', key(w, 'ws-push-ask') === 'never');
-  check('closed', !on(d));
+  check('gone', !notice(d) && badge(d) === '');
+  check('focus goes to the bell', d.activeElement === bellBtn(d), d.activeElement && d.activeElement.outerHTML.slice(0, 60));
   check('the banner is silenced too', w.WSPushOffer('ws-push-prompt-dismissed', 30) === false);
+  const step = w.WSWelcome.steps().find((s) => s.title === 'Notifications');
+  check('and the tour’s offer', !Object.assign({}, step, step.view()).actions);
   await w.happyDOM.close();
 
   const again = browser({ store: { [SEEN]: '1', 'ws-push-ask': 'never' } });
+  await bellUp(again.w);
   visit(again.w);
   await wait(10);
   check('next load: no prompt', !on(again.d));
   check('next load: no banner', again.d.getElementById('pushPrompt').hidden);
+  check('next load: no notice, no badge', !notice(again.d) && badge(again.d) === '');
   await again.w.happyDOM.close();
 });
 
@@ -580,28 +638,37 @@ await scenario('the banner and the tour never both ask', async () => {
   await wait(10);
   check('the banner shows', !b.d.getElementById('pushPrompt').hidden);
   check('no tour prompt the same visit', !on(b.d));
+  await bellUp(b.w);
+  check('and no notice in the bell either', !notice(b.d) && badge(b.d) === '', badge(b.d));
   await b.w.happyDOM.close();
 
   // Seen, nothing for the banner (push allowed), the home screen waiting:
-  // the tour's prompt for it.
+  // the bell's notice for it.
   const c = browser({ width: 390, ua: 'android', permission: 'granted', store: { [SEEN]: '1', 'ws-install-ask': 'later' } });
+  await bellUp(c.w);
   visit(c.w);
   await wait(10);
-  check('the home screen prompt', on(c.d) && title(c.d) === 'Add to home screen?' && quiet(c.d), on(c.d) && title(c.d));
-  check('its words', body(c.d) === 'Open Example Media from your home screen, full screen like an app.' &&
-        JSON.stringify(actions(c.d)) === JSON.stringify(['Add to home screen', 'Not now', 'Don’t ask me again']), [body(c.d), actions(c.d)]);
-  action(c.d, 'Don’t ask me again').click();
-  check('its confirmation', title(c.d) === 'Stop asking?' && body(c.d) === 'You can still add it from More.', body(c.d));
+  check('no bubble', !on(c.d));
+  await openBell(c.d, true);
+  check('the home screen notice', noticeTitle(c.d) === 'Add to home screen', noticeTitle(c.d));
+  check('its words', noticeBody(c.d) === 'Open Example Media from your home screen, full screen like an app.' &&
+        JSON.stringify(noticeActions(c.d)) === JSON.stringify(['Add to home screen', 'Not now', 'Don’t ask me again']), [noticeBody(c.d), noticeActions(c.d)]);
+  noticeAction(c.d, 'Don’t ask me again').click();
+  check('its confirmation', noticeTitle(c.d) === 'Stop asking?' && noticeBody(c.d) === 'You can still add it from More.', noticeBody(c.d));
+  noticeAction(c.d, 'Stop asking').click();
+  check('recorded', key(c.w, 'ws-install-ask') === 'never' && !notice(c.d));
   check('one at a time: banner hidden', c.d.getElementById('pushPrompt').hidden);
   await c.w.happyDOM.close();
 
   // The same on a desktop, or a tablet held wide: the home screen is never
   // asked about there, even one left waiting from a phone-width visit.
   for (const ua of ['desktop', 'iphone']) {
-    const e = browser({ ua, permission: 'granted', store: { [SEEN]: '1', 'ws-install-ask': 'later' } });
+    const e = browser({ ua, permission: 'granted', store: { [SEEN]: '1', 'ws-install-ask': 'later', 'ws-push-ask': 'never' } });
+    await bellUp(e.w);
     visit(e.w);
     await wait(10);
-    check('no home screen prompt on a wide screen: ' + ua, !on(e.d), on(e.d) && title(e.d));
+    check('no bubble on a wide screen: ' + ua, !on(e.d), on(e.d) && title(e.d));
+    check('no home screen notice on a wide screen: ' + ua, !notice(e.d) && badge(e.d) === '', noticeTitle(e.d));
     await e.w.happyDOM.close();
   }
 });
@@ -612,6 +679,249 @@ await scenario('home.js decides the banner first, marks it, then mounts the tour
   check('both there', mark !== -1 && mount !== -1);
   check('in that order', mark < mount && HOME.indexOf('window.WSPushOffer(') < mark);
   check('Home loads the engine and the tour as page helpers', /<script src="\/static\/js\/tour\.js\?v=\d+" data-ws-page-script><\/script>\s*<script src="\/static\/js\/welcome\.js\?v=\d+" data-ws-page-script><\/script>/.test(INDEX));
+});
+
+// ---- The bell's notice ----
+
+const LATER = { [SEEN]: '1', 'ws-push-ask': 'later' };
+
+await scenario('a tap on the bell never starts a tour or a bubble', async () => {
+  for (const [width, ua, phone] of [[1440, 'desktop', false], [390, 'android', true]]) {
+    const { w, d } = browser({ width, ua, store: { [SEEN]: '1', 'ws-push-ask': 'later', 'ws-install-ask': 'later' } });
+    await bellUp(w);
+    // Tapped before Home has even mounted, again once it has, and once more
+    // after the old prompt's delay.
+    await openBell(d, phone);
+    visit(w);
+    await openBell(d, phone);
+    await openBell(d, phone);
+    await wait(450);
+    check(ua + ': no tour layer shown', !on(d));
+    check(ua + ': the list opens and the notice is in it', listOpen(d) && !!notice(d), noticeTitle(d));
+    check(ua + ': the bell has no listener of the tour’s', !/WebServarrTour|tourLayer/.test(NOTIFY));
+    await w.happyDOM.close();
+  }
+  check('welcome.js no longer starts a quiet prompt', !/quiet:\s*true/.test(WELCOME));
+});
+
+await scenario('the notice is shown only when WSAsk allows it', async () => {
+  const shown = async (opts, phone = false) => {
+    const { w, d } = browser(opts);
+    await bellUp(w);
+    visit(w);
+    await wait(10);
+    const hint = badge(d, phone);
+    await openBell(d, phone);
+    const out = { kind: notice(d) ? notice(d).getAttribute('data-ws-notice') : '', badge: hint };
+    await w.happyDOM.close();
+    return out;
+  };
+  check('later: shown', (await shown({ store: LATER })).kind === 'push');
+  check('never asked by the tour, banner dismissed: shown', (await shown({ store: { [SEEN]: '1', 'ws-push-prompt-dismissed': String(Date.now()) } })).kind === 'push');
+  check('never: not shown', (await shown({ store: { [SEEN]: '1', 'ws-push-ask': 'never' } })).kind === '');
+  check('already allowed: not shown', (await shown({ store: LATER, permission: 'granted' })).kind === '');
+  check('no push in this browser: not shown', (await shown({ store: LATER, push: false })).kind === '');
+  check('no email on the account: not shown', (await shown({ store: LATER, user: { username: 'sam', has_email: false } })).kind === '');
+  check('the banner asks this visit: not shown', (await shown({ store: { [SEEN]: '1' } })).kind === '');
+  const first = await shown({});
+  check('the tour has not been shown: it asks, not the bell', first.kind === '' && first.badge === '', first);
+});
+
+await scenario('Turn on: the shared subscribe path, then gone', async () => {
+  const { w, d, calls } = browser({ store: LATER });
+  await bellUp(w);
+  let used = 0;
+  const real = w.WSPush.subscribe;
+  w.WSPush.subscribe = (onGranted) => { used += 1; return real(onGranted); };
+  await openBell(d);
+  noticeAction(d, 'Turn on').click();
+  await wait(20);
+  check('WSPush.subscribe ran once, from the tap', used === 1 && calls.asked === 1, [used, calls.asked]);
+  check('subscribed and saved', calls.subscribed === 1 && calls.posts.length === 1, calls.posts);
+  check('no longer waiting to ask', key(w, 'ws-push-ask') === null);
+  check('gone, badge clear', !notice(d) && badge(d) === '');
+  check('the banner has nothing to offer either', w.WSPushOffer('ws-push-prompt-dismissed', 30) === false);
+  await w.happyDOM.close();
+});
+
+await scenario('Turn on: a failure says why and keeps the buttons', async () => {
+  const { w, d } = browser({ store: LATER });
+  await bellUp(w);
+  let release;
+  w.WSPush.subscribe = () => new Promise((resolve, reject) => { release = () => reject(new Error('boom')); });
+  await openBell(d);
+  noticeAction(d, 'Turn on').click();
+  check('busy while the browser asks', noticeActions(d)[0] === 'Turning on…' && Array.from(notice(d).querySelectorAll('button')).every((b) => b.disabled));
+  release();
+  await wait(10);
+  check('the words say what failed', noticeBody(d) === w.WSPush.messages.failed, noticeBody(d));
+  check('and it is said aloud', notice(d).querySelector('[aria-live]').textContent.indexOf(w.WSPush.messages.failed) !== -1);
+  check('the buttons are back', JSON.stringify(noticeActions(d)) === JSON.stringify(PUSH_OFFER) &&
+        Array.from(notice(d).querySelectorAll('button')).every((b) => !b.disabled), noticeActions(d));
+  check('nothing recorded', key(w, 'ws-push-ask') === 'later');
+  await w.happyDOM.close();
+
+  // The browser's own question refused: it goes, the permission decides.
+  const no = browser({ store: LATER, answer: 'denied' });
+  await bellUp(no.w);
+  await openBell(no.d);
+  noticeAction(no.d, 'Turn on').click();
+  await wait(20);
+  check('refused: gone for this visit', !notice(no.d) && key(no.w, 'ws-push-ask') === null);
+  await no.w.happyDOM.close();
+  // Closed without an answer: a Not now.
+  const shut = browser({ store: LATER, answer: 'default' });
+  await bellUp(shut.w);
+  await openBell(shut.d);
+  noticeAction(shut.d, 'Turn on').click();
+  await wait(20);
+  check('closed: later', !notice(shut.d) && key(shut.w, 'ws-push-ask') === 'later');
+  await shut.w.happyDOM.close();
+});
+
+await scenario('blocked: how to unblock, no Turn on', async () => {
+  const { w, d } = browser({ store: LATER, permission: 'denied' });
+  await bellUp(w);
+  await openBell(d);
+  check('the words', noticeTitle(d) === 'Notifications are blocked' &&
+        noticeBody(d) === 'This browser is blocking notifications from this site. To get them here, allow notifications in the browser’s site settings, then reload the page.', [noticeTitle(d), noticeBody(d)]);
+  check('the tour says the same', /allow notifications in the browser’s site settings, then reload the page\.$/.test(
+    Object.assign({}, w.WSWelcome.steps().find((s) => s.title === 'Notifications')).view().body));
+  check('Not now and Don’t ask me again', JSON.stringify(noticeActions(d)) === JSON.stringify(['Not now', 'Don’t ask me again']), noticeActions(d));
+  noticeAction(d, 'Don’t ask me again').click();
+  noticeAction(d, 'Stop asking').click();
+  check('silenced', key(w, 'ws-push-ask') === 'never' && !notice(d));
+  await w.happyDOM.close();
+});
+
+await scenario('an iPhone in Safari: the home screen first, then why push needs it', async () => {
+  const both = browser({ width: 390, ua: 'iphone', push: false, store: { [SEEN]: '1', 'ws-push-ask': 'later', 'ws-install-ask': 'later' } });
+  await bellUp(both.w);
+  await openBell(both.d, true);
+  check('the home screen comes first', noticeTitle(both.d) === 'Add to home screen', noticeTitle(both.d));
+  check('says push needs it', /On an iPhone or iPad it’s also how you get notifications\.$/.test(noticeBody(both.d)), noticeBody(both.d));
+  check('the Share steps', JSON.stringify(noticeList(both.d)) === JSON.stringify(['Tap ios_share Share in the browser toolbar', 'Tap Add to Home Screen']), noticeList(both.d));
+  check('Done, Not now, Don’t ask me again', JSON.stringify(noticeActions(both.d)) === JSON.stringify(['Done', 'Not now', 'Don’t ask me again']), noticeActions(both.d));
+  noticeAction(both.d, 'Done').click();
+  check('done, and no second notice this visit', key(both.w, 'ws-install-ask') === 'done' && !notice(both.d));
+  await both.w.happyDOM.close();
+
+  // The home screen already answered: the push notice, which points at it.
+  const push = browser({ width: 390, ua: 'iphone', push: false, store: { [SEEN]: '1', 'ws-push-ask': 'later', 'ws-install-ask': 'done' } });
+  await bellUp(push.w);
+  await openBell(push.d, true);
+  check('notifications need the home screen app', noticeTitle(push.d) === 'Turn on notifications' &&
+        /only arrive in the home screen app: add it/.test(noticeBody(push.d)), [noticeTitle(push.d), noticeBody(push.d)]);
+  check('with the steps to add it', noticeList(push.d).length === 2, noticeList(push.d));
+  check('no Turn on in a Safari tab', JSON.stringify(noticeActions(push.d)) === JSON.stringify(['Not now', 'Don’t ask me again']), noticeActions(push.d));
+  await push.w.happyDOM.close();
+});
+
+await scenario('the home screen notice: phones only, never from inside it', async () => {
+  const store = { [SEEN]: '1', 'ws-push-ask': 'never', 'ws-install-ask': 'later' };
+  const phone = browser({ width: 390, ua: 'android', store });
+  await bellUp(phone.w);
+  check('a phone: one unread for it', badge(phone.d, true) === '1', badge(phone.d, true));
+  await openBell(phone.d, true);
+  check('a phone: shown', noticeTitle(phone.d) === 'Add to home screen');
+  noticeAction(phone.d, 'Add to home screen').click();
+  await wait(10);
+  check('no browser prompt: the menu steps', noticeBody(phone.d) === 'Add it from your browser’s menu:' &&
+        JSON.stringify(noticeList(phone.d)) === JSON.stringify(['Open the browser menu more_vert', 'Tap Add to Home screen']) &&
+        JSON.stringify(noticeActions(phone.d)) === JSON.stringify(['Done', 'Not now']), [noticeBody(phone.d), noticeActions(phone.d)]);
+  check('focus on Done', phone.d.activeElement === noticeAction(phone.d, 'Done'));
+  noticeAction(phone.d, 'Done').click();
+  check('done', key(phone.w, 'ws-install-ask') === 'done' && !notice(phone.d));
+  await phone.w.happyDOM.close();
+
+  const prompted = browser({ width: 390, ua: 'android', store, prompt: 'accepted' });
+  await bellUp(prompted.w);
+  await openBell(prompted.d, true);
+  noticeAction(prompted.d, 'Add to home screen').click();
+  await wait(10);
+  check('the browser’s own prompt, accepted: done', prompted.calls.prompted === 1 && key(prompted.w, 'ws-install-ask') === 'done' && !notice(prompted.d));
+  await prompted.w.happyDOM.close();
+
+  for (const opts of [{ width: 1440, ua: 'desktop' }, { width: 390, ua: 'android', standalone: true }]) {
+    const none = browser(Object.assign({ store }, opts));
+    await bellUp(none.w);
+    check('none: ' + JSON.stringify(opts), !notice(none.d) && badge(none.d, opts.width < 1024) === '', noticeTitle(none.d));
+    await none.w.happyDOM.close();
+  }
+});
+
+await scenario('one notice per visit: notifications first', async () => {
+  const store = { [SEEN]: '1', 'ws-push-ask': 'later', 'ws-install-ask': 'later' };
+  const { w, d } = browser({ width: 390, ua: 'android', store });
+  await bellUp(w);
+  check('one unread, not two', badge(d, true) === '1', badge(d, true));
+  await openBell(d, true);
+  check('notifications first', notice(d).getAttribute('data-ws-notice') === 'push');
+  check('only one in the list', d.querySelectorAll('[data-ws-notice]').length === 1);
+  noticeAction(d, 'Not now').click();
+  check('the home screen does not follow in the same visit', !notice(d) && badge(d, true) === '');
+  const store2 = Object.assign({}, w.localStorage);
+  await w.happyDOM.close();
+  const next = browser({ width: 390, ua: 'android', store: store2 });
+  await bellUp(next.w);
+  check('next visit: asked again', badge(next.d, true) === '1');
+  await openBell(next.d, true);
+  check('next visit: the same notice', !!notice(next.d) && notice(next.d).getAttribute('data-ws-notice') === 'push');
+  await next.w.happyDOM.close();
+});
+
+await scenario('the badge: one unread while the notice is new', async () => {
+  const { w, d } = browser({ store: LATER, unread: 2 });
+  await bellUp(w);
+  check('the server’s two and the notice', badge(d) === '3', badge(d));
+  await openBell(d);
+  check('opening the list reads it', badge(d) === '2', badge(d));
+  check('but it stays in the list until answered', !!notice(d));
+  await openBell(d);
+  await openBell(d);
+  check('not counted again on a second open', badge(d) === '2', badge(d));
+  await w.happyDOM.close();
+
+  // Answered without ever closing the list: the count stays the server's.
+  const two = browser({ store: LATER });
+  await bellUp(two.w);
+  check('alone: 1', badge(two.d) === '1', badge(two.d));
+  await openBell(two.d);
+  noticeAction(two.d, 'Not now').click();
+  await wait(10);
+  check('Not now: nothing', badge(two.d) === '', badge(two.d));
+  check('client-side only: nothing marked read or sent', two.calls.fetched.every((f) => f.indexOf('GET ') === 0), two.calls.fetched);
+  await two.w.happyDOM.close();
+
+  // The tour answering in the same visit takes it away too.
+  const tour = browser({ store: LATER });
+  await bellUp(tour.w);
+  tour.w.history.replaceState(null, '', '/?welcome=1');
+  visit(tour.w, '?welcome=1');
+  await wait(10);
+  check('the tour asks this visit: the notice steps aside', on(tour.d) && !notice(tour.d) && badge(tour.d) === '', badge(tour.d));
+  await tour.w.happyDOM.close();
+});
+
+await scenario('the notice outlives a soft navigation; nothing starts a bubble', async () => {
+  const { w, d } = browser({ store: LATER });
+  await bellUp(w);
+  const home = visit(w);
+  home.ctl.abort();                       // Home left before its timers ran
+  await wait(450);
+  check('no bubble after leaving', !on(d));
+  check('the notice is still counted in the bell', badge(d) === '1');
+  const back = visit(w);                  // back to Home, same document
+  await wait(450);
+  check('no bubble on the way back', !on(d));
+  await openBell(d);
+  check('and in the list', !!notice(d));
+  noticeAction(d, 'Not now').click();
+  back.ctl.abort();
+  visit(w);
+  await wait(450);
+  check('Not now holds across soft navigations', !notice(d) && !on(d) && badge(d) === '');
+  await w.happyDOM.close();
 });
 
 // ---- The visit ends ----

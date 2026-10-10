@@ -142,9 +142,17 @@
   }
 
   /**
-   * Update badge count on ALL bell buttons.
+   * The server's unread count, shown on ALL bell buttons with the ask
+   * notice's one (see "The ask notice") added while it is unread.
    */
+  var _serverCount = 0;
   function updateBadge(count) {
+    _serverCount = count;
+    drawBadge();
+  }
+
+  function drawBadge() {
+    var count = _serverCount + (_noticeUnread && noticeKind() ? 1 : 0);
     if (_badgeEls.length === 0) return;
     for (var i = 0; i < _badgeEls.length; i++) {
       var badge = _badgeEls[i];
@@ -207,7 +215,8 @@
   // ---- Dropdown Panel ----
 
   var _dropdown = null;
-  var _notifList = null;
+  var _notifList = null;   // the scrolling list: _noticeSlot, then _itemsBox
+  var _itemsBox = null;
 
   function buildDropdown() {
     if (_dropdown) return;
@@ -248,9 +257,15 @@
     header.appendChild(headerActions);
     _dropdown.appendChild(header);
 
-    // List container
+    // List container: the ask notice pinned at the top, then the items.
     _notifList = createEl('div', 'max-h-80 overflow-y-auto custom-scrollbar');
+    _noticeSlot = createEl('div');
+    _noticeSlot.hidden = true;
+    _itemsBox = createEl('div');
+    _notifList.appendChild(_noticeSlot);
+    _notifList.appendChild(_itemsBox);
     _dropdown.appendChild(_notifList);
+    renderNotice();
 
     // Footer
     var footer = createEl('div', 'px-4 py-3 border-t border-steel-blue/20');
@@ -292,7 +307,7 @@
 
   function renderItems(notifications) {
     _itemsSig = itemsSig(notifications);
-    while (_notifList.firstChild) _notifList.removeChild(_notifList.firstChild);
+    while (_itemsBox.firstChild) _itemsBox.removeChild(_itemsBox.firstChild);
 
     if (notifications.length === 0) {
       var empty = createEl('div', 'flex flex-col items-center justify-center py-8 text-frosted-blue/80');
@@ -300,12 +315,12 @@
       var emptyText = createEl('p', 'text-xs', 'No notifications');
       empty.appendChild(emptyIcon);
       empty.appendChild(emptyText);
-      _notifList.appendChild(empty);
+      _itemsBox.appendChild(empty);
       return;
     }
 
     notifications.forEach(function(n) {
-      _notifList.appendChild(buildNotificationItem(n));
+      _itemsBox.appendChild(buildNotificationItem(n));
     });
   }
 
@@ -316,7 +331,7 @@
       if (notifications === null) return;   // leaving for /login
       _items = notifications;
       // Unchanged: leave the list drawn, so an open panel never jumps.
-      if (_notifList.firstChild && itemsSig(notifications) === _itemsSig) return;
+      if (_itemsBox.firstChild && itemsSig(notifications) === _itemsSig) return;
       renderItems(notifications);
     });
   }
@@ -394,6 +409,11 @@
     // The list read before is drawn now (its times fresh), then read again.
     if (_items) renderItems(_items);
     loadDropdownItems();
+    // The notice is drawn as things stand now, and opening the list is
+    // reading it: it leaves the badge (it stays in the list until answered).
+    renderNotice();
+    _noticeUnread = false;
+    drawBadge();
     // Two steps with a reflow between (see WS.popOpen), so every open fades in.
     if (_dropdown) WS.popOpen(_dropdown);
     _dropdownOpen = true;
@@ -408,6 +428,262 @@
   function closeDropdown() {
     if (_dropdown) WS.popClose(_dropdown);
     _dropdownOpen = false;
+  }
+
+  // ---- The ask notice ----
+  //
+  // A later visit's ask, as the first entry in the list rather than a bubble
+  // over the page: turning on notifications when push is not set up on this
+  // device, or, on a phone, adding the site to the home screen. Whether it
+  // may ask is theme-loader.js WSAsk, shared with the welcome tour and Home's
+  // banner, so one "Don't ask me again" silences all three:
+  //   Turn on / Add       the browser's own question, from the tap
+  //                       (WSPush.subscribe, the same path as the tour)
+  //   Not now             WSAsk 'later': gone until the next visit (a full
+  //                       load or a sign-in), as the tour's Not now
+  //   Don't ask me again  "Stop asking?" first, then WSAsk 'never'
+  // Nothing while the welcome tour has not been shown here (it asks first),
+  // nor in a visit where the tour or the banner has already asked. At most
+  // one notice per visit: notifications first, except on an iPhone or iPad
+  // in a browser tab, where the home screen comes first (push needs it), as
+  // in the tour. The home screen never on a wide screen or from inside it.
+  //
+  // It lives only here: never in the server's list, never marked read there.
+  // It counts as one unread in the badge until the list is opened or the
+  // notice is answered.
+
+  var _noticeSlot = null;
+  var _noticeKind = '';       // this visit's one notice, once one has qualified
+  var _noticeEnded = false;   // answered in this visit
+  var _noticeUnread = true;   // counted in the badge until the list is opened
+  var _noticeView = '';       // '' | 'confirm' | 'menu' | 'error'
+  var _noticeError = '';
+  var _noticeBusy = false;
+
+  // Literal class lists, so Tailwind compiles them.
+  var NOTICE_BTN = {
+    primary: 'px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-bright text-xs font-bold transition-colors disabled:opacity-60',
+    quiet: 'px-2.5 py-1.5 rounded-lg text-xs font-semibold text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors disabled:opacity-60',
+    link: 'mt-1 min-h-6 inline-flex items-center text-label text-frosted-blue/80 hover:text-frosted-blue underline underline-offset-2 disabled:opacity-60'
+  };
+
+  function asker() { return window.WSAsk; }
+
+  function noticeAllowed(kind) {
+    var a = asker();
+    if (!a || !a.welcomeSeen() || a.asked() || a.snoozed(kind)) return false;
+    var state = a.get(kind);
+    if (state === 'never') return false;
+    if (kind === 'install') return state !== 'done' && a.homeOffered();
+    var push = a.pushKind();
+    return push !== 'granted' && push !== 'unsupported';
+  }
+
+  /** The notice to show now: 'push', 'install' or ''. */
+  function noticeKind() {
+    if (_noticeEnded) return '';
+    if (!_noticeKind) {
+      var a = asker();
+      var order = a && a.pushKind() === 'ios' ? ['install', 'push'] : ['push', 'install'];
+      for (var i = 0; i < order.length && !_noticeKind; i++) {
+        if (noticeAllowed(order[i])) _noticeKind = order[i];
+      }
+    }
+    return _noticeKind && noticeAllowed(_noticeKind) ? _noticeKind : '';
+  }
+
+  function words() { return (asker() && asker().words) || {}; }
+  function onIOS() { return typeof window.WSInstallIOS === 'function' && !!window.WSInstallIOS(); }
+
+  /* What the notice says now: its words, steps and buttons. */
+  function noticeContent(kind) {
+    var w = words();
+    var stop = { label: 'Don’t ask me again', kind: 'link', run: function () { setNoticeView('confirm'); } };
+    var later = { label: 'Not now', kind: 'quiet', run: function () { noticeAnswer('later'); } };
+    if (_noticeView === 'confirm') {
+      return { icon: kind === 'push' ? 'notifications_paused' : 'add_to_home_screen', title: 'Stop asking?', body: kind === 'push' ? w.PUSH_STOP : w.HOME_STOP, say: true,
+               actions: [{ label: 'Stop asking', kind: 'primary', run: function () { noticeAnswer('never'); } },
+                         { label: 'Cancel', kind: 'quiet', focus: true, run: function () { setNoticeView('', 'link'); } }] };
+    }
+    if (kind === 'install') {
+      var base = { icon: 'add_to_home_screen', title: w.HOME_TITLE };
+      var done = { label: 'Done', kind: 'primary', run: function () { noticeAnswer('done'); } };
+      if (_noticeView === 'menu') {
+        return Object.assign(base, { body: w.HOME_MENU, list: w.MENU_STEPS, say: true, actions: [Object.assign({ focus: true }, done), later] });
+      }
+      if (onIOS()) {
+        return Object.assign(base, { body: w.homeBody() + ' On an iPhone or iPad it’s also how you get notifications.', list: w.IOS_STEPS,
+                                     actions: [done, later, stop] });
+      }
+      return Object.assign(base, { body: w.homeBody(),
+                                   actions: [{ label: w.HOME_TITLE, kind: 'primary', run: addToHomeScreen }, later, stop] });
+    }
+    var push = asker().pushKind();
+    if (push === 'blocked') {
+      return { icon: 'notifications_off', title: 'Notifications are blocked', body: w.PUSH_BLOCKED, actions: [later, stop] };
+    }
+    if (push === 'ios') {
+      return { icon: 'notifications', title: 'Turn on notifications', body: w.PUSH_IOS, list: w.IOS_STEPS, actions: [later, stop] };
+    }
+    return { icon: 'notifications_active', title: 'Turn on notifications',
+             body: _noticeView === 'error' ? _noticeError : w.PUSH_OFFER, say: _noticeView === 'error',
+             actions: [{ label: 'Turn on', kind: 'primary', busyLabel: 'Turning on…', run: turnOnPush }, later, stop] };
+  }
+
+  function noticeSteps(items) {
+    var ol = createEl('ol', 'mt-1.5 ps-4 list-decimal space-y-0.5 text-label text-frosted-blue/80');
+    items.forEach(function (item) {
+      var parts = Array.isArray(item) ? item : [item];
+      var li = createEl('li', null, parts[0] || '');
+      if (parts[1]) li.appendChild(createIcon('material-symbols-outlined tour-glyph', parts[1]));
+      if (parts[2]) li.appendChild(document.createTextNode(parts[2]));
+      ol.appendChild(li);
+    });
+    return ol;
+  }
+
+  /** Draws the notice into the top of the list, or empties the slot. focusOn:
+   *  'link' (Don't ask me again), or a button asked for with focus: true. */
+  function renderNotice(focusOn) {
+    if (!_noticeSlot) return;
+    var kind = noticeKind();
+    var hadFocus = _noticeSlot.contains(document.activeElement);
+    while (_noticeSlot.firstChild) _noticeSlot.removeChild(_noticeSlot.firstChild);
+    _noticeSlot.hidden = !kind;
+    if (!kind) {
+      _noticeView = '';
+      // Answered from the keyboard: focus goes back to the bell.
+      if (hadFocus) focusOpenBell();
+      return;
+    }
+    var c = noticeContent(kind);
+    var box = createEl('div', 'flex items-start gap-3 px-4 py-3 bg-primary/10 border-b border-steel-blue/10');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-labelledby', 'wsNoticeTitle');
+    box.setAttribute('data-ws-notice', kind);
+    box.appendChild(createIcon('material-symbols-outlined text-steel-blue text-lg mt-0.5 shrink-0', c.icon));
+    var content = createEl('div', 'flex-1 min-w-0');
+    var title = createEl('p', 'text-xs font-bold text-frosted-blue', c.title);
+    title.id = 'wsNoticeTitle';
+    content.appendChild(title);
+    content.appendChild(createEl('p', 'text-label text-frosted-blue/80 mt-0.5', c.body));
+    if (c.list && c.list.length) content.appendChild(noticeSteps(c.list));
+
+    var row = createEl('div', 'mt-2 flex flex-wrap items-center gap-2');
+    var buttons = [];
+    var wanted = null;
+    var link = null;
+    c.actions.forEach(function (a) {
+      var b = createEl('button', NOTICE_BTN[a.kind], a.label);
+      b.type = 'button';
+      b.addEventListener('click', function (e) {
+        // The click must not reach the page's "outside the list" close: the
+        // button may be gone from the list by then.
+        e.stopPropagation();
+        if (_noticeBusy) return;
+        a.run(b, a);
+      });
+      buttons.push(b);
+      if (a.kind === 'link') { link = b; return; }
+      row.appendChild(b);
+      if (a.focus && !wanted) wanted = b;
+    });
+    content.appendChild(row);
+    // The small link on a line of its own under the buttons, as in the tour.
+    if (link) content.appendChild(link);
+    var say = createEl('p', 'sr-only');
+    say.setAttribute('aria-live', 'polite');
+    content.appendChild(say);
+    box.appendChild(content);
+    _noticeSlot.appendChild(box);
+
+    if (c.say) say.textContent = c.title + '. ' + c.body;
+    var to = focusOn === 'link' ? link : (focusOn ? wanted || buttons[0] : null);
+    if (to) { try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); } }
+  }
+
+  function setNoticeView(view, focusOn) {
+    _noticeView = view;
+    renderNotice(focusOn || true);
+  }
+
+  /** The notice is answered: remembered in WSAsk (whose ws:ask event redraws
+   *  the list and the badge) and gone for the rest of this visit. */
+  function noticeAnswer(value) {
+    var kind = _noticeKind;
+    _noticeEnded = true;
+    _noticeUnread = false;
+    _noticeBusy = false;
+    if (asker() && kind) asker().set(kind, value);
+    renderNotice();
+    drawBadge();
+  }
+
+  function focusOpenBell() {
+    var wrapper = _dropdown && _dropdown.parentElement;
+    var bell = wrapper && wrapper.querySelector('button[title="Notifications"]');
+    if (bell) { try { bell.focus({ preventScroll: true }); } catch (e) { bell.focus(); } }
+  }
+
+  function noticeToast(text) {
+    if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast(text, 'err');
+  }
+
+  /* Turn on: the shared subscribe path, straight from the tap (the browser
+     only asks in answer to one). The notice goes the moment the browser says
+     yes; the subscribe and the save finish behind it. */
+  function turnOnPush(btn, action) {
+    var push = window.WSPush;
+    if (!push || typeof push.subscribe !== 'function') return;
+    var gone = false;
+    _noticeBusy = true;
+    var all = _noticeSlot.querySelectorAll('button');
+    for (var i = 0; i < all.length; i++) all[i].disabled = true;
+    btn.textContent = action.busyLabel;
+    var result;
+    try {
+      result = push.subscribe(function () { gone = true; noticeAnswer(''); });
+    } catch (e) {
+      result = Promise.reject(e);
+    }
+    return Promise.resolve(result).then(function () {
+      if (!gone) noticeAnswer('');
+    }, function (err) {
+      var kind = push.failureKind(err);
+      // The browser's own question, answered no (the permission says so from
+      // now on) or closed (a Not now).
+      if (kind === 'blocked' || kind === 'dismissed') {
+        if (!gone) noticeAnswer(kind === 'dismissed' ? 'later' : '');
+        return;
+      }
+      var text = (push.messages && (push.messages[kind] || push.messages.failed)) || '';
+      if (gone) { noticeToast(text); return; }
+      _noticeBusy = false;
+      _noticeError = text;
+      setNoticeView('error');
+    });
+  }
+
+  /* Add to home screen: the browser's own prompt where it has given us one
+     (Chrome on Android), else the steps to take in its menu. */
+  function addToHomeScreen() {
+    var inst = window.WS && window.WS.install;
+    if (window.WSInstallPrompt && inst && typeof inst.prompt === 'function') {
+      Promise.resolve(inst.prompt()).then(function (outcome) {
+        if (outcome === 'accepted') noticeAnswer('done');
+        else if (outcome === 'dismissed') noticeAnswer('later');
+        else setNoticeView('menu');      // nothing was shown after all
+      }, function () { setNoticeView('menu'); });
+      return;
+    }
+    setNoticeView('menu');
+  }
+
+  /* WSAsk changed (the tour's answer, the banner taking this visit's ask):
+     the notice and the badge follow. */
+  function handleAskChange() {
+    renderNotice();
+    drawBadge();
   }
 
   // ---- Preferences Modal ----
@@ -1172,6 +1448,8 @@
     document.addEventListener('click', handleOutsideClick);
     // ...and when the account menu opens
     document.addEventListener('ws:menu-open', handleOtherMenuOpen);
+    // The ask notice follows WSAsk (theme-loader.js) for the document's life.
+    document.addEventListener('ws:ask', handleAskChange);
   }
 
   // Expose

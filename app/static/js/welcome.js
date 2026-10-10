@@ -8,19 +8,18 @@
  * phone adding the site to the home screen, the calendar, Books and, on a
  * phone, the tab bar. "Welcome tour" in the account menu and in More
  * (/?welcome=1) runs it again. A wide screen is never offered the home
- * screen, in the tour or in its small prompt.
+ * screen.
  *
  * The two offers (notifications, home screen) keep their answer in
- * theme-loader.js WSAsk, which Home's push banner reads too:
+ * theme-loader.js WSAsk, which Home's push banner and the bell read too:
  *   Turn on / Add       the browser's own question, from the tap
  *   Not now             asked again on the next visit: a full load or a
  *                       sign-in, never a soft navigation. Closing the tour
  *                       early (Skip, Escape) is a Not now for both.
  *   Don't ask me again  a confirmation first, then nothing asks again (the
  *                       banner included). The bell and More still have them.
- * A tour already seen asks again with one small bubble of its own (the
- * engine's quiet mode), at most one per visit, and never in a visit where
- * the banner or the tour has already asked.
+ * A tour already seen asks nothing here: the next visit's ask is a notice in
+ * the bell's list (notifications.js), never a bubble.
  *
  * WSWelcome.mount(ctx) is called by pages/home.js on every visit, after the
  * banner has been decided; everything ends with ctx.signal.
@@ -34,51 +33,31 @@
   var REPLAY = 'welcome';  // /?welcome=1, the menus' "Welcome tour"
 
   var PUSH_BASE = 'Updates on your requests, issues and tickets, server problems and announcements land here.';
-  var PUSH_STOP = 'You can still turn notifications on from the bell, under Notification settings.';
-  var IOS_STEPS = [['Tap ', 'ios_share', ' Share in the browser toolbar'], 'Tap Add to Home Screen'];
-  var MENU_STEPS = [['Open the browser menu ', 'more_vert', ''], 'Tap Add to Home screen'];
-  var HOME_TITLE = 'Add to home screen';
-  var HOME_STOP = 'You can still add it from More.';
+  // Said by the bell's notice too (theme-loader.js WSAsk.words).
+  var WORDS = (window.WSAsk && window.WSAsk.words) || {};
+  var PUSH_STOP = WORDS.PUSH_STOP;
+  var IOS_STEPS = WORDS.IOS_STEPS;
+  var MENU_STEPS = WORDS.MENU_STEPS;
+  var HOME_TITLE = WORDS.HOME_TITLE;
+  var HOME_STOP = WORDS.HOME_STOP;
 
   function matches(q) {
     try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; }
   }
   // A phone: the same test as the tab bar's "Getting around" step.
   function phone() { return !matches(LG); }
-  function installed() { return typeof window.WSInstalled === 'function' && !!window.WSInstalled(); }
   function ios() { return typeof window.WSInstallIOS === 'function' && !!window.WSInstallIOS(); }
   function ask() { return window.WSAsk; }
-
-  // The operator's site name, or words that stand in for one (as More's row).
-  function siteName() {
-    var b = window.WEBSERVARR_THEME || ((window.WS_DATA || {}).branding) || {};
-    var name = typeof b.app_name === 'string' ? b.app_name.trim() : '';
-    return name || 'this site';
-  }
 
   function toast(text) {
     if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast(text, 'err');
   }
 
-  /* Where push stands on this device:
-     'offer'        it can be asked for
-     'granted'      already allowed
-     'blocked'      refused in the browser: say how to undo that
-     'ios'          an iPhone or iPad in a browser tab: only the home-screen app has push
-     'unsupported'  no push here (the browser, the server, or an account with no email) */
-  function pushKind() {
-    if (ios() && !installed()) return 'ios';
-    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
-    var user = (window.WS_DATA || {}).user || {};
-    if (!user.has_email || !(window.WEBSERVARR_THEME || {}).vapid_public_key || !window.WSPush) return 'unsupported';
-    if (Notification.permission === 'granted') return 'granted';
-    if (Notification.permission === 'denied') return 'blocked';
-    return 'offer';
-  }
-
+  // Where push stands on this device, and whether the home screen is offered
+  // here: theme-loader.js WSAsk, the same answers the bell's notice reads.
+  function pushKind() { return ask().pushKind(); }
   function pushAskable() { return pushKind() === 'offer' && ask().get('push') !== 'never'; }
-  // The home screen is offered on a phone only, and not from inside it.
-  function homeOffered() { return phone() && !installed(); }
+  function homeOffered() { return ask().homeOffered(); }
   function installAskable() {
     var state = ask().get('install');
     return homeOffered() && state !== 'never' && state !== 'done';
@@ -186,7 +165,7 @@
 
   function menuSteps(ctl) {
     ctl.update({
-      body: 'Add it from your browser’s menu:',
+      body: WORDS.HOME_MENU,
       list: MENU_STEPS,
       actions: [
         { label: 'Done', kind: 'primary', focus: true, run: function (c) { ask().set('install', 'done'); c.next(); } },
@@ -208,10 +187,10 @@
           return { body: PUSH_BASE + ' Want them on this device too, even with the page closed?', actions: pushOffer() };
         }
         if (kind === 'blocked') {
-          return { body: PUSH_BASE + ' This browser is blocking notifications from this site. To get them here, allow notifications in the browser’s site settings, then reload the page.' };
+          return { body: PUSH_BASE + ' ' + WORDS.PUSH_BLOCKED };
         }
         if (kind === 'ios') {
-          return { body: PUSH_BASE + ' On an iPhone or iPad they only arrive in the home screen app: add it, open it from your home screen, then turn them on from the bell.' };
+          return { body: PUSH_BASE + ' ' + WORDS.PUSH_IOS };
         }
         return { body: PUSH_BASE + ' To choose what you get, open the bell and pick Notification settings.' };
       }
@@ -225,7 +204,7 @@
       icon: 'add_to_home_screen',
       title: HOME_TITLE,
       view: function () {
-        var body = 'Open ' + siteName() + ' from your home screen, full screen like an app.';
+        var body = WORDS.homeBody();
         var state = ask().get('install');
         if (state === 'never' || state === 'done') {
           return { body: body + ' It’s under More whenever you want it.', list: ios() ? IOS_STEPS : null };
@@ -319,27 +298,6 @@
     return list;
   }
 
-  /* What a seen tour asks again this visit, if anything: the home screen
-     first on an iPhone or iPad tab (push needs it), else notifications. The
-     home screen only on a phone. */
-  function waiting() {
-    var homeLater = ask().get('install') === 'later' && homeOffered();
-    if (homeLater && ios()) return 'install';
-    if (ask().get('push') === 'later' && pushKind() === 'offer') return 'push';
-    return homeLater ? 'install' : null;
-  }
-
-  function promptStep(kind) {
-    if (kind === 'push') {
-      return { target: bell(), icon: 'notifications', title: 'Turn on notifications?',
-               body: 'Get updates on your requests and server problems on this device, even with the page closed.',
-               actions: pushOffer() };
-    }
-    var step = installStep();
-    step.title = HOME_TITLE + '?';
-    return step;
-  }
-
   /* Takes ?welcome=1 off the address, so a reload does not run it again. */
   function dropReplayMark() {
     try {
@@ -362,19 +320,15 @@
       ctx.setTimeout(tour.start, REPLAY_MS);
       return;
     }
-    // Once per visit: a soft navigation back to Home never asks again.
-    if (ask().asked()) return;
+    // Once per visit: a soft navigation back to Home never asks again. A
+    // tour already seen asks nothing here: what it left for later waits in
+    // the bell's list (notifications.js), so a tap on the bell only ever
+    // opens the list.
+    if (ask().asked() || ask().welcomeSeen()) return;
     ctx.setTimeout(function () {
-      if (ask().asked()) return;
-      if (!ask().welcomeSeen()) {
-        ask().markAsked('welcome');
-        tour.start();
-        return;
-      }
-      var kind = waiting();
-      if (!kind) return;
+      if (ask().asked() || ask().welcomeSeen()) return;
       ask().markAsked('welcome');
-      Tour.init({ quiet: true, steps: [promptStep(kind)], signal: ctx.signal }).start();
+      tour.start();
     }, START_MS);
   }
 

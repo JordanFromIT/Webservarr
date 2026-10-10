@@ -184,15 +184,26 @@
  * WSAsk.get(kind) / set(kind, value), kind 'push' or 'install', in
  * localStorage (ws-push-ask, ws-install-ask):
  *   ''       never asked by the tour (the banner may ask about push)
- *   'later'  "Not now", or the tour closed before it was answered: the tour's
- *            own small prompt asks again on the next visit (a full load or a
- *            sign-in, never a soft navigation)
+ *   'later'  "Not now", or the tour closed before it was answered: the bell's
+ *            notice asks again on the next visit (a full load or a sign-in,
+ *            never a soft navigation)
  *   'never'  "Don't ask me again", confirmed: nothing asks again
  *   'done'   (install only) added, or the steps to add it were shown
+ * WSAsk.snoozed(kind): set to 'later' during this load of the document, so
+ * nothing asks about it again until the next one. Every set() and
+ * markAsked() is announced as a ws:ask event on document, for the bell.
  * WSAsk.welcomeSeen(): the welcome tour has been shown here (unreadable
  * storage counts as seen, so a browser that cannot remember is not toured on
  * every visit). WSAsk.asked() / markAsked(by): what has already asked during
  * this load of the document ('welcome' or 'banner'), at most one per visit.
+ *
+ * Where each stands on this device, for the tour and the bell alike:
+ * WSAsk.pushKind() is 'offer' (it can be asked for), 'granted', 'blocked'
+ * (refused in the browser: say how to undo that), 'ios' (an iPhone or iPad
+ * in a browser tab: only the home-screen app has push) or 'unsupported' (no
+ * push here: the browser, the server, or an account with no email).
+ * WSAsk.homeOffered(): the home screen is offered on a phone only, and not
+ * from inside it. WSAsk.words: the words both say.
  */
 (function () {
   'use strict';
@@ -213,13 +224,61 @@
     try { return localStorage.getItem(WELCOME_SEEN) === '1'; } catch (e) { return true; }
   }
 
+  var snoozedNow = {};
+  function changed(kind) {
+    try { document.dispatchEvent(new CustomEvent('ws:ask', { detail: { kind: kind } })); } catch (e) { /* no listeners yet */ }
+  }
+  function setAnswer(kind, value) {
+    set(kind, value);
+    if (value === 'later') snoozedNow[kind] = true;
+    changed(kind);
+  }
+
+  function matches(q) {
+    try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; }
+  }
+  function installed() { return typeof window.WSInstalled === 'function' && !!window.WSInstalled(); }
+  function ios() { return typeof window.WSInstallIOS === 'function' && !!window.WSInstallIOS(); }
+  // A phone: narrower than the sidebar layout (the tour's "Getting around").
+  function phone() { return !matches('(min-width: 1024px)'); }
+
+  function pushKind() {
+    if (ios() && !installed()) return 'ios';
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+    var user = (window.WS_DATA || {}).user || {};
+    if (!user.has_email || !(window.WEBSERVARR_THEME || {}).vapid_public_key || !window.WSPush) return 'unsupported';
+    if (Notification.permission === 'granted') return 'granted';
+    if (Notification.permission === 'denied') return 'blocked';
+    return 'offer';
+  }
+
   window.WSAsk = {
     WELCOME_SEEN: WELCOME_SEEN,
     get: get,
-    set: set,
+    set: setAnswer,
+    snoozed: function (kind) { return !!snoozedNow[kind]; },
     welcomeSeen: welcomeSeen,
     asked: function () { return askedBy; },
-    markAsked: function (by) { if (!askedBy) askedBy = by || 'welcome'; }
+    markAsked: function (by) { if (!askedBy) { askedBy = by || 'welcome'; changed(''); } },
+    pushKind: pushKind,
+    homeOffered: function () { return phone() && !installed(); },
+    words: {
+      PUSH_OFFER: 'Get updates on your requests and server problems on this device, even with the page closed.',
+      PUSH_BLOCKED: 'This browser is blocking notifications from this site. To get them here, allow notifications in the browser’s site settings, then reload the page.',
+      PUSH_IOS: 'On an iPhone or iPad they only arrive in the home screen app: add it, open it from your home screen, then turn them on from the bell.',
+      PUSH_STOP: 'You can still turn notifications on from the bell, under Notification settings.',
+      HOME_TITLE: 'Add to home screen',
+      HOME_STOP: 'You can still add it from More.',
+      HOME_MENU: 'Add it from your browser’s menu:',
+      IOS_STEPS: [['Tap ', 'ios_share', ' Share in the browser toolbar'], 'Tap Add to Home Screen'],
+      MENU_STEPS: [['Open the browser menu ', 'more_vert', ''], 'Tap Add to Home screen'],
+      // The site's name, or words that stand in for one (as More's row).
+      homeBody: function () {
+        var b = window.WEBSERVARR_THEME || ((window.WS_DATA || {}).branding) || {};
+        var name = typeof b.app_name === 'string' ? b.app_name.trim() : '';
+        return 'Open ' + (name || 'this site') + ' from your home screen, full screen like an app.';
+      }
+    }
   };
 })();
 
@@ -239,8 +298,9 @@
  * data-dismiss-days.
  *
  * The welcome tour asks first (WSAsk above): no banner while the tour has not
- * been shown, while the tour's own prompt is waiting to ask again ('later'),
- * after "Don't ask me again" ('never'), or once the tour has asked this visit.
+ * been shown, while the bell's notice is waiting to ask again ('later',
+ * notifications.js), after "Don't ask me again" ('never'), or once the tour
+ * has asked this visit.
  */
 (function () {
   'use strict';
