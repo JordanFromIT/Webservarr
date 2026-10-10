@@ -242,6 +242,14 @@ def _build() -> List[SettingDef]:
         _text("system.admin_email", "", "People who sign in with this email become admins", seed=False,
               max_length=254, pattern=r"[^@\s]+@[^@\s]+\.[^@\s]+", pattern_hint="Enter a full email address",
               check=_push_contact_problem),
+        # ---- Access requests (Settings > Access requests) ----
+        # Off by default. Public, but the sign-in page reads only the
+        # branding flag auth_methods.request_access, which also needs Plex.
+        _bool("access_requests.enabled", "false", "Let people request access from the sign-in page", public=True),
+        # The Plex library section keys ("1", "4", ...) ticked for a new
+        # person when the admin approves them (_validate_library_keys).
+        SettingDef("access_requests.default_libraries", "[]", "json",
+                   "Libraries a new person gets when you approve them", max_length=2000, allow_empty=False),
     ]
 
     # ---- Pages ----
@@ -535,6 +543,22 @@ def _validate_page_order(v: str) -> Optional[str]:
     return None
 
 
+_LIBRARY_KEY = re.compile(r"[0-9]{1,10}")   # ASCII digits only, as _INT
+
+
+def _validate_library_keys(v: str) -> Optional[str]:
+    """access_requests.default_libraries: a JSON list of distinct Plex section keys."""
+    try:
+        items = json.loads(v)
+    except ValueError:
+        return "Not valid JSON"
+    if not isinstance(items, list) or not all(isinstance(i, str) and _LIBRARY_KEY.fullmatch(i) for i in items):
+        return "Pick libraries from the list"
+    if len(set(items)) != len(items):
+        return "Pick each library once"
+    return None
+
+
 def validate_value(key: str, value: str) -> Optional[str]:
     """A plain-English reason the value can't be stored, or None when it can."""
     if is_user_data(key):
@@ -583,6 +607,8 @@ def validate_value(key: str, value: str) -> Optional[str]:
     if d.type == "json":
         if d.key == "pages.order":
             return _validate_page_order(value)
+        if d.key == "access_requests.default_libraries":
+            return _validate_library_keys(value)
         try:
             json.loads(value)
         except ValueError:

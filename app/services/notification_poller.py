@@ -34,7 +34,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Notification, NewsPost, PushSubscription, Setting, Ticket, TicketComment
 from app.services.push import send_push_to_users
-from app.services import status_feed
+from app.services import access_requests, status_feed
 from app.utils import identity_email
 
 logger = logging.getLogger(__name__)
@@ -1066,6 +1066,9 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
     last_news = 0.0
     last_tickets = 0.0
     last_library = 0.0
+    # Access requests: denied rows past their cooldown and approved rows
+    # after 30 days go once an hour (services/access_requests.tidy).
+    last_access_tidy = -access_requests.TIDY_INTERVAL
     # The Books catalog is rebuilt in a task of its own: a rebuild reads Kavita
     # and Plex over the network and must not hold up the notification polls.
     # Its own Redis lock keeps two rebuilds (this one, a webhook's, an admin's)
@@ -1169,6 +1172,17 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                     tidy_library_lines()
                 except Exception as exc:
                     logger.warning("Poller: library lines error: %s", type(exc).__name__)
+
+            # --- Access requests: the hourly tidy ---
+            if lease.held and now - last_access_tidy >= access_requests.TIDY_INTERVAL:
+                last_access_tidy = now
+                tidy_db = SessionLocal()
+                try:
+                    access_requests.tidy(tidy_db, access_requests.now_utc())
+                except Exception as exc:
+                    logger.warning("Poller: access request tidy failed: %s", type(exc).__name__)
+                finally:
+                    tidy_db.close()
 
             # --- News ---
             if lease.held and now - last_news >= interval_news:

@@ -193,6 +193,32 @@ class Notification(Base):
         return f"<Notification(id={self.id}, category='{self.category}', user='{self.user_email}')>"
 
 
+class AccessRequest(Base):
+    """A stranger's request for access from the sign-in page, one row per Plex
+    account (docs/superpowers/specs/2026-10-10-request-access-design.md,
+    section 4). The Plex account id is the key for "one open request" and
+    for the cooldown. The requester's Plex token is never stored anywhere.
+    app/services/access_requests.py owns the rules."""
+
+    __tablename__ = "access_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plex_account_id = Column(String(32), unique=True, nullable=False)
+    plex_username = Column(String(100), nullable=False)
+    plex_email = Column(String(254), nullable=False, default="", server_default="")
+    plex_avatar_url = Column(String(500), nullable=False, default="", server_default="")
+    name = Column(String(80), nullable=False)
+    note = Column(Text, nullable=False)
+    status = Column(String(10), nullable=False, index=True)    # pending, approved, denied, blocked
+    share_state = Column(String(10), nullable=True)             # shared, existing, failed (set on approve)
+    share_error = Column(String(200), nullable=True)            # Plex's short reason when failed, never a token
+    library_keys = Column(Text, nullable=True)                  # JSON list of the section keys ticked on approve
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(String(64), nullable=True)              # the admin's tickets.account_identity
+    cooldown_until = Column(DateTime, nullable=True)            # denied: decided_at plus 30 days
+
+
 class PushSubscription(Base):
     """Browser push notification subscriptions."""
     __tablename__ = "push_subscriptions"

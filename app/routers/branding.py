@@ -142,6 +142,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "simple": get("features.show_simple_auth") != "false",
         "plex": get("features.show_plex_auth") != "false" and bool(plex_url and plex_token),
         "authentik": get("features.show_authentik_auth") == "true" and bool(authentik_url and authentik_client_id),
+        # The sign-in page's "New here? Request access" link. The same rule
+        # as the request routes' own gate (services/access_requests.is_open).
+        "request_access": get("access_requests.enabled") == "true" and bool(plex_url and plex_token),
     }
 
     pages = SIDEBAR_PAGE_IDS
