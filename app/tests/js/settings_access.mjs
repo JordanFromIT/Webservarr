@@ -7,7 +7,8 @@
 // with the default libraries ticked, one dialog for two presses, at least
 // one library, the share's outcome, Plex not listing libraries means no
 // dialog); the failed share's reason and the copy button; Deny and Block;
-// Unblock; a failed load and Try again.
+// Unblock; a failed load and Try again; both dialogs opening on a choice,
+// not their action, so one Enter shares or denies nothing.
 // Run: node app/tests/js/settings_access.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -281,6 +282,45 @@ await run('a failed load, then Try again', async (open) => {
   s.listStatus = 200;
   await t.press(retry);
   check('then the list', t.qa('[data-ar-request]').length === 2);
+});
+
+await run('a dialog opens on its first choice, so Enter shares nothing', async (open) => {
+  const t = await open();
+  const enter = async (node) => {
+    node.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    node.dispatchEvent(new t.win.KeyboardEvent('keyup', { key: 'Enter', bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 10)); await flush();
+  };
+  await t.press('[data-ar-request="1"] [data-ar-approve]');
+  let box = t.dialog();
+  const firstLib = box.querySelector('input[type="checkbox"]');
+  check('Approve starts on the first library', t.doc.activeElement === firstLib, t.doc.activeElement && t.doc.activeElement.outerHTML);
+  await enter(t.doc.activeElement);
+  check('Enter there approves nothing', t.calls('POST', '/api/admin/access-requests/1/approve').length === 0);
+  check('the dialog stays open', t.dialog() === box);
+  await t.press(t.button(box, 'Cancel'));
+  await t.press('[data-ar-request="1"] [data-ar-deny]');
+  box = t.dialog();
+  check('Deny starts on the block box', t.doc.activeElement === box.querySelector('[data-ar-block]'), t.doc.activeElement && t.doc.activeElement.outerHTML);
+  await enter(t.doc.activeElement);
+  check('Enter there denies nothing', t.calls('POST', '/api/admin/access-requests/1/deny').length === 0);
+  check('the deny dialog stays open', t.dialog() === box);
+  await t.press(t.button(box, 'Cancel'));
+  check('still waiting', t.q('[data-ar-request="1"]') !== null);
+  // The shared dialog: initial is opt-in. 'title' starts on the heading; a
+  // dialog without it still starts on its OK (or Cancel when danger).
+  t.win.WSUI.confirm({ title: 'Heading start', body: 'x', initial: 'title' });
+  await flush();
+  check('initial title focuses the heading', t.doc.activeElement && t.doc.activeElement.tagName === 'H2' && t.doc.activeElement.textContent === 'Heading start');
+  await t.press(t.button(t.dialog(), 'Cancel'));
+  t.win.WSUI.confirm({ title: 'Plain', body: 'x', confirmLabel: 'OK here' });
+  await flush();
+  check('without it, OK as before', t.doc.activeElement && t.doc.activeElement.textContent === 'OK here');
+  await t.press(t.button(t.dialog(), 'Cancel'));
+  t.win.WSUI.confirm({ title: 'Danger', body: 'x', danger: true });
+  await flush();
+  check('danger, Cancel as before', t.doc.activeElement && t.doc.activeElement.textContent === 'Cancel');
+  await t.press(t.button(t.dialog(), 'Cancel'));
 });
 
 console.log(`${total - failed}/${total} settings access cases pass`);

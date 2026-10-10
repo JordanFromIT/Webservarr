@@ -327,7 +327,10 @@
         fs.appendChild(el('legend', 'text-[13px] font-semibold text-frosted-blue/70 mb-1', 'Libraries ' + r.plex_username + ' gets'));
         var on = currentDefaults();
         libraries.forEach(function (lib) { fs.appendChild(checkRow(lib, on.indexOf(lib.key) !== -1, null)); });
-        WSSettings.confirm({ title: 'Approve ' + r.plex_username + '?', body: fs, confirmLabel: 'Share and approve' }).then(function (ok) {
+        // Focus starts on the first library, never on the share itself.
+        var firstLib = fs.querySelector('input[type="checkbox"]');
+        WSSettings.confirm({ title: 'Approve ' + r.plex_username + '?', body: fs, confirmLabel: 'Share and approve',
+                             initial: firstLib || 'title' }).then(function (ok) {
           if (!ok) { busy[r.id] = false; return; }
           var keys = tickedIn(fs);
           if (!keys.length) { busy[r.id] = false; WSSettings.toast(MSG.pickOne, 'err'); return; }
@@ -357,7 +360,8 @@
         label.appendChild(block);
         label.appendChild(el('span', '', 'Block this Plex account for good'));
         body.appendChild(label);
-        WSSettings.confirm({ title: 'Deny ' + r.plex_username + '?', body: body, confirmLabel: 'Deny' }).then(function (ok) {
+        WSSettings.confirm({ title: 'Deny ' + r.plex_username + '?', body: body, confirmLabel: 'Deny',
+                             initial: block }).then(function (ok) {
           if (!ok) { busy[r.id] = false; return; }
           button.disabled = true;
           var forGood = block.checked;

@@ -222,7 +222,11 @@
     if (f.length) f[0].focus();
   }
 
-  // opts: {title, body: string|Node, confirmLabel, cancelLabel, danger, alert}.
+  // opts: {title, body: string|Node, confirmLabel, cancelLabel, danger, alert,
+  // initial}. initial (opt-in) is where focus starts instead of the default
+  // button: a control inside body, or 'title' for the heading. A dialog whose
+  // OK acts at once (shares, sends) starts on its first choice, so one Enter
+  // straight after opening does nothing.
   // Resolves true for OK, false for Cancel/Escape/backdrop; with alert (a
   // one-button notice) every way out resolves true.
   function confirm(opts) {
@@ -308,7 +312,14 @@
       overlay.addEventListener('click', function (e) { if (e.target === overlay) close(entry.dismiss); }, { signal: ends.signal });
       cancel.addEventListener('click', function () { close(false); }, { signal: ends.signal });
       ok.addEventListener('click', function () { close(true); }, { signal: ends.signal });
-      (opts.danger && !opts.alert ? cancel : ok).focus();
+      var start = opts.danger && !opts.alert ? cancel : ok;
+      if (opts.initial === 'title') {
+        title.tabIndex = -1;
+        start = title;
+      } else if (opts.initial && opts.initial.focus && box.contains(opts.initial)) {
+        start = opts.initial;
+      }
+      start.focus();
     });
   }
 
