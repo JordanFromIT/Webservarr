@@ -5,7 +5,9 @@
 //  * the steps, in order, on a desktop and on a phone, and where each points;
 //    the home screen is a phone's only (never a desktop's, nor its prompt), and
 //    its words never say install
-//  * shown once (webservarr_welcome_v2_seen); "Welcome tour" runs it again
+//  * shown once per account on a device (webservarr_welcome_v2_seen:<username>),
+//    by itself on a first visit to Home (no ?welcome=1); another account's
+//    tour in the same browser does not count; "Welcome tour" runs it again
 //  * the two offers: Not now asks again on the next load (a notice in the
 //    bell's list, never a bubble) but not on a soft navigation; Don't ask me
 //    again needs its confirmation, then silences the bell's notice and the
@@ -66,7 +68,9 @@ const UA = {
   iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
   desktop: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36'
 };
-const SEEN = 'webservarr_welcome_v2_seen';
+// The mark for the account the harness signs in as (user sam, below).
+const SEEN_BASE = 'webservarr_welcome_v2_seen';
+const SEEN = SEEN_BASE + ':sam';
 const VAPID = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
 
 function banner() {
@@ -426,6 +430,47 @@ await scenario('seen: not again on the next load, but Welcome tour runs it', asy
   const seen = walk(d);
   check('no offers after Don’t ask me again', seen.every((s) => s.actions.length === 0), seen.map((s) => s.actions));
   await w.happyDOM.close();
+});
+
+await scenario('a first visit to Home starts it by itself: no ?welcome=1, nothing stored', async () => {
+  // A full load after sign-in and a soft navigation into Home are the same
+  // call here: pages/home.js mounts the tour on every visit.
+  const { w, d } = browser({ store: {} });
+  check('nothing stored yet', w.localStorage.length === 0, w.localStorage.length);
+  visit(w);
+  await wait(10);
+  check('running', on(d) && title(d) === 'Event log', on(d) && title(d));
+  check('this visit’s one ask', w.WSAsk.asked() === 'welcome', w.WSAsk.asked());
+  check('not seen until it ends', key(w, SEEN) === null);
+  walk(d);
+  check('ended and seen for this account', !on(d) && key(w, SEEN) === '1');
+  const store = {};
+  for (let i = 0; i < w.localStorage.length; i++) store[w.localStorage.key(i)] = w.localStorage.getItem(w.localStorage.key(i));
+  await w.happyDOM.close();
+  const again = browser({ store });
+  visit(again.w);
+  await wait(10);
+  check('a reload does not run it again', !on(again.d));
+  await again.w.happyDOM.close();
+});
+
+await scenario('another account’s tour in this browser does not count', async () => {
+  // An admin tried it in this window first (the old device-wide mark, or
+  // their own), then a member signs in: the member still gets it.
+  const store = { [SEEN_BASE]: '1', [SEEN_BASE + ':jordan']: '1' };
+  const { w, d } = browser({ store });
+  visit(w);
+  await wait(10);
+  check('the member is toured', on(d) && title(d) === 'Event log', on(d) && title(d));
+  walk(d);
+  check('seen for the member', key(w, SEEN) === '1');
+  check('the admin’s mark untouched', key(w, SEEN_BASE + ':jordan') === '1');
+  await w.happyDOM.close();
+  const admin = browser({ store, user: { username: 'jordan', has_email: true } });
+  visit(admin.w);
+  await wait(10);
+  check('the admin, who has had it, is not toured again', !on(admin.d));
+  await admin.w.happyDOM.close();
 });
 
 await scenario('focus moves into the bubble and goes back after', async () => {

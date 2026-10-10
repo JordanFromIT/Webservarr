@@ -2,7 +2,9 @@
  * WebServarr: Home's welcome tour (page helper, data-ws-page-script)
  *
  * Shown once to everyone, new or not, the first time Home is opened on this
- * device after version 2 (localStorage webservarr_welcome_v2_seen). It runs on
+ * device after version 2: once per account, so a second person signing in on
+ * the same browser still gets it (theme-loader.js WSAsk.welcomeKey,
+ * localStorage webservarr_welcome_v2_seen:<username>). It runs on
  * the shared engine (js/tour.js) and walks the shell: the event log, the
  * service status, the bell (and an offer to turn on notifications), on a
  * phone adding the site to the home screen, Home's news, the calendar, Books
@@ -330,7 +332,7 @@
     var Tour = window.WebServarrTour;
     if (!Tour || typeof Tour.init !== 'function' || !ask() || (ctx.signal && ctx.signal.aborted)) return;
     var replay = !!(ctx.url && ctx.url.searchParams && ctx.url.searchParams.get(REPLAY) === '1');
-    var tour = Tour.init({ seenKey: ask().WELCOME_SEEN, steps: steps, signal: ctx.signal });
+    var tour = Tour.init({ seenKey: ask().welcomeKey(), steps: steps, signal: ctx.signal });
 
     if (replay) {
       dropReplayMark();

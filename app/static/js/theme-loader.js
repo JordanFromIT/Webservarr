@@ -195,10 +195,15 @@
  * WSAsk.snoozed(kind): set to 'later' during this load of the document, so
  * nothing asks about it again until the next one. Every set() and
  * markAsked() is announced as a ws:ask event on document, for the bell.
- * WSAsk.welcomeSeen(): the welcome tour has been shown here (unreadable
- * storage counts as seen, so a browser that cannot remember is not toured on
- * every visit). WSAsk.asked() / markAsked(by): what has already asked during
- * this load of the document ('welcome' or 'banner'), at most one per visit.
+ * WSAsk.welcomeSeen(): the welcome tour has been shown to this account on
+ * this device (unreadable storage counts as seen, so a browser that cannot
+ * remember is not toured on every visit). The mark is kept per account
+ * (WSAsk.welcomeKey(): webservarr_welcome_v2_seen:<username>, as the Books
+ * guide keeps its own), so a browser someone else has had the tour in, a
+ * shared computer or a private window an admin tried it in first, still
+ * tours the next person who signs in there. WSAsk.asked() / markAsked(by):
+ * what has already asked during this load of the document ('welcome' or
+ * 'banner'), at most one per visit.
  *
  * Where each stands on this device, for the tour and the bell alike:
  * WSAsk.pushKind() is 'offer' (it can be asked for), 'granted', 'blocked'
@@ -214,6 +219,14 @@
   var WELCOME_SEEN = 'webservarr_welcome_v2_seen';
   var askedBy = '';
 
+  // The welcome tour's mark for the account signed in on this page (#ws-data).
+  // The bare name, without one, is never written by a signed-in Home.
+  function welcomeKey() {
+    var user = (window.WS_DATA || {}).user || {};
+    var name = typeof user.username === 'string' ? user.username : '';
+    return name ? WELCOME_SEEN + ':' + name : WELCOME_SEEN;
+  }
+
   function get(kind) {
     try { return localStorage.getItem(KEYS[kind]) || ''; } catch (e) { return ''; }
   }
@@ -224,7 +237,7 @@
     } catch (e) { /* private mode: asked again next time */ }
   }
   function welcomeSeen() {
-    try { return localStorage.getItem(WELCOME_SEEN) === '1'; } catch (e) { return true; }
+    try { return localStorage.getItem(welcomeKey()) === '1'; } catch (e) { return true; }
   }
 
   var snoozedNow = {};
@@ -256,7 +269,7 @@
   }
 
   window.WSAsk = {
-    WELCOME_SEEN: WELCOME_SEEN,
+    welcomeKey: welcomeKey,
     get: get,
     set: setAnswer,
     snoozed: function (kind) { return !!snoozedNow[kind]; },

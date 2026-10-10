@@ -97,7 +97,9 @@ function browser({ width = 390, ua = 'android', user = { username: 'sam', has_em
   } else {
     // Someone who has had the welcome tour (js/welcome.js): until then the
     // tour, not the banner, asks (welcome_tour.mjs covers the hand-over).
-    const all = Object.assign({ webservarr_welcome_v2_seen: '1' }, store);
+    // Its mark is kept per account (theme-loader.js WSAsk.welcomeKey).
+    const seen = 'webservarr_welcome_v2_seen' + (user && user.username ? ':' + user.username : '');
+    const all = Object.assign({ [seen]: '1' }, store);
     Object.keys(all).forEach((k) => w.localStorage.setItem(k, all[k]));
   }
   const data = { branding: { app_name: 'WebServarr', vapid_public_key: vapid }, user, page };
