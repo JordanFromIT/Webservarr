@@ -149,6 +149,14 @@ class Habits(Base):
         self.assertEqual([(i["title"], i["book_id"]) for i in got["requested"]["items"]],
                          [("Not Here Yet", None), ("Dune", 1)])
 
+    def test_requested_total_counts_every_request_in_the_period(self):
+        self.add(*[BookRequester(identity=ME, foreign_id=f"gr:{n}", title=f"Book {n}", format="both",
+                                 requested_at=NOW - timedelta(hours=n + 1)) for n in range(insights.LIST_MAX + 5)])
+        self.add(BookRequester(identity=ME, foreign_id="gr:old", title="Old", format="both",
+                               requested_at=NOW - timedelta(days=40)))
+        got = insights.habits_view(self.db, self.src(plays=[]), "30d", timezone.utc)["requested"]
+        self.assertEqual((got["total"], len(got["items"])), (insights.LIST_MAX + 5, insights.LIST_MAX))
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class EmptyInstall(Base):

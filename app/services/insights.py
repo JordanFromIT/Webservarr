@@ -1030,7 +1030,8 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
     """Spec section 7, Habits: the web and Plex app split (Plex an estimate),
     the time-of-day heatmap (7 x 24, Monday first, in `zone`; an hour of web
     listening lands on the local hour its UTC hour starts in) and requested
-    then read (the newest LIST_MAX requests in the period)."""
+    then read (every request in the period counted, the newest LIST_MAX
+    listed)."""
     since = since_of(period, src.now)
     web = [x for x in src.listens if since is None or x.hour >= _hour(since)]
     plays = [x for x in src.plays or () if since is None or x.at >= since]
@@ -1042,7 +1043,10 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
         local = _local(x.at, zone)
         heat[local.weekday()][local.hour] += x.ms
     asked = requested(db, src, since=since)
+    total = db.query(func.count(BookRequester.id))
+    if since is not None:
+        total = total.filter(BookRequester.requested_at >= since)
     return {"split": {"web_ms": sum(x.ms for x in web), "plex_ms": sum(x.ms for x in plays)},
             "heatmap": heat,
-            "requested": {"total": len(asked), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
+            "requested": {"total": total.scalar(), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
             "unavailable": list(src.unavailable), "tracking": tracking(db)}
