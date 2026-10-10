@@ -5,7 +5,7 @@ app/pages.py for the signed-in user from the operator's nav settings.
 
 Below lg the first five pages the user can see become tabs, in the operator's
 order, and the last tab is always More: the More sheet holds the remaining
-pages, then "Add to home screen", Account settings (admins) and Sign out. With
+pages, then "Add to home screen", the welcome tour and Sign out. With
 five pages or fewer every page is a tab; More stays, because Sign out and
 "Add to home screen" live there (the spec's "no More tab" case would leave a
 phone with no way to sign out).
@@ -149,15 +149,17 @@ class TabBar(unittest.TestCase):
 class MoreSheet(unittest.TestCase):
     def test_rows_in_the_specified_order(self):
         s = sheet(render(user=ADMIN, b=branding(**ALL_ON)))
-        order = [s.index('id="wsMoreNav"'), s.index("data-install-row"), s.index('href="/settings#sign-in"'),
+        order = [s.index('id="wsMoreNav"'), s.index("data-install-row"), s.index('href="/?welcome=1"'),
                  s.index("data-logout")]
         self.assertEqual(order, sorted(order))
 
-    def test_account_settings_is_for_admins_only(self):
-        def account_li(out):
-            return re.search(r'<li class="([^"]*)">\s*<a class="ws-sheet-row" href="/settings#sign-in"', sheet(out)).group(1)
-        self.assertNotIn("hidden", account_li(render(user=ADMIN)).split())
-        self.assertIn("hidden", account_li(render(user=MEMBER)).split())
+    def test_no_account_settings_row(self):
+        # Admins reach Settings from its own page link; the sheet has no
+        # shortcut into it, for anyone.
+        for user in (ADMIN, MEMBER):
+            s = sheet(render(user=user, b=branding(**ALL_ON)))
+            self.assertNotIn("Account settings", s)
+            self.assertNotIn("/settings#", s)
 
     def test_sign_out_names_who_is_signed_in(self):
         s = sheet(render(user=MEMBER))

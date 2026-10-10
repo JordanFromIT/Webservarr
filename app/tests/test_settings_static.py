@@ -2233,20 +2233,14 @@ class InPlaceNewsRender(PageRoutesBase):
 
 
 class SwitchOver(unittest.TestCase):
-    def test_account_menu_opens_sign_in(self):
-        # The page cache this once bumped is gone (Task 13); the activate
-        # cleanup below still clears any a previous worker left.
+    def test_account_menus_have_no_settings_shortcut(self):
+        # The desktop account menu and the phone More sheet once carried an
+        # "Account settings" link to /settings#sign-in; admins use the
+        # Settings page link instead.
         for partial in ("shell-header.html", "shell-sidebar.html"):
             text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
-            self.assertIn('href="/settings#sign-in"', text, partial)
-
-    def test_account_menu_label_is_sentence_case(self):
-        for partial in ("shell-header.html", "shell-sidebar.html"):
-            text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
-            link = re.search(r'<a\b[^>]*href="/settings#sign-in"[^>]*>.*?</a>', text, re.S)
-            self.assertIsNotNone(link, partial)
-            self.assertIn("Account settings", link.group(0), partial)
-            self.assertNotIn("Account Settings", text, partial)
+            self.assertNotIn("/settings#", text, partial)
+            self.assertNotIn("account settings", text.lower(), partial)
 
     def test_worker_update_drops_every_old_page_cache(self):
         # R11: a bump only clears what the old name left behind if activate
