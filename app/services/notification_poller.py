@@ -1109,6 +1109,18 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
         except Exception as exc:
             logger.warning("Poller: books discovery refresh failed: %s", type(exc).__name__)
 
+    # Insights' nightly Kavita read (services/insights_kavita.sweep): asked
+    # every CHECK_INTERVAL, runs at most once a night, in a task of its own.
+    from app.services import insights_kavita
+    last_kavita = -insights_kavita.CHECK_INTERVAL
+    kavita_task: Optional[asyncio.Task] = None
+
+    async def _sweep_kavita() -> None:
+        try:
+            await insights_kavita.sweep()
+        except Exception as exc:
+            logger.warning("Poller: Insights Kavita sweep failed: %s", type(exc).__name__)
+
     while not _stop_event.is_set():
         try:
             await asyncio.wait_for(_stop_event.wait(), timeout=TICK_SECONDS)
@@ -1218,6 +1230,12 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                 last_discovery = now
                 discovery_task = asyncio.create_task(_refresh_discovery())
 
+            # --- Insights: the nightly Kavita read ---
+            if (lease.held and now - last_kavita >= insights_kavita.CHECK_INTERVAL
+                    and (kavita_task is None or kavita_task.done())):
+                last_kavita = now
+                kavita_task = asyncio.create_task(_sweep_kavita())
+
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
 
@@ -1227,6 +1245,8 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
         ratings_task.cancel()
     if discovery_task is not None and not discovery_task.done():
         discovery_task.cancel()
+    if kavita_task is not None and not kavita_task.done():
+        kavita_task.cancel()
     logger.info("Notification poller stopped.")
 
 

@@ -105,9 +105,10 @@ page must label as an estimate. The phase says when it first appears.
 | 14 | Time-of-day heatmap | Web hours (beyond 180 days through the rollup); Plex plays at their hour | n/a | READY (180 days back), ESTIMATE (Plex) | A, B |
 | 15 | Requested then read | `book_requesters` matched by title; first activity by the requester after the request | Same | NEW TRACKING | B |
 
-Phase C adds, through Kavita admin queries: lifetime totals for every linked person every night (pages
-per day without a visit), and reading history (which ebooks were opened, and when), which completes 2, 3,
-6, 7, 9, 10 and 11 for people who read only in Kavita's own app.
+Phase C was to add, through Kavita admin queries, lifetime totals and reading history for every linked
+person every night. Kavita 0.9 refuses both to the admin key (section 4.3, Proof), so Phase C instead adds
+Kavita's own minutes of reading per person per day (Kavita's figure, labelled so) to People, a person,
+Trends and Habits. Pages and ebook places stay the Phase B snapshots.
 
 ## 4. Sources in detail
 
@@ -163,10 +164,42 @@ the request access work) and the owner's own account. A person with no known nam
 - **Kavita time spent** (`timeSpentReading`) is Kavita's own estimate; the page labels it so.
 - **Phase B readers:** the person's own link, on reads that already happen (Your stats, the Continue
   row, a book's pop-up) plus one background totals read from the Continue row at most once a day.
-- **Phase C:** the admin key (`integration.kavita.api_key`) exchanged for a token as the catalog does
-  (`kavita._token`), then per linked person: their totals and their reading history. The endpoints are
-  unverified today; Phase C's first task proves them read-only against dev's Kavita and records the result
-  here, and the plan stops for Jordan if they do not answer as expected.
+- **Phase C (as ruled after the proof below):** the admin key (`integration.kavita.api_key`) exchanged
+  for a token as the catalog does (`kavita._token`), then, once a night and GET only, per linked person
+  (`kavita_links`): `/api/Stats/reading-counts?userId=&StartDate=&TimeZoneId=UTC`, the minutes Kavita
+  measured them reading per day and format. Insights adds the formats together and keeps one
+  `reading_minutes` row per person per UTC day with minutes (`services/insights_kavita.sweep`). It asks
+  from three days before the latest day it keeps for the person (Kavita counts a session on the day it
+  began, once it has ended), or 730 days back for someone with none kept. A day that comes back 0 does
+  not overwrite what was kept. These minutes are **Kavita's own figure**, from its reading sessions, not
+  WebServarr's: the API carries them only under `kavita_ms` keys (People `kavita_ms_30d`, a person's
+  `totals.kavita_ms` and `weekly[].kavita_ms`, Trends `buckets[].kavita_ms`, Habits `split.kavita_ms`).
+  A day of minutes counts toward last active and active readers at the start of that UTC day. The sweep
+  does not read lifetime totals or history and writes no `ebook_places`; `/api/Activity/current` is left
+  to the live sessions task.
+- **Proof (Task 10, 2026-10-10).** Read-only from dev with the admin key against Kavita 0.9.1.4, whose
+  key account has the Admin role:
+
+  | Probe (GET, admin token) | Status | Shape |
+  |---|---|---|
+  | `/api/Users` | 200 | 6 users; `id`, `username`, `roles` and others |
+  | `/api/Stats/user-read?userId=<own>` | 200 | `avgHoursPerWeekSpentReading, lastActiveUtc, timeSpentReading, totalPagesRead, totalWordsRead` |
+  | `/api/Stats/user-read?userId=<other>` | 400 for all 5 others (one an admin), empty body | |
+  | `/api/Stats/user/<id>/read` (old route) | 404 | removed |
+  | `/api/Stats/user/reading-history?userId=<other>` | 404 | removed |
+  | `/api/Stats/reading-history` (new route) | 200 | the caller's own history only |
+  | `/api/Stats/reading-counts?userId=<other>` | 200 for all 5 others | `{value (day), format, count (minutes)}`, gap-filled per format |
+  | `/api/Activity/current` | 200 | live sessions with chapter ids (empty when probed) |
+
+  Why: in 0.9.1.4, `user-read` and the other per-user totals carry `[ProfilePrivacy]`, which allows
+  another user's id only when that user turned on "Share profile"; the admin role is not consulted.
+  `reading-history` always reads the caller's own. `reading-counts` has an explicit admin bypass but
+  gives minutes only: no pages, words or chapters. Kavita's session tables start with 0.9, so every
+  count was 0 when probed.
+- **Ruling (Jordan, 2026-10-10):** drop the lifetime totals and history halves of Phase C; pages and
+  ebook places stay the Phase B per-person snapshots from each person's own link. The nightly sweep reads
+  `reading-counts` instead, as above. Live sessions (`/api/Activity/current`) belong to the live sessions
+  task.
 
 ### 4.4 Requests
 
@@ -197,8 +230,9 @@ needs a migration in `app/seed.py`, registered in `app/database.py` `init_db`, g
 | `listening_hourly` (id, identity, hour, book_key, source, ms); unique (identity, hour, book_key, source); index on hour | B | new table | `listening.roll_up_hours`, in the hourly Books pass and before every log prune |
 | `book_requesters` (id, identity, foreign_id, title, format, requested_at); indexes on identity and requested_at | B | new table | the book request route, after Chaptarr took the request |
 | `kavita_links` (identity primary key, kavita_user_id, kavita_username, linked_at) | B | new table | `/signin-oidc`, from Kavita's `/api/account` answer (id and username only) |
-| `reading_totals` (id, identity, day, pages, words, hours, seen_at); unique (identity, day) | B | new table | Your stats, the Continue row's daily background read, the nightly sweep (C) |
-| `ebook_places` (id, identity, book_id, page, pages, read_at, seen_at); unique (identity, book_id); index on book_id | B | new table | the Continue row, a book's pop-up, the nightly sweep (C, opened books only, never over a real page) |
+| `reading_totals` (id, identity, day, pages, words, hours, seen_at); unique (identity, day) | B | new table | Your stats, the Continue row's daily background read |
+| `ebook_places` (id, identity, book_id, page, pages, read_at, seen_at); unique (identity, book_id); index on book_id | B | new table | the Continue row, a book's pop-up |
+| `reading_minutes` (id, identity, day, minutes, seen_at); unique (identity, day) | C | new table | the nightly sweep (`insights_kavita.sweep`), Kavita's own minutes |
 | Setting `insights.tracking_started` (internal) | B | `migrate_insights_started_v1` writes today's UTC date once | the migration |
 | Settings `listening.hours_through`, `insights.kavita_swept_at`, `insights.kavita_sweep_error` (internal) | B, C | none | the rollup and the sweep |
 
@@ -221,7 +255,7 @@ read.
 | Route | Answer | Cache |
 |---|---|---|
 | `/now` | `{listening: [...], reading: [...], unavailable, checked_at}` | none (the page asks every 30 s); Plex sessions 15 s |
-| `/people` | `{people: [{key, name, last_active, last_what, listened_ms_30d, plex_ms_30d, current: [...]}], unavailable, tracking}` | 5 min |
+| `/people` | `{people: [{key, name, last_active, last_what, listened_ms_30d, plex_ms_30d, kavita_ms_30d, current: [...]}], unavailable, tracking}` | 5 min |
 | `/person?key=&tz=` | `{key, name, last_active, totals, weekly, books, requests, unavailable, tracking}`; 404 for an unknown key | 5 min |
 | `/trends?period=&tz=` | `{period, bucket, buckets, active, top_books, top_authors, top_series, unavailable, tracking}` | 5 min |
 | `/books?period=` | `{abandoned, never_opened: {count, items}, finish, unavailable, tracking}` | 5 min |
@@ -234,8 +268,11 @@ read.
   anything unknown is UTC. Days, weeks, buckets and the heatmap are in that zone.
 - `key` is `utils.identity_key(identity)`: 24 hex characters. The server finds the person by comparing
   keys of everyone it knows; an identity never reaches the browser.
-- `unavailable` lists the sources that could not be read for this answer: `plex`, `kavita`. An answer
-  with something unavailable is never cached.
+- `unavailable` lists the sources that could not be read for this answer: `plex`, `kavita` (the last
+  nightly sweep failed). An answer with something unavailable is never cached.
+- `kavita_ms` (and `kavita_ms_30d`) is Kavita's own measure of reading time, from the nightly sweep
+  (section 4.3), never a figure WebServarr measured; the page labels it as Kavita's. In Trends it is null
+  before any is kept, as `pages` is.
 - `tracking` gives the date each new kind of record began: `{requests, reading, ebook_places, hours}`.
 - Errors: 4xx or 503 only. A database that cannot be read is 503 "Insights can't be read right now".
 
@@ -319,6 +356,7 @@ empty, new-tracking, unavailable and failed states. Jordan approves it before Ta
 | `listening_daily` | unchanged (all time) |
 | `book_requesters` | 730 days after the request |
 | `reading_totals` | 730 days |
+| `reading_minutes` | 730 days |
 | `ebook_places` | until 730 days after WebServarr last saw the place |
 | `kavita_links` | one row per person, replaced at each connect |
 | Redis answer caches | 5 minutes |
@@ -389,13 +427,15 @@ wording.
 2. **The echo rule** might drop a real Plexamp play when the same person also used the web player within
    the hour, or keep a web player play whose track ran longer than its length suggests. Both only move the
    Plex estimate, which is labelled.
-3. **Kavita admin endpoints** for another user's stats and history are unverified. If they refuse the
-   admin key, Phase C stops and the Phase B snapshots (from each person's own link) stay the only ebook
-   source.
+3. **Kavita admin endpoints** for another user's stats and history. Task 10 proved Kavita 0.9.1.4
+   refuses both to the admin key (section 4.3, Proof). Ruled 2026-10-10: the Phase B snapshots (from each
+   person's own link) stay the only source of pages and ebook places, and the nightly sweep reads only
+   Kavita's admin-only minutes per day (`reading-counts`), labelled as Kavita's figure.
 4. **Matching requests by title** misses a request whose Chaptarr title differs from the library's (a
    subtitle). Those show "not in the library yet".
 5. **Reading totals across gaps:** a person who reads Monday to Friday and visits only on Friday shows
-   all of it on Friday until Phase C's nightly sweep. Labelled as an estimate.
+   all of their pages on Friday. Labelled as an estimate. Kavita's minutes (Phase C) land on the right
+   days, but they are time, not pages.
 6. **Privacy:** the page shows everyone's habits to the admin. Mitigated by the wording (section 10), the
    admin-only gate on every way in, and the security audit.
 7. **Load:** a long first rollup on a large log. The log holds at most 180 days and the first run happens

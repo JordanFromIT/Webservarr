@@ -1,8 +1,9 @@
 """
 What Insights records as it happens (docs/superpowers/specs/2026-10-10-insights-design.md,
 section 5): who asked for which book, the Kavita account each person
-connected, their Kavita reading totals once a day, and their place in each
-ebook WebServarr reads for them. Listening is recorded by the player's own
+connected, their Kavita reading totals once a day, their place in each
+ebook WebServarr reads for them, and the minutes Kavita measured them reading
+each day (the nightly sweep, services/insights_kavita). Listening is recorded by the player's own
 log and its hourly rollup (app/services/listening.py).
 
 Each writer is called by a route that has already done its own job, through
@@ -18,7 +19,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models import BookRequester, EbookPlace, KavitaLink, ReadingTotal, Setting
+from app.models import BookRequester, EbookPlace, KavitaLink, ReadingMinutes, ReadingTotal, Setting
 
 logger = logging.getLogger(__name__)
 
@@ -129,13 +130,35 @@ def record_ebook_places(db: Session, identity: str, places, now: Optional[dateti
     return kept
 
 
+def record_reading_minutes(db: Session, identity: str, minutes, now: Optional[datetime] = None) -> int:
+    """Keep the minutes this person read on each UTC day as Kavita measured
+    them ({date: whole minutes}, from the nightly sweep). A day's figure
+    replaces the one kept before. A day of 0 is not written, so a day Kavita
+    no longer counts keeps what was read. Returns how many days were kept."""
+    if not identity or not isinstance(minutes, dict):
+        return 0
+    at = now or now_utc()
+    kept = 0
+    for day, count in minutes.items():
+        if not isinstance(day, date) or isinstance(day, datetime) or not _whole(count):
+            continue
+        values = {"minutes": count, "seen_at": at}
+        db.execute(sqlite_insert(ReadingMinutes).values(identity=identity, day=day, **values)
+                   .on_conflict_do_update(index_elements=[ReadingMinutes.identity, ReadingMinutes.day], set_=values))
+        kept += 1
+    db.commit()
+    return kept
+
+
 def prune(db: Session, now: Optional[datetime] = None) -> int:
-    """Delete what is older than KEEP_DAYS: requests, daily totals and places
-    WebServarr has not seen for that long. The Kavita links stay (one row a
-    person, replaced at each connect). Returns how many rows went."""
+    """Delete what is older than KEEP_DAYS: requests, daily totals and
+    minutes, and places WebServarr has not seen for that long. The Kavita
+    links stay (one row a person, replaced at each connect). Returns how many
+    rows went."""
     cutoff = (now or now_utc()) - timedelta(days=KEEP_DAYS)
     gone = db.query(BookRequester).filter(BookRequester.requested_at < cutoff).delete(synchronize_session=False)
     gone += db.query(ReadingTotal).filter(ReadingTotal.day < cutoff.date()).delete(synchronize_session=False)
+    gone += db.query(ReadingMinutes).filter(ReadingMinutes.day < cutoff.date()).delete(synchronize_session=False)
     gone += db.query(EbookPlace).filter(EbookPlace.seen_at < cutoff).delete(synchronize_session=False)
     db.commit()
     return gone

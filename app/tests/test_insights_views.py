@@ -143,7 +143,7 @@ class Habits(Base):
                  BookRequester(identity=THEM, foreign_id="gr:2", title="Not Here Yet", format="ebook",
                                requested_at=datetime(2026, 10, 2)))
         got = insights.habits_view(self.db, self.src(plays=plays), "30d", timezone.utc)
-        self.assertEqual(got["split"], {"web_ms": 3600000, "plex_ms": 600000})
+        self.assertEqual(got["split"], {"web_ms": 3600000, "plex_ms": 600000, "kavita_ms": 0})
         self.assertEqual((got["heatmap"][4][20], got["heatmap"][3][7]), (3600000, 600000))
         self.assertEqual((got["requested"]["total"], got["requested"]["read"]), (2, 1))
         self.assertEqual([(i["title"], i["book_id"]) for i in got["requested"]["items"]],

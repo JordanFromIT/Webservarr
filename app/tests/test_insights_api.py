@@ -155,10 +155,11 @@ class Person(Base):
         self.add(BookRequester(identity=ME, foreign_id="gr:1", title="dune", format="both",
                                requested_at=datetime(2026, 9, 30)))
         got = insights.person_view(self.db, self.src(plays=plays, names={"1001": "Sam"}), ME, timezone.utc)
-        self.assertEqual(got["totals"], {"listened_ms": 3600000, "plex_ms": 1200000, "finished": 1, "pages_read": None})
+        self.assertEqual(got["totals"], {"listened_ms": 3600000, "plex_ms": 1200000, "kavita_ms": 0, "finished": 1,
+                                         "pages_read": None})
         self.assertEqual(len(got["weekly"]), insights.HISTORY_WEEKS)
-        self.assertEqual(got["weekly"][-1], {"week": "2026-10-05", "web_ms": 3600000, "plex_ms": 0})
-        self.assertEqual(got["weekly"][-2], {"week": "2026-09-28", "web_ms": 0, "plex_ms": 1200000})
+        self.assertEqual(got["weekly"][-1], {"week": "2026-10-05", "web_ms": 3600000, "plex_ms": 0, "kavita_ms": 0})
+        self.assertEqual(got["weekly"][-2], {"week": "2026-09-28", "web_ms": 0, "plex_ms": 1200000, "kavita_ms": 0})
         self.assertEqual([(b["title"], b["finished"], b["listened_ms"], b["plex_ms"]) for b in got["books"]],
                          [("Dune", True, 3600000, 1200000)])
         self.assertEqual([(r["title"], r["book_id"], r["started_at"]) for r in got["requests"]],
@@ -174,7 +175,8 @@ class Person(Base):
                 src = self.src(plays=plays)
                 got = insights.person_view(self.db, src, ME, timezone.utc)
                 self.assertEqual((got["totals"]["listened_ms"], got["totals"]["plex_ms"]), (900000, 1200000))
-                self.assertEqual(got["weekly"][-1], {"week": "2026-10-05", "web_ms": 900000, "plex_ms": 1200000})
+                self.assertEqual(got["weekly"][-1], {"week": "2026-10-05", "web_ms": 900000, "plex_ms": 1200000,
+                                                     "kavita_ms": 0})
                 self.assertEqual([(b["listened_ms"], b["plex_ms"]) for b in got["books"]], [(900000, 1200000)])
                 sam = insights.people_view(self.db, src)["people"][0]
                 self.assertEqual((sam["listened_ms_30d"], sam["plex_ms_30d"]), (900000, 1200000))

@@ -16,6 +16,10 @@ Where each figure comes from (spec section 4; the page labels the estimates):
 - Reading: Kavita's lifetime totals as WebServarr read them each day
   (reading_totals; pages on a day are the rise from the day before) and places
   in ebooks (ebook_places).
+- Kavita reading time: the minutes Kavita measured each person reading each
+  UTC day, read by the nightly sweep (reading_minutes, kavita_reading).
+  Kavita's own figure, never WebServarr's: every key that carries it is
+  named kavita_ms.
 - Requests: book_requesters, matched to the library by folded title.
 
 People are named, and keyed for the browser by utils.identity_key; an account
@@ -28,7 +32,7 @@ import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from redis.exceptions import RedisError
@@ -36,7 +40,7 @@ from sqlalchemy import exists, func
 from sqlalchemy.orm import Session
 
 from app.models import (Book, BookAudioEdition, BookRequester, BookVisit, EbookPlace, ListeningHourly,
-                        ListeningLog, ListeningPosition, ReadingTotal, User)
+                        ListeningLog, ListeningPosition, ReadingMinutes, ReadingTotal, User)
 from app.services import book_catalog, insights_store, listening
 from app.utils import identity_key, utc_iso
 
@@ -59,6 +63,7 @@ HISTORY_WEEKS = 12
 DROP_OFF_MIN = 2                           # a drop-off chapter is one at least this many stopped in
 GONE_TITLE = "A book no longer in the library"
 EPOCH = datetime(1970, 1, 1)
+MINUTE_MS = 60_000
 
 CACHE_PREFIX = "webservarr:insights:v1:"
 ANSWER_TTL = 5 * 60
@@ -435,6 +440,26 @@ def ebook_rows(db: Session, identity: Optional[str] = None, book_ids: Optional[I
     return out
 
 
+def kavita_reading(db: Session, since: Optional[datetime] = None,
+                   identity: Optional[str] = None) -> Dict[Tuple[str, date], int]:
+    """{(identity, UTC day): ms} read as Kavita measured it (reading_minutes,
+    the nightly sweep): Kavita's own figure in whole minutes, every format,
+    from `since`'s UTC day on, everyone's or one person's."""
+    M = ReadingMinutes
+    q = db.query(M.identity, M.day, M.minutes)
+    if identity is not None:
+        q = q.filter(M.identity == identity)
+    if since is not None:
+        q = q.filter(M.day >= since.date())
+    return {(who, day): minutes * MINUTE_MS for who, day, minutes in q}
+
+
+def _day_start(day: date) -> datetime:
+    """When a day of Kavita's minutes counts as activity: its first moment
+    (UTC), the most Kavita's daily figure says."""
+    return datetime.combine(day, time.min)
+
+
 def known_identities(db: Session, src: Sources) -> Set[str]:
     """Everyone Insights has anything about."""
     found = {i for (i,) in db.query(ListeningPosition.identity).distinct()}
@@ -442,6 +467,7 @@ def known_identities(db: Session, src: Sources) -> Set[str]:
     found |= {i for (i,) in db.query(BookVisit.identity)}
     found |= {i for (i,) in db.query(BookRequester.identity).distinct()}
     found |= {i for (i,) in db.query(ReadingTotal.identity).distinct()}
+    found |= {i for (i,) in db.query(ReadingMinutes.identity).distinct()}
     found |= {listen.identity for listen in src.listens}
     found |= {play.identity for play in src.plays or ()}
     return {i for i in found if i}
@@ -565,12 +591,14 @@ def _public(item: dict) -> dict:
 def people_view(db: Session, src: Sources) -> dict:
     """Everyone, most recently active first: when they were last active and
     doing what, their listening in the last 30 days (the Plex part an
-    estimate) and up to CURRENT_MAX books they are in the middle of."""
+    estimate), Kavita's measure of their reading in them (kavita_ms_30d) and
+    up to CURRENT_MAX books they are in the middle of."""
     now = src.now
     month = now - CURRENT
     places = audio_places(db)
     ebooks = ebook_rows(db)
     plays = src.plays or []
+    kavita = kavita_reading(db)
     last: Dict[str, Tuple[datetime, str]] = {}
 
     def seen(identity: str, at: Optional[datetime], what: str) -> None:
@@ -583,6 +611,8 @@ def people_view(db: Session, src: Sources) -> dict:
         seen(play.identity, play.at, "plex")
     for ebook in ebooks:
         seen(ebook.identity, ebook.at, "reading")
+    for identity, day in kavita:
+        seen(identity, _day_start(day), "reading")
     for identity, at in db.query(BookVisit.identity, BookVisit.seen_at):
         seen(identity, at, "visit")
     for identity, at in db.query(BookRequester.identity, func.max(BookRequester.requested_at)).group_by(
@@ -597,6 +627,10 @@ def people_view(db: Session, src: Sources) -> dict:
     recent_plays = [p for p in plays if p.at >= month]
     for play in recent_plays:
         plex_ms[play.identity] += play.ms
+    kavita_ms: Counter = Counter()
+    for (identity, day), ms in kavita.items():
+        if day >= month.date():
+            kavita_ms[identity] += ms
 
     recent_places = [p for p in places if p.updated_at >= month and not p.finished]
     infos = audio_books(db, {p.book_key for p in recent_places} | {p.book_key for p in recent_plays})
@@ -628,7 +662,7 @@ def people_view(db: Session, src: Sources) -> dict:
         items = sorted(current.get(identity, {}).values(), key=lambda i: i["at"], reverse=True)[:CURRENT_MAX]
         people.append({"key": identity_key(identity), "name": names[identity], "last_active": utc_iso(at),
                        "last_what": what, "listened_ms_30d": web_ms[identity], "plex_ms_30d": plex_ms[identity],
-                       "current": [_public(i) for i in items]})
+                       "kavita_ms_30d": kavita_ms[identity], "current": [_public(i) for i in items]})
     people.sort(key=lambda p: (p["last_active"] or "", p["name"]), reverse=True)
     return {"people": people, "unavailable": list(src.unavailable), "tracking": tracking(db)}
 
@@ -642,9 +676,10 @@ def _book_row(row: dict) -> dict:
 
 
 def person_view(db: Session, src: Sources, identity: str, zone) -> dict:
-    """One person's history: totals, HISTORY_WEEKS weekly bars (web, and Plex
-    apps as an estimate, weeks Monday first in `zone`), every book they
-    touched (newest first, at most LIST_MAX) and their requests."""
+    """One person's history: totals, HISTORY_WEEKS weekly bars (web, Plex
+    apps as an estimate, and Kavita's measure of their reading by its UTC
+    day; weeks Monday first in `zone`), every book they touched (newest
+    first, at most LIST_MAX) and their requests."""
     now = src.now
     mine = [listen for listen in src.listens if listen.identity == identity]
     plays = [play for play in src.plays or () if play.identity == identity]
@@ -695,7 +730,7 @@ def person_view(db: Session, src: Sources, identity: str, zone) -> dict:
     listed = sorted(books.values(), key=lambda r: r["last"] or datetime.min, reverse=True)
 
     weeks = _weeks(now, zone, HISTORY_WEEKS)
-    weekly = {w: [0, 0] for w in weeks}
+    weekly = {w: [0, 0, 0] for w in weeks}
     for listen in mine:
         week = _monday(_local(listen.hour, zone).date())
         if week in weekly:
@@ -704,16 +739,24 @@ def person_view(db: Session, src: Sources, identity: str, zone) -> dict:
         week = _monday(_local(play.at, zone).date())
         if week in weekly:
             weekly[week][1] += play.ms
+    kavita = kavita_reading(db, identity=identity)
+    for (_identity, day), ms in kavita.items():
+        week = _monday(day)
+        if week in weekly:
+            weekly[week][2] += ms
 
     pages = (db.query(ReadingTotal.pages).filter(ReadingTotal.identity == identity)
              .order_by(ReadingTotal.day.desc()).limit(1).scalar())
     visits = [at for (at,) in db.query(BookVisit.seen_at).filter(BookVisit.identity == identity)]
-    last = max([r["last"] for r in listed if r["last"]] + visits, default=None)
+    last = max([r["last"] for r in listed if r["last"]] + visits + [_day_start(day) for (_i, day) in kavita],
+               default=None)
     return {"key": identity_key(identity), "name": names_of(db, [identity], src.names)[identity],
             "last_active": utc_iso(last),
             "totals": {"listened_ms": sum(x.ms for x in mine), "plex_ms": sum(x.ms for x in plays),
-                       "finished": sum(1 for r in listed if r["finished"]), "pages_read": pages},
-            "weekly": [{"week": w.isoformat(), "web_ms": weekly[w][0], "plex_ms": weekly[w][1]} for w in weeks],
+                       "kavita_ms": sum(kavita.values()), "finished": sum(1 for r in listed if r["finished"]),
+                       "pages_read": pages},
+            "weekly": [{"week": w.isoformat(), "web_ms": weekly[w][0], "plex_ms": weekly[w][1],
+                        "kavita_ms": weekly[w][2]} for w in weeks],
             "books": [_book_row(r) for r in listed[:LIST_MAX]],
             "requests": requested(db, src, identity=identity),
             "unavailable": list(src.unavailable), "tracking": tracking(db)}
@@ -776,7 +819,8 @@ def _top(rows: Iterable[dict], name_of) -> List[dict]:
 
 def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
     """Spec section 7, Trends: listening per bucket (web, and Plex apps as an
-    estimate) with pages read beside it (null before any reading is kept);
+    estimate) with pages read and Kavita's measure of reading time (by its
+    UTC day) beside it (each null before any of it is kept);
     people active each week; the top books, authors and series by time
     listened, then by people. Buckets and weeks are in `zone`."""
     now = src.now
@@ -785,14 +829,15 @@ def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
     web = [x for x in src.listens if since is None or x.hour >= _hour(since)]
     plays = [x for x in src.plays or () if since is None or x.at >= since]
     pages = reading_pages(db, since)
+    kavita = kavita_reading(db, since)
     ebooks = [e for e in ebook_rows(db) if e.started and (since is None or e.at >= since)]
     today = _local(now, zone).date()
     seen_days = ([_local(x.hour, zone).date() for x in web] + [_local(x.at, zone).date() for x in plays]
-                 + [day for (_identity, day) in pages])
+                 + [day for (_identity, day) in pages] + [day for (_identity, day) in kavita])
     first = _local(since, zone).date() if since is not None else min(seen_days, default=today)
 
     starts = _span(first, today, unit)
-    series = {s: {"web_ms": 0, "plex_ms": 0, "pages": 0} for s in starts}
+    series = {s: {"web_ms": 0, "plex_ms": 0, "pages": 0, "kavita_ms": 0} for s in starts}
 
     def add(day: date, what: str, amount: int) -> None:
         start = _bucket(day, unit)
@@ -805,7 +850,10 @@ def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
         add(_local(x.at, zone).date(), "plex_ms", x.ms)
     for (_identity, day), amount in pages.items():
         add(day, "pages", amount)
+    for (_identity, day), ms in kavita.items():
+        add(day, "kavita_ms", ms)
     has_reading = db.query(ReadingTotal.id).first() is not None
+    has_minutes = db.query(ReadingMinutes.id).first() is not None
 
     weeks = _span(first, today, "week")[-104:]
     active = {w: set() for w in weeks}
@@ -821,6 +869,8 @@ def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
     for x in plays:
         mark(_local(x.at, zone).date(), x.identity)
     for (identity, day), _amount in pages.items():
+        mark(day, identity)
+    for identity, day in kavita:
         mark(day, identity)
     for e in ebooks:
         mark(_local(e.at, zone).date(), e.identity)
@@ -846,7 +896,8 @@ def trends_view(db: Session, src: Sources, period: str, zone) -> dict:
     ranked = sorted(per_book.values(), key=lambda r: (-r["ms"], -len(r["people"]), r["info"].title.casefold()))
     return {"period": period, "bucket": unit,
             "buckets": [{"start": s.isoformat(), "web_ms": series[s]["web_ms"], "plex_ms": series[s]["plex_ms"],
-                         "pages": series[s]["pages"] if has_reading else None} for s in starts],
+                         "pages": series[s]["pages"] if has_reading else None,
+                         "kavita_ms": series[s]["kavita_ms"] if has_minutes else None} for s in starts],
             "active": [{"week": w.isoformat(), "people": len(active[w])} for w in weeks],
             "top_books": [{"book_id": r["info"].book_id, "title": r["info"].title, "author": r["info"].author,
                            "listened_ms": r["ms"], "people": len(r["people"])} for r in ranked[:TOP]],
@@ -1027,7 +1078,8 @@ def book_view(db: Session, src: Sources, book_id: int) -> Optional[dict]:
 # --- Habits --------------------------------------------------------------------------------
 
 def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
-    """Spec section 7, Habits: the web and Plex app split (Plex an estimate),
+    """Spec section 7, Habits: the web and Plex app split (Plex an estimate)
+    with Kavita's measure of reading time beside it (by its UTC day),
     the time-of-day heatmap (7 x 24, Monday first, in `zone`; an hour of web
     listening lands on the local hour its UTC hour starts in) and requested
     then read (every request in the period counted, the newest LIST_MAX
@@ -1046,7 +1098,8 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
     total = db.query(func.count(BookRequester.id))
     if since is not None:
         total = total.filter(BookRequester.requested_at >= since)
-    return {"split": {"web_ms": sum(x.ms for x in web), "plex_ms": sum(x.ms for x in plays)},
+    return {"split": {"web_ms": sum(x.ms for x in web), "plex_ms": sum(x.ms for x in plays),
+                      "kavita_ms": sum(kavita_reading(db, since).values())},
             "heatmap": heat,
             "requested": {"total": total.scalar(), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
             "unavailable": list(src.unavailable), "tracking": tracking(db)}

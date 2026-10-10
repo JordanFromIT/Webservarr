@@ -894,10 +894,28 @@ class ReadingTotal(Base):
         return f"<ReadingTotal(identity='{self.identity}', day={self.day})>"
 
 
+class ReadingMinutes(Base):
+    """The minutes a person read on one UTC day as Kavita measured them: its
+    reading sessions in every format, a session counted on the day it began
+    once it has ended. Kavita's own figure, read by Insights' nightly sweep
+    with the admin key (services/insights_kavita)."""
+    __tablename__ = "reading_minutes"
+    __table_args__ = (UniqueConstraint("identity", "day", name="uq_reading_minutes_identity_day"),)
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    day = Column(Date, nullable=False)
+    minutes = Column(Integer, nullable=False, default=0)
+    seen_at = Column(DateTime, nullable=False)                     # naive UTC
+
+    def __repr__(self):
+        return f"<ReadingMinutes(identity='{self.identity}', day={self.day})>"
+
+
 class EbookPlace(Base):
     """A person's place in one ebook (a catalog book) as Kavita gave it the
     last time WebServarr read it for them. `pages` 0 means the book is known
-    to be opened but not how far (the nightly sweep saw it in their history)."""
+    to be opened but not how far."""
     __tablename__ = "ebook_places"
     __table_args__ = (UniqueConstraint("identity", "book_id", name="uq_ebook_places_identity_book"),
                       Index("ix_ebook_places_book_id", "book_id"))

@@ -7,7 +7,8 @@ them). Every route only reads.
 
 Plex being down never fails a route: the answer lists it under
 "unavailable" and carries what WebServarr's own records say, and such an
-answer is never cached. A database that cannot be read is 503. People are
+answer is never cached. No route calls Kavita: after a failed nightly sweep
+(services/insights_kavita) answers list "kavita" until one works. A database that cannot be read is 503. People are
 keyed by utils.identity_key; an identity never leaves the server.
 """
 import functools
@@ -24,7 +25,7 @@ from app.database import get_db
 from app.dependencies import require_admin
 from app.limiter import limiter
 from app.routers.book_discovery import _zone
-from app.services import insights
+from app.services import insights, insights_kavita
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,9 @@ async def _sources(db: Session, r, since=None) -> insights.Sources:
     owner, names = await insights.plex_people(r)
     plays = await insights.plex_plays(r, owner)
     web = insights.listens(db, None if since is None else since - insights.ECHO_DAY)
+    unavailable = ([] if plays is not None else ["plex"]) + (["kavita"] if insights_kavita.last_error(db) else [])
     return insights.Sources(listens=web, plays=None if plays is None else insights.app_plays(plays, web),
-                            names=names, now=insights.now_utc(), unavailable=[] if plays is not None else ["plex"])
+                            names=names, now=insights.now_utc(), unavailable=unavailable)
 
 
 async def _answer(r, key: str, build) -> dict:
