@@ -232,11 +232,12 @@ class ShellRendering(unittest.TestCase):
             return re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
         self.assertIn('href="/settings"', nav(render(user=ADMIN)))
         self.assertNotIn('href="/settings"', nav(render(user=MEMBER)))
-        # The account-menu entry stays in the markup but hidden for members.
-        self.assertRegex(render(user=MEMBER), r'<a href="/settings#sign-in" class="[^"]*hidden">')
+        # No account-menu shortcut into Settings, for anyone.
+        for user in (ADMIN, MEMBER):
+            self.assertNotIn('href="/settings#', render(user=user))
         self.assertIn("data-admin", html_tag(render(user=ADMIN)))
         self.assertNotIn("data-admin", html_tag(render(user=MEMBER)))
-        # Version label and the account-settings menu entry hide for members.
+        # The version label hides for members.
         self.assertIn('id="appVersion" class="text-steel-blue text-[10px] text-center ">v9.9.9', render(user=ADMIN))
         self.assertIn('id="appVersion" class="text-steel-blue text-[10px] text-center hidden">v9.9.9', render(user=MEMBER))
 
