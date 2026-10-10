@@ -245,29 +245,38 @@
 
   /* Calendar points at Home's Upcoming Releases, which has the button to the
      full calendar, when the week there has something in it
-     (data-has-releases, pages/home.js). Hidden (its Home section is off),
-     empty or not yet in: the Calendar entry in the nav, as other pages. */
+     (data-has-releases, pages/home.js). A busy week on a phone is taller
+     than the screen: then only its header (the heading and View calendar),
+     so the button is in view. Hidden (its Home section is off), empty or not
+     yet in: the Calendar entry in the nav, as other pages. */
   var RELEASES = '#upcomingReleasesSection[data-has-releases]';
+  var RELEASES_HEAD = RELEASES + ' #releasesHead';
+  var BUBBLE_ROOM = 240;   // the bubble, its gap and the bars, beside the spotlight
   var CAL_WORDS = 'Upcoming movies and episodes, so you know what’s coming and when.';
-  function releasesShown() {
+  function releasesBox() {
     var el = document.querySelector(RELEASES);
-    if (!el) return false;
+    if (!el) return null;
     var r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    return r.width > 0 && r.height > 0 ? r : null;
   }
   function calendarStep() {
     var at = navEntry('/calendar');
     if (!at) return null;
-    return {
+    var step = {
       target: RELEASES,
       fallback: at.target,
       icon: 'calendar_month',
       title: 'Calendar',
       view: function () {
-        if (releasesShown()) return { body: CAL_WORDS + ' Open the full calendar from here.' };
+        if (releasesBox()) return { body: CAL_WORDS + ' Open the full calendar from here.' };
         return { body: CAL_WORDS + (at.more ? ' Find it under More.' : '') };
+      },
+      before: function () {
+        var r = releasesBox();
+        step.target = r && r.height + BUBBLE_ROOM > window.innerHeight ? RELEASES_HEAD : RELEASES;
       }
     };
+    return step;
   }
 
   function navStep(href, icon, title, body) {

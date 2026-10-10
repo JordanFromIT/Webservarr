@@ -1080,7 +1080,7 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
         self.assertEqual(cal.group(2), "View calendar")
         self.assertEqual(cal.group(1), req)
         section = page[page.index('<section id="upcomingReleasesSection"'):page.index('<div id="releasesContainer">')]
-        row = re.search(r'<div class="([^"]*)">\s*<div class="flex items-center gap-3">', section).group(1).split()
+        row = re.search(r'<div id="releasesHead" class="([^"]*)">\s*<div class="flex items-center gap-3">', section).group(1).split()
         for cls in ("flex", "flex-wrap", "items-center", "justify-between", "gap-x-4", "gap-y-2"):
             self.assertIn(cls, row)
         self.assertNotIn("View Calendar", page)

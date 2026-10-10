@@ -86,7 +86,7 @@ function shell({ booksInMore = false, eventLog = true, releases = false } = {}) 
   <div id="wsPage">
     <section id="wsEventLog"${eventLog ? '' : ' hidden'}><h2>Event log</h2></section>
     ${banner()}
-    <section id="upcomingReleasesSection" data-arrive="releases"${releases ? ' data-has-releases' : ''}><h3>Upcoming Releases</h3></section>
+    <section id="upcomingReleasesSection" data-arrive="releases"${releases ? ' data-has-releases' : ''}><div id="releasesHead"><h3>Upcoming Releases</h3><a href="/calendar">View calendar</a></div></section>
   </div>
 </main>`;
 }
@@ -258,6 +258,11 @@ await scenario('Calendar: Upcoming Releases when it has the week, else the nav e
     const v = Object.assign({}, cal, cal.view());
     check(ua + ': the section first, the nav entry as its fallback', cal.target === REL && cal.fallback === nav, [cal.target, cal.fallback]);
     check(ua + ': says the button is there', v.body === 'Upcoming movies and episodes, so you know what’s coming and when. Open the full calendar from here.', v.body);
+    cal.before();
+    check(ua + ': a week that fits: the whole section', cal.target === REL, cal.target);
+    shown.d.getElementById('upcomingReleasesSection').getBoundingClientRect = () => ({ width: 374, height: 1400, top: 0, left: 0, right: 374, bottom: 1400 });
+    cal.before();
+    check(ua + ': taller than the screen: its header, with the button', cal.target === REL + ' #releasesHead', cal.target);
     await shown.w.happyDOM.close();
 
     // Hidden by its Home setting (no box), or a week with nothing in it (no mark).
