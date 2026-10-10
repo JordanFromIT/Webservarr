@@ -1,7 +1,8 @@
 """
 Share the configured Plex server with one Plex account, as the server's
 owner (the admin token), for Settings > Access requests
-(docs/superpowers/specs/2026-10-10-request-access-design.md, section 7).
+(docs/superpowers/specs/2026-10-10-request-access-design.md, section 7),
+and read who the server is shared with for Insights' names.
 
 Every call this module makes goes to a fixed plex.tv host with TLS
 verified, the admin token in the X-Plex-Token header (never the query
@@ -148,6 +149,31 @@ async def find_share(plex_account_id: str) -> Optional[str]:
     server = await _server()
     async with _client() as client:
         return await _find(client, server, plex_account_id)
+
+
+NAME_MAX = 100
+
+
+async def server_people() -> Dict[str, object]:
+    """Who the server is shared with, and its owner, for the names on the
+    admin's Insights page: {"owner": the owner's plex.tv id or "", "names":
+    {plex.tv id: name}}. From each accepted share's `invited` account and
+    plex.tv's own account for the admin token. Only ids and names are read
+    out of either answer (never an email or a token). Raises
+    PlexShareUnavailable."""
+    server = await _server()
+    async with _client() as client:
+        accepted = await _get_json(client, f"{CLIENTS}/api/v2/shared_servers/owned/accepted", server)
+        owner = await _get_json(client, f"{PLEX_TV}/api/v2/user", server)
+    names: Dict[str, str] = {}
+    for entry in accepted if isinstance(accepted, list) else []:
+        invited = entry.get("invited") if isinstance(entry, dict) else None
+        if isinstance(invited, dict) and invited.get("id"):
+            names[str(invited["id"])] = str(invited.get("title") or invited.get("username") or "")[:NAME_MAX]
+    owner_id = str(owner.get("id") or "") if isinstance(owner, dict) else ""
+    if owner_id:
+        names[owner_id] = str(owner.get("title") or owner.get("username") or "")[:NAME_MAX]
+    return {"owner": owner_id, "names": names}
 
 
 async def _create(client: httpx.AsyncClient, server: PlexServer, username: str, ids: List[str]) -> httpx.Response:

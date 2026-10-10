@@ -929,15 +929,24 @@ class Integrations(unittest.TestCase):
             start = int(request.url.params["X-Plex-Container-Start"])
             pages.append((start, request.url.params["librarySectionID"], request.headers.get("x-plex-token")))
             if start == 0:
-                items = [{"type": "track", "accountID": 1, "parentRatingKey": "100", "parentIndex": 2,
-                          "viewedAt": floor + 50}] * 2 + [
-                         {"type": "episode", "accountID": 3, "parentRatingKey": "7", "viewedAt": floor + 40},
-                         {"type": "track", "accountID": 4, "parentRatingKey": "200", "viewedAt": floor + 30}]
-                items += [{"type": "track", "accountID": 5, "parentRatingKey": "300", "viewedAt": floor + 10}] * 496
+                # Plex's real shape: the album only as parentKey, no parentRatingKey.
+                items = [{"type": "track", "accountID": 1, "parentKey": "/library/metadata/100", "parentIndex": 2,
+                          "ratingKey": "1001", "viewedAt": floor + 50}] * 2 + [
+                         {"type": "episode", "accountID": 3, "parentKey": "/library/metadata/7", "ratingKey": "70",
+                          "viewedAt": floor + 40},
+                         {"type": "track", "accountID": 4, "parentKey": "/library/metadata/200", "ratingKey": "2001",
+                          "viewedAt": floor + 30},
+                         {"type": "track", "accountID": 8, "parentRatingKey": "600",
+                          "parentKey": "/library/metadata/999", "ratingKey": "6001", "viewedAt": floor + 20},
+                         {"type": "track", "accountID": 9, "ratingKey": "9001", "viewedAt": floor + 15}]
+                items += [{"type": "track", "accountID": 5, "parentKey": "/library/metadata/300", "ratingKey": "3001",
+                           "viewedAt": floor + 10}] * 494
                 return httpx.Response(200, json={"MediaContainer": {"Metadata": items}})
             return httpx.Response(200, json={"MediaContainer": {"Metadata": [
-                {"type": "track", "accountID": 6, "parentRatingKey": "400", "viewedAt": floor},
-                {"type": "track", "accountID": 7, "parentRatingKey": "500", "viewedAt": floor - 1}]}})
+                {"type": "track", "accountID": 6, "parentKey": "/library/metadata/400", "ratingKey": "4001",
+                 "viewedAt": floor},
+                {"type": "track", "accountID": 7, "parentKey": "/library/metadata/500", "ratingKey": "5001",
+                 "viewedAt": floor - 1}]}})
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(answer), base_url="http://plex.test")
         admin = {"url": "http://plex.test", "token": "ADMIN", "section": "12"}
@@ -945,9 +954,11 @@ class Integrations(unittest.TestCase):
                 mock.patch.object(pp, "_pms_client", return_value=client):
             plays = asyncio.run(pp.play_history(since))
         self.assertEqual(pages, [(0, "12", "ADMIN"), (500, "12", "ADMIN")])
-        self.assertEqual(plays[:3], [("1", "100:2"), ("1", "100:2"), ("4", "200:1")])
+        # parentRatingKey wins when Plex sends both; a play with neither is skipped.
+        self.assertEqual(plays[:4], [("1", "100:2"), ("1", "100:2"), ("4", "200:1"), ("8", "600:1")])
+        self.assertNotIn("9", {account for account, _ in plays})
         self.assertEqual(plays[-1], ("6", "400:1"))
-        self.assertEqual(len(plays), 3 + 496 + 1)
+        self.assertEqual(len(plays), 4 + 494 + 1)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

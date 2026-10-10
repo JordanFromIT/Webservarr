@@ -138,6 +138,16 @@ Plex numbers the server's owner `1` in its own history; every other account id i
 of the plan proves this read-only before anything relies on it, and maps `1` to the owner's plex.tv id
 (from plex.tv's account for the admin token).
 
+**Proof (Task 4, 2026-10-10).** Read-only from dev with the admin token: of the newest 200 plays, 38 were
+tracks, all with viewedAt and accountID; 36 had a ratingKey and a parentKey of `/library/metadata/<n>`,
+and the other 2 (plays of tracks since gone from Plex) had neither. None had a parentRatingKey, so the
+album comes from parentRatingKey when Plex sends it, else from parentKey, and a play with neither or with
+no ratingKey is skipped (`play_history` for Popular included). History has no duration field: yes. In the
+audiobook library 1 distinct account: the owner as 1 (yes), 0 matched an accepted share's invited id, 0
+matched neither. Across the whole server's newest 2000 plays, 39 distinct accounts: the owner as 1, 38
+matched an accepted share's invited id, 0 matched neither. 1501 tracks in the library, 1501 with a
+length. owned/accepted's `invited` has id, title and username on all 62 entries.
+
 Names come from plex.tv: each accepted share's `invited` account (`owned/accepted`, already proven by
 the request access work) and the owner's own account. A person with no known name is shown as
 "Account <last four digits>".

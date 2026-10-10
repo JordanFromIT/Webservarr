@@ -54,6 +54,9 @@ RESOURCES_URL = "https://plex.tv/api/v2/resources"
 # "<album>:<disc>", ASCII digits only and bounded (the store caps keys at 64).
 _BOOK_KEY = re.compile(r"([0-9]{1,20}):([0-9]{1,6})", re.ASCII)
 _RATING_KEY = re.compile(r"[0-9]{1,20}", re.ASCII)
+# Plex's history gives a play's album only as its parentKey, never as a
+# parentRatingKey (Insights Task 4 proof).
+_PARENT_KEY = re.compile(r"/library/metadata/([0-9]{1,20})", re.ASCII)
 
 TIMELINE_STATES = ("playing", "paused", "stopped")
 
@@ -662,16 +665,32 @@ HISTORY_PAGE = 500
 HISTORY_MAX = 20000          # plays one read goes through at most
 
 
-async def play_history(since: datetime) -> list:
+def _album_key(item: dict) -> str:
+    """A history play's album rating key: its parentRatingKey, else the id in
+    its parentKey ("/library/metadata/<digits>" only), else ""."""
+    album = str(item.get("parentRatingKey") or "")
+    if _RATING_KEY.fullmatch(album):
+        return album
+    found = _PARENT_KEY.fullmatch(str(item.get("parentKey") or ""))
+    return found.group(1) if found else ""
+
+
+async def play_events(since: datetime) -> list:
     """Every track play in the audiobook library since `since` (naive UTC),
     from Plex's own history (the web player's timeline writes and every Plex
-    app), read with the admin token: [(Plex account id, book key)]. The
-    account ids only ever count people for Books' Popular shelf; they are
-    never shown or sent anywhere. Newest first, paged until the plays are
-    older than `since`. Raises PlayerOff or PlayerUnavailable."""
+    app), read with the admin token, newest first: [{"account", "book_key",
+    "track_key", "viewed_at"}]. `viewed_at` is when Plex counted the play
+    (naive UTC). The account ids are Plex's own: the server's owner is "1",
+    everyone else their plex.tv id. They count people for Books' Popular
+    shelf and, for the admin only, show who listened on Insights; they are
+    never sent to a member. A play with no album or no track key (a track
+    since deleted from Plex) is skipped, and only how many is logged. Paged
+    until the plays are older than `since`, at most HISTORY_MAX. Raises
+    PlayerOff or PlayerUnavailable."""
     admin = _configured()
     floor = int(since.replace(tzinfo=timezone.utc).timestamp())
     plays = []
+    skipped = 0
     async with _pms_client() as client:
         for start in range(0, HISTORY_MAX, HISTORY_PAGE):
             container = await _pms_get(client, admin, admin["token"], "/status/sessions/history/all", {
@@ -680,17 +699,52 @@ async def play_history(since: datetime) -> list:
             items = _items(container) if container is not None else []
             older = False
             for item in items:
-                if _int(item.get("viewedAt")) < floor:
+                viewed = _int(item.get("viewedAt"))
+                if viewed < floor:
                     older = True
                     continue
-                album = str(item.get("parentRatingKey") or "")
                 account = item.get("accountID")
-                if item.get("type") != "track" or not _RATING_KEY.fullmatch(album) or account in (None, ""):
+                if item.get("type") != "track" or account in (None, ""):
                     continue
-                plays.append((str(account), f"{album}:{_int(item.get('parentIndex')) or 1}"))
+                album = _album_key(item)
+                track = str(item.get("ratingKey") or "")
+                if not album or not _RATING_KEY.fullmatch(track):
+                    skipped += 1
+                    continue
+                plays.append({"account": str(account), "book_key": f"{album}:{_int(item.get('parentIndex')) or 1}",
+                              "track_key": track,
+                              "viewed_at": datetime.fromtimestamp(viewed, tz=timezone.utc).replace(tzinfo=None)})
             if older or len(items) < HISTORY_PAGE:
                 break
+    if skipped:
+        logger.debug("Plex history: skipped %d track plays with no album or track key", skipped)
     return plays
+
+
+async def play_history(since: datetime) -> list:
+    """[(Plex account id, book key)] for every track play since `since`
+    (play_events), for Books' Popular shelf. Raises PlayerOff or
+    PlayerUnavailable."""
+    return [(p["account"], p["book_key"]) for p in await play_events(since)]
+
+
+async def track_durations() -> dict:
+    """{track rating key: its length in ms} for every track in the audiobook
+    library, in one read with the admin token (Insights counts a Plex app play
+    at its track's length). Raises PlayerOff or PlayerUnavailable."""
+    admin = _configured()
+    async with _pms_client() as client:
+        tracks = await _pms_get(client, admin, admin["token"], f"/library/sections/{admin['section']}/all",
+                                {"type": 10})
+    if tracks is None:
+        logger.warning("The configured audiobook library section was not found")
+        raise PlayerUnavailable("The audiobook library was not found")
+    found = {}
+    for t in _items(tracks):
+        key = str(t.get("ratingKey") or "")
+        if _RATING_KEY.fullmatch(key):
+            found[key] = _track_duration(t)
+    return found
 
 
 async def list_books() -> list:
