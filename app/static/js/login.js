@@ -89,6 +89,10 @@ function applyLoginBranding(theme) {
             }
         }
     }
+
+    // Request access (login-request.js, loaded just before this file): its
+    // link, and the phone's way back from Plex, follow the same branding.
+    if (window.WSRequestAccess) window.WSRequestAccess.apply(theme);
 }
 if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
 
