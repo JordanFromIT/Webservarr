@@ -370,18 +370,44 @@ def seed_ebook(conn: sqlite3.Connection, identity: str, book_id: int, page: int,
     return {"identity": identity, "book_id": book_id, "page": page, "pages": pages}
 
 
-def seed_reading(conn: sqlite3.Connection, identity: str, pages: int, days_ago: int,
+def seed_reading(conn: sqlite3.Connection, identity: str, pages_read: int, days_ago: int,
                  now: datetime | None = None) -> dict:
-    """Kavita's lifetime pages for a test identity as of `days_ago` days ago
-    (one row a day, replacing that day's). Two days make pages read."""
+    """Pages a test identity read on one day, `days_ago` days ago, as Insights
+    counts them. Insights keeps Kavita's lifetime total, one row a day, and a
+    day's pages are the rise from the row before (spec 4.3), so a lone row
+    reads nothing. The kit writes totals that give each seeded day exactly its
+    pages: a zero total the day before the identity's earliest day, a day
+    seeded again replaced, and every later total moved by the change."""
     require_reserved(identity)
-    if pages < 0 or days_ago < 0:
-        raise DevkitError("--pages and --days-ago cannot be negative")
+    if pages_read < 0 or days_ago < 0:
+        raise DevkitError("--pages-read and --days-ago cannot be negative")
     at = _now(now) - timedelta(days=days_ago)
-    _write(conn, "INSERT INTO reading_totals (identity, day, pages, words, hours, seen_at) VALUES (?, ?, ?, 0, 0, ?) "
-                 "ON CONFLICT (identity, day) DO UPDATE SET pages = excluded.pages, seen_at = excluded.seen_at",
-           [(identity, at.strftime("%Y-%m-%d"), pages, _stamp(at))])
-    return {"identity": identity, "day": at.strftime("%Y-%m-%d"), "pages": pages}
+    day = at.strftime("%Y-%m-%d")
+    upsert = ("INSERT INTO reading_totals (identity, day, pages, words, hours, seen_at) VALUES (?, ?, ?, 0, 0, ?) "
+              "ON CONFLICT (identity, day) DO UPDATE SET pages = excluded.pages, seen_at = excluded.seen_at")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        rows = conn.execute("SELECT day, pages FROM reading_totals WHERE identity = ? ORDER BY day",
+                            (identity,)).fetchall()
+        before = [pages for d, pages in rows if d < day]
+        same = [pages for d, pages in rows if d == day]
+        after = [pages for d, pages in rows if d > day]
+        if not before:
+            start = at - timedelta(days=1)
+            conn.execute(upsert, (identity, start.strftime("%Y-%m-%d"), 0, _stamp(start)))
+        total = (before[-1] if before else 0) + pages_read
+        # The total the later rows rose from until now; moving them all by the
+        # change keeps each later day's own rise.
+        level = (same or before[-1:] or after[:1] or [total])[0]
+        conn.execute(upsert, (identity, day, total, _stamp(at)))
+        if total != level:
+            conn.execute("UPDATE reading_totals SET pages = MAX(0, pages + ?) WHERE identity = ? AND day > ?",
+                         (total - level, identity, day))
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+    return {"identity": identity, "day": day, "pages_read": pages_read, "total": total}
 
 
 # --- sessions (Redis) --------------------------------------------------------
@@ -544,9 +570,9 @@ def build_parser() -> argparse.ArgumentParser:
     ebook.add_argument("--pages", type=int, required=True)
     ebook.add_argument("--days-ago", type=int, default=0)
 
-    reading = commands.add_parser("seed-reading", help="seed Kavita's lifetime pages on one day (Insights)")
+    reading = commands.add_parser("seed-reading", help="seed pages read on one day (Insights)")
     reading.add_argument("--identity", type=identity_arg, required=True)
-    reading.add_argument("--pages", type=int, required=True)
+    reading.add_argument("--pages-read", type=int, required=True, help="pages read that day")
     reading.add_argument("--days-ago", type=int, default=0)
 
     commands.add_parser("cleanup", help="remove every row and session of the reserved test identities")
@@ -600,7 +626,7 @@ def run(args: argparse.Namespace) -> int:
         elif args.command == "seed-ebook":
             print(json.dumps(seed_ebook(conn, args.identity, args.book_id, args.page, args.pages, args.days_ago)))
         elif args.command == "seed-reading":
-            print(json.dumps(seed_reading(conn, args.identity, args.pages, args.days_ago)))
+            print(json.dumps(seed_reading(conn, args.identity, args.pages_read, args.days_ago)))
         elif args.command == "cleanup":
             removed = delete_reserved_rows(conn)
             gone = asyncio.run(finish(purge_sessions()))

@@ -64,8 +64,8 @@ dk seed-log --identity plex:990011 --book-key 283644:1 --minutes-ago 90 --minute
 dk seed-hour --identity plex:990011 --book-key 283644:1 --hours-ago 200 --minutes 45     # any age
 dk seed-request --identity plex:990011 --title "Dune" --format both --days-ago 3
 dk seed-ebook --identity plex:990011 --book-id 7 --page 40 --pages 300 --days-ago 40     # 40 days: abandoned
-dk seed-reading --identity plex:990011 --pages 100 --days-ago 2
-dk seed-reading --identity plex:990011 --pages 160 --days-ago 1                          # 60 pages read yesterday
+dk seed-reading --identity plex:990011 --pages-read 100 --days-ago 2                     # 100 pages read 2 days ago
+dk seed-reading --identity plex:990011 --pages-read 160 --days-ago 1                     # and 160 yesterday: 260 in all
 
 # Put the snapshot back exactly, check it matches, delete the kit's sessions and the snapshot.
 dk restore before-books

@@ -216,12 +216,35 @@ class InsightsSeeding(unittest.TestCase):
         devkit.seed_ebook(conn, "plex:990011", 7, 40, 300, 2, now=self.NOW)
         devkit.seed_ebook(conn, "plex:990011", 7, 60, 300, 1, now=self.NOW)
         devkit.seed_reading(conn, "plex:990011", 120, 1, now=self.NOW)
-        devkit.seed_reading(conn, "plex:990011", 150, 1, now=self.NOW)
+        devkit.seed_reading(conn, "plex:990011", 150, 1, now=self.NOW)              # the day again: replaced
         self.assertEqual(conn.execute("SELECT length(title), format, requested_at FROM book_requesters").fetchall(),
                          [(300, "both", "2026-10-07 12:00:00.000000")])
         self.assertEqual(conn.execute("SELECT book_id, page, read_at FROM ebook_places").fetchall(),
                          [(7, 60, "2026-10-09 12:00:00.000000")])
-        self.assertEqual(conn.execute("SELECT day, pages FROM reading_totals").fetchall(), [("2026-10-09", 150)])
+        self.assertEqual(conn.execute("SELECT day, pages FROM reading_totals ORDER BY day").fetchall(),
+                         [("2026-10-08", 0), ("2026-10-09", 150)])
+
+    @staticmethod
+    def pages_read(conn) -> dict:
+        """Pages read per day as Insights counts them (insights.reading_pages):
+        the rise from the row before; a first row only sets where to rise from."""
+        out, previous = {}, None
+        for day, pages in conn.execute("SELECT day, pages FROM reading_totals ORDER BY day"):
+            if previous is not None and pages > previous:
+                out[day] = pages - previous
+            previous = pages
+        return out
+
+    def test_each_seeded_day_reads_its_pages(self):
+        conn = self.conn()
+        devkit.seed_reading(conn, "plex:990012", 100, 3, now=self.NOW)
+        devkit.seed_reading(conn, "plex:990012", 160, 1, now=self.NOW)
+        self.assertEqual(self.pages_read(conn), {"2026-10-07": 100, "2026-10-09": 160})
+        devkit.seed_reading(conn, "plex:990012", 40, 5, now=self.NOW)               # an earlier day, seeded after
+        devkit.seed_reading(conn, "plex:990012", 70, 3, now=self.NOW)               # a day seeded again
+        devkit.seed_reading(conn, "plex:990012", 25, 2, now=self.NOW)               # a day in between
+        self.assertEqual(self.pages_read(conn),
+                         {"2026-10-05": 40, "2026-10-07": 70, "2026-10-08": 25, "2026-10-09": 160})
 
     def test_refusals_write_nothing(self):
         conn = self.conn()
