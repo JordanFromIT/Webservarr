@@ -47,7 +47,7 @@ class TopUsers(Base):
                                       thumbs={"2002"})
         self.assertEqual([p["name"] for p in got["people"]], ["Account 2002", "Sam"])   # most time first
         them, me = got["people"]
-        self.assertEqual((me["web_ms"], me["plex_ms"], me["ebook_ms"], me["total_ms"]),
+        self.assertEqual((me["web_ms"], me["plex_ms"], me["kavita_ms"], me["total_ms"]),
                          (90 * M, 20 * M, 2 * H, 90 * M + 20 * M + 2 * H))
         self.assertEqual(me["sessions"], 3)          # Dune on the 9th, ebooks on the 7th and the 8th
         self.assertEqual((them["sessions"], them["plex_ms"]), (1, 5 * H))
@@ -73,10 +73,10 @@ class History(Base):
         self.assertEqual([b["start"] for b in got["buckets"]],
                          ["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28", "2026-10-05"])
         week = {b["start"]: b for b in got["buckets"]}
-        self.assertEqual((week["2026-10-05"]["web_ms"], week["2026-10-05"]["plex_ms"], week["2026-10-05"]["ebook_ms"]),
+        self.assertEqual((week["2026-10-05"]["web_ms"], week["2026-10-05"]["plex_ms"], week["2026-10-05"]["kavita_ms"]),
                          (H, 30 * M, 3 * H))
         self.assertEqual(week["2026-09-28"]["web_ms"], 2 * H)
-        self.assertEqual(got["totals"], {"web_ms": 3 * H, "plex_ms": 30 * M, "ebook_ms": 3 * H})
+        self.assertEqual(got["totals"], {"web_ms": 3 * H, "plex_ms": 30 * M, "kavita_ms": 3 * H})
         self.assertTrue(got["reading"])
 
     def test_one_person_and_days_for_a_week(self):
@@ -85,7 +85,7 @@ class History(Base):
         self.hour(THEM, "5:1", datetime(2026, 10, 9, 21), 2 * H)
         got = insights.history_view(self.db, self.src(plays=[]), "7d", timezone.utc, identity=ME)
         self.assertEqual((got["bucket"], len(got["buckets"])), ("day", 8))       # 3 Oct to 10 Oct
-        self.assertEqual(got["totals"], {"web_ms": H, "plex_ms": 0, "ebook_ms": 0})
+        self.assertEqual(got["totals"], {"web_ms": H, "plex_ms": 0, "kavita_ms": 0})
         self.assertFalse(got["reading"])
 
 

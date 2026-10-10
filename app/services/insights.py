@@ -1129,7 +1129,7 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
 # zone), in the web player or a Plex app, the two counted once together. A
 # session (top users) is a play or a day of reading in Kavita (minutes kept
 # for it, or Kavita's page total rose). Reading time is Kavita's own measure
-# (kavita_reading), by its UTC day, under the ebook_ms keys here.
+# (kavita_reading), by its UTC day, under kavita_ms keys, as everywhere.
 
 TOP_USERS_MAX = 24
 
@@ -1177,21 +1177,21 @@ def top_users_view(db: Session, src: Sources, period: str, zone, thumbs: Iterabl
     for x in plays:
         add(x.identity, "plex_ms", x.ms, ("audio", x.book_key, _local(x.at, zone).date()))
     for (identity, day), ms in reading.items():
-        add(identity, "ebook_ms", ms, ("ebook", day))
+        add(identity, "kavita_ms", ms, ("ebook", day))
     for (identity, day), _amount in pages.items():
-        add(identity, "ebook_ms", 0, ("ebook", day))
+        add(identity, "kavita_ms", 0, ("ebook", day))
     have = set(thumbs)
     names = names_of(db, totals, src.names)
     rows = []
     for identity, t in totals.items():
-        total = t["web_ms"] + t["plex_ms"] + t["ebook_ms"]
+        total = t["web_ms"] + t["plex_ms"] + t["kavita_ms"]
         count = len(sessions.get(identity, ()))
         if not total and not count:
             continue
         rows.append({"key": identity_key(identity), "name": names[identity],
                      "avatar": identity.startswith("plex:") and identity[5:] in have,
                      "sessions": count, "total_ms": total, "web_ms": t["web_ms"], "plex_ms": t["plex_ms"],
-                     "ebook_ms": t["ebook_ms"]})
+                     "kavita_ms": t["kavita_ms"]})
     rows.sort(key=lambda r: (-r["total_ms"], -r["sessions"], r["name"].casefold()))
     return {"period": period, "people": rows[:TOP_USERS_MAX], "unavailable": list(src.unavailable),
             "tracking": tracking(db)}
@@ -1225,8 +1225,8 @@ def history_view(db: Session, src: Sources, period: str, zone, identity: Optiona
     for x in plays:
         add(_local(x.at, zone).date(), "plex_ms", x.ms)
     for (_identity, day), ms in hours.items():
-        add(day, "ebook_ms", ms)
-    fields = ("web_ms", "plex_ms", "ebook_ms")
+        add(day, "kavita_ms", ms)
+    fields = ("web_ms", "plex_ms", "kavita_ms")
     return {"period": period, "bucket": unit,
             "buckets": [dict({"start": s.isoformat()}, **{f: series[s][f] for f in fields}) for s in starts],
             "totals": {f: sum(series[s][f] for s in starts) for f in fields},

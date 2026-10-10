@@ -209,7 +209,7 @@ const NOW_ANSWER = {
 const TRACKING = { requests: '2026-10-11', reading: '2026-10-11', ebook_places: '2026-10-11', hours: '2026-09-28' };
 const PEOPLE_ANSWER = {
   people: [
-    { key: SAM, name: 'Sam', last_active: hoursAgo(3), last_what: 'listening', listened_ms_30d: 3 * H, plex_ms_30d: 30 * M,
+    { key: SAM, name: 'Sam', last_active: hoursAgo(3), last_what: 'listening', listened_ms_30d: 3 * H, plex_ms_30d: 30 * M, kavita_ms_30d: 45 * M,
       current: [{ book_id: 1, title: 'Dune', format: 'audio', where: 'web', percent: 42, updated_at: hoursAgo(3) }] },
     { key: ODD, name: MARKUP, last_active: null, last_what: null, listened_ms_30d: 0, plex_ms_30d: 0, current: [] }],
   unavailable: [], tracking: TRACKING
@@ -218,8 +218,8 @@ const MONDAYS = ['2026-07-20', '2026-07-27', '2026-08-03', '2026-08-10', '2026-0
   '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05'];
 const PERSON_ANSWER = {
   key: SAM, name: 'Sam', last_active: hoursAgo(3),
-  totals: { listened_ms: 12 * H, plex_ms: 2 * H, finished: 1, pages_read: 420 },
-  weekly: MONDAYS.map((week, i) => ({ week, web_ms: i * 10 * M, plex_ms: i % 3 ? 0 : 20 * M })),
+  totals: { listened_ms: 12 * H, plex_ms: 2 * H, kavita_ms: 90 * M, finished: 1, pages_read: 420 },
+  weekly: MONDAYS.map((week, i) => ({ week, web_ms: i * 10 * M, plex_ms: i % 3 ? 0 : 20 * M, kavita_ms: i === 11 ? 30 * M : 0 })),
   books: [{ book_id: 1, title: 'Dune', author: 'Frank Herbert', formats: ['audio'], percent: 42, finished: false, listened_ms: 3 * H, plex_ms: 30 * M, last_at: hoursAgo(3) }],
   requests: [{ key: SAM, name: 'Sam', title: 'Children of Dune', format: 'both', requested_at: '2026-10-01T09:00:00.000Z', book_id: null, started_at: null }],
   unavailable: [], tracking: TRACKING
@@ -241,7 +241,7 @@ const BOOKS_ANSWER = {
 };
 const HEAT = Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => (d === 4 && h === 21 ? 3 * H : (h === 8 ? 10 * M : 0))));
 const HABITS_ANSWER = {
-  split: { web_ms: 9 * H, plex_ms: 3 * H }, heatmap: HEAT,
+  split: { web_ms: 9 * H, plex_ms: 3 * H, kavita_ms: 2 * H }, heatmap: HEAT,
   requested: { total: 2, read: 1, items: [
     { key: SAM, name: 'Sam', title: 'Dune', format: 'both', requested_at: '2026-10-01T09:00:00.000Z', book_id: 1, started_at: '2026-10-02T09:00:00.000Z' },
     { key: KIM, name: 'Kim', title: 'Not Here Yet', format: 'ebook', requested_at: '2026-10-02T09:00:00.000Z', book_id: null, started_at: null }] },
@@ -250,16 +250,16 @@ const HABITS_ANSWER = {
 const TOP_USERS_ANSWER = {
   period: '7d',
   people: [
-    { key: KIM, name: 'Kim', avatar: true, sessions: 12, total_ms: 39 * H, web_ms: 30 * H, plex_ms: 6 * H, ebook_ms: 3 * H },
-    { key: SAM, name: 'sam', avatar: false, sessions: 1, total_ms: 45 * M, web_ms: 0, plex_ms: 45 * M, ebook_ms: 0 },
-    { key: ODD, name: MARKUP, avatar: false, sessions: 2, total_ms: 2 * H, web_ms: 0, plex_ms: 0, ebook_ms: 2 * H }],
+    { key: KIM, name: 'Kim', avatar: true, sessions: 12, total_ms: 39 * H, web_ms: 30 * H, plex_ms: 6 * H, kavita_ms: 3 * H },
+    { key: SAM, name: 'sam', avatar: false, sessions: 1, total_ms: 45 * M, web_ms: 0, plex_ms: 45 * M, kavita_ms: 0 },
+    { key: ODD, name: MARKUP, avatar: false, sessions: 2, total_ms: 2 * H, web_ms: 0, plex_ms: 0, kavita_ms: 2 * H }],
   unavailable: [], tracking: TRACKING
 };
 const WEEKS5 = ['2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05'];
 const HISTORY_ANSWER = {
   period: '30d', bucket: 'week',
-  buckets: WEEKS5.map((start, i) => ({ start, web_ms: (i + 1) * H, plex_ms: i === 4 ? 0 : 30 * M, ebook_ms: i === 2 ? 2 * H : 0 })),
-  totals: { web_ms: 15 * H, plex_ms: 2 * H, ebook_ms: 2 * H }, reading: true,
+  buckets: WEEKS5.map((start, i) => ({ start, web_ms: (i + 1) * H, plex_ms: i === 4 ? 0 : 30 * M, kavita_ms: i === 2 ? 2 * H : 0 })),
+  totals: { web_ms: 15 * H, plex_ms: 2 * H, kavita_ms: 2 * H }, reading: true,
   unavailable: [], tracking: TRACKING
 };
 const COVER = (id) => `/api/books/${id}/cover?v=1760000000`;
@@ -554,7 +554,7 @@ await run('the approved design: hatched estimates, each chart names its tallest 
 
 await run('a history with nothing in it says so and draws no legend', async (make) => {
   const t = await mounted(make, { history: () => ({ body: Object.assign({}, HISTORY_ANSWER, {
-    buckets: WEEKS5.map((start) => ({ start, web_ms: 0, plex_ms: 0, ebook_ms: 0 })), reading: false }) }),
+    buckets: WEEKS5.map((start) => ({ start, web_ms: 0, plex_ms: 0, kavita_ms: 0 })), reading: false }) }),
   played: () => ({ body: Object.assign({}, PLAYED_ANSWER, { audiobooks: [] }) }) });
   check('nothing, in words', rr(t.text('[data-ins-history]')).startsWith('Nothing in the last 30 days.'), rr(t.text('[data-ins-history]')));
   check('and when ebook time will show', rr(t.text('#insHistory')).includes('Ebook time shows here once reading in Kavita is recorded.'));
@@ -602,7 +602,7 @@ await run('Top users: a card a person, most time first, its rows tinted by their
   check('sessions and time as Plex says it', rr(kim.textContent).startsWith('K12 sessions1 day, 15 hrKim'), rr(kim.textContent));
   const rows = Array.from(kim.querySelectorAll('[data-ins-kind]'));
   check('three rows: site, Plex app, ebooks, with their times', rows.map((r) => rr(r.textContent)).join('|') ===
-    'Audiobooks (site)30 hr|Audiobooks (Plex app), an estimate6 hr|Ebooks3 hr', rows.map((r) => rr(r.textContent)));
+    'Audiobooks (site)30 hr|Audiobooks (Plex app), an estimate6 hr|Ebooks (Kavita’s count)3 hr', rows.map((r) => rr(r.textContent)));
   check('each row tinted by its share of the most', rows.map((r) => r.style.getPropertyValue('--ins-a')).join(',') === '1.00,0.20,0.10',
     rows.map((r) => r.style.getPropertyValue('--ins-a')));
   check('each row in its kind’s tint and mark', rows[0].classList.contains('ins-tint-site') && !!rows[1].querySelector('.ins-est') &&
@@ -656,12 +656,12 @@ await run('History: stacked bars on an axis of time, the legend and the totals',
     'bg-media-book,ins-est,ins-site', parts.map((b) => b.className));
   check('the top part has the round corners', /rounded-t-/.test(parts[0].className) && !/rounded-t-/.test(parts[2].className));
   check('heights against the top of the axis', parts.map((b) => b.style.height).join(',') === '33%,8%,50%', parts.map((b) => b.style.height));
-  check('each bar said in words', /^Week of 21 Sept? 2026: 3 hr on the site, 30 min in Plex apps \(an estimate\), 2 hr of ebooks$/.test(
+  check('each bar said in words', /^Week of 21 Sept? 2026: 3 hr on the site, 30 min in Plex apps \(an estimate\), 2 hr reading ebooks, by Kavita’s count$/.test(
     rr(bars[2].querySelector('.sr-only').textContent)), rr(bars[2].querySelector('.sr-only').textContent));
   const ticks = t.qa('#insHistory .absolute.h-0 span:first-child').map((n) => n.textContent);
   check('the axis steps in whole hours', ticks.join(',') === '0,2 hr,4 hr,6 hr', ticks);
   check('each week named under its bar', /^7 Sept?$/.test(t.qa('#insHistory [aria-hidden="true"].ml-14 span').map((n) => n.textContent)[0] || ''));
-  check('the legend', rr(t.text('[data-ins-legend]')) === 'Audiobooks (site)Audiobooks (Plex app), an estimateEbooks', rr(t.text('[data-ins-legend]')));
+  check('the legend', rr(t.text('[data-ins-legend]')) === 'Audiobooks (site)Audiobooks (Plex app), an estimateEbooks (Kavita’s count)', rr(t.text('[data-ins-legend]')));
   check('the totals', rr(t.text('[data-ins-totals-line]')) === 'TotalsSite 15 hrPlex apps 2 hrEbooks 2 hr', rr(t.text('[data-ins-totals-line]')));
   check('what a bar is, and where the ebook time comes from', rr(t.text('[data-ins-history]')).includes('Each bar is a week, Monday first, in your time zone. Ebook time is the reading Kavita measured, by its day.'));
 });
@@ -674,7 +674,7 @@ await run('History: media redraws what was read; whose and the period ask again'
   await flush();
   check('ebooks alone, nothing asked', t.net.urls('/api/admin/insights/history').length === 1 &&
     t.qa('[data-ins-bars] .ins-bar').length === 1 && t.qa('[data-ins-bars] .ins-bar.bg-media-book').length === 1);
-  check('its legend and totals follow', rr(t.text('[data-ins-legend]')) === 'Ebooks' && rr(t.text('[data-ins-totals-line]')) === 'TotalsEbooks 2 hr');
+  check('its legend and totals follow', rr(t.text('[data-ins-legend]')) === 'Ebooks (Kavita’s count)' && rr(t.text('[data-ins-totals-line]')) === 'TotalsEbooks 2 hr');
   const whose = t.q('#insHistoryPerson');
   const names = Array.from(whose.options).map((o) => o.textContent);
   check('whose: everyone, then each person by name, from People', names.join('|') === `All users|${MARKUP}|Sam` && whose.value === '', names);
@@ -740,6 +740,19 @@ await run('the filters are quiet controls, each with a name, and a failing secti
   media.dispatchEvent(new t.win.Event('change'));
   await flush();
   check('media with nothing read draws nothing and asks nothing', !!t.q('#insHistory [data-ins-failed]') && t.net.urls('/api/admin/insights/history').length === 1);
+});
+
+await run('Kavita’s reading minutes show where ebook time does, as Kavita’s count', async (make) => {
+  const t = await mounted(make);
+  check('in a person’s row', rr(t.text(`[data-ins-person="${SAM}"]`)).includes('45 min reading in 30 days, by Kavita’s count'));
+  check('in Habits', rr(t.text('[data-ins-split] [data-ins-kavita]')) === 'Reading ebooks in the same period: 2 hr, by Kavita’s count.');
+  t.q(`[data-ins-person="${SAM}"]`).click();
+  await flush();
+  check('in the person’s totals', rr(t.text('[data-ins-totals]')).includes('Reading ebooks, Kavita’s count1 hr 30 min'), rr(t.text('[data-ins-totals]')));
+  const last = t.qa('[data-ins-weekly] li').pop();
+  check('on top of the week’s bar, in the book colour', !!last.querySelector('.ins-bar.bg-media-book') &&
+    /30 min reading ebooks \(Kavita’s count\)$/.test(last.querySelector('.sr-only').textContent));
+  check('and in the legend', rr(t.text('[data-ins-weekly]')).includes('Ebooks (Kavita’s count)'));
 });
 
 console.log(`insights page: ${total - failed}/${total} checks pass`);

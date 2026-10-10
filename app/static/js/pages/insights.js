@@ -41,6 +41,8 @@ const ROW = 'flex w-full min-w-0 items-start gap-3 rounded-xl px-3 py-2 -mx-3 te
 const EST = 'ins-est';
 // One bar's parts, top to bottom: the Plex estimate over the web player.
 const LISTEN_PARTS = [['plex_ms', EST], ['web_ms', 'bg-frosted-blue']];
+// A person's weeks: Kavita's measure of their reading on top of their listening.
+const WEEK_PARTS = [['kavita_ms', 'bg-media-book']].concat(LISTEN_PARTS);
 const WHAT = {
   listening: 'listening', plex: 'listening in a Plex app', reading: 'reading',
   visit: 'opening Books', request: 'asking for a book'
@@ -58,7 +60,9 @@ const KINDS = [
   { field: 'web_ms', media: 'web', mark: 'ins-site', tint: 'ins-tint-site', label: 'Audiobooks (site)', short: 'Site', said: 'on the site' },
   { field: 'plex_ms', media: 'plex', mark: EST, tint: 'ins-tint-plex', label: 'Audiobooks (Plex app)', short: 'Plex apps',
     said: 'in Plex apps (an estimate)', estimate: true },
-  { field: 'ebook_ms', media: 'ebook', mark: 'bg-media-book', tint: 'ins-tint-ebook', label: 'Ebooks', short: 'Ebooks', said: 'of ebooks' }
+  // Kavita's own measure of reading (its kavita_ms keys), never the site's.
+  { field: 'kavita_ms', media: 'ebook', mark: 'bg-media-book', tint: 'ins-tint-ebook', label: 'Ebooks (Kavita’s count)', short: 'Ebooks',
+    said: 'reading ebooks, by Kavita’s count' }
 ];
 // The history's y axis steps up in the first of these (in minutes) that needs
 // four lines or fewer.
@@ -422,8 +426,11 @@ export async function mount(ctx) {
       main.appendChild(who);
       const plex = num(p.plex_ms_30d);
       const listened = num(p.listened_ms_30d) + plex;
-      main.appendChild(el('span', 'block min-w-0 ' + SMALL, listened ? duration(listened) + ' listened in 30 days' +
-        (plex ? ' (' + duration(plex) + ' in Plex apps, an estimate)' : '') : ''));
+      const kavita = num(p.kavita_ms_30d);
+      const spent = [listened ? duration(listened) + ' listened in 30 days' +
+        (plex ? ' (' + duration(plex) + ' in Plex apps, an estimate)' : '') : '',
+      kavita ? duration(kavita) + ' reading in 30 days, by Kavita’s count' : ''].filter(Boolean);
+      main.appendChild(el('span', 'block min-w-0 ' + SMALL, spent.join('. ')));
       const current = Array.isArray(p.current) ? p.current.filter(Boolean) : [];
       if (current.length) {
         const books = el('span', 'mt-1 flex min-w-0 flex-wrap gap-x-4 gap-y-1 lg:mt-0');
@@ -705,7 +712,7 @@ export async function mount(ctx) {
     } else {
       banner.classList.add('bg-frosted-blue/[0.06]');
     }
-    banner.appendChild(el('h3', 'relative text-[17px] font-extrabold uppercase tracking-[0.08em] text-frosted-blue', title));
+    banner.appendChild(el('h3', 'relative text-xl font-bold text-frosted-blue', title));
     col.appendChild(banner);
     if (!items.length) {
       col.appendChild(el('p', MUTED + ' px-4 py-4', 'Nothing in this period.'));
@@ -854,10 +861,12 @@ export async function mount(ctx) {
     return row;
   }
 
-  function legend() {
+  function legend(reading) {
     const p = el('p', 'mt-2 flex flex-wrap gap-x-4 gap-y-1 ' + SMALL);
     p.setAttribute('aria-hidden', 'true');
-    [['bg-frosted-blue', 'Web player'], [EST, 'Plex apps (an estimate)']].forEach(function (k) {
+    const keys = [['bg-frosted-blue', 'Web player'], [EST, 'Plex apps (an estimate)']];
+    if (reading) keys.push(['bg-media-book', 'Ebooks (Kavita’s count)']);
+    keys.forEach(function (k) {
       const item = el('span', 'inline-flex items-center gap-1.5');
       item.appendChild(el('span', 'inline-block size-2.5 rounded-sm ' + k[0]));
       item.appendChild(el('span', '', k[1]));
@@ -866,12 +875,13 @@ export async function mount(ctx) {
     return p;
   }
 
-  /** 12 weeks of bars, web and Plex apps stacked; each week said in words. */
+  /** 12 weeks of bars, web, Plex apps and Kavita's reading stacked; each week said in words. */
   function weeklyBars(weeks) {
     const section = el('section', 'mt-8');
     section.setAttribute('data-ins-weekly', '');
     section.appendChild(el('h3', H3, 'Each week'));
-    const most = weeks.reduce(function (m, w) { return Math.max(m, num(w.web_ms) + num(w.plex_ms)); }, 0);
+    const most = weeks.reduce(function (m, w) { return Math.max(m, num(w.web_ms) + num(w.plex_ms) + num(w.kavita_ms)); }, 0);
+    const reading = weeks.some(function (w) { return num(w.kavita_ms); });
     if (!most) {
       section.appendChild(el('p', MUTED + ' mt-1', 'Nothing in the last 12 weeks.'));
       return section;
@@ -883,16 +893,17 @@ export async function mount(ctx) {
       const web = num(w.web_ms);
       const plex = num(w.plex_ms);
       const words = 'Week of ' + dayLabel(w.week) + ': ' + duration(web) +
-        (plex ? ', and ' + duration(plex) + ' in Plex apps (an estimate)' : '');
+        (plex ? ', and ' + duration(plex) + ' in Plex apps (an estimate)' : '') +
+        (num(w.kavita_ms) ? ', and ' + duration(w.kavita_ms) + ' reading ebooks (Kavita’s count)' : '');
       const li = el('li', 'flex h-full min-w-0 flex-col justify-end');
       li.title = words;
       li.appendChild(el('span', 'sr-only', words));
-      stack(li, LISTEN_PARTS, w, most);
+      stack(li, WEEK_PARTS, w, most);
       list.appendChild(li);
     });
     section.appendChild(list);
     section.appendChild(ends('Week of ' + dayLabel(weeks[0].week), 'Week of ' + dayLabel(weeks[weeks.length - 1].week)));
-    section.appendChild(legend());
+    section.appendChild(legend(reading));
     return section;
   }
 
@@ -954,6 +965,7 @@ export async function mount(ctx) {
     row.setAttribute('data-ins-totals', '');
     row.appendChild(figure(duration(t.listened_ms), 'In the web player'));
     if (num(t.plex_ms)) row.appendChild(figure(duration(t.plex_ms), 'In Plex apps (an estimate)'));
+    if (num(t.kavita_ms)) row.appendChild(figure(duration(t.kavita_ms), 'Reading ebooks, Kavita’s count'));
     const finished = num(t.finished);
     row.appendChild(figure(finished.toLocaleString(), finished === 1 ? 'Book finished' : 'Books finished'));
     if (typeof t.pages_read === 'number') row.appendChild(figure(t.pages_read.toLocaleString(), 'Pages read, by Kavita’s count'));
@@ -1221,6 +1233,11 @@ export async function mount(ctx) {
       if (plex) track.appendChild(el('span', 'block h-full flex-1 ' + EST));
       both.appendChild(track);
       both.appendChild(el('p', 'mt-2 ' + SMALL, 'Web player ' + duration(web) + ' · Plex apps ' + duration(plex) + ' (an estimate)'));
+    }
+    if (num(split.kavita_ms)) {
+      const read = el('p', 'mt-1 ' + SMALL, 'Reading ebooks in the same period: ' + duration(split.kavita_ms) + ', by Kavita’s count.');
+      read.setAttribute('data-ins-kavita', '');
+      both.appendChild(read);
     }
     box.appendChild(both);
     box.appendChild(heatmap(data.heatmap));
