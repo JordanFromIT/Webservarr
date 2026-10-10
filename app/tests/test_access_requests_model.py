@@ -119,7 +119,8 @@ class Form(unittest.TestCase):
     def test_refused(self):
         cases = [("", "note", svc.NAME_PROBLEM), ("   ", "note", svc.NAME_PROBLEM),
                  ("n" * 81, "note", svc.NAME_PROBLEM), ("Sam\tLee", "note", svc.NAME_PROBLEM),
-                 ("Sam\nLee", "note", svc.NAME_PROBLEM), ("Sam", "", svc.NOTE_PROBLEM),
+                 ("Sam\nLee", "note", svc.NAME_PROBLEM), ("Sam\x85", "note", svc.NAME_PROBLEM),
+                 ("Sam", "", svc.NOTE_PROBLEM),
                  ("Sam", "x" * 1001, svc.NOTE_PROBLEM), ("Sam", "bell\x07", svc.NOTE_PROBLEM),
                  ("Sam", "c1\x85", svc.NOTE_PROBLEM), ("Sam", "tab\tinside", svc.NOTE_PROBLEM)]
         for name, note, message in cases:

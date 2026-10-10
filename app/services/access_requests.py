@@ -79,11 +79,15 @@ def _has_control(text: str, newline_ok: bool) -> bool:
 def clean_form(name: str, note: str) -> Tuple[str, str]:
     """The form as stored: both trimmed, the note's line ends as \\n. Control
     characters are refused, except newlines in the note."""
-    name = name.strip()
-    note = note.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not name or len(name) > NAME_MAX or _has_control(name, newline_ok=False):
+    note = note.replace("\r\n", "\n").replace("\r", "\n")
+    # Looked for before trimming: strip() also removes some control
+    # characters (U+0085, U+001C to U+001F), so one at either end would pass.
+    name_has_control = _has_control(name, newline_ok=False)
+    note_has_control = _has_control(note, newline_ok=True)
+    name, note = name.strip(), note.strip()
+    if name_has_control or not name or len(name) > NAME_MAX:
         raise FormProblem(NAME_PROBLEM)
-    if not note or len(note) > NOTE_MAX or _has_control(note, newline_ok=True):
+    if note_has_control or not note or len(note) > NOTE_MAX:
         raise FormProblem(NOTE_PROBLEM)
     return name, note
 
