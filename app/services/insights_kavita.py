@@ -14,10 +14,13 @@ Run from the notification poller's leader loop, which asks every
 CHECK_INTERVAL; it runs at most once per SWEEP_EVERY, by a settings row, so a
 restart or a new leader does not run it twice. One person at a time: Kavita
 is one small server across the tunnel. Every call is a GET, after the token
-exchange. A failure is recorded (ERROR_KEY: a fixed sentence, never an
-address or a key) so the page can say Kavita's figures may be a day behind,
-and the sweep is tried again an hour later; the next sweep that works clears
-it. Kavita not set up is nothing to do, not a failure.
+exchange. One person Kavita won't answer for (a stale link, say) is counted
+and skipped, and the rest are still read. The sweep fails when Kavita itself
+can't be reached or refuses the key, or when it answers for no one; that is
+recorded (ERROR_KEY: a fixed sentence, never an address or a key) so the
+page can say Kavita's figures may be a day behind, and the sweep is tried
+again an hour later; the next sweep that works clears it. Kavita not set up,
+or no one linked, is nothing to do, not a failure, and clears it too.
 """
 import logging
 from collections import Counter
@@ -109,8 +112,14 @@ async def _minutes(client: httpx.AsyncClient, base: str, headers: dict, db: Sess
                                       identity, dict(per_day), now) or 0
 
 
+def _clear_error(db: Session) -> None:
+    if last_error(db):
+        _put(db, ERROR_KEY, "", "Why Insights' last Kavita sweep failed (internal)")
+
+
 async def sweep(now: Optional[datetime] = None) -> dict:
-    """One sweep when it is due: {"people", "days"}, or {"skipped": True}."""
+    """One sweep when it is due: {"people", "days", "failed"} (people read,
+    days kept, people Kavita wouldn't answer for), or {"skipped": True}."""
     now = now or insights_store.now_utc()
     db = SessionLocal()
     try:
@@ -119,12 +128,15 @@ async def sweep(now: Optional[datetime] = None) -> dict:
         try:
             base, key = kavita._config()
         except kavita.KavitaUnavailable:
-            return {"skipped": True}                                  # Kavita is not set up
+            _clear_error(db)                                          # Kavita is not set up
+            return {"skipped": True}
         links = db.query(KavitaLink.identity, KavitaLink.kavita_user_id, KavitaLink.kavita_username).all()
         if not links:
+            _clear_error(db)
             return {"skipped": True}
         _put(db, SWEPT_AT_KEY, utc_iso(now), "Insights' Kavita sweep last ran (internal)")
-        people = days = 0
+        people = days = failed = 0
+        refused: Optional[kavita.KavitaUnavailable] = None
         try:
             async with _client() as client:
                 headers = {"Authorization": f"Bearer {await kavita._token(client, base, key)}"}
@@ -135,15 +147,25 @@ async def sweep(now: Optional[datetime] = None) -> dict:
                     user_id = user_id or by_name.get((username or "").casefold())
                     if not isinstance(user_id, int):
                         continue
-                    days += await _minutes(client, base, headers, db, identity, user_id, now)
+                    try:
+                        days += await _minutes(client, base, headers, db, identity, user_id, now)
+                    except kavita.KavitaUnavailable as exc:
+                        if isinstance(exc.__cause__, httpx.HTTPError):
+                            raise                                     # Kavita itself stopped answering
+                        logger.info("Insights' Kavita sweep skipped one person: %s", exc)
+                        failed += 1
+                        refused = exc
+                        continue
                     people += 1
+            if refused is not None and not people:
+                raise refused
         except kavita.KavitaUnavailable as exc:
             logger.warning("Insights' Kavita sweep failed: %s", exc)
             _put(db, ERROR_KEY, str(exc)[:200], "Why Insights' last Kavita sweep failed (internal)")
             _put(db, SWEPT_AT_KEY, utc_iso(now - SWEEP_EVERY + RETRY_AFTER),
                  "Insights' Kavita sweep last ran (internal)")
-            return {"people": people, "days": days, "error": True}
+            return {"people": people, "days": days, "failed": failed, "error": True}
         _put(db, ERROR_KEY, "", "Why Insights' last Kavita sweep failed (internal)")
-        return {"people": people, "days": days}
+        return {"people": people, "days": days, "failed": failed}
     finally:
         db.close()

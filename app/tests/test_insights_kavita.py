@@ -39,11 +39,13 @@ class FakeKavita:
     """Kavita 0.9.1.4 as Task 10 found it: reading-counts by day and format,
     gap-filled with zeros. `counts` is {Kavita user id: [entries]}."""
 
-    def __init__(self, counts=None, status=200):
+    def __init__(self, counts=None, status=200, statuses=None, down=()):
         self.counts = counts if counts is not None else {
             "7": [day("2026-10-08", EPUB, 30), day("2026-10-08", PDF, 5), day("2026-10-09", EPUB, 0)],
             "8": [day("2026-10-09", EPUB, 12)]}
         self.status = status
+        self.statuses = statuses or {}          # {Kavita user id: the status reading-counts answers for them}
+        self.down = set(down)                   # Kavita user ids whose reading-counts never answers
         self.calls = []
         self.starts = {}
 
@@ -60,7 +62,10 @@ class FakeKavita:
         if path == "/api/Stats/reading-counts":
             assert params["TimeZoneId"] == "UTC"
             self.starts[params["userId"]] = params["StartDate"]
-            return httpx.Response(self.status, json=self.counts.get(params["userId"], []))
+            if params["userId"] in self.down:
+                raise httpx.ConnectError("connection refused", request=request)
+            return httpx.Response(self.statuses.get(params["userId"], self.status),
+                                  json=self.counts.get(params["userId"], []))
         raise AssertionError(f"unexpected Kavita call: {path}")
 
 
@@ -88,7 +93,7 @@ class Sweep(unittest.TestCase):
 
     def test_minutes_for_everyone_linked(self):
         fake = FakeKavita()
-        self.assertEqual(self.run_sweep(fake), {"people": 2, "days": 2})
+        self.assertEqual(self.run_sweep(fake), {"people": 2, "days": 2, "failed": 0})
         self.assertEqual(self.minutes(), [(ME, date(2026, 10, 8), 35), (THEM, date(2026, 10, 9), 12)])
         first = (NOW.date() - timedelta(days=insights_store.KEEP_DAYS)).isoformat() + "T00:00:00Z"
         self.assertEqual(fake.starts, {"7": first, "8": first})
@@ -100,7 +105,7 @@ class Sweep(unittest.TestCase):
         self.run_sweep(FakeKavita())
         fake = FakeKavita({"7": [day("2026-10-08", EPUB, 40), day("2026-10-10", EPUB, 3)],
                            "8": [day("2026-10-09", EPUB, 0)]})
-        self.assertEqual(self.run_sweep(fake, now=NOW + timedelta(hours=21)), {"people": 2, "days": 2})
+        self.assertEqual(self.run_sweep(fake, now=NOW + timedelta(hours=21)), {"people": 2, "days": 2, "failed": 0})
         self.assertEqual(fake.starts, {"7": "2026-10-05T00:00:00Z", "8": "2026-10-06T00:00:00Z"})
         self.assertEqual(self.minutes(), [(ME, date(2026, 10, 8), 40), (ME, date(2026, 10, 10), 3),
                                           (THEM, date(2026, 10, 9), 12)])       # a day now 0 keeps what was read
@@ -127,6 +132,35 @@ class Sweep(unittest.TestCase):
                 self.assertEqual(insights_kavita.last_error(self.db), "")
                 self.db.query(Setting).delete()
                 self.db.commit()
+
+    def test_one_person_kavita_refuses_is_skipped_and_the_rest_are_read(self):
+        self.db.add(Setting(key=insights_kavita.ERROR_KEY, value="Kavita answered HTTP 400"))
+        self.db.commit()
+        fake = FakeKavita(statuses={"7": 400})             # a stale link: Kavita no longer knows user 7
+        self.assertEqual(self.run_sweep(fake), {"people": 1, "days": 1, "failed": 1})
+        self.assertEqual(self.minutes(), [(THEM, date(2026, 10, 9), 12)])
+        self.assertEqual(insights_kavita.last_error(self.db), "")
+        self.assertEqual(self.run_sweep(FakeKavita(), now=NOW + timedelta(hours=2)), {"skipped": True})
+
+    def test_kavita_that_stops_answering_fails_the_sweep(self):
+        fake = FakeKavita(down={"7"})
+        got = self.run_sweep(fake)
+        self.assertEqual((got["people"], got["error"]), (0, True))
+        self.assertNotIn("8", fake.starts)                 # no one else is asked once Kavita is gone
+        self.db.expire_all()
+        self.assertEqual(insights_kavita.last_error(self.db), "Kavita did not answer")
+
+    def test_an_old_error_clears_once_kavita_is_not_set_up_or_no_one_is_linked(self):
+        for configured in (False, True):
+            with self.subTest(configured=configured):
+                self.db.query(Setting).delete()
+                self.db.add(Setting(key=insights_kavita.ERROR_KEY, value="Kavita did not answer"))
+                if configured:
+                    self.db.query(KavitaLink).delete()
+                self.db.commit()
+                self.assertEqual(self.run_sweep(FakeKavita(), configured=configured), {"skipped": True})
+                self.db.expire_all()
+                self.assertEqual(insights_kavita.last_error(self.db), "")
 
     def test_kavita_not_set_up_is_nothing_to_do(self):
         self.assertEqual(self.run_sweep(FakeKavita(), configured=False), {"skipped": True})
