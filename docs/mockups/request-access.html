@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Request Access Mockup</title>
+<!--
+  Request access: the sign-in card's steps and Settings > Access requests,
+  drawn for review before Tasks 9 and 10 are built (spec
+  docs/superpowers/specs/2026-10-10-request-access-design.md, section 9; plan
+  docs/superpowers/plans/2026-10-10-request-access.md, Task 3).
+
+  Self-contained on purpose: no app CSS, so it renders the same as a
+  published page. The colours and the frost are the shipped defaults copied
+  from app/static/css/theme.css (:where(:root) and "Frosted surfaces"), the
+  card is login.html's .login-glass-card, and the classes are the ones Tasks 9
+  and 10 write. A dark gradient stands in for the login artwork.
+
+  Each frame is a viewport drawn at its real width (390 or 1440) and zoomed
+  to fit the column, so the app's own breakpoints are container queries on
+  the frame (@[640px]: is sm, @[1024px]: is lg) rather than the reader's
+  window. The states are <template>s cloned into each frame.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=block" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: { extend: {
+    colors: {
+      "primary": "rgb(var(--color-primary) / <alpha-value>)",
+      "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+      "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+      "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+      "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+      "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+      "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      "focus": "rgb(var(--ws-focus) / <alpha-value>)",
+      "status-ok": "rgb(var(--color-status-ok) / <alpha-value>)",
+      "status-warn": "rgb(var(--color-status-warn) / <alpha-value>)",
+      "status-err": "rgb(var(--color-status-err) / <alpha-value>)",
+      "status-ok-text": "var(--ws-status-ok-text)",
+      "status-warn-text": "var(--ws-status-warn-text)",
+      "status-err-text": "var(--ws-status-err-text)"
+    },
+    fontFamily: { "display": ["var(--font-display)", "sans-serif"] },
+    fontSize: { "label": "13px", "body": "15px", "lead": "17px", "h3": "20px", "h2": "24px", "h1": "32px", "hero": "44px" },
+    borderRadius: { "card": "16px", "inner": "12px", "btn": "10px" }
+  } }
+}</script>
+<style>
+/* Layout: a column of review rows; each row holds a 390 frame and a 1440
+   frame side by side on a wide screen, stacked on a narrow one. */
+:root {
+  /* The shipped default palette (theme.css :where(:root)). */
+  --color-primary: 18 87 147;
+  --color-secondary: 44 109 161;
+  --color-accent: 70 132 176;
+  --color-text: 190 238 244;
+  --color-text-secondary: 255 255 255;
+  --color-background: 0 0 0;
+  --color-status-ok: 74 222 128;
+  --color-status-warn: 251 191 36;
+  --color-status-err: 248 113 113;
+  --font-display: "Spline Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* The glass slab's defaults: 15px blur, tint .25, everything else at 1 or 0. */
+  --ws-frost-blur: blur(15px);
+  --ws-frost-tint-a: .25;
+  --ws-frost-hl: 1;
+  --ws-frost-sheen: 0;
+  --ws-frost-grain: 0;
+  --ws-frost-depth: 1;
+  --ws-frost-sat: 1;
+  --ws-focus: var(--color-text);
+
+  --ws-status-ok: var(--color-status-ok);
+  --ws-status-warn: var(--color-status-warn);
+  --ws-status-err: var(--color-status-err);
+  --ws-status-off: var(--color-text);
+  --ws-status-ok-text: rgb(var(--color-text));
+  --ws-status-warn-text: rgb(var(--color-text));
+  --ws-status-err-text: rgb(var(--color-text));
+  --ws-shade: color-mix(in srgb, rgb(var(--color-background)) 35%, black);
+
+  /* The frost recipe (theme.css "Frosted surfaces"). */
+  --ws-frost-tint: rgb(var(--color-secondary) / var(--ws-frost-tint-a));
+  --ws-frost-glow: rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth)));
+  --ws-frost-boost: saturate(calc(1 + .5 * var(--ws-frost-sat))) brightness(calc(1 + .06 * var(--ws-frost-sat)));
+  --ws-frost-edge: rgb(var(--color-text) / .12);
+  --ws-frost-ring: linear-gradient(135deg, rgb(255 255 255 / calc(.55 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.165 * var(--ws-frost-hl))) 40%, rgb(var(--color-text) / .04) 75%);
+  --ws-frost-ring-layer: none;
+  --ws-frost-sheen-layer: linear-gradient(160deg, rgb(255 255 255 / var(--ws-frost-sheen)), rgb(255 255 255 / 0) 45%);
+  --ws-frost-grain-layer: none;
+  --ws-frost-fill: var(--ws-frost-sheen-layer), var(--ws-frost-grain-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));
+  --ws-frost-shadow:
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 1px 0 0 rgb(255 255 255 / calc(.14 * var(--ws-frost-hl))),
+    inset 0 -1px 0 rgb(0 0 0 / calc(.256 * var(--ws-frost-depth))), inset 0 -12px 24px -12px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
+  --ws-frost-floor: 0;
+
+  /* The mockup's own frame chrome, from the same palette. */
+  --mk-rule: rgb(var(--color-text) / .12);
+  --mk-muted: rgb(var(--color-text) / .7);
+  --mk-faint: rgb(var(--color-text) / .55);
+  color-scheme: dark;
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / var(--ws-frost-tint-a)) 70%, rgb(var(--color-text) / var(--ws-frost-tint-a)));
+    --ws-frost-glow: color-mix(in srgb, rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth))) 70%, rgb(var(--color-text) / calc(.14 * var(--ws-frost-depth))));
+    --ws-status-ok-text: color-mix(in srgb, rgb(var(--ws-status-ok)) 40%, rgb(var(--color-text)));
+    --ws-status-warn-text: color-mix(in srgb, rgb(var(--ws-status-warn)) 40%, rgb(var(--color-text)));
+    --ws-status-err-text: color-mix(in srgb, rgb(var(--ws-status-err)) 40%, rgb(var(--color-text)));
+  }
+}
+@supports (background-clip: border-area) {
+  :root {
+    --ws-frost-edge: transparent;
+    --ws-frost-ring-layer: var(--ws-frost-ring) border-box border-area;
+  }
+}
+
+html { background: rgb(var(--color-background)); }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: rgb(var(--color-background));
+  color: rgb(var(--color-text));
+  font-family: var(--font-display);
+  line-height: 1.5;
+  overflow-x: clip;
+}
+.material-symbols-outlined { font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased; }
+:where(.material-symbols-outlined:not(.block)) { width: 1em; overflow: clip; flex-shrink: 0; }
+
+/* ---- The app's own pieces (theme.css, login.html) ---- */
+:where(a[href], button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px;
+}
+input:focus, textarea:focus, select:focus {
+  --tw-ring-color: rgb(var(--ws-focus));
+  --tw-ring-offset-color: rgb(var(--color-background));
+  border-color: rgb(var(--ws-focus));
+}
+input:where([type='checkbox'], [type='radio']) { color: rgb(var(--color-primary)); border-color: rgb(var(--color-accent) / .5); }
+input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); }
+
+.cinematic-overlay { background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%); }
+.login-glass-card {
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill);
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border: 1px solid var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow);
+}
+/* login.html's outline for small text on the glass, applied to every word
+   the request steps draw (new: Task 9 adds #requestAccessLinkRow and
+   #requestAccess to the selector list). */
+.login-glass-card label,
+.ra-ink, .ra-ink :is(h2, p, label, a, button:not([class*="bg-"])) {
+  text-shadow: 0 0 1px rgb(var(--color-background) / 0.9),
+               0 1px 2px rgb(var(--color-background) / 0.9),
+               0 0 5px rgb(var(--color-background) / 0.75),
+               0 0 12px rgb(var(--color-background) / 0.5);
+}
+.ws-frost {
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
+  -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
+  border-color: var(--ws-frost-edge);
+  box-shadow: var(--ws-frost-shadow);
+  --tw-shadow: var(--ws-frost-shadow);
+}
+.ws-scrim { background-color: rgb(var(--color-background) / .7); }
+.ws-pill { --ws-pill: var(--ws-status-ok); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
+.ws-status-dot { flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px; background: rgb(var(--ws-pill)); }
+.ws-lift { transition: transform 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out; }
+@media (hover: hover) { .ws-lift:hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--ws-shade) 90%, transparent); } }
+.ws-tab {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .75rem 1rem; margin-bottom: -1px;
+  font-size: 15px; font-weight: 600; color: rgb(var(--color-text) / .7);
+  border-bottom: 2px solid transparent; border-radius: 10px 10px 0 0;
+}
+.ws-tab[aria-selected="true"] { color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary)); }
+.ws-tab:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: -2px; }
+.ws-hide-scrollbar { scrollbar-width: none; }
+.ws-hide-scrollbar::-webkit-scrollbar { display: none; }
+.ws-tab-hint-right { background: linear-gradient(to left, rgb(var(--color-background)) 40%, rgb(var(--color-background) / 0)); }
+.ws-tab-hint-left { background: linear-gradient(to right, rgb(var(--color-background)) 40%, rgb(var(--color-background) / 0)); }
+.ws-switch {
+  position: relative; flex-shrink: 0; width: 2.75rem; height: 1.5rem; border-radius: 9999px;
+  background: rgb(var(--color-text) / .15); transition: background-color 150ms ease-out;
+}
+.ws-switch::after {
+  content: ""; position: absolute; top: .1875rem; left: .1875rem; width: 1.125rem; height: 1.125rem;
+  border-radius: 9999px; background: rgb(var(--color-text-secondary)); transition: transform 150ms ease-out;
+}
+.ws-switch[aria-checked="true"] { background: rgb(var(--color-primary)); }
+.ws-switch[aria-checked="true"]::after { transform: translateX(1.25rem); }
+.ws-switch:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ws-lift, .ws-switch, .ws-switch::after { transition: none; }
+}
+
+/* ---- The stand-in for the login artwork ----
+   Dark like the real art after its overlay, with enough shape and colour
+   (a lantern glow, a night sky, a few diagonal beams) that the frost has
+   something to blur. */
+.art {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 38% 30% at 62% 78%, rgb(214 128 46 / .85), transparent 70%),
+    radial-gradient(ellipse 34% 42% at 22% 30%, rgb(38 140 150 / .7), transparent 70%),
+    radial-gradient(ellipse 30% 36% at 82% 22%, rgb(122 70 160 / .6), transparent 70%),
+    repeating-linear-gradient(118deg, rgb(255 255 255 / .06) 0 18px, transparent 18px 64px),
+    linear-gradient(160deg, rgb(16 30 58), rgb(6 10 22) 60%, rgb(24 14 10));
+}
+
+/* ---- Frames: one viewport each, drawn at its real size and scaled ---- */
+.vp { position: relative; overflow: hidden; border-radius: 12px; border: 1px solid var(--mk-rule); background: rgb(var(--color-background)); }
+.vp-inner { container-type: inline-size; }
+.vp-page { position: relative; display: flex; flex-direction: column; isolation: isolate; }
+.vp-page > main { position: relative; z-index: 20; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 1rem 0; }
+.vp-page > footer { position: relative; z-index: 20; padding: 2rem; display: flex; justify-content: center; }
+/* Settings > Pages > Login page: left or right from 64rem, centred below. */
+.vp-page[data-pos="left"] > main { align-items: flex-start; padding-inline-start: 86.4px; }
+.vp-page[data-pos="right"] > main { align-items: flex-end; padding-inline-end: 86.4px; }
+.vp-page[data-pos="left"] > footer { justify-content: flex-start; padding-inline-start: 86.4px; }
+.vp-page[data-pos="right"] > footer { justify-content: flex-end; padding-inline-end: 86.4px; }
+.vp-page[data-pos] > footer > div { width: 440px; display: flex; justify-content: center; }
+
+/* ---- The mockup's own page ---- */
+.mk { max-width: 1960px; margin-inline: auto; padding-inline: 16px; padding-block: 32px 96px; }
+@media (min-width: 768px) { .mk { padding-inline: 32px; } }
+.mk-head { max-width: 72ch; }
+.mk-head h1 { font-size: clamp(1.75rem, 1.2rem + 2vw, 2.75rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+.mk-head p { color: var(--mk-muted); font-size: 17px; margin: 12px 0 0; text-wrap: pretty; }
+.mk-notes { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 15px; color: var(--mk-muted); }
+.mk-notes li { display: flex; gap: 10px; align-items: baseline; }
+.mk-notes li::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--color-accent)); transform: translateY(-2px); }
+.mk-nav { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; }
+.mk-nav a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 16px; border-radius: 9999px; font-size: 15px; font-weight: 600; color: rgb(var(--color-text) / .8); background: rgb(var(--color-text) / .07); text-decoration: none; }
+.mk-nav a:hover { background: rgb(var(--color-text) / .12); color: rgb(var(--color-text)); }
+.mk-part { margin-top: 72px; scroll-margin-top: 24px; }
+.mk-part > h2 { font-size: 28px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin: 0; padding-bottom: 12px; border-bottom: 1px solid var(--mk-rule); }
+.mk-part > p { color: var(--mk-muted); font-size: 15px; margin: 12px 0 0; max-width: 72ch; }
+.mk-state { margin-top: 48px; }
+.mk-state-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; max-width: 90ch; }
+.mk-code { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); font-variant-numeric: tabular-nums; }
+.mk-state-head h3 { font-size: 20px; font-weight: 700; margin: 0; }
+.mk-state-head p { flex-basis: 100%; margin: 0; color: var(--mk-muted); font-size: 15px; text-wrap: pretty; }
+.mk-row { margin-top: 16px; display: grid; gap: 24px; align-items: start; }
+@media (min-width: 900px) { .mk-row.pair { grid-template-columns: minmax(0, 392px) minmax(0, 1fr); } }
+@media (min-width: 900px) { .mk-row.duo { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.mk-frame { min-width: 0; }
+.mk-cap { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; color: var(--mk-faint); font-variant-numeric: tabular-nums; }
+.mk-cap b { color: rgb(var(--color-text) / .85); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="mk">
+
+<header class="mk-head">
+  <h1>Request access, inside the sign-in card</h1>
+  <p>Every step a visitor can see, and the new Settings tab, each drawn at 390 and 1440 wide. A picture for review: the buttons don't go anywhere.</p>
+  <ul class="mk-notes">
+    <li>The glass is the shipped default (15px blur, tint at 25%) and the card is today's sign-in card. A dark gradient stands in for the artwork.</li>
+    <li>Only the part under the logo changes from step to step. The words come from the spec (section 9) and the build plan.</li>
+    <li>Wide frames are scaled to fit your window; the caption says by how much. People, notes and libraries are made up.</li>
+  </ul>
+  <nav class="mk-nav" aria-label="Parts of this mockup">
+    <a href="#card">Sign-in card</a>
+    <a href="#positions">Card left and right</a>
+    <a href="#settings">Settings tab</a>
+    <a href="#dialogs">Approve and Deny</a>
+  </nav>
+</header>
+
+<section class="mk-part" id="card" aria-labelledby="card-h">
+  <h2 id="card-h">Sign-in card</h2>
+  <p>The card keeps its size, glass and logo. Each step moves focus to its heading. Errors show in one line at the foot of the card.</p>
+
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S0</span><h3>Sign in</h3><p>Today's card on this site (Authentik only) with the new link under the button. The link shows only while requests are switched on.</p></div>
+    <div class="mk-row pair" data-row="card:s0"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S1</span><h3>Intro</h3><p>After "New here? Request access". The browser's Back button also returns to S0.</p></div>
+    <div class="mk-row pair" data-row="card:s1"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S2</span><h3>Waiting for Plex</h3><p>While the Plex window is open. When Plex answers, the card moves on by itself.</p></div>
+    <div class="mk-row pair" data-row="card:s2"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S2</span><h3>Plex window blocked</h3><p>The browser stopped the window from opening. Reopen becomes the main button: a fresh click gets past the blocker.</p></div>
+    <div class="mk-row pair" data-row="card:s2b"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S3</span><h3>Form</h3><p>Plex has told us who they are. Both fields are required; the counter follows the typing (try it).</p></div>
+    <div class="mk-row pair" data-row="card:s3"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S3</span><h3>Form with an error</h3><p>Filled in and sent while 20 requests are already waiting. Every S3 error uses the same line.</p></div>
+    <div class="mk-row pair" data-row="card:s3e"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S4</span><h3>Sent</h3><p>After Send request.</p></div>
+    <div class="mk-row pair" data-row="card:s4"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Status: pending</h3><p>They did the Plex step again while their request waits.</p></div>
+    <div class="mk-row pair" data-row="card:s5-pending"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Status: approved (and invited)</h3><p>Approved here, or already invited in Plex. Both say the same thing.</p></div>
+    <div class="mk-row pair" data-row="card:s5-approved"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Status: denied</h3><p>Within 30 days of a deny.</p></div>
+    <div class="mk-row pair" data-row="card:s5-denied"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Status: blocked</h3><p>The admin blocked this Plex account for good.</p></div>
+    <div class="mk-row pair" data-row="card:s5-blocked"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><span class="mk-code">S5</span><h3>Status: member</h3><p>Their Plex account can already see the server. The button returns to S0 and focuses its sign-in button.</p></div>
+    <div class="mk-row pair" data-row="card:s5-member"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="positions" aria-labelledby="pos-h">
+  <h2 id="pos-h">Card left and right</h2>
+  <p>From 1024 wide, Settings &gt; Pages can put the card on the left or the right. Shown with S3, the tallest step. Narrower screens always centre it.</p>
+  <div class="mk-row duo" data-row="card:s3:left card:s3:right"></div>
+</section>
+
+<section class="mk-part" id="settings" aria-labelledby="set-h">
+  <h2 id="set-h">Settings &gt; Access requests</h2>
+  <p>A new tab after Sign-in, for admins. Its badge counts the people waiting and is read as "Access requests, 3 waiting". The app's sidebar and phone bars are drawn as plain stubs.</p>
+  <div class="mk-state">
+    <div class="mk-state-head"><h3>The tab</h3><p>Switch on, default libraries ticked, three people waiting, and three answers from the last 30 days: a share Plex refused, a deny and a block.</p></div>
+    <div class="mk-row pair" data-row="settings:panel"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><h3>When Plex isn't connected</h3><p>The note under the switch. Only the top of the tab is drawn.</p></div>
+    <div class="mk-row pair" data-row="settings:noplex"></div>
+  </div>
+</section>
+
+<section class="mk-part" id="dialogs" aria-labelledby="dlg-h">
+  <h2 id="dlg-h">Approve and Deny</h2>
+  <p>The site's shared dialog. On a phone it sits at the bottom of the screen.</p>
+  <div class="mk-state">
+    <div class="mk-state-head"><h3>Approve</h3><p>The default libraries come ticked. Untick or add any for this person.</p></div>
+    <div class="mk-row pair" data-row="settings:approve"></div>
+  </div>
+  <div class="mk-state">
+    <div class="mk-state-head"><h3>Deny</h3><p>Without the box ticked they can ask again after 30 days.</p></div>
+    <div class="mk-row pair" data-row="settings:deny"></div>
+  </div>
+</section>
+
+</div>
+
+<!-- ================= Sign-in card templates ================= -->
+
+<!-- The card itself (login.html), with the logo and the site's name. -->
+<template id="tpl-card">
+<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 flex flex-col items-center">
+<div class="mb-8 w-full flex flex-col items-center">
+<img alt="Logo" class="h-48 w-auto object-contain border-none mb-2" width="192" height="192" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiIGZpbGw9Im5vbmUiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJiZzMiIHgxPSIyNDAiIHkxPSIxNjAiIHgyPSI4MjQiIHkyPSI5MjAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMjAzMzNkIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzBlMWUyYSIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZWRnZTMiIHgxPSIyNDAiIHkxPSIxODAiIHgyPSI4NjAiIHkyPSI4NjAiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjOTJiMWMwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC42IiBzdG9wLWNvbG9yPSIjMjU2NTk5Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwNTA5MCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CgogIDxnIGlkPSJpY29uIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg1MTIgNTEyKSBzY2FsZSgwLjkyKSB0cmFuc2xhdGUoLTUxMiAtNTEyKSI+CiAgICA8cGF0aCBkPSJNNTEyIDk0IEM2MzIgMTcwIDczOCAyMDggODcwIDIzOCBWNTQyIEM4NzAgNzQ0IDcyNiA4NzggNTEyIDk0MiBDMjk4IDg3OCAxNTQgNzQ0IDE1NCA1NDIgVjIzOCBDMjg2IDIwOCAzOTIgMTcwIDUxMiA5NCBaIiBmaWxsPSJ1cmwoI2JnMykiLz4KICAgIDxwYXRoIGQ9Ik01MTIgMTMyIEM2MjIgMjAyIDcyMiAyMzYgODM2IDI2MiBWNTM4IEM4MzYgNzE4IDcxMiA4MzQgNTEyIDg5MCBDMzEyIDgzNCAxODggNzE4IDE4OCA1MzggVjI2MiBDMzAyIDIzNiA0MDIgMjAyIDUxMiAxMzIgWiIgc3Ryb2tlPSJ1cmwoI2VkZ2UzKSIgc3Ryb2tlLXdpZHRoPSIzNCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgoKICAgIDxwYXRoIGQ9Ik0yNzYgMzU2IEwzNzIgNzA4IEw1MTIgNDYwIEw2NTIgNzA4IEw3NDggMzU2IiBmaWxsPSJub25lIiBzdHJva2U9IiM5MmIxYzAiIHN0cm9rZS13aWR0aD0iNDQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogICAgPHBhdGggZD0iTTMyNCAzNTYgTDM5MCA1ODAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzI1NjU5OSIgc3Ryb2tlLXdpZHRoPSIyOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjk1Ii8+CiAgICA8cGF0aCBkPSJNNzAwIDM1NiBMNjM0IDU4MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjU2NTk5IiBzdHJva2Utd2lkdGg9IjI4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIG9wYWNpdHk9IjAuOTUiLz4KCiAgICA8Y2lyY2xlIGN4PSI1MTIiIGN5PSI0NTYiIHI9IjIyIiBmaWxsPSIjMjJjMzVkIi8+CiAgICA8cGF0aCBkPSJNNTEyIDQ1NiBDNTUyIDQyMCA2MDggNDA0IDY2NCA0MDQiIHN0cm9rZT0iIzIyYzM1ZCIgc3Ryb2tlLXdpZHRoPSIyMCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjc1Ii8+CiAgICA8cGF0aCBkPSJNNTEyIDQ1NiBDNTY2IDQwNCA2NDAgMzc2IDcxNiAzNzYiIHN0cm9rZT0iIzIyYzM1ZCIgc3Ryb2tlLXdpZHRoPSIxNiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBvcGFjaXR5PSIwLjUiLz4KCiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgzODYgNzQ0KSI+CiAgICAgIDxwYXRoIGQ9Ik00MCAwIEgyMTIgQzI0MCAwIDI2NCAyNCAyNjQgNTIgVjkyIEMyNjQgMTIwIDI0MCAxNDQgMjEyIDE0NCBINDAgQzEyIDE0NCAtMTIgMTIwIC0xMiA5MiBWNTIgQy0xMiAyNCAxMiAwIDQwIDAgWiIgZmlsbD0iIzBlMWUyYSIgc3Ryb2tlPSIjMjU2NTk5IiBzdHJva2Utd2lkdGg9IjE4Ii8+CiAgICAgIDxjaXJjbGUgY3g9IjIyIiBjeT0iNzIiIHI9IjEyIiBmaWxsPSIjMjJjMzVkIi8+CiAgICAgIDxwYXRoIGQ9Ik02MCA3MiBIMjIwIiBzdHJva2U9IiM5MmIxYzAiIHN0cm9rZS1vcGFjaXR5PSIwLjYiIHN0cm9rZS13aWR0aD0iMTQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogICAgPC9nPgogIDwvZz4KPC9zdmc+Cg==">
+<h1 class="text-frosted-blue text-2xl font-bold mt-4 tracking-tight text-center">Your Server</h1>
+</div>
+<div data-slot class="w-full"></div>
+</div>
+</template>
+
+<!-- S0: today's buttons on this site (Authentik), then the new link. -->
+<template id="tpl-s0">
+<div class="w-full space-y-5">
+<button class="w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3 rounded-lg flex flex-col items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark active:scale-[0.98]" type="button">
+<div class="flex items-center gap-1.5">
+<span class="text-sm font-medium">Sign in with</span>
+<!-- The site's primary button (as "Turn on" on Home's push card), carrying
+     Plex's full-colour wordmark: the letters and the white strokes of the x
+     in the button's bright text (R153: words on a solid Primary fill), the
+     chevron in Plex's own amber. The amber is the brand mark's fixed fill,
+     not a theme colour, like the direct Plex button's fill (audit M10). The
+     hidden "Plex" keeps the name "Sign in with Plex via Authentik". -->
+<svg class="h-[1.125rem] w-auto shrink-0" viewBox="0.4 0.4 359 155" fill="currentColor" aria-hidden="true" focusable="false">
+<path d="M59.3,28.2c-14.3,0-23.5,3.9-31.3,13v-10H.4v123.7s.5.2,1.9.5c1.9.5,12.1,2.5,19.6-3.4,6.5-5.3,8-11.4,8-18.3v-17.8c8,8,17,11.4,29.6,11.4,27.2,0,48-20.8,48-48.4s-20.1-50.7-48.3-50.7h0ZM54,103.8c-15.3,0-27.4-11.9-27.4-26.3s14.3-25.6,27.4-25.6,27.4,11.2,27.4,25.8-12.1,26-27.4,26Z"/>
+<path d="M146.9,75.9c0,10.7,1.2,23.7,12.4,37.9.2.2.7.9.7.9-4.6,7.3-10.2,12.3-17.7,12.3s-11.6-3-16.5-8c-5.1-5.5-7.5-12.6-7.5-20.1V.4h28.4l.2,75.6Z"/>
+<path d="M227.4,97.4c-5.8,5-9.7,7.8-17.7,7.8-14.3,0-22.6-9.6-23.8-20.1h75.9c.5-1.4.7-3.2.7-6.2,0-29-22.6-50.7-52.2-50.7s-51.2,22.1-51.2,49.8,23,49.1,51.9,49.1,37.6-10.7,47.1-29.7h-30.8ZM210.7,50.1c12.6,0,22.1,7.8,24.3,18h-48c2.4-10.7,11.4-18,23.8-18h0Z"/>
+<path fill="#EBAF00" d="M286.4,77.8L252.9,31.2h34.4l33.3,46.6-33.3,46.3h-34.4Z"/>
+<path d="M329.5,72.5l29.9-41.3h-34.5l-12.3,17.1Z"/>
+<path d="M312.6,107.2l5.8,7.5c5.6,8.2,12.9,12.3,21.3,12.3,9-.2,15.3-7.5,17.7-10.3,0,0-4.4-3.7-9.9-9.8-7.5-8.2-17.5-23.3-17.7-24Z"/>
+</svg>
+<span class="sr-only">Plex</span>
+</div>
+<!-- "via" and authentik's logo, its orange key and wordmark sized so the
+     wordmark's x-height matches "via" and sits on its baseline (the SVG is
+     cropped to the mark, and align-[] lowers it by the part below the
+     baseline). The orange is the mark's own fill, not a theme colour, like
+     the Plex chevron's amber above. The hidden "Authentik" keeps the name
+     "Sign in with Plex via Authentik".
+     The orange is only 2.2:1 on the default Primary: the owner's deliberate
+     choice, and the accessible name carries the meaning.
+     The logo's paths are authentik's icon_left_brand.svg as committed in
+     goauthentik/authentik at web/icons (commit a4e0ae9, 2026), flattened from
+     its <symbol>s; that path falls under the repository's MIT licence:
+       Copyright (c) 2023 Jens Langhammer
+       Permission is hereby granted, free of charge, to any person obtaining a
+       copy of this software and associated documentation files (the
+       "Software"), to deal in the Software without restriction, including
+       without limitation the rights to use, copy, modify, merge, publish,
+       distribute, sublicense, and/or sell copies of the Software, and to
+       permit persons to whom the Software is furnished to do so, subject to
+       the following conditions: The above copyright notice and this
+       permission notice shall be included in all copies or substantial
+       portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+       WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+       THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+       NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+       LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+       OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+       WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+     authentik's newer brand-asset copies are not under that licence, so
+     don't refresh the paths from them. The name and logo are authentik's
+     trademarks, shown only to say whose sign-in this is. -->
+<span class="text-label font-medium text-bright/80">via
+<svg class="inline h-[0.92em] w-auto align-[-0.103em]" viewBox="28.5 36.2 3638.8 519.4" fill="#FD4B2D" aria-hidden="true" focusable="false">
+<g transform="translate(28.54 36.14) scale(.68)">
+<path d="M829.67,0h-425.28c-93.1,0-169.27,76.17-169.27,169.27v425.28c0,93.1,76.17,169.27,169.27,169.27h50.18v-165.68h324.96v165.68h50.14c93.1,0,169.27-76.17,169.27-169.27V169.27C998.94,76.17,922.77,0,829.67,0ZM755.98,463.53H235.4v-114.49h268.96v-158.97h43.68v94.7h25.61v-94.7h30.88v69.64h25.61v-69.64h30.88v116.35h25.61v-116.35h43.68v158.97h25.69v114.49Z"/>
+<path d="M237.36,342.19h-.02c-25.34-34.27-63.32-69.15-105.42-69.15-48.4.03-92.89,26.58-115.91,69.15-48.08,83.85,18.39,196.94,115.91,194.36,75.46,0,137.69-111.95,137.69-131.75,0-8.76-12.18-35.49-32.25-62.61ZM77.32,342.19c27.16-23.43,66.59-30.27,95.1,0h.02c21.51,19.51,40.28,47.91,47.08,62.35-84.6,176.88-232.87,26.13-142.2-62.35Z"/>
+</g>
+<g transform="translate(802.22 67.81)">
+<path d="M238.73,125.38h76.4v304.5h-76.4v-32.18c-14.91,14.18-29.87,24.4-44.87,30.65-15,6.25-31.26,9.37-48.78,9.37-39.32,0-73.33-15.25-102.04-45.76C14.35,361.45,0,323.53,0,278.19s13.89-85.54,41.65-115.58c27.77-30.04,61.5-45.06,101.19-45.06,18.26,0,35.4,3.45,51.43,10.35,16.03,6.91,30.84,17.26,44.45,31.07v-33.58ZM158.41,188.07c-23.62,0-43.24,8.35-58.86,25.05-15.62,16.7-23.43,38.11-23.43,64.23s7.95,47.96,23.84,64.93c15.9,16.98,35.47,25.47,58.72,25.47s43.89-8.35,59.69-25.05c15.8-16.7,23.71-38.57,23.71-65.63s-7.9-47.95-23.71-64.37c-15.81-16.42-35.8-24.63-59.97-24.63Z"/>
+<path d="M403.16,125.38h77.24v146.65c0,28.55,1.96,48.37,5.89,59.47,3.93,11.1,10.24,19.73,18.94,25.89,8.69,6.16,19.4,9.24,32.12,9.24s23.52-3.03,32.4-9.1c8.88-6.06,15.47-14.97,19.78-26.73,3.18-8.77,4.77-27.52,4.77-56.25V125.38h76.41v129.02c0,53.18-4.2,89.56-12.59,109.15-10.26,23.88-25.38,42.22-45.34,54.99-19.97,12.78-45.34,19.17-76.13,19.17-33.4,0-60.41-7.46-81.02-22.39-20.62-14.92-35.13-35.73-43.52-62.41-5.97-18.47-8.96-52.06-8.96-100.75v-126.78Z"/>
+<path d="M796.76,13.15h76.41v112.23h45.34v65.77h-45.34v238.73h-76.41v-238.73h-39.18v-65.77h39.18V13.15Z"/>
+<path d="M999.76,7.84h75.85v148.33c14.93-12.88,29.95-22.53,45.06-28.97,15.11-6.44,30.41-9.65,45.9-9.65,30.23,0,55.7,10.45,76.41,31.34,17.73,18.1,26.59,44.69,26.59,79.76v201.23h-75.29v-133.5c0-35.27-1.68-59.15-5.04-71.65-3.36-12.5-9.09-21.83-17.21-27.99-8.12-6.15-18.15-9.23-30.09-9.23-15.49,0-28.78,5.13-39.88,15.39-11.11,10.26-18.8,24.26-23.09,41.98-2.24,9.14-3.36,30.04-3.36,62.69v122.3h-75.85V7.84Z"/>
+<path d="M1688.63,299.74h-245.45c3.54,21.65,13.01,38.86,28.41,51.64,15.39,12.78,35.03,19.17,58.91,19.17,28.55,0,53.08-9.98,73.6-29.95l64.37,30.23c-16.05,22.77-35.26,39.6-57.65,50.52-22.39,10.91-48.98,16.37-79.76,16.37-47.77,0-86.67-15.06-116.71-45.2-30.04-30.13-45.06-67.87-45.06-113.21s14.97-85.03,44.92-115.73c29.95-30.69,67.49-46.04,112.65-46.04,47.95,0,86.95,15.35,116.99,46.04,30.04,30.69,45.06,71.23,45.06,121.61l-.28,14.55ZM1612.22,239.57c-5.05-16.98-15-30.79-29.86-41.42-14.86-10.63-32.1-15.95-51.72-15.95-21.3,0-40,5.98-56.07,17.91-10.09,7.47-19.44,20.62-28.03,39.46h165.68Z"/>
+<path d="M1790.6,125.38h76.41v31.21c17.33-14.61,33.02-24.77,47.09-30.48,14.06-5.71,28.46-8.57,43.18-8.57,30.18,0,55.8,10.54,76.85,31.62,17.7,17.91,26.55,44.41,26.55,79.48v201.23h-75.57v-133.35c0-36.34-1.63-60.47-4.89-72.4-3.26-11.93-8.93-21.01-17.03-27.26-8.1-6.24-18.1-9.36-30.01-9.36-15.45,0-28.71,5.17-39.78,15.51-11.08,10.35-18.76,24.65-23.04,42.91-2.24,9.5-3.35,30.1-3.35,61.78v122.16h-76.41V125.38Z"/>
+<path d="M2183.92,13.15h76.41v112.23h45.34v65.77h-45.34v238.73h-76.41v-238.73h-39.18v-65.77h39.18V13.15Z"/>
+<path d="M2416.46,0c13.39,0,24.88,4.85,34.46,14.55,9.58,9.7,14.38,21.46,14.38,35.27s-4.75,25.24-14.24,34.84c-9.49,9.61-20.84,14.41-34.04,14.41s-25.16-4.9-34.75-14.69c-9.58-9.79-14.37-21.69-14.37-35.68s4.74-24.91,14.23-34.43c9.49-9.51,20.93-14.27,34.33-14.27ZM2378.26,125.38h76.41v304.5h-76.41V125.38Z"/>
+<path d="M2564.75,7.84h76.41v243.09l112.51-125.54h95.96l-131.17,145.94,146.86,158.56h-94.85l-129.3-140.34v140.34h-76.41V7.84Z"/>
+</g>
+</svg>
+<span class="sr-only">Authentik</span></span>
+</button>
+</div>
+<p class="w-full text-center mt-6 ra-ink">
+<a href="#card" class="text-frosted-blue text-sm font-medium underline underline-offset-4 decoration-frosted-blue/40 hover:decoration-frosted-blue rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">New here? Request access</a>
+</p>
+</template>
+
+<template id="tpl-s1">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Request access</h2>
+<p class="mt-3 text-frosted-blue text-sm text-center text-balance">Sign in to Plex so we know who you are.</p>
+<p class="mt-1 text-frosted-blue/80 text-sm text-center text-balance">We only read your Plex username, email and picture.</p>
+<button type="button" class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">
+<span class="text-sm font-medium">Continue with</span>
+<svg class="h-[1.125rem] w-auto shrink-0" viewBox="0.4 0.4 359 155" fill="currentColor" aria-hidden="true" focusable="false">
+<path d="M59.3,28.2c-14.3,0-23.5,3.9-31.3,13v-10H.4v123.7s.5.2,1.9.5c1.9.5,12.1,2.5,19.6-3.4,6.5-5.3,8-11.4,8-18.3v-17.8c8,8,17,11.4,29.6,11.4,27.2,0,48-20.8,48-48.4s-20.1-50.7-48.3-50.7h0ZM54,103.8c-15.3,0-27.4-11.9-27.4-26.3s14.3-25.6,27.4-25.6,27.4,11.2,27.4,25.8-12.1,26-27.4,26Z"/>
+<path d="M146.9,75.9c0,10.7,1.2,23.7,12.4,37.9.2.2.7.9.7.9-4.6,7.3-10.2,12.3-17.7,12.3s-11.6-3-16.5-8c-5.1-5.5-7.5-12.6-7.5-20.1V.4h28.4l.2,75.6Z"/>
+<path d="M227.4,97.4c-5.8,5-9.7,7.8-17.7,7.8-14.3,0-22.6-9.6-23.8-20.1h75.9c.5-1.4.7-3.2.7-6.2,0-29-22.6-50.7-52.2-50.7s-51.2,22.1-51.2,49.8,23,49.1,51.9,49.1,37.6-10.7,47.1-29.7h-30.8ZM210.7,50.1c12.6,0,22.1,7.8,24.3,18h-48c2.4-10.7,11.4-18,23.8-18h0Z"/>
+<path fill="#EBAF00" d="M286.4,77.8L252.9,31.2h34.4l33.3,46.6-33.3,46.3h-34.4Z"/>
+<path d="M329.5,72.5l29.9-41.3h-34.5l-12.3,17.1Z"/>
+<path d="M312.6,107.2l5.8,7.5c5.6,8.2,12.9,12.3,21.3,12.3,9-.2,15.3-7.5,17.7-10.3,0,0-4.4-3.7-9.9-9.8-7.5-8.2-17.5-23.3-17.7-24Z"/>
+</svg>
+<span class="sr-only">Plex</span>
+</button>
+<button type="button" class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+</div>
+</template>
+
+<template id="tpl-s2">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Waiting for Plex…</h2>
+<p class="mt-3 text-frosted-blue text-sm text-center text-balance">Finish signing in to Plex in the window that opened.</p>
+<button type="button" class="mt-6 w-full bg-frosted-blue/10 hover:bg-frosted-blue/15 border border-frosted-blue/15 text-frosted-blue font-semibold py-3 rounded-lg transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Reopen Plex sign-in</button>
+<button type="button" class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Cancel</button>
+</div>
+</template>
+
+<template id="tpl-s2b">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Waiting for Plex…</h2>
+<p class="mt-3 text-frosted-blue text-sm text-center text-balance">Finish signing in to Plex in the window that opened.</p>
+<button type="button" class="mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Reopen Plex sign-in</button>
+<button type="button" class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Cancel</button>
+</div>
+<p role="alert" class="w-full mt-3 text-status-err-text text-sm font-medium text-center text-balance ra-ink">Your browser blocked the Plex window</p>
+</template>
+
+<template id="tpl-s3">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Request access</h2>
+<div class="mt-4 flex items-center justify-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="M">
+<p class="text-frosted-blue text-sm min-w-0 break-words">Requesting as <span class="font-semibold">mira.okafor</span></p>
+</div>
+<div class="mt-5 flex flex-col gap-1.5">
+<label for="raName" class="text-frosted-blue text-sm font-medium px-1">Your name</label>
+<input id="raName" type="text" autocomplete="name" maxlength="80" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 px-4 text-frosted-blue focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all" value="">
+</div>
+<div class="mt-4 flex flex-col gap-1.5">
+<label for="raNote" class="text-frosted-blue text-sm font-medium px-1">Who are you and how do you know us?</label>
+<textarea id="raNote" rows="4" maxlength="1000" aria-describedby="raCount" data-count="raCount" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 px-4 text-frosted-blue resize-y focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all"></textarea>
+<p id="raCount" class="text-frosted-blue/80 text-label text-right px-1 tabular-nums">0/1000</p>
+</div>
+<button type="button" class="mt-5 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Send request</button>
+<button type="button" class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+</div>
+</template>
+
+<template id="tpl-s3e">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Request access</h2>
+<div class="mt-4 flex items-center justify-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="M">
+<p class="text-frosted-blue text-sm min-w-0 break-words">Requesting as <span class="font-semibold">mira.okafor</span></p>
+</div>
+<div class="mt-5 flex flex-col gap-1.5">
+<label for="raName" class="text-frosted-blue text-sm font-medium px-1">Your name</label>
+<input id="raName" type="text" autocomplete="name" maxlength="80" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 px-4 text-frosted-blue focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all" value="Mira Okafor">
+</div>
+<div class="mt-4 flex flex-col gap-1.5">
+<label for="raNote" class="text-frosted-blue text-sm font-medium px-1">Who are you and how do you know us?</label>
+<textarea id="raNote" rows="4" maxlength="1000" aria-describedby="raCount" data-count="raCount" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 px-4 text-frosted-blue resize-y focus:outline-none focus:ring-2 focus:ring-focus focus:border-transparent transition-all">I'm Dana's sister. She said you run the server for the family.
+Mostly documentaries and the odd anime.</textarea>
+<p id="raCount" class="text-frosted-blue/80 text-label text-right px-1 tabular-nums">0/1000</p>
+</div>
+<button type="button" class="mt-5 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark">Send request</button>
+<button type="button" class="mt-3 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+</div>
+<p role="alert" class="w-full mt-3 text-status-err-text text-sm font-medium text-center text-balance ra-ink">We’re not taking new requests right now. Try again later.</p>
+</template>
+
+<template id="tpl-s4">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Request sent</h2>
+<p class="mt-3 text-frosted-blue text-sm text-center text-balance">Request sent: watch your email for the Plex invite.</p>
+<button type="button" class="mt-6 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+</div>
+</template>
+
+<!-- S5: one block; the script fills the message and, for member, the button. -->
+<template id="tpl-s5">
+<div class="w-full ra-ink">
+<h2 tabindex="-1" class="text-frosted-blue text-xl font-bold text-center text-balance focus:outline-none">Your request</h2>
+<p data-ra-status class="mt-3 text-frosted-blue text-sm text-center text-balance"></p>
+<button type="button" data-ra-back class="mt-6 w-full text-frosted-blue text-sm font-medium py-2.5 rounded-lg hover:bg-frosted-blue/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">Back to sign in</button>
+</div>
+</template>
+
+<!-- ================= Settings templates ================= -->
+
+<!-- The page around the tab: heading and tab strip. -->
+<template id="tpl-settings-head">
+<header class="mb-6">
+<h1 class="text-[24px] @[1024px]:text-[32px] font-bold tracking-tight text-frosted-blue leading-tight">Settings</h1>
+<p class="text-[15px] text-frosted-blue/70 mt-1">Set up your site, choose what people see, and connect your services.</p>
+</header>
+<div class="relative border-b border-frosted-blue/10 mb-8">
+<div class="overflow-x-auto ws-hide-scrollbar" data-tabscroll>
+<nav role="tablist" aria-label="Settings sections" class="flex w-max gap-1 whitespace-nowrap pr-12 @[1024px]:pr-0">
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">General</a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Pages</a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Appearance</a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Sign-in</a>
+<a role="tab" href="#settings" aria-selected="true" aria-label="Access requests, 3 waiting" class="ws-tab" data-current>Access requests<span aria-hidden="true" class="inline-flex min-w-5 h-5 px-1.5 items-center justify-center rounded-full bg-primary text-bright text-label font-bold tabular-nums">3</span></a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Integrations</a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Books</a>
+<a role="tab" href="#settings" aria-selected="false" class="ws-tab">Notifications</a>
+</nav>
+</div>
+<div class="ws-tab-hint-left absolute inset-y-0 left-0 w-12 flex items-center justify-start pointer-events-none @[1024px]:hidden" aria-hidden="true"><span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_back</span></div>
+<div class="ws-tab-hint-right absolute inset-y-0 right-0 w-12 flex items-center justify-end pointer-events-none @[1024px]:hidden" aria-hidden="true"><span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_forward</span></div>
+</div>
+</template>
+
+<!-- The switch section. data-plex="off" shows the note. -->
+<template id="tpl-set-switch">
+<section class="mb-12 last:mb-0">
+<div class="mb-5">
+<h2 class="text-[20px] font-bold tracking-tight text-frosted-blue">Sign-in page</h2>
+<p class="text-[15px] text-frosted-blue/70 mt-1 max-w-2xl">Let people who don’t have access yet ask for it from the sign-in card.</p>
+</div>
+<div class="space-y-6">
+<div class="flex items-start justify-between gap-4 max-w-2xl">
+<div class="min-w-0"><span id="arOnLabel" class="block text-[15px] font-semibold text-frosted-blue">Let people request access from the sign-in page</span></div>
+<button type="button" role="switch" aria-checked="true" aria-labelledby="arOnLabel" class="ws-switch" data-switch></button>
+</div>
+<p data-needs-plex class="text-[13px] text-frosted-blue/60 mt-1.5 flex items-center gap-2" hidden><span class="inline-block shrink-0 w-2.5 h-2.5 rounded-full" style="box-shadow: inset 0 0 0 2px rgb(var(--ws-status-off) / .45)" aria-hidden="true"></span>This needs Plex. Connect it under Integrations first.</p>
+</div>
+</section>
+</template>
+
+<template id="tpl-set-rest">
+<section class="mb-12 last:mb-0">
+<div class="mb-5">
+<h2 class="text-[20px] font-bold tracking-tight text-frosted-blue">Default libraries</h2>
+<p class="text-[15px] text-frosted-blue/70 mt-1 max-w-2xl">Ticked for a new person when you approve them. You can change them for each person.</p>
+</div>
+<div class="grid gap-x-6 max-w-2xl grid-cols-1 @[640px]:grid-cols-2">
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Movies</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">TV Shows</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Anime</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Kids</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">4K Movies</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Music</span></label>
+</div>
+</section>
+
+<section class="mb-12 last:mb-0">
+<div class="mb-5">
+<h2 class="text-[20px] font-bold tracking-tight text-frosted-blue">Waiting</h2>
+<p class="text-[15px] text-frosted-blue/70 mt-1 max-w-2xl">People who asked for access. Approving shares your Plex server with them.</p>
+</div>
+<div class="space-y-3 max-w-2xl">
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="M">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">mira.okafor</p><p class="text-[13px] text-frosted-blue/70 break-all">mira.okafor@fastmail.com</p></div>
+</div>
+<p class="mt-3 text-[15px] text-frosted-blue break-words"><span class="text-frosted-blue/70">Name: </span>Mira Okafor</p>
+<p class="mt-1 text-[15px] text-frosted-blue whitespace-pre-line break-words max-w-prose" data-note>I'm Dana's sister. She said you run the server for the family and that it was fine to ask.
+
+Mostly documentaries and the odd anime. I'd watch on the living room TV and my phone, never more than two at once.
+
+Happy to stick to whatever rules you have.</p>
+<p class="mt-2 text-[13px] text-frosted-blue/60">Sent 3 hours ago</p>
+<div class="mt-4 flex flex-wrap gap-2">
+<button type="button" aria-label="Approve mira.okafor" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Approve</button>
+<button type="button" aria-label="Deny mira.okafor" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Deny</button>
+</div>
+</article>
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="T">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">tvjunkie_2002</p><p class="text-[13px] text-frosted-blue/70 break-all">sam.reyes.tv@outlook.com</p></div>
+</div>
+<p class="mt-3 text-[15px] text-frosted-blue break-words"><span class="text-frosted-blue/70">Name: </span>Sam Reyes</p>
+<p class="mt-1 text-[15px] text-frosted-blue whitespace-pre-line break-words max-w-prose" data-note>Chris from work said to ask. My watch list, so you can see I'm real:
+https://letterboxd.com/tvjunkie2002/list/everything-i-have-watched-since-2019-ranked-best-to-worst-with-notes-on-every-season-and-the-ones-i-dropped-halfway-because-work-got-busy-again-in-the-spring26</p>
+<p class="mt-2 text-[13px] text-frosted-blue/60">Sent 1 day ago</p>
+<div class="mt-4 flex flex-wrap gap-2">
+<button type="button" aria-label="Approve tvjunkie_2002" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Approve</button>
+<button type="button" aria-label="Deny tvjunkie_2002" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Deny</button>
+</div>
+</article>
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="P">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">pedro.alves</p><p class="text-[13px] text-frosted-blue/70 break-all">pedro.alves@proton.me</p></div>
+</div>
+<p class="mt-3 text-[15px] text-frosted-blue break-words"><span class="text-frosted-blue/70">Name: </span>Pedro Alves</p>
+<p class="mt-1 text-[15px] text-frosted-blue whitespace-pre-line break-words max-w-prose" data-note>Your neighbour at number 14. We met at the block party.</p>
+<p class="mt-2 text-[13px] text-frosted-blue/60">Sent 2 days ago</p>
+<div class="mt-4 flex flex-wrap gap-2">
+<button type="button" aria-label="Approve pedro.alves" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Approve</button>
+<button type="button" aria-label="Deny pedro.alves" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Deny</button>
+</div>
+</article>
+
+</div>
+</section>
+
+<section class="mb-12 last:mb-0">
+<div class="mb-5">
+<h2 class="text-[20px] font-bold tracking-tight text-frosted-blue">Decided</h2>
+<p class="text-[15px] text-frosted-blue/70 mt-1 max-w-2xl">Answers from the last 30 days, and the accounts you blocked.</p>
+</div>
+<div class="space-y-3 max-w-2xl">
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="J">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">jules.r</p><p class="text-[13px] text-frosted-blue/70 break-all">jules.robin@icloud.com</p></div>
+</div>
+<p class="mt-2 text-[13px] text-frosted-blue/70 break-words">Approved 2 days ago.</p>
+<p class="mt-1 text-[13px] text-status-err-text break-words">Plex refused the share (HTTP 400)</p>
+<button type="button" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors mt-3">Share it in Plex yourself</button>
+</article>
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="K">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">kvn_88</p><p class="text-[13px] text-frosted-blue/70 break-all">kevin.m88@gmail.com</p></div>
+</div>
+<p class="mt-2 text-[13px] text-frosted-blue/70 break-words">Denied 5 days ago. They can ask again after November 4, 2026.</p>
+</article>
+
+<article class="rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-4 @[640px]:p-5 min-w-0">
+<div class="flex items-center gap-3 min-w-0">
+<img alt="" class="h-10 w-10 shrink-0 rounded-full object-cover" width="40" height="40" data-av="F">
+<div class="min-w-0"><p class="text-[15px] font-semibold text-frosted-blue break-words">freemovies4all</p><p class="text-[13px] text-frosted-blue/70 break-all">freemovies4all@mail.ru</p></div>
+</div>
+<p class="mt-2 text-[13px] text-frosted-blue/70 break-words">Blocked 12 days ago.</p>
+<button type="button" aria-label="Unblock freemovies4all" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors mt-3">Unblock</button>
+</article>
+
+</div>
+</section>
+</template>
+
+<!-- The shared dialog (ui.js confirm), over the tab. -->
+<template id="tpl-dlg-approve">
+<div class="absolute inset-0 z-[95] flex items-end @[640px]:items-center justify-center p-4 ws-scrim backdrop-blur-sm">
+<div role="dialog" aria-modal="true" aria-labelledby="dlgA" class="ws-frost w-full max-w-lg max-h-[85%] overflow-y-auto rounded-2xl border p-6">
+<h2 id="dlgA" class="text-[20px] font-bold tracking-tight text-frosted-blue">Approve mira.okafor?</h2>
+<div class="mt-2 text-[15px] text-frosted-blue/70">
+<fieldset class="mt-2 space-y-2">
+<legend class="text-[13px] font-semibold text-frosted-blue/70 mb-1">Libraries mira.okafor gets</legend>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Movies</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">TV Shows</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" checked class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Anime</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Kids</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">4K Movies</span></label>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span class="min-w-0 break-words">Music</span></label>
+</fieldset>
+</div>
+<div class="mt-6 flex flex-col-reverse @[640px]:flex-row @[640px]:justify-end gap-2">
+<button type="button" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Cancel</button>
+<button type="button" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Share and approve</button>
+</div>
+</div>
+</div>
+</template>
+
+<template id="tpl-dlg-deny">
+<div class="absolute inset-0 z-[95] flex items-end @[640px]:items-center justify-center p-4 ws-scrim backdrop-blur-sm">
+<div role="alertdialog" aria-modal="true" aria-labelledby="dlgD" class="ws-frost w-full max-w-lg max-h-[85%] overflow-y-auto rounded-2xl border p-6">
+<h2 id="dlgD" class="text-[20px] font-bold tracking-tight text-frosted-blue">Deny tvjunkie_2002?</h2>
+<div class="mt-2 text-[15px] text-frosted-blue/70">
+<div class="space-y-3">
+<p>tvjunkie_2002 can ask again in 30 days.</p>
+<label class="flex items-center gap-3 min-h-11 text-[15px] text-frosted-blue cursor-pointer"><input type="checkbox" class="h-5 w-5 shrink-0 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-focus"><span>Block this Plex account for good</span></label>
+</div>
+</div>
+<div class="mt-6 flex flex-col-reverse @[640px]:flex-row @[640px]:justify-end gap-2">
+<button type="button" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Cancel</button>
+<button type="button" class="ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold ring-1 ring-inset ring-[rgb(var(--ws-status-err))] hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus transition-colors">Deny</button>
+</div>
+</div>
+</div>
+</template>
+
+<script>
+(function () {
+  'use strict';
+
+  // The S5 messages, word for word from login-request.js in the plan.
+  var S5 = {
+    'pending': 'Your request is waiting for review. Sent October 8, 2026.',
+    'approved': 'You’re approved. Accept the Plex invite from your email or a Plex app, then sign in here.',
+    'denied': 'This request wasn’t approved. You can ask again after November 9, 2026.',
+    'blocked': 'This Plex account can’t request access.',
+    'member': 'You already have access. Sign in.'
+  };
+
+  // Plex's default picture is a letter on a coloured disc; these stand in
+  // for the avatar_url images.
+  var AV = { M: '#b4534a', T: '#3f7f6e', P: '#7a5aa6', J: '#a7782b', K: '#476f9e', F: '#5f6b74' };
+  function avatar(letter) {
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="' + AV[letter] +
+      '"/><text x="40" y="53" font-family="Arial,Helvetica,sans-serif" font-size="38" font-weight="700" fill="#fff" text-anchor="middle">' +
+      letter + '</text></svg>';
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  }
+
+  var seq = 0;
+  function clone(id) {
+    var frag = document.getElementById(id).content.cloneNode(true);
+    var n = ++seq;
+    // Ids repeat across frames: give each copy its own, and keep the
+    // references pointing at it.
+    frag.querySelectorAll('[id]').forEach(function (e) { e.id = e.id + '-' + n; });
+    ['for', 'aria-describedby', 'aria-labelledby', 'data-count'].forEach(function (attr) {
+      frag.querySelectorAll('[' + attr + ']').forEach(function (e) { e.setAttribute(attr, e.getAttribute(attr) + '-' + n); });
+    });
+    frag.querySelectorAll('img[data-av]').forEach(function (img) { img.src = avatar(img.getAttribute('data-av')); });
+    return frag;
+  }
+
+  function div(cls) { var d = document.createElement('div'); if (cls) d.className = cls; return d; }
+
+  // A frame: caption above, viewport below. w and h are the viewport's CSS
+  // size; h is a minimum (the page grows if the content is taller) unless
+  // fixed is set.
+  function frame(w, h, caption, build, fixed) {
+    var box = div('mk-frame');
+    var cap = div('mk-cap');
+    var left = document.createElement('span');
+    left.innerHTML = '<b>' + w + ' wide</b>' + (caption ? ', ' + caption : '');
+    var right = document.createElement('span');
+    right.setAttribute('data-scale', '');
+    cap.appendChild(left); cap.appendChild(right);
+    var vp = div('vp');
+    var inner = div('vp-inner');
+    inner.style.width = w + 'px';
+    var page = build(w);
+    if (fixed) { page.style.height = h + 'px'; page.style.overflow = 'hidden'; }
+    else page.style.minHeight = h + 'px';
+    inner.appendChild(page);
+    vp.appendChild(inner);
+    vp._w = w; vp._inner = inner; vp._cap = right;
+    box.appendChild(cap); box.appendChild(vp);
+    return box;
+  }
+
+  // The sign-in page: artwork, overlay, card, status badge.
+  function loginPage(state, pos) {
+    return function (w) {
+      var page = div('vp-page');
+      if (pos && w >= 1024) page.setAttribute('data-pos', pos);
+      page.appendChild(div('art'));
+      var ov = div('cinematic-overlay'); ov.style.cssText = 'position:absolute;inset:0;z-index:10';
+      page.appendChild(ov);
+      var main = document.createElement('main');
+      main.appendChild(clone('tpl-card'));
+      var slot = main.querySelector('[data-slot]');
+      var key = state.indexOf('s5-') === 0 ? 'tpl-s5' : 'tpl-' + state;
+      slot.appendChild(clone(key));
+      if (state.indexOf('s5-') === 0) {
+        var s = state.slice(3);
+        slot.querySelector('[data-ra-status]').textContent = S5[s];
+        if (s === 'member') {
+          var b = slot.querySelector('[data-ra-back]');
+          b.textContent = 'Sign in';
+          b.className = 'mt-6 w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark';
+        }
+      }
+      page.appendChild(main);
+      var foot = document.createElement('footer');
+      var wrap = div();
+      wrap.innerHTML = '<div class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border"><span class="ws-status-dot" aria-hidden="true"></span><span class="text-frosted-blue text-label font-semibold">All systems online</span></div>';
+      foot.appendChild(wrap);
+      page.appendChild(foot);
+      return page;
+    };
+  }
+
+  // Settings, in the app's frame: the sidebar from 1024, a top bar stub below.
+  function settingsPage(kind) {
+    return function (w) {
+      var page = div('vp-page');
+      page.style.flexDirection = w >= 1024 ? 'row' : 'column';
+      page.style.background = 'rgb(var(--color-background))';
+      if (w >= 1024) {
+        var side = document.createElement('aside');
+        side.setAttribute('aria-hidden', 'true');
+        side.className = 'w-64 shrink-0 bg-baltic-blue/20 border-r border-steel-blue/30 flex flex-col';
+        side.innerHTML = '<div class="p-6 text-center text-frosted-blue font-bold text-lead">Your Server</div>' +
+          '<div class="px-4 py-4 space-y-1 text-[15px] text-frosted-blue/70">' +
+          ['Home', 'Requests', 'Calendar', 'Books', 'Issues', 'Wiki'].map(function (t) {
+            return '<div class="px-4 py-2.5 rounded-[10px]">' + t + '</div>';
+          }).join('') + '<div class="px-4 py-2.5 rounded-[10px] bg-primary/30 text-frosted-blue font-semibold">Settings</div></div>';
+        page.appendChild(side);
+      } else {
+        var bar = div('h-14 shrink-0 flex items-center px-4 border-b border-steel-blue/20 bg-baltic-blue/20 text-frosted-blue font-semibold text-lead');
+        bar.setAttribute('aria-hidden', 'true');
+        bar.textContent = 'Settings';
+        page.appendChild(bar);
+      }
+      var main = div('flex-1 min-w-0');
+      var col = div('max-w-[1200px] w-full mx-auto px-4 @[1024px]:px-8 pt-6 @[1024px]:pt-8 pb-16');
+      col.appendChild(clone('tpl-settings-head'));
+      var panel = document.createElement('section');
+      panel.setAttribute('role', 'tabpanel');
+      panel.appendChild(clone('tpl-set-switch'));
+      if (kind === 'noplex') {
+        panel.querySelector('[data-needs-plex]').hidden = false;
+        panel.querySelector('[data-switch]').setAttribute('aria-checked', 'false');
+      } else {
+        panel.appendChild(clone('tpl-set-rest'));
+      }
+      col.appendChild(panel);
+      main.appendChild(col);
+      page.appendChild(main);
+      if (kind === 'approve' || kind === 'deny') {
+        page.appendChild(clone(kind === 'approve' ? 'tpl-dlg-approve' : 'tpl-dlg-deny'));
+      }
+      return page;
+    };
+  }
+
+  var CAPS = { center: 'card in the middle', left: 'card on the left', right: 'card on the right' };
+
+  document.querySelectorAll('[data-row]').forEach(function (row) {
+    row.getAttribute('data-row').split(' ').forEach(function (spec) {
+      var p = spec.split(':');
+      if (p[0] === 'card') {
+        if (p[2]) row.appendChild(frame(1440, 900, CAPS[p[2]], loginPage(p[1], p[2])));
+        else {
+          row.appendChild(frame(390, 844, 'phone', loginPage(p[1])));
+          row.appendChild(frame(1440, 900, CAPS.center, loginPage(p[1], 'center')));
+        }
+      } else {
+        var kind = p[1];
+        var fixed = kind === 'approve' || kind === 'deny';
+        var noplex = kind === 'noplex';
+        row.appendChild(frame(390, noplex ? 0 : 844, 'phone', settingsPage(kind), fixed));
+        row.appendChild(frame(1440, noplex ? 0 : 900, 'beside the sidebar', settingsPage(kind), fixed));
+      }
+    });
+  });
+
+  // The counters, the switches and the phone tab strip behave as in the app.
+  document.querySelectorAll('textarea[data-count]').forEach(function (t) {
+    var out = document.getElementById(t.getAttribute('data-count'));
+    function count() { out.textContent = t.value.length + '/1000'; }
+    t.addEventListener('input', count);
+    count();
+  });
+  document.querySelectorAll('[data-switch]').forEach(function (s) {
+    s.addEventListener('click', function () { s.setAttribute('aria-checked', s.getAttribute('aria-checked') === 'true' ? 'false' : 'true'); });
+  });
+  // Plain links in the frames lead nowhere: keep the reader where they are.
+  document.querySelectorAll('.vp a[href]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); }); });
+
+  // Fit each frame to its column.
+  var frames = Array.prototype.slice.call(document.querySelectorAll('.vp'));
+  function fit() {
+    frames.forEach(function (vp) {
+      var s = Math.min(1, vp.clientWidth / vp._w);
+      // zoom, not a transform: a backdrop blur inside a scaled transform
+      // samples the wrong place in Chromium, and zoom keeps the frame's own
+      // CSS pixels (and its container queries) at the real width.
+      vp._inner.style.zoom = s;
+      vp._cap.textContent = s >= 1 ? 'actual size' : 'shown at ' + Math.round(s * 100) + '%';
+    });
+    // The phone tab strip starts scrolled to the chosen tab, as first-paint.js does.
+    document.querySelectorAll('[data-tabscroll]').forEach(function (sc) {
+      var cur = sc.querySelector('[data-current]');
+      if (sc.scrollWidth > sc.clientWidth && cur) sc.scrollLeft = cur.offsetLeft - 48;
+      var hints = sc.parentNode.querySelectorAll('.ws-tab-hint-left, .ws-tab-hint-right');
+      hints[0].style.opacity = sc.scrollLeft > 0 ? '1' : '0';
+      hints[1].style.opacity = sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 1 ? '1' : '0';
+    });
+  }
+  if ('ResizeObserver' in window) {
+    var ro = new ResizeObserver(fit);
+    ro.observe(document.body);
+    frames.forEach(function (vp) { ro.observe(vp._inner); });
+  }
+  window.addEventListener('load', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+})();
+</script>
+</body>
+</html>
