@@ -157,6 +157,17 @@ class Habits(Base):
         got = insights.habits_view(self.db, self.src(plays=[]), "30d", timezone.utc)["requested"]
         self.assertEqual((got["total"], len(got["items"])), (insights.LIST_MAX + 5, insights.LIST_MAX))
 
+    def test_requested_then_read_counts_past_the_listed_requests(self):
+        count = insights.LIST_MAX + 1
+        for n in range(count):
+            self.book(n + 1, f"Book {n}", keys=[f"{500 + n}:1"])
+        self.add(*[BookRequester(identity=ME, foreign_id=f"gr:{n}", title=f"Book {n}", format="both",
+                                 requested_at=NOW - timedelta(hours=n + 1)) for n in range(count)])
+        # Only the oldest request, the one past the listed LIST_MAX, was started after asking.
+        self.hour(ME, f"{500 + count - 1}:1", NOW - timedelta(hours=50), 600000)
+        got = insights.habits_view(self.db, self.src(plays=[]), "30d", timezone.utc)["requested"]
+        self.assertEqual((got["total"], got["read"], len(got["items"])), (count, 1, insights.LIST_MAX))
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class EmptyInstall(Base):

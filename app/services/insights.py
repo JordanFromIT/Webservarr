@@ -590,8 +590,8 @@ def tracking(db: Session) -> dict:
 
 
 def requested(db: Session, src: Sources, identity: Optional[str] = None,
-              since: Optional[datetime] = None) -> List[dict]:
-    """Book requests, newest first, at most LIST_MAX, each with the library
+              since: Optional[datetime] = None, limit: Optional[int] = LIST_MAX) -> List[dict]:
+    """Book requests, newest first, at most `limit` (None: all), each with the library
     book its title names (book_catalog.fold; None while it isn't in the
     library) and when the person who asked first listened to it or read it
     after asking (None when they haven't)."""
@@ -601,7 +601,8 @@ def requested(db: Session, src: Sources, identity: Optional[str] = None,
         q = q.filter(R.identity == identity)
     if since is not None:
         q = q.filter(R.requested_at >= since)
-    rows = q.order_by(R.requested_at.desc(), R.id.desc()).limit(LIST_MAX).all()
+    q = q.order_by(R.requested_at.desc(), R.id.desc())
+    rows = (q if limit is None else q.limit(limit)).all()
     if not rows:
         return []
     titles = {book_catalog.fold(r.title) for r in rows if r.title}
@@ -1229,14 +1230,12 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
     for x in plays:
         local = _local(x.at, zone)
         heat[local.weekday()][local.hour] += x.ms
-    asked = requested(db, src, since=since)
-    total = db.query(func.count(BookRequester.id))
-    if since is not None:
-        total = total.filter(BookRequester.requested_at >= since)
+    asked = requested(db, src, since=since, limit=None)
     return {"split": {"web_ms": sum(x.ms for x in web), "plex_ms": sum(x.ms for x in plays),
                       "kavita_ms": sum(kavita_reading(db, since).values())},
             "heatmap": heat,
-            "requested": {"total": total.scalar(), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
+            "requested": {"total": len(asked), "read": sum(1 for a in asked if a["started_at"]),
+                          "items": asked[:LIST_MAX]},
             "unavailable": list(src.unavailable), "tracking": tracking(db)}
 
 
