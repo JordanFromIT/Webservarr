@@ -1,6 +1,6 @@
 /**
  * Settings > General: site name, tagline, Cloudflare Web Analytics, logo,
- * home-screen icon, and settings backup.
+ * home-screen icon, debug mode, and settings backup.
  *
  * A logo or icon upload stores the file straight away but only stages its
  * address; the setting is written when the admin presses Save, like
@@ -19,7 +19,7 @@
   // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
   var signal = null, later = null, cancel = function () {};
   var TAB_KEYS = ['branding.app_name', 'branding.show_name', 'branding.tagline', 'branding.logo_url',
-    'branding.app_icon_url', 'security.cloudflare_web_analytics'];
+    'branding.app_icon_url', 'security.cloudflare_web_analytics', 'system.debug_mode'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
   var MAX_IMPORT_BYTES = 1024 * 1024;         // a real backup is a few kilobytes
@@ -110,6 +110,20 @@
     c.body.appendChild(api.toggle({
       key: 'security.cloudflare_web_analytics', label: 'Cloudflare Web Analytics',
       help: 'Allow Cloudflare Web Analytics’ script (only if your site is behind Cloudflare with Web Analytics on)'
+    }));
+    return c.root;
+  }
+
+  // ---- Troubleshooting ----
+
+  // Debug mode: the server tells only an admin's pages it is on (#ws-data
+  // debug_mode), and only then does router.js honour ?ws-debug= in the address.
+  function troubleshootingCard(api) {
+    var c = WSSettings.card('Troubleshooting', 'Tools for finding problems with the site.');
+    c.body.appendChild(api.toggle({
+      key: 'system.debug_mode', label: 'Debug mode',
+      help: 'Lets admins add ?ws-debug=leaks to a page’s address to check for pages that leave work running ' +
+        'after you move on. Members never get it. Leave it off unless you are looking into a problem.'
     }));
     return c.root;
   }
@@ -694,10 +708,12 @@
       var site = siteCard(api);
       var logo = logoCard(api, shared);
       var appIcon = iconCard(api, shared);
+      var troubleshooting = troubleshootingCard(api);
       panel.appendChild(site);
       panel.appendChild(logo.root);
       panel.appendChild(appIcon);
-      panel.appendChild(backupCard(api, [site, logo.root, appIcon], shared));
+      panel.appendChild(troubleshooting);
+      panel.appendChild(backupCard(api, [site, logo.root, appIcon, troubleshooting], shared));
       return logo.ready;
     }
   });

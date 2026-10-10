@@ -375,7 +375,8 @@ def app_head_links(branding: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def data_block(branding: dict, user: Optional[dict], version: str, name: str,
-               setup: Optional[dict] = None, books_notice: Optional[str] = None) -> str:
+               setup: Optional[dict] = None, books_notice: Optional[str] = None,
+               debug_mode: bool = False) -> str:
     """
     The payload the client reads at parse time.
 
@@ -386,12 +387,17 @@ def data_block(branding: dict, user: Optional[dict], version: str, name: str,
     page only.
     books_notice: what the Books page shows this person about where to
     listen ("window", "inline" or "off"; main.books_notice), on Books only.
+    debug_mode: True only for an admin while Settings has debug mode on
+    (render_html); router.js honours ?ws-debug= only then. Otherwise the
+    key is left out, so nobody else learns whether it is on.
     """
     payload = {"branding": branding, "user": user, "version": version, "page": name}
     if setup is not None:
         payload["setup"] = setup
     if books_notice is not None:
         payload["books_notice"] = books_notice
+    if debug_mode:
+        payload["debug_mode"] = True
     text = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
     return f'<script id="ws-data" type="application/json">{text}</script>'
 
@@ -916,7 +922,8 @@ def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], sta
 
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
                  name: str, base_url: str, path: str, setup: Optional[dict] = None,
-                 custom_css: bool = True, books_notice: Optional[str] = None) -> str:
+                 custom_css: bool = True, books_notice: Optional[str] = None,
+                 debug_mode: bool = False) -> str:
     """Rewrite <title> and append, right after it: preview tags, theme, font, data.
     The custom CSS goes last in <head> instead, after every stylesheet."""
     app_name, tags = _preview_meta(branding, base_url, path)
@@ -924,7 +931,8 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
     # falls back to the tagline (or nothing) rather than a dangling " - ".
     bare_title = app_name or (branding.get("tagline") or "").strip()
     extra = "\n".join([tags, app_head_links(branding), theme_style(branding), font_links(branding),
-                       icon_font_head(), data_block(branding, user, version, name, setup, books_notice)])
+                       icon_font_head(),
+                       data_block(branding, user, version, name, setup, books_notice, debug_mode)])
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]
@@ -1130,12 +1138,16 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     flags["safe_theme"]: Settings in safe colours; pass safe_theme_branding()
     as the branding. The page carries no custom CSS and is marked
     <html data-safe-theme>, which shows its notice and keeps colour previews
-    in the preview cards."""
+    in the preview cards.
+    flags["debug_mode"]: Settings' debug mode (system.debug_mode) is on; the
+    page says so in #ws-data only when user is an admin."""
     safe = bool(flags.get("safe_theme"))
     title = _TITLE_RE.search(page_html)
     static_title = title.group(0)[len("<title>"):-len("</title>")] if title else ""
+    debug_mode = flags.get("debug_mode") is True and bool(user) and user.get("is_admin") is True
     out = _inject_head(_tag_page_styles(page_html), branding, user, version, name, base_url, path,
-                       flags.get("setup"), custom_css=not safe, books_notice=flags.get("books_notice"))
+                       flags.get("setup"), custom_css=not safe, books_notice=flags.get("books_notice"),
+                       debug_mode=debug_mode)
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         out = _cover_viewport(out)
@@ -1234,12 +1246,15 @@ def load_context(signed_in: bool) -> tuple:
 
         db = SessionLocal()
         branding = load_branding(db, signed_in)
-        netdata = db.query(Setting).filter(Setting.key == "integration.netdata.url").first()
-        flags = {"netdata": bool(netdata and netdata.value)}
+        rows = {r.key: r.value for r in db.query(Setting).filter(
+            Setting.key.in_(("integration.netdata.url", "system.debug_mode"))).all()}
+        # debug_mode: off unless the row says "true" (a missing row is the default, off).
+        flags = {"netdata": bool(rows.get("integration.netdata.url")),
+                 "debug_mode": rows.get("system.debug_mode") == "true"}
     except Exception:  # pragma: no cover - defensive
         logger.warning("Could not load branding for page render; using defaults", exc_info=True)
         branding = build_branding({}, {}, None, dict(EMPTY_WIKI_HOOKS))
-        flags = {"netdata": False}
+        flags = {"netdata": False, "debug_mode": False}
     finally:
         if db is not None:
             db.close()

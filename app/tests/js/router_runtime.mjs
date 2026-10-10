@@ -15,7 +15,7 @@
 // Run: node app/tests/js/router_runtime.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -54,6 +54,7 @@ function pageHtml(name, o = {}) {
   const links = PAGES.map((p) => `<a href="/${p}">${p}</a>`).join('') +
     '<a href="/wiki/a">wiki a</a><a href="/wiki/b">wiki b</a>';
   const data = { version: o.version || '1.0', user: o.user || { username: 'sam', is_admin: false }, page: name };
+  if (o.debugMode) data.debug_mode = true;   // as the server writes it: admin and setting on only
   const extra = o.extra || '';
   const helper = o.helper ? `<script src="/static/js/tour.js?v=${o.helper}" data-ws-page-script></script>` : '';
   return `<!DOCTYPE html><html data-page="${name}"${name === 'reader' ? ' data-shell="hidden"' : ''}>
@@ -264,7 +265,10 @@ async function boot(o = {}) {
 
   routerCopy += 1;
   try {
-    await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(routerSrc + '\n// copy ' + routerCopy));
+    // fileBase: the router's import.meta.url is router.js's own file, so the
+    // debug files next to it (debug-leaks.js, pages/_debug-throw.js) load.
+    const src = o.fileBase ? routerSrc.split('import.meta.url').join(JSON.stringify(pathToFileURL(ROUTER).href)) : routerSrc;
+    await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(src + '\n// copy ' + routerCopy));
   } catch (e) {
     env.bootError = String(e);
   }
@@ -710,6 +714,48 @@ await scenario('M5: a member\'s ?ws-debug is ignored and cleared', async () => {
   click(env, '/calendar');
   await until(() => mounted(env, 'calendar').length === 1);
   check('the next page mounts as itself', mounted(env, 'calendar').length === 1);
+});
+
+// Settings > General > Debug mode (system.debug_mode): the server marks the
+// admin's #ws-data with debug_mode only while it is on (app/pages.py).
+const ADMIN = { username: 'admin', is_admin: true };
+
+await scenario('Debug mode off: an admin\'s ?ws-debug is ignored and a stored flag cleared', async () => {
+  const env = await boot({ search: '?ws-debug=leaks,throw', storage: { 'ws.debug': 'leaks' }, page: { user: ADMIN },
+    fileBase: true });
+  check('the router started', !!env.router, env.bootError);
+  check('the tab keeps no debug flags', !env.storage.has('ws.debug'), [...env.storage]);
+  check('no debug tools loaded', !env.win.WS.debug, Object.keys(env.win.WS));
+  click(env, '/calendar');
+  await until(() => mounted(env, 'calendar').length === 1);
+  check('the next page mounts as itself', mounted(env, 'calendar').length === 1);
+});
+
+await scenario('Debug mode on: a member\'s ?ws-debug still does nothing', async () => {
+  const env = await boot({ search: '?ws-debug=throw', storage: { 'ws.debug': 'leaks' }, page: { debugMode: true },
+    fileBase: true });
+  check('the router started', !!env.router, env.bootError);
+  check('the tab keeps no debug flags', !env.storage.has('ws.debug'), [...env.storage]);
+  check('no debug tools loaded', !env.win.WS.debug, Object.keys(env.win.WS));
+  click(env, '/calendar');
+  await until(() => mounted(env, 'calendar').length === 1);
+  check('the next page mounts as itself', mounted(env, 'calendar').length === 1);
+});
+
+await scenario('Debug mode on: an admin\'s ?ws-debug=throw loads the tools and the next page throws', async () => {
+  const env = await boot({ search: '?ws-debug=throw', page: { user: ADMIN, debugMode: true }, fileBase: true });
+  check('the router started', !!env.router, env.bootError);
+  check('the flag is kept for the tab', env.storage.get('ws.debug') === 'throw', [...env.storage]);
+  await until(() => !!env.win.WS.debug);
+  check('the debug tools loaded', !!env.win.WS.debug && env.win.WS.debug.flags.indexOf('throw') !== -1,
+    env.win.WS.debug && env.win.WS.debug.flags);
+  const quiet = console.error;
+  console.error = () => {};
+  click(env, '/calendar');
+  await until(() => !!env.win.document.querySelector('#wsPage [role="alert"]') || env.hard.length > 0);
+  console.error = quiet;
+  check('the calendar did not mount as itself', mounted(env, 'calendar').length === 0, env.log);
+  check('"throw" is spent', !env.storage.has('ws.debug'), [...env.storage]);
 });
 
 // ---- Carried from sub-project 1 (spec 2026-09-28 section 10) ----

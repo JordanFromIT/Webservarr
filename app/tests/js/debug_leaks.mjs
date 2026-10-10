@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (rel) => import('data:text/javascript;charset=utf-8,' +
   encodeURIComponent(readFileSync(join(here, rel), 'utf8')));
-const { debugFlags, takeFlag } = await load('../../static/js/router.js');
+const { debugAllowed, debugFlags, takeFlag } = await load('../../static/js/router.js');
 const dbg = await load('../../static/js/debug-leaks.js');
 
 let failed = 0;
@@ -59,6 +59,22 @@ for (const [search, stored, admin, store, why] of [
 ]) {
   const got = debugFlags(search, stored, admin);
   check('debugFlags, ' + why, eq(got, { flags: [], store }), got);
+}
+
+// ---- debugAllowed(data): Settings' debug mode, for admins only ----
+
+// The server writes debug_mode: true into #ws-data only for an admin while
+// system.debug_mode is on (app/pages.py). Anything less is not allowed.
+for (const [data, want, why] of [
+  [{ user: { is_admin: true }, debug_mode: true }, true, 'an admin with the setting on'],
+  [{ user: { is_admin: true } }, false, 'an admin with the setting off (no key)'],
+  [{ user: { is_admin: true }, debug_mode: false }, false, 'an admin with the setting off'],
+  [{ user: { is_admin: false }, debug_mode: true }, false, 'a member, even if the key were there'],
+  [{ user: null, debug_mode: true }, false, 'signed out'],
+  [{ user: { is_admin: 'true' }, debug_mode: 'true' }, false, 'only real trues count'],
+  [null, false, 'no data block at all'],
+]) {
+  check('debugAllowed, ' + why, debugAllowed(data) === want, data);
 }
 
 // ---- takeFlag: the "throw" gate ----

@@ -183,6 +183,11 @@ def _build() -> List[SettingDef]:
         # (app/web_analytics.py).
         _bool("security.cloudflare_web_analytics", "false",
               "Allow Cloudflare Web Analytics' script (only if your site is behind Cloudflare with Web Analytics on)"),
+        # Off by default. Not public: the page renderer reads it and tells
+        # only an admin's page (#ws-data debug_mode), so ?ws-debug= in the
+        # address does nothing for anyone else, or for anyone while it is off.
+        _bool("system.debug_mode", "false",
+              "Debug mode: let admins load the browser debug tools with ?ws-debug= in the address"),
         # ---- Appearance ----
         _color("theme.color_primary", "#125793", "Primary colour"),
         _color("theme.color_secondary", "#2C6DA1", "Secondary colour"),

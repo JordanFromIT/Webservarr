@@ -16,16 +16,19 @@
  * Pure rules (importable by Node, no DOM at import time):
  *   qualifies(href, baseHref, attrs)  does the router take this link click (5.1)
  *   decide(requestedUrl, response)    swap, full navigation, or stay (5.2, 5.5)
- *   debugFlags(search, stored, admin) which debug tools this tab asked for (7)
+ *   debugAllowed(data)                may this page use debug mode at all (7)
+ *   debugFlags(search, stored, allowed) which debug tools this tab asked for (7)
  *   visitTimers(signal)               a page's ctx.setTimeout / ctx.clearTimeout
  *
- * Debug mode (spec 7), for admins only: ?ws-debug=leaks,throw in the
+ * Debug mode (spec 7), for admins only, and only while Settings > General >
+ * Debug mode (system.debug_mode) is on: the server then marks the admin's
+ * #ws-data with debug_mode: true. ?ws-debug=leaks,throw in the
  * address, kept for the tab in sessionStorage 'ws.debug' (?ws-debug=off
  * clears it), loads debug-leaks.js before any page module: the leak checker,
  * the soak, the shell identity check and a test tone in #wsPlayer. "throw"
  * mounts pages/_debug-throw.js instead of the next soft navigation's page,
- * once. Without the flag neither loads; anyone else's flag is ignored and
- * cleared.
+ * once. Without the flag neither loads; anyone else's flag, and every flag
+ * while the setting is off, is ignored and cleared.
  *
  * While a navigation loads: the More sheet and menus close at once, a thin bar
  * (#wsProgress) shows after 150 ms, and the same address again waits for it.
@@ -191,15 +194,22 @@ function parseFlags(raw) {
   return DEBUG_FLAGS.filter(function (f) { return asked.indexOf(f) !== -1; });
 }
 
+/* May this page use debug mode? data: the #ws-data payload. Only when the
+   server said so (debug_mode: true, which it writes only for an admin while
+   the setting is on) and the visitor is an admin. */
+export function debugAllowed(data) {
+  return !!data && data.debug_mode === true && !!data.user && data.user.is_admin === true;
+}
+
 /* The debug flags for this document. search: location.search; stored: this
-   tab's sessionStorage 'ws.debug' (or null); admin: true only when the
-   signed-in visitor is an admin. The address adds to what is stored; "off"
-   clears it; unknown words are ignored. Anyone else gets none, and whatever
-   the tab stored is removed: a ?ws-debug= link sent to a member does
-   nothing. store: the value to write back, '' to remove it, null to leave
-   it alone. */
-export function debugFlags(search, stored, admin) {
-  if (admin !== true) {
+   tab's sessionStorage 'ws.debug' (or null); allowed: true only when
+   debugAllowed() said so. The address adds to what is stored; "off" clears
+   it; unknown words are ignored. Otherwise none, and whatever the tab stored
+   is removed: a ?ws-debug= link sent to a member, or opened while the
+   setting is off, does nothing. store: the value to write back, '' to
+   remove it, null to leave it alone. */
+export function debugFlags(search, stored, allowed) {
+  if (allowed !== true) {
     const asked = new URLSearchParams(search || '').get('ws-debug');
     return { flags: [], store: stored || asked !== null ? '' : null };
   }
@@ -394,9 +404,8 @@ function start() {
 
   let storedDebug = null;
   try { storedDebug = sessionStorage.getItem(DEBUG_KEY); } catch (e) { /* none */ }
-  // The visitor the server stamped into #ws-data (shell.js WS.user).
-  const visitor = WS.user || (window.WS_DATA && window.WS_DATA.user) || null;
-  const debugState = debugFlags(location.search, storedDebug, !!visitor && visitor.is_admin === true);
+  // The #ws-data block (shell.js WS.data): the visitor and the setting.
+  const debugState = debugFlags(location.search, storedDebug, debugAllowed(WS.data || window.WS_DATA));
   if (debugState.store !== null) storeDebug(debugState.store);
 
   let debug = null;            // the debug tools' hooks, once loaded
