@@ -159,6 +159,20 @@ class People(Base):
         self.assertEqual(got["people"], [])
         self.assertEqual(set(got["tracking"]), {"requests", "reading", "ebook_places", "hours"})
 
+    def test_an_old_web_place_does_not_hide_a_book_now_played_in_a_plex_app(self):
+        self.book(1, "Dune", keys=["5:1"])
+        self.place(ME, "5:1", NOW - timedelta(days=60), ms=600000)      # tried on the web two months ago
+        plays = [insights.Play(ME, "5:1", NOW - timedelta(days=2), 3600000),
+                 insights.Play(ME, "5:1", NOW - timedelta(days=1), 3600000)]
+        me = insights.people_view(self.db, self.src(plays=plays))["people"][0]
+        self.assertEqual([(c["title"], c["where"]) for c in me["current"]], [("Dune", "plex")])
+
+    def test_a_finished_web_place_still_keeps_the_book_out_of_current(self):
+        self.book(1, "Dune", keys=["5:1"])
+        self.place(ME, "5:1", NOW - timedelta(days=60), ms=36000000)    # finished on the web
+        plays = [insights.Play(ME, "5:1", NOW - timedelta(days=1), 3600000)]
+        self.assertEqual(insights.people_view(self.db, self.src(plays=plays))["people"][0]["current"], [])
+
     def test_a_name_is_passed_on_as_it_is(self):
         self.add(BookVisit(identity=ME, seen_at=NOW))
         got = insights.people_view(self.db, self.src(plays=[], names={"1001": "<b>Sam</b>"}))

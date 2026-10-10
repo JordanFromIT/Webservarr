@@ -778,7 +778,10 @@ def people_view(db: Session, src: Sources) -> dict:
         info = infos[place.book_key]
         offer(place.identity, _ident(info, place.book_key),
               _current(info, "audio", "web", place.percent, place.updated_at))
-    placed = {(p.identity, p.book_key) for p in places}
+    # A web place hides the same book's Plex plays only while it says
+    # something now: offered above, or finished. An old unfinished one must
+    # not hide a book the person has since been playing in a Plex app.
+    placed = {(p.identity, p.book_key) for p in places if p.finished or p.updated_at >= month}
     for play in recent_plays:
         if (play.identity, play.book_key) not in placed:
             info = infos[play.book_key]
