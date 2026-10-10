@@ -28,6 +28,7 @@ calls (two uvicorn workers): Plex's answers are cached in Redis (cache_get,
 cache_set) and every figure is worked out from the database on each call.
 """
 import bisect
+import calendar
 import json
 import logging
 from collections import Counter
@@ -46,8 +47,10 @@ from app.utils import identity_key, utc_iso
 
 logger = logging.getLogger(__name__)
 
-PERIODS = {"30d": 30, "90d": 90, "1y": 365, "all": None}
+PERIODS = {"7d": 7, "30d": 30, "90d": 90, "1y": 365, "all": None}
 BUCKETS = {"30d": "day", "90d": "week", "1y": "month", "all": "month"}
+# Listening and reading history's bars (history_view): a few wide ones, as Plex draws them.
+HISTORY_BUCKETS = {"7d": "day", "30d": "week", "90d": "week", "1y": "month", "all": "month"}
 NOW_PLAYING = timedelta(seconds=60)        # the player checks in every 10 s while it plays
 NOW_PAUSED = timedelta(minutes=10)
 CURRENT = timedelta(days=30)               # a current book was touched this recently
@@ -70,6 +73,7 @@ ANSWER_TTL = 5 * 60
 PLAYS_TTL = 10 * 60
 DURATIONS_TTL = 6 * 60 * 60
 PEOPLE_TTL = 60 * 60
+PEOPLE_KEY = "people:v2"                   # v2 carries the pictures (plex_share.server_people's thumbs)
 
 
 @dataclass(frozen=True)
@@ -225,17 +229,31 @@ async def plex_people(r) -> Tuple[str, Dict[str, str]]:
     """(the owner's plex.tv id, {plex.tv id: name}) from plex.tv, cached for
     PEOPLE_TTL; ("", {}) while plex.tv can't be read: names then fall back to
     short_name, and the owner's plays (Plex's account 1) are left out."""
+    found = await _people_answer(r)
+    return str(found.get("owner") or ""), dict(found.get("names") or {})
+
+
+async def plex_thumbs(r) -> Dict[str, str]:
+    """{plex.tv id: the address of their plex.tv picture}, from the same
+    cached answer as plex_people; {} while plex.tv can't be read. The
+    addresses never reach the browser: the avatar route fetches them."""
+    thumbs = (await _people_answer(r)).get("thumbs")
+    return {str(k): v for k, v in thumbs.items() if isinstance(v, str)} if isinstance(thumbs, dict) else {}
+
+
+async def _people_answer(r) -> dict:
+    """plex_share.server_people's answer, cached for PEOPLE_TTL; {} while plex.tv can't be read."""
     from app.integrations import plex_share
 
-    found = await cache_get(r, "people")
+    found = await cache_get(r, PEOPLE_KEY)
     if found is None:
         try:
             found = await plex_share.server_people()
         except plex_share.PlexShareUnavailable as exc:
             logger.info("plex.tv people could not be read for Insights: %s", type(exc).__name__)
-            return "", {}
-        await cache_set(r, "people", found, PEOPLE_TTL)
-    return str(found.get("owner") or ""), dict(found.get("names") or {})
+            return {}
+        await cache_set(r, PEOPLE_KEY, found, PEOPLE_TTL)
+    return found if isinstance(found, dict) else {}
 
 
 async def plex_plays(r, owner: str) -> Optional[List[Play]]:
@@ -1102,4 +1120,205 @@ def habits_view(db: Session, src: Sources, period: str, zone) -> dict:
                       "kavita_ms": sum(kavita_reading(db, since).values())},
             "heatmap": heat,
             "requested": {"total": total.scalar(), "read": sum(1 for a in asked if a["started_at"]), "items": asked},
+            "unavailable": list(src.unavailable), "tracking": tracking(db)}
+
+
+# --- Top users, listening and reading history, top played (the Plex-style views) ----------------
+#
+# A play is one person listening to one book on one day (in the viewer's
+# zone), in the web player or a Plex app, the two counted once together. A
+# session (top users) is a play or a day of reading in Kavita (minutes kept
+# for it, or Kavita's page total rose). Reading time is Kavita's own measure
+# (kavita_reading), by its UTC day, under the ebook_ms keys here.
+
+TOP_USERS_MAX = 24
+
+
+def _in_period(src: Sources, since: Optional[datetime], identity: Optional[str] = None):
+    """The web listening and the Plex app plays in the period (one person's, for an identity)."""
+    web = [x for x in src.listens if (since is None or x.hour >= _hour(since))
+           and (identity is None or x.identity == identity)]
+    plays = [x for x in src.plays or () if (since is None or x.at >= since)
+             and (identity is None or x.identity == identity)]
+    return web, plays
+
+
+def _covers(db: Session, ids: Iterable[int]) -> Dict[int, str]:
+    """{book id: its cover's address on this origin}, as the Books pages write
+    it (/api/books/<id>/cover, stamped with the book's last change)."""
+    out = {}
+    for chunk in _chunks({i for i in ids if i is not None}):
+        for book_id, updated in db.query(Book.id, Book.updated_at).filter(Book.id.in_(chunk)):
+            stamp = calendar.timegm(updated.utctimetuple()) if updated else 0
+            out[book_id] = f"/api/books/{book_id}/cover?v={stamp}"
+    return out
+
+
+def top_users_view(db: Session, src: Sources, period: str, zone, thumbs: Iterable[str] = ()) -> dict:
+    """Everyone with time or a session in the period, most time first (at most
+    TOP_USERS_MAX): sessions, and time on the site, in Plex apps (an
+    estimate) and reading in Kavita (its own measure). `avatar` says the avatar route
+    has a plex.tv picture for them (`thumbs`: the plex.tv ids that have one)."""
+    since = since_of(period, src.now)
+    web, plays = _in_period(src, since)
+    reading = kavita_reading(db, since)
+    pages = reading_pages(db, since)
+    totals: Dict[str, Counter] = {}
+    sessions: Dict[str, Set[tuple]] = {}
+
+    def add(identity: str, what: str, ms: int, session: Optional[tuple]) -> None:
+        totals.setdefault(identity, Counter())[what] += ms
+        if session is not None:
+            sessions.setdefault(identity, set()).add(session)
+
+    for x in web:
+        if x.ms:
+            add(x.identity, "web_ms", x.ms, ("audio", x.book_key, _local(x.hour, zone).date()))
+    for x in plays:
+        add(x.identity, "plex_ms", x.ms, ("audio", x.book_key, _local(x.at, zone).date()))
+    for (identity, day), ms in reading.items():
+        add(identity, "ebook_ms", ms, ("ebook", day))
+    for (identity, day), _amount in pages.items():
+        add(identity, "ebook_ms", 0, ("ebook", day))
+    have = set(thumbs)
+    names = names_of(db, totals, src.names)
+    rows = []
+    for identity, t in totals.items():
+        total = t["web_ms"] + t["plex_ms"] + t["ebook_ms"]
+        count = len(sessions.get(identity, ()))
+        if not total and not count:
+            continue
+        rows.append({"key": identity_key(identity), "name": names[identity],
+                     "avatar": identity.startswith("plex:") and identity[5:] in have,
+                     "sessions": count, "total_ms": total, "web_ms": t["web_ms"], "plex_ms": t["plex_ms"],
+                     "ebook_ms": t["ebook_ms"]})
+    rows.sort(key=lambda r: (-r["total_ms"], -r["sessions"], r["name"].casefold()))
+    return {"period": period, "people": rows[:TOP_USERS_MAX], "unavailable": list(src.unavailable),
+            "tracking": tracking(db)}
+
+
+def history_view(db: Session, src: Sources, period: str, zone, identity: Optional[str] = None) -> dict:
+    """Listening and reading per bucket (HISTORY_BUCKETS; days, weeks or
+    months in `zone`): on the site, in Plex apps (an estimate) and reading in
+    Kavita (its own measure, by its UTC day), everyone's or one person's,
+    with the period's totals. `reading` is False until the nightly sweep has
+    kept any minutes."""
+    now = src.now
+    since = since_of(period, now)
+    unit = HISTORY_BUCKETS[period]
+    web, plays = _in_period(src, since, identity)
+    hours = kavita_reading(db, since, identity)
+    today = _local(now, zone).date()
+    seen = ([_local(x.hour, zone).date() for x in web] + [_local(x.at, zone).date() for x in plays]
+            + [day for (_identity, day) in hours])
+    first = _local(since, zone).date() if since is not None else min(seen, default=today)
+    starts = _span(first, today, unit)
+    series = {s: Counter() for s in starts}
+
+    def add(day: date, what: str, ms: int) -> None:
+        start = _bucket(day, unit)
+        if start in series:
+            series[start][what] += ms
+
+    for x in web:
+        add(_local(x.hour, zone).date(), "web_ms", x.ms)
+    for x in plays:
+        add(_local(x.at, zone).date(), "plex_ms", x.ms)
+    for (_identity, day), ms in hours.items():
+        add(day, "ebook_ms", ms)
+    fields = ("web_ms", "plex_ms", "ebook_ms")
+    return {"period": period, "bucket": unit,
+            "buckets": [dict({"start": s.isoformat()}, **{f: series[s][f] for f in fields}) for s in starts],
+            "totals": {f: sum(series[s][f] for s in starts) for f in fields},
+            "reading": db.query(ReadingMinutes.id).first() is not None,
+            "unavailable": list(src.unavailable), "tracking": tracking(db)}
+
+
+def top_played_view(db: Session, src: Sources, period: str, zone, identity: Optional[str] = None) -> dict:
+    """The period's most played (everyone's or one person's), at most TOP
+    each: audiobooks by plays (web and Plex apps; the Plex time an
+    estimate), ebooks by reads (people whose place in it moved in the
+    period) and authors and series by plays and reads together, each with
+    how many people and a cover on this origin (an author's or a series' is
+    their most played book's)."""
+    since = since_of(period, src.now)
+    web, plays = _in_period(src, since, identity)
+    infos = audio_books(db, {x.book_key for x in web} | {x.book_key for x in plays})
+    audio: Dict[tuple, dict] = {}
+
+    def heard(key: str, who: str, at: datetime, ms: int, field_: str) -> None:
+        info = infos[key]
+        row = audio.setdefault(_ident(info, key), {"info": info, "plays": set(), "people": set(),
+                                                   "web_ms": 0, "plex_ms": 0})
+        row["plays"].add((who, _local(at, zone).date()))
+        row["people"].add(who)
+        row[field_] += ms
+
+    for x in web:
+        if x.ms:
+            heard(x.book_key, x.identity, x.hour, x.ms, "web_ms")
+    for x in plays:
+        heard(x.book_key, x.identity, x.at, x.ms, "plex_ms")
+    ebooks = [e for e in ebook_rows(db, identity=identity) if e.started and (since is None or e.at >= since)]
+    ebook_infos = catalog_books(db, {e.book_id for e in ebooks})
+    read: Dict[int, dict] = {}
+    for e in ebooks:
+        if e.book_id in ebook_infos:
+            row = read.setdefault(e.book_id, {"info": ebook_infos[e.book_id], "people": set(), "finished": set()})
+            row["people"].add(e.identity)
+            if e.finished:
+                row["finished"].add(e.identity)
+
+    def by_plays(row):
+        return (-len(row["plays"]), -len(row["people"]), -(row["web_ms"] + row["plex_ms"]), row["info"].title.casefold())
+
+    ranked_audio = sorted(audio.values(), key=by_plays)
+    ranked_read = sorted(read.values(), key=lambda r: (-len(r["people"]), -len(r["finished"]), r["info"].title.casefold()))
+
+    def grouped(name_of) -> List[dict]:
+        groups: Dict[str, dict] = {}
+
+        def group(info: BookInfo) -> Optional[dict]:
+            name = name_of(info)
+            if not name or not name.strip():
+                return None
+            return groups.setdefault(book_catalog.name_key(name), {"name": name, "plays": 0, "reads": 0,
+                                                                  "people": set(), "ms": 0, "books": Counter()})
+        for row in ranked_audio:
+            g = group(row["info"])
+            if g is not None:
+                g["plays"] += len(row["plays"])
+                g["people"] |= row["people"]
+                g["ms"] += row["web_ms"] + row["plex_ms"]
+                if row["info"].book_id is not None:
+                    g["books"][row["info"].book_id] += len(row["plays"])
+        for row in ranked_read:
+            g = group(row["info"])
+            if g is not None:
+                g["reads"] += len(row["people"])
+                g["people"] |= row["people"]
+                g["books"][row["info"].book_id] += len(row["people"])
+        ranked = sorted(groups.values(), key=lambda g: (-(g["plays"] + g["reads"]), -len(g["people"]), -g["ms"],
+                                                        g["name"].casefold()))[:TOP]
+        return [{"name": g["name"], "plays": g["plays"], "reads": g["reads"], "people": len(g["people"]),
+                 "listened_ms": g["ms"], "book_id": g["books"].most_common(1)[0][0] if g["books"] else None}
+                for g in ranked]
+
+    authors = grouped(lambda info: info.author)
+    series = grouped(lambda info: info.series)
+    top_audio = ranked_audio[:TOP]
+    top_read = ranked_read[:TOP]
+    covers = _covers(db, [r["info"].book_id for r in top_audio] + [r["info"].book_id for r in top_read]
+                     + [g["book_id"] for g in authors + series])
+    for g in authors + series:
+        g["cover_url"] = covers.get(g["book_id"])
+    return {"period": period,
+            "audiobooks": [{"book_id": r["info"].book_id, "title": r["info"].title, "author": r["info"].author,
+                            "cover_url": covers.get(r["info"].book_id), "plays": len(r["plays"]),
+                            "people": len(r["people"]), "listened_ms": r["web_ms"] + r["plex_ms"],
+                            "plex_ms": r["plex_ms"]} for r in top_audio],
+            "ebooks": [{"book_id": r["info"].book_id, "title": r["info"].title, "author": r["info"].author,
+                        "cover_url": covers.get(r["info"].book_id), "reads": len(r["people"]),
+                        "finished": len(r["finished"])} for r in top_read],
+            "authors": authors, "series": series,
             "unavailable": list(src.unavailable), "tracking": tracking(db)}

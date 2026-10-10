@@ -22,6 +22,27 @@
   .ins-est { background: repeating-linear-gradient(135deg, rgb(var(--color-text) / .62) 0 2px, rgb(var(--color-text) / .2) 2px 5px); }
   /* The scrim behind the detail dialog: the theme's own (theme.css .ws-scrim). */
   #insDetail::backdrop { background-color: rgb(var(--color-background) / .7); }
+  /* Top users, history and Top played follow Plex's own dashboard, in this
+     site's palette. Each kind of time keeps one look everywhere it is a mark:
+     audiobooks on the site in the text colour (.ins-site), Plex apps hatched
+     (.ins-est, an estimate), ebooks in the book colour (theme.css
+     .bg-media-book). A top user's rows are tinted the same way, stronger for
+     more time (--ins-a, 0 to 1, set by pages/insights.js). */
+  .ins-site { background-color: rgb(var(--color-text)); }
+  .ins-tint-site, .ins-tint-plex { background-color: rgb(var(--color-text) / calc(.03 + .16 * var(--ins-a, 0))); }
+  .ins-tint-ebook { background-color: rgb(var(--color-media-book) / calc(.03 + .2 * var(--ins-a, 0))); }
+  /* Letter circles for people without a plex.tv picture: palette hues, one per person. */
+  .ins-hue-0 { background-color: rgb(var(--color-media-movie) / .3); }
+  .ins-hue-1 { background-color: rgb(var(--color-media-tv) / .26); }
+  .ins-hue-2 { background-color: rgb(var(--color-media-book) / .28); }
+  .ins-hue-3 { background-color: rgb(var(--color-accent) / .55); }
+  .ins-hue-4 { background-color: rgb(var(--color-secondary) / .6); }
+  /* Top played: each column's banner is its top item's cover, blurred and
+     dimmed under the column's name. */
+  .ins-banner-art { filter: blur(10px) saturate(1.15); transform: scale(1.2); }
+  /* A filter is as wide as its choice, as Plex's are (where the browser can). */
+  #wsPage select[data-ins-filter] { field-sizing: content; }
+  .ins-banner-dim { background: linear-gradient(rgb(var(--color-background) / .45), rgb(var(--color-background) / .7)); }
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
@@ -39,22 +60,73 @@
   <p class="mt-2 text-[15px] leading-6 text-frosted-blue/70">Reading and listening across everyone. Only admins can see this page.</p>
 
   <section id="insNow" data-arrive="ins-now" aria-labelledby="insNowTitle" aria-busy="true" class="mt-10">
-    <h2 id="insNowTitle" class="text-xl font-bold leading-snug text-frosted-blue">Right now</h2>
+    <h2 id="insNowTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Right now</h2>
     <div data-ins-body aria-hidden="true" class="mt-4 grid gap-2 sm:grid-cols-2">
-      <div class="skel h-20 rounded-xl"></div><div class="skel h-20 rounded-xl"></div>
+      <div class="skel h-20 rounded-card"></div><div class="skel h-20 rounded-card"></div>
+    </div>
+  </section>
+
+  <!-- Top users, as Plex's dashboard draws them: a card a person, most time
+       first, in a row that scrolls sideways (the arrows page through it). -->
+  <section id="insTopUsers" data-arrive="ins-top-users" aria-labelledby="insTopUsersTitle" aria-busy="true" class="mt-12">
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <h2 id="insTopUsersTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Top users</h2>
+      <div class="flex items-center gap-1">
+        <label for="insTopUsersPeriod" class="sr-only">Top users: period</label>
+        <select id="insTopUsersPeriod" data-ins-filter="top-users-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d" selected>Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+        <button type="button" data-ins-page="-1" aria-label="Show earlier people" aria-controls="insTopUsers" aria-disabled="true" class="ws-lift inline-flex size-9 items-center justify-center rounded-btn text-frosted-blue hover:bg-frosted-blue/[0.07] aria-disabled:cursor-default aria-disabled:opacity-35 aria-disabled:hover:bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+        </button>
+        <button type="button" data-ins-page="1" aria-label="Show more people" aria-controls="insTopUsers" aria-disabled="true" class="ws-lift inline-flex size-9 items-center justify-center rounded-btn text-frosted-blue hover:bg-frosted-blue/[0.07] aria-disabled:cursor-default aria-disabled:opacity-35 aria-disabled:hover:bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+        </button>
+      </div>
+    </div>
+    <div data-ins-body aria-hidden="true" class="mt-4 flex gap-4 overflow-hidden">
+      <div class="skel h-[312px] w-[min(82vw,288px)] shrink-0 rounded-card lg:w-[calc((100%-48px)/4)]"></div><div class="skel h-[312px] w-[min(82vw,288px)] shrink-0 rounded-card lg:w-[calc((100%-48px)/4)]"></div><div class="skel h-[312px] w-[min(82vw,288px)] shrink-0 rounded-card lg:w-[calc((100%-48px)/4)]"></div><div class="skel h-[312px] w-[min(82vw,288px)] shrink-0 rounded-card lg:w-[calc((100%-48px)/4)]"></div>
+    </div>
+  </section>
+
+  <section id="insHistory" data-arrive="ins-history" aria-labelledby="insHistoryTitle" aria-busy="true" class="mt-12">
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <h2 id="insHistoryTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Listening and reading history</h2>
+      <div class="flex flex-wrap items-center gap-1 max-sm:-ml-3">
+        <label for="insHistoryMedia" class="sr-only">History: what to show</label>
+        <select id="insHistoryMedia" data-ins-filter="history-media" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="all" selected>All media</option><option value="web">Audiobooks on the site</option><option value="plex">Audiobooks in Plex apps</option><option value="ebook">Ebooks</option></select>
+        <label for="insHistoryPerson" class="sr-only">History: whose</label>
+        <select id="insHistoryPerson" data-ins-filter="history-person" data-ins-people class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus max-w-[12rem]"><option value="" selected>All users</option></select>
+        <label for="insHistoryPeriod" class="sr-only">History: period</label>
+        <select id="insHistoryPeriod" data-ins-filter="history-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+      </div>
+    </div>
+    <div data-ins-body aria-hidden="true" class="mt-4"><div class="skel h-[360px] rounded-card"></div></div>
+  </section>
+
+  <section id="insTopPlayed" data-arrive="ins-top-played" aria-labelledby="insTopPlayedTitle" aria-busy="true" class="mt-12">
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <h2 id="insTopPlayedTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Top played</h2>
+      <div class="flex flex-wrap items-center gap-1 max-sm:-ml-3">
+        <label for="insTopPlayedPerson" class="sr-only">Top played: whose</label>
+        <select id="insTopPlayedPerson" data-ins-filter="top-played-person" data-ins-people class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus max-w-[12rem]"><option value="" selected>All users</option></select>
+        <label for="insTopPlayedPeriod" class="sr-only">Top played: period</label>
+        <select id="insTopPlayedPeriod" data-ins-filter="top-played-period" class="h-9 cursor-pointer rounded-btn border-0 bg-transparent py-0 pl-3 pr-9 text-[15px] font-semibold text-frosted-blue/85 hover:bg-frosted-blue/[0.07] focus:ring-2 focus:ring-focus"><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option><option value="1y">Last year</option><option value="all">All time</option></select>
+      </div>
+    </div>
+    <div data-ins-body aria-hidden="true" class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="skel h-96 rounded-card"></div><div class="skel h-96 rounded-card"></div><div class="skel h-96 rounded-card"></div><div class="skel h-96 rounded-card"></div>
     </div>
   </section>
 
   <section id="insPeople" data-arrive="ins-people" aria-labelledby="insPeopleTitle" aria-busy="true" class="mt-12">
-    <h2 id="insPeopleTitle" class="text-xl font-bold leading-snug text-frosted-blue">People</h2>
+    <h2 id="insPeopleTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">People</h2>
     <div data-ins-body aria-hidden="true" class="mt-4 space-y-3">
-      <div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div>
+      <div class="skel h-16 rounded-card"></div><div class="skel h-16 rounded-card"></div><div class="skel h-16 rounded-card"></div>
     </div>
   </section>
 
   <!-- The period for Trends, Books and Habits; remembered in this browser (pages/insights.js). -->
   <div id="insPeriodBar" class="mt-12 flex flex-wrap items-center gap-3">
-    <p id="insPeriodLabel" class="text-[15px] font-semibold text-frosted-blue">Period</p>
+    <p id="insPeriodLabel" class="text-[15px] font-semibold text-frosted-blue/85">Period for Trends, Books and Habits</p>
     <div id="insPeriod" role="group" aria-labelledby="insPeriodLabel" class="inline-flex flex-wrap gap-1 rounded-[12px] border border-frosted-blue/15 p-1">
       <button type="button" data-period="30d" aria-pressed="false" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">30 days</button>
       <button type="button" data-period="90d" aria-pressed="true" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">90 days</button>
@@ -64,17 +136,17 @@
   </div>
 
   <section id="insTrends" data-arrive="ins-trends" aria-labelledby="insTrendsTitle" aria-busy="true" class="mt-8">
-    <h2 id="insTrendsTitle" class="text-xl font-bold leading-snug text-frosted-blue">Trends</h2>
+    <h2 id="insTrendsTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Trends</h2>
     <div data-ins-body aria-hidden="true" class="mt-4 space-y-4"><div class="skel h-40 rounded-xl"></div><div class="skel h-24 rounded-xl"></div></div>
   </section>
 
   <section id="insBooks" data-arrive="ins-books" aria-labelledby="insBooksTitle" aria-busy="true" class="mt-12">
-    <h2 id="insBooksTitle" class="text-xl font-bold leading-snug text-frosted-blue">Books</h2>
+    <h2 id="insBooksTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Books</h2>
     <div data-ins-body aria-hidden="true" class="mt-4 space-y-3"><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div></div>
   </section>
 
   <section id="insHabits" data-arrive="ins-habits" aria-labelledby="insHabitsTitle" aria-busy="true" class="mt-12">
-    <h2 id="insHabitsTitle" class="text-xl font-bold leading-snug text-frosted-blue">Habits</h2>
+    <h2 id="insHabitsTitle" class="text-[17px] font-extrabold uppercase leading-snug tracking-[0.06em] text-frosted-blue">Habits</h2>
     <div data-ins-body aria-hidden="true" class="mt-4 space-y-4"><div class="skel h-10 rounded-xl"></div><div class="skel h-48 rounded-xl"></div></div>
   </section>
 

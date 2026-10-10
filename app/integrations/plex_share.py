@@ -155,25 +155,92 @@ NAME_MAX = 100
 
 
 async def server_people() -> Dict[str, object]:
-    """Who the server is shared with, and its owner, for the names on the
-    admin's Insights page: {"owner": the owner's plex.tv id or "", "names":
-    {plex.tv id: name}}. From each accepted share's `invited` account and
-    plex.tv's own account for the admin token. Only ids and names are read
-    out of either answer (never an email or a token). Raises
-    PlexShareUnavailable."""
+    """Who the server is shared with, and its owner, for the names and
+    pictures on the admin's Insights page: {"owner": the owner's plex.tv id
+    or "", "names": {plex.tv id: name}, "thumbs": {plex.tv id: picture
+    address}}. From each accepted share's `invited` account and plex.tv's
+    own account for the admin token. Only ids, names and picture addresses
+    on plex.tv (avatar_url) are read out of either answer (never an email or
+    a token). Raises PlexShareUnavailable."""
     server = await _server()
     async with _client() as client:
         accepted = await _get_json(client, f"{CLIENTS}/api/v2/shared_servers/owned/accepted", server)
         owner = await _get_json(client, f"{PLEX_TV}/api/v2/user", server)
     names: Dict[str, str] = {}
+    thumbs: Dict[str, str] = {}
+
+    def keep(account: dict) -> str:
+        found = str(account.get("id") or "")
+        if found:
+            names[found] = str(account.get("title") or account.get("username") or "")[:NAME_MAX]
+            thumb = avatar_url(account.get("thumb"))
+            if thumb:
+                thumbs[found] = thumb
+        return found
+
     for entry in accepted if isinstance(accepted, list) else []:
         invited = entry.get("invited") if isinstance(entry, dict) else None
-        if isinstance(invited, dict) and invited.get("id"):
-            names[str(invited["id"])] = str(invited.get("title") or invited.get("username") or "")[:NAME_MAX]
-    owner_id = str(owner.get("id") or "") if isinstance(owner, dict) else ""
-    if owner_id:
-        names[owner_id] = str(owner.get("title") or owner.get("username") or "")[:NAME_MAX]
-    return {"owner": owner_id, "names": names}
+        if isinstance(invited, dict):
+            keep(invited)
+    owner_id = keep(owner) if isinstance(owner, dict) else ""
+    return {"owner": owner_id, "names": names, "thumbs": thumbs}
+
+
+AVATAR_MAX_BYTES = 512 * 1024
+AVATAR_HOPS = 3
+AVATAR_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+
+
+def _plex_host(host: str) -> bool:
+    return host == "plex.tv" or host.endswith(".plex.tv")
+
+
+def avatar_url(value) -> str:
+    """A plex.tv account picture's address, or "" for anything else: only an
+    https address on plex.tv itself, so a picture is only ever fetched from there."""
+    if not isinstance(value, str) or len(value) > 500:
+        return ""
+    try:
+        url = httpx.URL(value)
+    except (httpx.InvalidURL, TypeError, ValueError):
+        return ""
+    return value if url.scheme == "https" and _plex_host(url.host or "") and not url.userinfo else ""
+
+
+def _hop_ok(url: httpx.URL) -> bool:
+    """A redirect from plex.tv may go on to its image host: https, a name
+    (never an address typed as numbers) and nothing on this machine."""
+    host = url.host or ""
+    return (url.scheme == "https" and bool(host) and host != "localhost" and not host.endswith(".local")
+            and not host.replace(".", "").isdigit() and ":" not in host)
+
+
+async def avatar_image(url: str) -> Tuple[bytes, str]:
+    """The picture at a plex.tv account's avatar address (avatar_url), for
+    Insights to serve from this origin: (bytes, its type). Sent with no
+    token. Up to AVATAR_HOPS redirects, each checked (_hop_ok); only a PNG,
+    JPEG, WebP or GIF of AVATAR_MAX_BYTES or less. Raises PlexShareUnavailable."""
+    if not avatar_url(url):
+        raise PlexShareUnavailable("Not a Plex picture")
+    target = httpx.URL(url)
+    async with _client() as client:
+        for _hop in range(AVATAR_HOPS + 1):
+            try:
+                resp = await client.get(target, headers={"Accept": "image/*"})
+            except httpx.HTTPError:
+                raise PlexShareUnavailable("Plex didn't answer") from None
+            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
+                target = target.join(resp.headers["location"])
+                if not _hop_ok(target):
+                    raise PlexShareUnavailable("Plex sent the picture somewhere unexpected")
+                continue
+            kind = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+            if resp.status_code != 200 or kind not in AVATAR_TYPES:
+                raise PlexShareUnavailable("Plex had no picture")
+            if len(resp.content) > AVATAR_MAX_BYTES:
+                raise PlexShareUnavailable("The picture is too large")
+            return resp.content, kind
+    raise PlexShareUnavailable("Too many redirects")
 
 
 async def _create(client: httpx.AsyncClient, server: PlexServer, username: str, ids: List[str]) -> httpx.Response:

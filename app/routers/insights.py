@@ -15,7 +15,7 @@ import functools
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -25,7 +25,9 @@ from app.database import get_db
 from app.dependencies import require_admin
 from app.limiter import limiter
 from app.routers.book_discovery import _zone
+from app.integrations import plex_share
 from app.services import insights, insights_kavita
+from app.utils import identity_key
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,10 @@ DB_DOWN = "Insights can't be read right now. Try again in a moment."
 NOT_HERE = "That person or book isn't here any more."
 KEY_PATTERN = r"^[0-9a-f]{24}$"
 Period = Literal["30d", "90d", "1y", "all"]
+# The Plex-style sections (Top users, history, Top played) also offer the last 7 days.
+Span = Literal["7d", "30d", "90d", "1y", "all"]
+AVATAR_LIMIT = "240/minute"                # a page of cards asks for up to insights.TOP_USERS_MAX at once
+AVATAR_MAX_AGE = 24 * 60 * 60
 
 
 def _db_503(route):
@@ -185,3 +191,86 @@ async def habits(request: Request, period: Period = "90d", tz: Optional[str] = Q
         src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
         return insights.habits_view(db, src, period, zone)
     return await _answer(r, f"habits:{period}:{zone}", build)
+
+
+def _one(db: Session, src: insights.Sources, person: Optional[str]) -> Optional[str]:
+    """The identity behind the person filter's key (None for everyone); 404 for a key that is no one's."""
+    if person is None:
+        return None
+    identity = insights.identity_for(db, src, person)
+    if identity is None:
+        raise HTTPException(status_code=404, detail=NOT_HERE)
+    return identity
+
+
+@router.get("/top-users")
+@limiter.limit(LIMIT)
+@_db_503
+async def top_users(request: Request, period: Span = "7d", tz: Optional[str] = Query(None, max_length=TZ_MAX),
+                    _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Everyone with time in the period, most first: sessions, and time on the
+    site, in Plex apps (an estimate) and in ebooks; whether there is a picture."""
+    zone = _zone(tz)
+    r = await _redis()
+
+    async def build():
+        src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
+        thumbs = await insights.plex_thumbs(r)
+        return insights.top_users_view(db, src, period, zone, thumbs)
+    return await _answer(r, f"top-users:{period}:{zone}", build)
+
+
+@router.get("/history")
+@limiter.limit(LIMIT)
+@_db_503
+async def history(request: Request, period: Span = "30d", person: Optional[str] = Query(None, pattern=KEY_PATTERN),
+                  tz: Optional[str] = Query(None, max_length=TZ_MAX),
+                  _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """Listening and reading per day, week or month, everyone's or one person's, with totals."""
+    zone = _zone(tz)
+    r = await _redis()
+
+    async def build():
+        src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
+        return insights.history_view(db, src, period, zone, _one(db, src, person))
+    return await _answer(r, f"history:{period}:{person or ''}:{zone}", build)
+
+
+@router.get("/top-played")
+@limiter.limit(LIMIT)
+@_db_503
+async def top_played(request: Request, period: Span = "30d", person: Optional[str] = Query(None, pattern=KEY_PATTERN),
+                     tz: Optional[str] = Query(None, max_length=TZ_MAX),
+                     _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """The most played audiobooks, ebooks, authors and series, everyone's or one person's."""
+    zone = _zone(tz)
+    r = await _redis()
+
+    async def build():
+        src = await _sources(db, r, insights.since_of(period, insights.now_utc()))
+        return insights.top_played_view(db, src, period, zone, _one(db, src, person))
+    return await _answer(r, f"top-played:{period}:{person or ''}:{zone}", build)
+
+
+@router.get("/avatar")
+@limiter.limit(AVATAR_LIMIT)
+async def avatar(request: Request, key: str = Query(..., pattern=KEY_PATTERN),
+                 _admin: dict = Depends(require_admin)):
+    """A person's plex.tv picture, served from this origin (img-src stays as
+    it is, and the browser never sees a plex.tv address); 404 for anyone
+    without one, or while plex.tv can't give it."""
+    r = await _redis()
+    thumbs = await insights.plex_thumbs(r)
+    url = next((u for plex_id, u in thumbs.items() if identity_key("plex:" + plex_id) == key), None)
+    if url is None:
+        raise HTTPException(status_code=404, detail=NOT_HERE)
+    try:
+        content, content_type = await plex_share.avatar_image(url)
+    except plex_share.PlexShareUnavailable as exc:
+        logger.info("A plex.tv picture could not be read for Insights: %s", type(exc).__name__)
+        raise HTTPException(status_code=404, detail=NOT_HERE) from None
+    return Response(content=content, media_type=content_type, headers={
+        "Cache-Control": f"private, max-age={AVATAR_MAX_AGE}",
+        # Loaded as a document rather than an <img>, it can run nothing.
+        "Content-Security-Policy": "sandbox",
+    })

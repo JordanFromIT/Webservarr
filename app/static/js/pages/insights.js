@@ -6,11 +6,13 @@
  * (docs/superpowers/specs/2026-10-10-insights-design.md, section 7). Reading
  * and listening across everyone, in sections that each load on their own, so
  * one that fails, or whose source is down, never takes the others with it.
- * Right now is read again every 30 s while the page is visible. A person opens
- * in the detail dialog. Trends, Books and Habits share one period picker; the
- * choice is remembered in this browser (localStorage, a convenience: the page
- * works without it). A book opens in the same dialog, from Trends, Books or a
- * person's books.
+ * Right now is read again every 30 s while the page is visible. Top users,
+ * the listening and reading history and Top played follow Plex's own
+ * dashboard (in this site's theme): each has its own quiet filters (period,
+ * whose, what), and a person's card opens them in the detail dialog. Trends,
+ * Books and Habits share one period picker; the choice is remembered in this
+ * browser (localStorage, a convenience: the page works without it). A book
+ * opens in the same dialog, from Top played, Books or a person's books.
  *
  * Every read goes through readLive, on the page's signal. Markup is built with
  * textContent only. Time in Plex apps is called an estimate wherever it shows,
@@ -27,7 +29,11 @@ const API = '/api/admin/insights/';
 
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 const NEUTRAL = 'ws-lift inline-flex h-10 items-center rounded-[10px] border border-frosted-blue/15 px-4 text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/[0.07] ' + FOCUS;
+// Focus drawn inside the box, for rows in a column that clips what overflows it.
+const FOCUS_IN = 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus';
 const MUTED = 'text-[15px] leading-6 text-frosted-blue/70';
+// Every section's body sits on the site's frosted surface (theme.css .ws-frost).
+const PANEL = 'ws-frost mt-4 rounded-card border p-4 sm:p-6';
 const SMALL = 'text-[13px] leading-5 text-frosted-blue/70';
 const H3 = 'text-[17px] font-semibold text-frosted-blue';
 const ROW = 'flex w-full min-w-0 items-start gap-3 rounded-xl px-3 py-2 -mx-3 text-left transition-colors hover:bg-frosted-blue/[0.07] ' + FOCUS;
@@ -40,6 +46,23 @@ const WHAT = {
   visit: 'opening Books', request: 'asking for a book'
 };
 const PERIODS = ['30d', '90d', '1y', 'all'];
+// Top users, history and Top played: Plex's periods, the last 7 days included.
+const SPANS = ['7d', '30d', '90d', '1y', 'all'];
+const SPAN_WORDS = { '7d': 'in the last 7 days', '30d': 'in the last 30 days', '90d': 'in the last 90 days',
+  '1y': 'in the last year', all: 'yet' };
+const MEDIA = ['all', 'web', 'plex', 'ebook'];
+// The three kinds of time, bottom to top in a history bar: how each is drawn
+// as a mark (.ins-site, the hatched estimate, the book colour) and as a top
+// user's tinted row (insights.html), and how each is said.
+const KINDS = [
+  { field: 'web_ms', media: 'web', mark: 'ins-site', tint: 'ins-tint-site', label: 'Audiobooks (site)', short: 'Site', said: 'on the site' },
+  { field: 'plex_ms', media: 'plex', mark: EST, tint: 'ins-tint-plex', label: 'Audiobooks (Plex app)', short: 'Plex apps',
+    said: 'in Plex apps (an estimate)', estimate: true },
+  { field: 'ebook_ms', media: 'ebook', mark: 'bg-media-book', tint: 'ins-tint-ebook', label: 'Ebooks', short: 'Ebooks', said: 'of ebooks' }
+];
+// The history's y axis steps up in the first of these (in minutes) that needs
+// four lines or fewer.
+const STEPS = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080, 20160, 43200];
 const PERIOD_KEY = 'webservarr:insights:period';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -153,6 +176,60 @@ function bucketLabel(start, unit) {
 
 function people(n) { return num(n).toLocaleString() + (num(n) === 1 ? ' person' : ' people'); }
 
+/** A count of something in words: "1 play", "12 plays". */
+function count(n, word) { return num(n).toLocaleString() + ' ' + word + (num(n) === 1 ? '' : 's'); }
+
+/** A long time as Plex's cards say it: "1 day, 15 hr"; under a day, as duration says it. */
+function total(ms) {
+  const minutes = Math.round(num(ms) / 60000);
+  if (minutes < 24 * 60) return duration(ms);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  return days.toLocaleString() + (days === 1 ? ' day' : ' days') + (hours ? ', ' + hours + ' hr' : '');
+}
+
+/** An axis label: "45 min", "6 hr", "1.5 hr", "2 days". */
+function tick(ms) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return minutes + ' min';
+  if (minutes < 48 * 60) return Math.round(minutes / 6) / 10 + ' hr';
+  return Math.round(minutes / 144) / 10 + ' days';
+}
+
+/** The history's scale for its tallest bar: [the top of the axis, its step]. */
+function scale(most) {
+  const minutes = STEPS.find(function (m) { return most / (m * 60000) <= 4; });
+  const step = minutes ? minutes * 60000 : Math.ceil(most / 4 / 86400000) * 86400000;
+  return [Math.max(step, Math.ceil(most / step) * step), step];
+}
+
+/** A bar's name under the history: "Sat 10" for a day, "5 Oct" for the week
+    that starts then, "Oct" for a month (with its year on the first and on January). */
+function axisLabel(start, unit, first) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text(start));
+  if (!m) return '';
+  const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  try {
+    if (unit === 'day') return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+    if (unit === 'week') return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    return d.toLocaleDateString('en-GB', first || d.getMonth() === 0 ? { month: 'short', year: 'numeric' } : { month: 'short' });
+  } catch (e) {
+    return m[0];
+  }
+}
+
+/** One of five palette hues for a person's letter circle, the same one each visit. */
+function hue(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) % 9973;
+  return 'ins-hue-' + (h % 5);
+}
+
+/** A cover address this page may load: only the Books pages' own, on this origin. */
+function coverOf(url) {
+  return /^\/api\/books\/\d+\/cover(\?v=\d+)?$/.test(text(url)) ? url : '';
+}
+
 function hourLabel(h) { return (h < 10 ? '0' : '') + h + ':00'; }
 
 export async function mount(ctx) {
@@ -160,7 +237,10 @@ export async function mount(ctx) {
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
   const tz = timeZone();
-  const state = { gen: {}, nowJSON: '', opener: null, detailGen: 0, period: storedPeriod() };
+  const state = {
+    gen: {}, nowJSON: '', opener: null, detailGen: 0, period: storedPeriod(),
+    topUsers: '7d', history: { period: '30d', media: 'all', person: '', data: null }, played: { period: '30d', person: '' }
+  };
 
   function quiet(err) { return signal.aborted || isAbort(err); }
 
@@ -251,7 +331,7 @@ export async function mount(ctx) {
   }
 
   function nowItem(item, audio) {
-    const li = el('li', 'flex min-w-0 items-start gap-3 rounded-xl border border-frosted-blue/10 px-3 py-3');
+    const li = el('li', 'flex min-w-0 items-start gap-3 rounded-inner bg-frosted-blue/[0.05] px-3 py-3');
     li.setAttribute('data-ins-now', audio ? 'listening' : 'reading');
     li.appendChild(icon(audio ? 'headphones' : 'menu_book', 'mt-0.5 text-xl text-frosted-blue/70'));
     const body = el('div', 'min-w-0 flex-1');
@@ -268,7 +348,7 @@ export async function mount(ctx) {
 
   function drawNow(data) {
     state.nowJSON = nowJSON(data);
-    const box = el('div', 'mt-4');
+    const box = el('div', PANEL);
     const lines = unavailableLines(data.unavailable);
     if (lines) box.appendChild(lines);
     const listening = Array.isArray(data.listening) ? data.listening.filter(Boolean) : [];
@@ -298,13 +378,29 @@ export async function mount(ctx) {
 
   // ---- People ----
 
+  /** Everyone, by name, in the whose filters of the history and Top played. */
+  function fillPeople(list) {
+    const sorted = list.slice().sort(function (a, b) { return text(a.name).localeCompare(text(b.name)); });
+    root.querySelectorAll('[data-ins-people]').forEach(function (select) {
+      const keep = select.value;
+      while (select.options.length > 1) select.remove(1);
+      sorted.forEach(function (p) {
+        const option = el('option', '', text(p.name));
+        option.value = p.key;
+        select.appendChild(option);
+      });
+      select.value = sorted.some(function (p) { return p.key === keep; }) ? keep : '';
+    });
+  }
+
   function drawPeople(data) {
-    const box = el('div', 'mt-4');
+    const box = el('div', PANEL);
     const lines = unavailableLines(data.unavailable);
     if (lines) box.appendChild(lines);
     const people = (Array.isArray(data.people) ? data.people : []).filter(function (p) {
       return p && typeof p.key === 'string';
     });
+    fillPeople(people);
     if (!people.length) {
       box.appendChild(emptyLine('No one has listened or read yet.'));
       return box;
@@ -346,6 +442,313 @@ export async function mount(ctx) {
       list.appendChild(li);
     });
     box.appendChild(list);
+    return box;
+  }
+
+  // ---- Top users ----
+
+  function swatch(mark) {
+    const s = el('span', 'inline-block size-2.5 shrink-0 rounded-sm ' + mark);
+    s.setAttribute('aria-hidden', 'true');
+    return s;
+  }
+
+  /** Their plex.tv picture (served from this origin by the avatar route), over
+      a letter circle that stays when there is none or it does not load. */
+  function avatar(p) {
+    const box = el('span', 'relative inline-flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full text-[24px] font-semibold text-frosted-blue ' + hue(p.key));
+    box.setAttribute('aria-hidden', 'true');
+    box.appendChild(el('span', '', (Array.from(text(p.name).trim())[0] || '?').toUpperCase()));
+    if (p.avatar === true) {
+      const img = el('img', 'absolute inset-0 size-full object-cover');
+      img.alt = '';
+      img.width = 56;
+      img.height = 56;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.addEventListener('error', function () { img.remove(); }, { signal: signal });
+      img.src = API + 'avatar?key=' + encodeURIComponent(p.key);
+      box.appendChild(img);
+    }
+    return box;
+  }
+
+  /** One person's card: picture, sessions and time, the name band, then a row
+      a kind of time, each tinted more strongly the more of their time it holds. */
+  function userCard(p) {
+    // Four to a row from lg, as Plex shows them; narrower, the row scrolls.
+    const li = el('li', 'w-[min(82vw,288px)] shrink-0 snap-start lg:w-[calc((100%-48px)/4)]');
+    const card = el('button', 'ws-frost flex h-full w-full flex-col overflow-hidden rounded-card border text-left ' + FOCUS);
+    card.type = 'button';
+    card.setAttribute('data-ins-user', p.key);
+    const head = el('span', 'flex items-center gap-4 px-4 pb-4 pt-5');
+    head.appendChild(avatar(p));
+    const figures = el('span', 'block min-w-0');
+    figures.appendChild(el('span', 'block text-[15px] tabular-nums text-frosted-blue/70', count(p.sessions, 'session')));
+    figures.appendChild(el('span', 'block text-[17px] font-semibold tabular-nums text-frosted-blue', total(p.total_ms)));
+    head.appendChild(figures);
+    card.appendChild(head);
+    card.appendChild(el('span', 'block truncate bg-background-dark/30 px-4 py-3 text-[15px] font-semibold text-frosted-blue', text(p.name)));
+    const most = KINDS.reduce(function (m, k) { return Math.max(m, num(p[k.field])); }, 0);
+    KINDS.forEach(function (k) {
+      const ms = num(p[k.field]);
+      const row = el('span', 'flex items-center justify-between gap-2 px-4 py-3 text-[14px] ' + k.tint);
+      row.setAttribute('data-ins-kind', k.media);
+      row.style.setProperty('--ins-a', most ? (ms / most).toFixed(2) : '0');
+      const name = el('span', 'inline-flex min-w-0 items-center gap-2 text-frosted-blue');
+      name.appendChild(swatch(k.mark));
+      name.appendChild(el('span', 'truncate', k.label));
+      if (k.estimate) name.appendChild(el('span', 'sr-only', ', an estimate'));
+      row.appendChild(name);
+      row.appendChild(el('span', 'shrink-0 tabular-nums text-frosted-blue/80', duration(ms)));
+      card.appendChild(row);
+    });
+    card.addEventListener('click', function () { openPerson(p.key, text(p.name), card); }, { signal: signal });
+    li.appendChild(card);
+    return li;
+  }
+
+  const pagers = Array.from(root.querySelectorAll('[data-ins-page]'));
+
+  /** The arrows page the cards; each says it has nowhere to go at an end
+      (aria-disabled, so a focused arrow keeps its focus). */
+  function showPagers() {
+    const row = $('insTopUsers').querySelector('[data-ins-scroller]');
+    pagers.forEach(function (b) {
+      const back = b.getAttribute('data-ins-page') === '-1';
+      const stuck = !row || (back ? row.scrollLeft <= 1 : row.scrollLeft + row.clientWidth >= row.scrollWidth - 1);
+      b.setAttribute('aria-disabled', String(stuck));
+    });
+  }
+
+  pagers.forEach(function (b) {
+    b.addEventListener('click', function () {
+      const row = $('insTopUsers').querySelector('[data-ins-scroller]');
+      if (!row || b.getAttribute('aria-disabled') === 'true' || typeof row.scrollBy !== 'function') return;
+      // scroll-behavior on the row (motion-safe) decides whether this glides.
+      row.scrollBy({ left: parseInt(b.getAttribute('data-ins-page'), 10) * Math.max(200, row.clientWidth - 48) });
+    }, { signal: signal });
+  });
+  window.addEventListener('resize', showPagers, { signal: signal });
+
+  function drawTopUsers(data) {
+    const box = el('div', 'mt-4');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const list = (Array.isArray(data.people) ? data.people : []).filter(function (p) { return p && typeof p.key === 'string'; });
+    if (!list.length) {
+      const empty = el('div', PANEL.replace('mt-4 ', ''));
+      empty.appendChild(emptyLine('No one listened or read ' + (SPAN_WORDS[state.topUsers] || 'in this period') + '.'));
+      box.appendChild(empty);
+      ctx.setTimeout(showPagers, 0);
+      return box;
+    }
+    const row = el('ul', '-mx-1 flex snap-x snap-mandatory scroll-px-1 gap-4 overflow-x-auto px-1 pb-3 pt-1 custom-scrollbar motion-safe:scroll-smooth');
+    row.setAttribute('data-ins-scroller', '');
+    row.setAttribute('aria-label', 'Top users, most time first');
+    list.forEach(function (p) { row.appendChild(userCard(p)); });
+    row.addEventListener('scroll', showPagers, { signal: signal, passive: true });
+    box.appendChild(row);
+    box.appendChild(el('p', 'mt-2 ' + SMALL, 'Plex app time is an estimate: each track counts at its full length. Ebook time is the reading Kavita measured. A session is a book on a day, or a day of reading.'));
+    ctx.setTimeout(showPagers, 0);
+    return box;
+  }
+
+  // ---- Listening and reading history ----
+
+  /** The history in Plex's shape: a stacked bar a day, week or month on an
+      axis of time, the legend and the period's totals under it. The media
+      filter only redraws what was read (state.history.data). */
+  function historyBody(data) {
+    const box = el('div', PANEL);
+    box.setAttribute('data-ins-history', '');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const unit = text(data.bucket);
+    const buckets = Array.isArray(data.buckets) ? data.buckets.filter(Boolean) : [];
+    const kinds = KINDS.filter(function (k) { return state.history.media === 'all' || k.media === state.history.media; });
+    const sum = function (b) { return kinds.reduce(function (t, k) { return t + num(b[k.field]); }, 0); };
+    const most = buckets.reduce(function (m, b) { return Math.max(m, sum(b)); }, 0);
+    const ebookShown = kinds.some(function (k) { return k.media === 'ebook'; });
+    if (!most) {
+      box.appendChild(el('p', MUTED, 'Nothing ' + (SPAN_WORDS[state.history.period] || 'in this period') + '.'));
+      if (ebookShown && data.reading === false) box.appendChild(el('p', SMALL + ' mt-1', 'Ebook time shows here once reading in Kavita is recorded.'));
+      return box;
+    }
+    const s = scale(most);
+    const top = s[0];
+    const plot = el('div', 'relative h-56 sm:h-64');
+    for (let v = 0; v <= top; v += s[1]) {
+      const line = el('div', 'absolute inset-x-0 h-0');
+      line.setAttribute('aria-hidden', 'true');
+      line.style.bottom = (v / top * 100) + '%';
+      line.appendChild(el('span', 'absolute left-0 w-12 -translate-y-1/2 text-right text-[12px] tabular-nums text-frosted-blue/60', v ? tick(v) : '0'));
+      line.appendChild(el('span', 'absolute left-14 right-0 border-t ' + (v ? 'border-frosted-blue/10' : 'border-frosted-blue/25')));
+      plot.appendChild(line);
+    }
+    const ROWCLS = 'flex justify-around gap-1 px-1 sm:gap-4 sm:px-2 lg:gap-6';
+    const COL = 'min-w-0 max-w-[160px] flex-1';
+    const bars = el('ol', 'absolute inset-y-0 left-14 right-0 items-end ' + ROWCLS);
+    bars.setAttribute('data-ins-bars', '');
+    bars.setAttribute('aria-label', unit === 'day' ? 'Each day' : unit === 'week' ? 'Each week' : 'Each month');
+    const parts = kinds.slice().reverse().map(function (k) { return [k.field, k.mark]; });
+    const wide = Math.ceil(buckets.length / 12);
+    const narrow = Math.ceil(buckets.length / 6);
+    const names = el('div', 'ml-14 mt-2 ' + ROWCLS);
+    names.setAttribute('aria-hidden', 'true');
+    buckets.forEach(function (b, i) {
+      const said = bucketLabel(b.start, unit) + ': ' + kinds.map(function (k) { return duration(b[k.field]) + ' ' + k.said; }).join(', ');
+      const li = el('li', 'flex h-full flex-col justify-end ' + COL);
+      li.title = said;
+      li.appendChild(el('span', 'sr-only', said));
+      stack(li, parts, b, top);
+      bars.appendChild(li);
+      const shown = i % wide === 0 ? (i % narrow === 0 ? '' : ' max-sm:invisible') : ' invisible';
+      names.appendChild(el('span', 'truncate text-center text-[12px] text-frosted-blue/70 ' + COL + shown, axisLabel(b.start, unit, i === 0)));
+    });
+    plot.appendChild(bars);
+    box.appendChild(plot);
+    box.appendChild(names);
+
+    const foot = el('div', 'mt-5 flex flex-wrap items-start justify-between gap-x-8 gap-y-2 ' + SMALL);
+    const key = el('ul', 'flex flex-wrap gap-x-5 gap-y-1');
+    key.setAttribute('data-ins-legend', '');
+    kinds.forEach(function (k) {
+      const item = el('li', 'inline-flex items-center gap-1.5');
+      item.appendChild(swatch(k.mark));
+      item.appendChild(el('span', '', k.label + (k.estimate ? ', an estimate' : '')));
+      key.appendChild(item);
+    });
+    foot.appendChild(key);
+    const totals = data.totals && typeof data.totals === 'object' ? data.totals : {};
+    const sums = el('p', 'flex flex-wrap gap-x-4 gap-y-1 tabular-nums');
+    sums.setAttribute('data-ins-totals-line', '');
+    sums.appendChild(el('span', 'font-semibold text-frosted-blue/85', 'Totals'));
+    kinds.forEach(function (k) { sums.appendChild(el('span', '', k.short + ' ' + duration(totals[k.field]))); });
+    foot.appendChild(sums);
+    box.appendChild(foot);
+    const notes = [unit === 'week' ? 'Each bar is a week, Monday first, in your time zone.'
+      : unit === 'day' ? 'Each bar is a day, in your time zone.' : 'Each bar is a month, in your time zone.'];
+    if (ebookShown) notes.push(data.reading === false ? 'Ebook time shows here once reading in Kavita is recorded.' : 'Ebook time is the reading Kavita measured, by its day.');
+    box.appendChild(el('p', 'mt-2 ' + SMALL, notes.join(' ')));
+    return box;
+  }
+
+  function drawHistory(data) {
+    state.history.data = data;
+    return historyBody(data);
+  }
+
+  // ---- Top played ----
+
+  /** A cover (or, for an author, a round stand-in) beside a row; the book icon
+      stays when there is no cover or it does not load. */
+  function thumb(url, round) {
+    const box = el('span', 'relative flex shrink-0 items-center justify-center overflow-hidden bg-frosted-blue/10 ' +
+      (round ? 'size-12 rounded-full' : 'h-[60px] w-10 rounded-[4px]'));
+    box.setAttribute('aria-hidden', 'true');
+    box.appendChild(icon(round ? 'person' : 'menu_book', 'text-[20px] text-frosted-blue/45'));
+    const src = coverOf(url);
+    if (src && !round) {
+      const img = el('img', 'absolute inset-0 size-full object-cover');
+      img.alt = '';
+      img.width = 40;
+      img.height = 60;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.addEventListener('error', function () { img.remove(); }, { signal: signal });
+      img.src = src;
+      box.appendChild(img);
+    }
+    return box;
+  }
+
+  /** One ranked row: a button that opens the book when it is a library book, else plain. */
+  function playedRow(title, lines, art, bookId) {
+    const li = el('li', 'min-w-0');
+    const isBook = typeof bookId === 'number';
+    const holder = el(isBook ? 'button' : 'div', 'flex w-full min-w-0 items-center gap-3 px-4 py-2.5 text-left' +
+      (isBook ? ' transition-colors hover:bg-frosted-blue/[0.07] ' + FOCUS_IN : ''));
+    holder.appendChild(art);
+    const words = el('span', 'block min-w-0 flex-1');
+    words.appendChild(el('span', 'line-clamp-2 break-words text-[15px] font-semibold leading-5 text-frosted-blue', title));
+    lines.filter(Boolean).forEach(function (line) {
+      words.appendChild(el('span', 'block truncate text-[13px] leading-5 text-frosted-blue/70', line));
+    });
+    holder.appendChild(words);
+    if (isBook) {
+      holder.type = 'button';
+      holder.setAttribute('data-ins-book', String(bookId));
+      holder.addEventListener('click', function () { openBook(bookId, title, holder); }, { signal: signal });
+    }
+    li.appendChild(holder);
+    return li;
+  }
+
+  /** A column: its top item's cover blurred behind its name, then its rows. */
+  function playedColumn(title, kind, items, row) {
+    const col = el('section', 'ws-frost min-w-0 overflow-hidden rounded-card border');
+    col.setAttribute('data-ins-played', kind);
+    const banner = el('div', 'relative flex h-24 items-center justify-center overflow-hidden');
+    const art = items.length ? coverOf(items[0].cover_url) : '';
+    if (art) {
+      const img = el('img', 'ins-banner-art absolute inset-0 size-full object-cover');
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      img.width = 300;
+      img.height = 96;
+      img.decoding = 'async';
+      img.addEventListener('error', function () { img.remove(); }, { signal: signal });
+      img.src = art;
+      banner.appendChild(img);
+      banner.appendChild(el('span', 'ins-banner-dim absolute inset-0'));
+    } else {
+      banner.classList.add('bg-frosted-blue/[0.06]');
+    }
+    banner.appendChild(el('h3', 'relative text-[17px] font-extrabold uppercase tracking-[0.08em] text-frosted-blue', title));
+    col.appendChild(banner);
+    if (!items.length) {
+      col.appendChild(el('p', MUTED + ' px-4 py-4', 'Nothing in this period.'));
+      return col;
+    }
+    const list = el('ol', 'divide-y divide-frosted-blue/10');
+    items.forEach(function (item) { list.appendChild(row(item)); });
+    col.appendChild(list);
+    return col;
+  }
+
+  function playsAndReads(item) {
+    return [num(item.plays) ? count(item.plays, 'play') : '', num(item.reads) ? count(item.reads, 'read') : '']
+      .filter(Boolean).join(', ');
+  }
+
+  function drawTopPlayed(data) {
+    const box = el('div', 'mt-4');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const list = function (rows, field) {
+      return (Array.isArray(rows) ? rows : []).filter(function (r) { return r && text(r[field]); });
+    };
+    const audio = list(data.audiobooks, 'title');
+    const grid = el('div', 'grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-4');
+    grid.appendChild(playedColumn('Audiobooks', 'audiobooks', audio, function (b) {
+      return playedRow(text(b.title), [count(b.plays, 'play') + (num(b.listened_ms) ? ', ' + duration(b.listened_ms) : ''),
+        count(b.people, 'user')], thumb(b.cover_url), b.book_id);
+    }));
+    grid.appendChild(playedColumn('Ebooks', 'ebooks', list(data.ebooks, 'title'), function (b) {
+      return playedRow(text(b.title), [count(b.reads, 'read'), num(b.finished).toLocaleString() + ' finished'],
+        thumb(b.cover_url), b.book_id);
+    }));
+    grid.appendChild(playedColumn('Authors', 'authors', list(data.authors, 'name'), function (a) {
+      return playedRow(text(a.name), [playsAndReads(a), count(a.people, 'user')], thumb('', true), null);
+    }));
+    grid.appendChild(playedColumn('Series', 'series', list(data.series, 'name'), function (a) {
+      return playedRow(text(a.name), [playsAndReads(a), count(a.people, 'user')], thumb(a.cover_url), null);
+    }));
+    box.appendChild(grid);
+    const words = ['A play is one person listening to a book on a day; a read is one person reading an ebook in the period.'];
+    if (audio.some(function (b) { return num(b.plex_ms); })) words.push('Times include listening in Plex apps, which is an estimate.');
+    box.appendChild(el('p', 'mt-3 ' + SMALL, words.join(' ')));
     return box;
   }
 
@@ -620,85 +1023,49 @@ export async function mount(ctx) {
     return li;
   }
 
-  function topList(title, rows, books) {
-    const section = el('section', 'min-w-0');
-    section.setAttribute('data-ins-top', title);
-    section.appendChild(el('h3', H3, title));
-    const list = (Array.isArray(rows) ? rows : []).filter(function (r) { return r && (text(r.title) || text(r.name)); });
-    if (!list.length) {
-      section.appendChild(el('p', MUTED + ' mt-1', 'Nothing in this period.'));
-      return section;
-    }
-    const ol = el('ol', 'mt-2 space-y-1');
-    list.forEach(function (r) {
-      const line = (num(r.listened_ms) ? duration(r.listened_ms) + ' · ' : '') + people(r.people);
-      const li = bookItem(books ? r.book_id : null, text(r.title) || text(r.name), line);
-      ol.appendChild(li);
-    });
-    section.appendChild(ol);
-    return section;
-  }
-
   // ---- Trends ----
 
+  /** Pages read and active people a week. Hours listened is the history
+      above (its own period), and the top books, authors and series are Top played. */
   function drawTrends(data) {
-    const box = el('div', 'mt-2');
+    const box = el('div', PANEL);
     const lines = unavailableLines(data.unavailable);
     if (lines) box.appendChild(lines);
     const unit = text(data.bucket);
     const buckets = Array.isArray(data.buckets) ? data.buckets.filter(Boolean) : [];
     const tracking = data.tracking || {};
-    // From lg: Hours listened leads in a 3fr column; the two smaller charts stack in 2fr beside it.
-    const grid = el('div', 'mt-2 grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-10');
-    const lead = el('div', 'min-w-0');
-    lead.appendChild(barChart('data-ins-trend', 'Hours listened', buckets, unit, LISTEN_PARTS, function (b) {
-      return bucketLabel(b.start, unit) + ': ' + duration(b.web_ms) +
-        (num(b.plex_ms) ? ', and ' + duration(b.plex_ms) + ' in Plex apps (an estimate)' : '');
-    }, duration, 'h-40 lg:h-[216px]'));
-    if (buckets.some(function (b) { return num(b.web_ms) + num(b.plex_ms); })) lead.appendChild(legend());
-    grid.appendChild(lead);
-    const side = el('div', 'grid min-w-0 content-start gap-8 lg:gap-6');
+    const grid = el('div', 'grid gap-8 lg:grid-cols-2 lg:gap-10');
     if (!buckets.length || buckets.every(function (b) { return b.pages === null || b.pages === undefined; })) {
       const pages = el('section', 'min-w-0');
       pages.setAttribute('data-ins-pages', '');
       pages.appendChild(el('h3', H3, 'Pages read'));
       pages.appendChild(emptyLine('Pages read show here once reading in Kavita is recorded.', tracking.reading));
-      side.appendChild(pages);
+      grid.appendChild(pages);
     } else {
-      const pages = barChart('data-ins-pages', 'Pages read', buckets, unit, [['pages', 'bg-frosted-blue/70']], function (b) {
+      const pages = barChart('data-ins-pages', 'Pages read', buckets, unit, [['pages', 'bg-media-book']], function (b) {
         return bucketLabel(b.start, unit) + ': ' + num(b.pages).toLocaleString() + ' pages';
-      }, function (most) { return most.toLocaleString() + ' pages'; }, 'h-28 lg:h-20');
+      }, function (most) { return most.toLocaleString() + ' pages'; }, 'h-32');
       pages.appendChild(el('p', 'mt-1 ' + SMALL, 'By Kavita’s count; across days without a read, an estimate.'));
-      side.appendChild(pages);
+      grid.appendChild(pages);
     }
     const active = Array.isArray(data.active) ? data.active.filter(Boolean) : [];
-    side.appendChild(barChart('data-ins-active', 'Active people each week', active, 'week', [['people', 'bg-frosted-blue/70']], function (w) {
+    grid.appendChild(barChart('data-ins-active', 'Active people each week', active, 'week', [['people', 'bg-frosted-blue/70']], function (w) {
       return 'Week of ' + dayLabel(w.week) + ': ' + people(w.people);
-    }, people, 'h-28 lg:h-20'));
-    grid.appendChild(side);
+    }, people, 'h-32'));
     box.appendChild(grid);
-    const tops = el('div', 'mt-10 grid gap-8 lg:grid-cols-3');
-    tops.appendChild(topList('Top books', data.top_books, true));
-    tops.appendChild(topList('Top authors', data.top_authors, false));
-    tops.appendChild(topList('Top series', data.top_series, false));
-    box.appendChild(tops);
-    const timed = [data.top_books, data.top_authors, data.top_series].some(function (rows) {
-      return Array.isArray(rows) && rows.some(function (r) { return r && num(r.listened_ms); });
-    });
-    if (timed) box.appendChild(el('p', 'mt-3 ' + SMALL, 'Times include listening in Plex apps, which is an estimate.'));
     return box;
   }
 
   // ---- Books ----
 
   function drawBooks(data) {
-    const box = el('div', 'mt-2');
+    const box = el('div', PANEL);
     const lines = unavailableLines(data.unavailable);
     if (lines) box.appendChild(lines);
     const now = Date.now();
     const cols = el('div', 'grid gap-8 lg:grid-cols-2 lg:gap-x-10');
 
-    const gone = el('section', 'mt-2 min-w-0');
+    const gone = el('section', 'min-w-0');
     gone.setAttribute('data-ins-abandoned', '');
     gone.appendChild(el('h3', H3, 'Abandoned'));
     gone.appendChild(el('p', SMALL, 'Unfinished and untouched for 30 days or more.'));
@@ -719,7 +1086,7 @@ export async function mount(ctx) {
     }
     cols.appendChild(gone);
 
-    const fin = el('section', 'mt-2 min-w-0');
+    const fin = el('section', 'min-w-0');
     fin.setAttribute('data-ins-finish', '');
     fin.appendChild(el('h3', H3, 'Finish rate'));
     fin.appendChild(el('p', SMALL, 'Books two or more people started in this period.'));
@@ -831,13 +1198,13 @@ export async function mount(ctx) {
   }
 
   function drawHabits(data) {
-    const box = el('div', 'mt-2');
+    const box = el('div', PANEL);
     const lines = unavailableLines(data.unavailable);
     if (lines) box.appendChild(lines);
     const split = data.split && typeof data.split === 'object' ? data.split : {};
     const web = num(split.web_ms);
     const plex = num(split.plex_ms);
-    const both = el('section', 'mt-2 lg:max-w-[880px]');
+    const both = el('section', 'lg:max-w-[880px]');
     both.setAttribute('data-ins-split', '');
     both.appendChild(el('h3', H3, 'Web player and Plex apps'));
     if (!web && !plex) {
@@ -966,10 +1333,56 @@ export async function mount(ctx) {
   });
   showPeriod();
 
+  // ---- Top users, history and Top played: their own filters ----
+
+  function whose(person) { return person ? '&person=' + encodeURIComponent(person) : ''; }
+
+  function loadTopUsers() {
+    return load('insTopUsers', 'ins-top-users', withZone(API + 'top-users?period=' + encodeURIComponent(state.topUsers)), drawTopUsers);
+  }
+
+  function loadHistory() {
+    state.history.data = null;
+    return load('insHistory', 'ins-history', withZone(API + 'history?period=' + encodeURIComponent(state.history.period) +
+      whose(state.history.person)), drawHistory);
+  }
+
+  function loadPlayed() {
+    return load('insTopPlayed', 'ins-top-played', withZone(API + 'top-played?period=' + encodeURIComponent(state.played.period) +
+      whose(state.played.person)), drawTopPlayed);
+  }
+
+  /** A filter: its choice, kept when it is one of `allowed`, then `then`. */
+  function filter(id, allowed, choose, then) {
+    const select = $(id);
+    select.addEventListener('change', function () {
+      if (allowed && allowed.indexOf(select.value) === -1) return;
+      choose(select.value);
+      then();
+    }, { signal: signal });
+  }
+
+  function busy(id) { $(id).setAttribute('aria-busy', 'true'); }
+
+  filter('insTopUsersPeriod', SPANS, function (v) { state.topUsers = v; }, function () { busy('insTopUsers'); loadTopUsers(); });
+  filter('insHistoryPeriod', SPANS, function (v) { state.history.period = v; }, function () { busy('insHistory'); loadHistory(); });
+  filter('insHistoryPerson', null, function (v) { state.history.person = /^[0-9a-f]{24}$/.test(v) ? v : ''; },
+    function () { busy('insHistory'); loadHistory(); });
+  // What the history shows is drawn again from what was read; nothing is asked for.
+  filter('insHistoryMedia', MEDIA, function (v) { state.history.media = v; }, function () {
+    if (state.history.data) setBody('insHistory', historyBody(state.history.data));
+  });
+  filter('insTopPlayedPeriod', SPANS, function (v) { state.played.period = v; }, function () { busy('insTopPlayed'); loadPlayed(); });
+  filter('insTopPlayedPerson', null, function (v) { state.played.person = /^[0-9a-f]{24}$/.test(v) ? v : ''; },
+    function () { busy('insTopPlayed'); loadPlayed(); });
+
   // ---- Boot ----
 
   const first = Promise.all([
     load('insNow', 'ins-now', API + 'now', drawNow),
+    loadTopUsers(),
+    loadHistory(),
+    loadPlayed(),
     load('insPeople', 'ins-people', API + 'people', drawPeople),
     loadPeriodSections()
   ]);

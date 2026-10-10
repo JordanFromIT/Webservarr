@@ -102,8 +102,9 @@ class ServerPeople(unittest.TestCase):
             calls.append((url, request.headers.get("x-plex-token")))
             if url == "https://clients.plex.tv/api/v2/shared_servers/owned/accepted":
                 return httpx.Response(status, json=[
-                    {"invitedId": 5, "invited": {"id": 5, "title": "Sam", "username": "sam", "email": "s@x.test"}},
-                    {"invitedId": 6, "invited": {"id": 6, "username": "kim"}},
+                    {"invitedId": 5, "invited": {"id": 5, "title": "Sam", "username": "sam", "email": "s@x.test",
+                                                 "thumb": "https://plex.tv/users/s5/avatar?c=1"}},
+                    {"invitedId": 6, "invited": {"id": 6, "username": "kim", "thumb": "https://elsewhere.test/k.png"}},
                     {"invitedId": 7, "invited": "junk"}, "junk"])
             if url == "https://plex.tv/api/v2/user":
                 return httpx.Response(200, json={"id": 99, "title": "Owner", "email": "o@x.test",
@@ -120,7 +121,8 @@ class ServerPeople(unittest.TestCase):
     def test_names_for_each_share_and_the_owner(self):
         calls = self.use()
         found = asyncio.run(plex_share.server_people())
-        self.assertEqual(found, {"owner": "99", "names": {"5": "Sam", "6": "kim", "99": "Owner"}})
+        self.assertEqual(found, {"owner": "99", "names": {"5": "Sam", "6": "kim", "99": "Owner"},
+                                 "thumbs": {"5": "https://plex.tv/users/s5/avatar?c=1"}})   # plex.tv's pictures only
         self.assertNotIn("x.test", repr(found))
         self.assertNotIn("OWNER-SENTINEL", repr(found))
         for url, token in calls:
