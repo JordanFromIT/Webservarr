@@ -1632,8 +1632,11 @@ export async function mount(ctx) {
           buttonEl.outerHTML = bookStatusBlock(states);
         }
         refreshBookDetail(String(mediaId));
+        // Both formats now asked for: the toast says so.
+        var bothAsked = BOOK_FORMATS.every(function (f) { return states[f.key] && states[f.key] !== 'available'; });
         showToast(answer.state === 'available' ? 'Already in the library'
-          : (title ? 'Requested ' + title : 'Requested'), 'success');
+          : (title ? 'Requested ' + title : 'Requested') +
+            (bothAsked ? '. We’ll look for both the ebook and the audiobook.' : ''), 'success');
       } else {
         // Swap the button for the matching status block, so the card holds its
         // shape and the click reads as the same element changing state.
@@ -2184,6 +2187,8 @@ export async function mount(ctx) {
     var allHere = BOOK_FORMATS.every(function (f) { return states[f.key] === 'available'; });
     var words = allHere ? 'Already in the library' : bookDetail(states);
     detailLine(line, words);
+    // The request goes for both formats: said while neither is here.
+    $('modalBookHint').classList.toggle('hidden', here);
     if (!here || !words) return;
     var seq = _detailSeq;
     var url = '/api/integrations/book-in-library?title=' + encodeURIComponent(item.short_title || item.title || '') +
@@ -2266,7 +2271,10 @@ export async function mount(ctx) {
     }
 
     if (book) showBookLine(item);
-    else detailLine($('modalLibrary'), '');
+    else {
+      detailLine($('modalLibrary'), '');
+      $('modalBookHint').classList.add('hidden');
+    }
     fillDetailActions(item);
 
     if (_dialog) return;

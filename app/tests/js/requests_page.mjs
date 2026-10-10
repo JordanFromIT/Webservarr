@@ -304,6 +304,14 @@ await run('phone search row: its own reserved row, folded once the bar moves dow
   } finally { t.release(); }
 });
 
+await run('the Trending books shelf says a request goes for both formats, once', async () => {
+  const html = REQUESTS_HTML;
+  const line = 'Every book request goes for both the ebook and the audiobook.';
+  const shelf = html.slice(html.indexOf('id="trendingBooksTitle"'), html.indexOf('id="trendingBooksRow"'));
+  check('under the Trending books heading', shelf.indexOf(line) !== -1);
+  check('said in two places only: the shelf and the detail', html.split(line).length - 1 === 2, html.split(line).length - 1);
+});
+
 // ---- Book search: real states, the book detail, and requests that report back ----
 
 const BANE = (over) => Object.assign({
@@ -375,6 +383,8 @@ await run('book detail: series, author, one Request for the book, request from i
     check('the author', t.q('#modalByline').textContent === 'by Drew Karpyshyn');
     check('year and description', t.q('#modalYear').textContent === '2007' && t.q('#modalOverview').textContent === 'Darth Bane takes an apprentice.');
     check('no line for a book nobody asked for', t.q('#modalLibrary').classList.contains('hidden'));
+    check('the detail says a request goes for both formats', !t.q('#modalBookHint').classList.contains('hidden') &&
+      t.q('#modalBookHint').textContent === 'Every book request goes for both the ebook and the audiobook.', t.q('#modalBookHint').textContent);
     const buttons = Array.from(t.q('#modalActionArea').querySelectorAll('button'));
     check('ONE Request button, for the book', buttons.length === 1 && buttons[0].getAttribute('data-action') === 'request-from-modal' &&
       buttons[0].getAttribute('data-media-type') === 'book' && /^Request\s+Book$/.test(buttons[0].textContent.trim()), buttons.map((b) => b.textContent));
@@ -389,7 +399,9 @@ await run('book detail: series, author, one Request for the book, request from i
     check('both formats alike: no per-format line', t.q('#modalLibrary').classList.contains('hidden'));
     const cardState = cardFor(t, 1).querySelector('[data-book-state]');
     check('and so does its card', !!cardState && cardState.getAttribute('data-book-state') === 'requested' && cardState.textContent.trim() === 'Book Requested');
-    check('a success toast naming it', toasts.indexOf('ok:Requested Rule of Two (Star Wars: Darth Bane, #2)') !== -1, toasts);
+    check('a success toast naming it, and both formats',
+      toasts.indexOf('ok:Requested Rule of Two (Star Wars: Darth Bane, #2). We’ll look for both the ebook and the audiobook.') !== -1, toasts);
+    check('the both-formats line stays after the request', !t.q('#modalBookHint').classList.contains('hidden'));
   } finally { t.release(); }
 });
 
@@ -422,6 +434,7 @@ await run('a book with one format here links its Books entry, and says where eac
     check('asked by title and author', asked.length === 1 && asked[0].indexOf('title=Path%20of%20Destruction') !== -1 && asked[0].indexOf('author=Drew%20Karpyshyn') !== -1, asked);
     const a = line.querySelector('a');
     check('a link to the Books entry, same words', !!a && a.getAttribute('href') === '/books/24' && a.textContent === 'Ebook in library, audiobook searching');
+    check('no both-formats line with a format here', t.q('#modalBookHint').classList.contains('hidden'));
     const blocks = Array.from(t.q('#modalActionArea').querySelectorAll('[data-book-state]'));
     check('one status block, naming the format still coming', blocks.length === 1 && blocks[0].textContent.trim() === 'Audiobook Searching', blocks.map((b) => b.textContent));
     t.q('[data-action="close-modal"]').click();
@@ -439,6 +452,8 @@ await run('the ebook here, the audiobook never asked for: Request asks for the r
     })(net);
     net.on('/api/integrations/chaptarr-search', () => ({ body: { results } }));
   });
+  const toasts = [];
+  globalThis.WSUI.toast = (m, k) => toasts.push(k + ':' + m);
   try {
     await searchBooks(t);
     check('the card offers the request', !!cardFor(t, 0).querySelector('[data-action="request-media"]'));
@@ -451,6 +466,7 @@ await run('the ebook here, the audiobook never asked for: Request asks for the r
     const block = t.q('#modalActionArea [data-book-state]');
     check('the block names the audiobook', !!block && block.textContent.trim() === 'Audiobook Requested', block && block.textContent);
     check('the line has both words', t.q('#modalLibrary').textContent === 'Ebook in library, audiobook requested', t.q('#modalLibrary').textContent);
+    check('the toast claims no second format', toasts.indexOf('ok:Requested Rule of Two (Star Wars: Darth Bane, #2)') !== -1, toasts);
   } finally { t.release(); }
 });
 
@@ -495,6 +511,7 @@ await run('film and show search results: each opens its detail', async () => {
     check('its description', t.q('#modalOverview').textContent === 'The sisterhood.');
     check('no Request for a show already here', !t.q('#modalActionArea button'));
     check('no book line on a show', t.q('#modalLibrary').classList.contains('hidden'));
+    check('no both-formats line on a show', t.q('#modalBookHint').classList.contains('hidden'));
   } finally { t.release(); }
 });
 

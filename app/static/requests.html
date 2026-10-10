@@ -352,7 +352,8 @@ html[data-rs-empty] #rsSection { display: none; }
   </div>
 </section>
 <section class="mb-6" aria-labelledby="trendingBooksTitle">
-  <h2 id="trendingBooksTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending books</h2>
+  <h2 id="trendingBooksTitle" class="text-lead font-bold text-frosted-blue mb-1">Trending books</h2>
+  <p id="trendingBooksHint" class="mb-3 text-label text-frosted-blue/70">Every book request goes for both the ebook and the audiobook.</p>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
@@ -673,6 +674,8 @@ Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</sp
         <!-- "Already in the library", a link to its Books entry once found. -->
         <p id="modalLibrary" class="hidden text-frosted-blue text-label font-semibold mb-3"></p>
         <div id="modalActionArea"></div>
+        <!-- A book's request goes for both formats; hidden while either is here. -->
+        <p id="modalBookHint" class="hidden mt-2 text-frosted-blue/70 text-label">Every book request goes for both the ebook and the audiobook.</p>
       </div>
     </div>
   </div>
