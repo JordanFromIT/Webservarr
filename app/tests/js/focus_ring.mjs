@@ -51,7 +51,7 @@ const secondary = hex('secondary');
 // toward the text colour, at the tint's own alpha (.25), over what is
 // behind, with no floor.
 const floor = (THEME.match(/--ws-frost-floor: ([\d.]+);/) || [])[1];
-const alpha = +(THEME.match(/\n  --ws-frost-tint: rgb\(var\(--color-secondary\) \/ (\.\d+)\);/) || [])[1];
+const alpha = +(THEME.match(/\n  --ws-frost-tint-a: (\.\d+);/) || [])[1];
 check('the tint is at .25', alpha === 0.25, alpha);
 const icy = tint(text, secondary, 0.3);
 const frost = tint(icy, tint(page, page, +floor), alpha);

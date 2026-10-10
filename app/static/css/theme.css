@@ -67,10 +67,18 @@
 
   --font-display: "Spline Sans", sans-serif;
 
-  /* How much every frosted surface blurs what is behind it (Settings >
-     Appearance > Frosted glass); the rest of the frost is under "Frosted
-     surfaces" below. 15px is the glass slab's own blur. */
+  /* How much every frosted surface blurs what is behind it, and the rest of
+     the frost's strengths (Settings > Appearance > Frosted glass); the recipe
+     that reads them is under "Frosted surfaces" below. These are the glass
+     slab's own: 15px of blur, the tint at .25, the highlight, depth and
+     saturation at 1 (100%), no sheen and no grain. */
   --ws-frost-blur: blur(15px);
+  --ws-frost-tint-a: .25;
+  --ws-frost-hl: 1;
+  --ws-frost-sheen: 0;
+  --ws-frost-grain: 0;
+  --ws-frost-depth: 1;
+  --ws-frost-sat: 1;
 
   /* The one focus colour: every :focus-visible ring, every field's focus
      ring and the Tailwind "focus" colour (outline-focus, ring-focus). It is
@@ -1047,7 +1055,7 @@ html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
 .ws-tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
   color: rgb(var(--color-text) / .7);
-  background: var(--ws-frost-ring-bar-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  background: var(--ws-frost-ring-bar-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
   -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   border-top: 1px solid var(--ws-frost-edge);
@@ -1212,19 +1220,30 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  * - shadow: a lit rim (white along the top and left inside edges), the
  *   thickness (a dark line and shade along the inside bottom, a faint inner
  *   glow of the text colour), then a layered lift (a contact shadow, a mid
- *   and a wide soft shadow) and a faint glow of the tint's own colour.
+ *   and a wide soft shadow) and a faint glow of the tint's own colour;
+ * - sheen and grain: a white wash from the top-left corner and a fine
+ *   fractal noise, both at 0 in the slab and there for the settings. The
+ *   grain is a background layer too (-webkit-cross-fade of the noise tile
+ *   with an empty one sets its opacity), so it also needs no pseudo-element;
+ *   a browser without cross-fade shows none.
  * A bar docked to the bottom edge (the phone tab bar) takes the same slab
  * turned over: the ring as one line along its top edge (--ws-frost-ring-bar)
  * and the shadow mirrored upward (--ws-frost-shadow-up), with only the top
- * light and the inner glow inside. No sheen, grain, live light or
- * refraction. The sign-in card (login.html .login-glass-card), the player's
- * notices and drop-down wear these tokens too.
+ * light and the inner glow inside. The sign-in card (login.html
+ * .login-glass-card), the player's notices and drop-down wear these tokens
+ * too.
  *
- * The blur is a setting (Settings > Appearance, theme.frost_blur): the page
- * renderer writes --ws-frost-blur into #ws-theme, which comes before this
- * file, so its default (15px) is with the colours' in :where(:root) at the
- * top, and loses to it. Every surface writes the filter as
- * var(--ws-frost-blur) var(--ws-frost-boost), so the setting moves them all.
+ * The strengths are settings (Settings > Appearance > Frosted glass): the
+ * page renderer writes them into #ws-theme, which comes before this file, as
+ * numbers (--ws-frost-blur as blur(Npx); --ws-frost-tint-a, -sheen and
+ * -grain as opacities; --ws-frost-hl, -depth and -sat as multipliers, 1 for
+ * the slab), so their defaults are with the colours' in :where(:root) at the
+ * top, and lose to them. Every value below is the slab's own times its
+ * strength in calc(), so the first paint is right and nothing is computed in
+ * script: highlight scales the rim, the ring and the inner glow; depth
+ * scales the thickness, the lift (its offsets and blurs too) and the glow;
+ * saturation moves saturate() and brightness() toward 1. Every surface
+ * writes the filter as var(--ws-frost-blur) var(--ws-frost-boost).
  *
  * No floor. The glass lays nothing dark under the tint, so what is behind
  * shows through at its own brightness, only blurred. That is a trade the
@@ -1238,28 +1257,42 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  * .ws-sheet-panel and .ws-sheet-head, so a frosted sheet takes the frost.
  */
 :root {
-  --ws-frost-tint: rgb(var(--color-secondary) / .25);
-  --ws-frost-glow: rgb(var(--color-secondary) / .14);
-  --ws-frost-boost: saturate(1.5) brightness(1.06);
+  --ws-frost-tint: rgb(var(--color-secondary) / var(--ws-frost-tint-a));
+  --ws-frost-glow: rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth)));
+  --ws-frost-boost: saturate(calc(1 + .5 * var(--ws-frost-sat))) brightness(calc(1 + .06 * var(--ws-frost-sat)));
   --ws-frost-edge: rgb(var(--color-text) / .12);
-  --ws-frost-ring: linear-gradient(135deg, rgb(255 255 255 / .55), rgb(var(--color-text) / .165) 40%, rgb(var(--color-text) / .04) 75%);
-  --ws-frost-ring-bar: linear-gradient(90deg, rgb(255 255 255 / .44), rgb(var(--color-text) / .138) 50%, rgb(var(--color-text) / .04));
+  --ws-frost-ring: linear-gradient(135deg, rgb(255 255 255 / calc(.55 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.165 * var(--ws-frost-hl))) 40%, rgb(var(--color-text) / .04) 75%);
+  --ws-frost-ring-bar: linear-gradient(90deg, rgb(255 255 255 / calc(.44 * var(--ws-frost-hl))), rgb(var(--color-text) / calc(.138 * var(--ws-frost-hl))) 50%, rgb(var(--color-text) / .04));
   --ws-frost-ring-layer: none;
   --ws-frost-ring-bar-layer: none;
+  --ws-frost-sheen-layer: linear-gradient(160deg, rgb(255 255 255 / var(--ws-frost-sheen)), rgb(255 255 255 / 0) 45%);
+  --ws-frost-grain-layer: none;
+  /* The noise tile and an empty one of the same size (grain, above). */
+  --ws-frost-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --ws-frost-noise-none: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'/%3E");
+  /* What every surface paints under its ring: the sheen, the grain, the tint. */
+  --ws-frost-fill: var(--ws-frost-sheen-layer), var(--ws-frost-grain-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));
   --ws-frost-shadow:
-    inset 0 1px 0 rgb(255 255 255 / .38), inset 1px 0 0 rgb(255 255 255 / .14),
-    inset 0 -1px 0 rgb(0 0 0 / .256), inset 0 -12px 24px -12px rgb(0 0 0 / .32), inset 0 0 24px rgb(var(--color-text) / .07),
-    0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -4px rgb(0 0 0 / .32), 0 24px 56px -16px rgb(0 0 0 / .5), 0 0 40px -8px var(--ws-frost-glow);
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 1px 0 0 rgb(255 255 255 / calc(.14 * var(--ws-frost-hl))),
+    inset 0 -1px 0 rgb(0 0 0 / calc(.256 * var(--ws-frost-depth))), inset 0 -12px 24px -12px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
   --ws-frost-shadow-up:
-    inset 0 1px 0 rgb(255 255 255 / .38), inset 0 0 24px rgb(var(--color-text) / .07),
-    0 -1px 2px rgb(0 0 0 / .4), 0 -6px 16px -4px rgb(0 0 0 / .32), 0 -24px 56px -16px rgb(0 0 0 / .5), 0 0 40px -8px var(--ws-frost-glow);
+    inset 0 1px 0 rgb(255 255 255 / calc(.38 * var(--ws-frost-hl))), inset 0 0 24px rgb(var(--color-text) / calc(.07 * var(--ws-frost-hl))),
+    0 -1px 2px rgb(0 0 0 / calc(.4 * min(var(--ws-frost-depth), 1.5))),
+    0 calc(-6px * var(--ws-frost-depth)) calc(16px * var(--ws-frost-depth)) -4px rgb(0 0 0 / calc(.32 * var(--ws-frost-depth))),
+    0 calc(-24px * var(--ws-frost-depth)) calc(56px * var(--ws-frost-depth)) -16px rgb(0 0 0 / calc(.5 * var(--ws-frost-depth))),
+    0 0 calc(40px * max(var(--ws-frost-depth), .5)) -8px var(--ws-frost-glow);
   --ws-frost-floor: 0;
   --ws-frost-floor-on-scrim: 0;
 }
 @supports (color: color-mix(in srgb, red, blue)) {
   :root {
-    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / .25) 70%, rgb(var(--color-text) / .25));
-    --ws-frost-glow: color-mix(in srgb, rgb(var(--color-secondary) / .14) 70%, rgb(var(--color-text) / .14));
+    --ws-frost-tint: color-mix(in srgb, rgb(var(--color-secondary) / var(--ws-frost-tint-a)) 70%, rgb(var(--color-text) / var(--ws-frost-tint-a)));
+    --ws-frost-glow: color-mix(in srgb, rgb(var(--color-secondary) / calc(.14 * var(--ws-frost-depth))) 70%, rgb(var(--color-text) / calc(.14 * var(--ws-frost-depth))));
   }
 }
 /* The ring layers, as a background layer each surface puts first: "none"
@@ -1271,8 +1304,15 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
     --ws-frost-ring-bar-layer: var(--ws-frost-ring-bar) border-box border-area;
   }
 }
+/* The grain layer: the noise tile faded toward the empty one, so its
+   opacity is the setting (cross-fade's percentage is the second image's). */
+@supports (background-image: -webkit-cross-fade(url("a.png"), url("b.png"), 50%)) {
+  :root {
+    --ws-frost-grain-layer: -webkit-cross-fade(var(--ws-frost-noise), var(--ws-frost-noise-none), calc((1 - var(--ws-frost-grain)) * 100%)) 0 0 / 160px 160px;
+  }
+}
 .ws-frost {
-  background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
   -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   border-color: var(--ws-frost-edge);
@@ -2099,7 +2139,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   padding: 12px 12px 12px 16px; border-radius: 16px; border: 1px solid var(--ws-frost-edge);
   color: rgb(var(--color-text));
   /* The site's one frosted surface (the .ws-frost tokens), as the toasts. */
-  background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
   -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost); backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   box-shadow: var(--ws-frost-shadow);
   animation: ws-fade-up 180ms ease-out both;
@@ -2401,7 +2441,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-full.is-window {
   inset: auto; left: 0; top: 0; width: 400px; display: flex; flex-direction: column; overflow: visible;
   color: rgb(var(--color-text)); border-radius: 16px; border: 1px solid var(--ws-frost-edge);
-  background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
   -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
   box-shadow: var(--ws-frost-shadow);
@@ -2432,7 +2472,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   display: block; position: absolute; top: -7px; left: var(--wsp-caret, 50%); width: 12px; height: 12px; margin-left: -6px;
   transform: rotate(45deg); border-radius: 2px 0 0 0; clip-path: polygon(0 0, 100% 0, 0 100%);
   border-top: 1px solid var(--ws-frost-edge); border-left: 1px solid var(--ws-frost-edge);
-  background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), rgb(var(--color-background) / var(--ws-frost-floor));
+  background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));
 }
 
 /* Its top bar: "Now playing", Playback settings, Pop out, then Collapse

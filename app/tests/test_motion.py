@@ -639,7 +639,7 @@ class LoginDrift(unittest.TestCase):
     def test_the_card_glass_and_the_form_reveal_are_untouched(self):
         glass = css_rule(LOGIN, ".login-glass-card")
         # The glass is the site's frost tokens (test_frost.py pins their values).
-        self.assertIn("background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint))", glass)
+        self.assertIn("background: var(--ws-frost-ring-layer), var(--ws-frost-fill)", glass)
         self.assertIn("backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost)", glass)
         self.assertIn("#loginForm { visibility: hidden; }", LOGIN)
         self.assertIn("#loginForm.auth-ready { visibility: visible; }", LOGIN)

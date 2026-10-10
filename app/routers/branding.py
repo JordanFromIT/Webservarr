@@ -14,7 +14,7 @@ from app.icons import icon_or
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    COLOR_KEYS, HOME_SECTION_IDS, LOGIN_CARD_POSITIONS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color,
+    COLOR_KEYS, FROST_STRENGTHS, HOME_SECTION_IDS, LOGIN_CARD_POSITIONS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color,
     safe_font, switch_is_off,
 )
 from app.utils import safe_http_url, same_origin_path
@@ -183,6 +183,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # The frosted surfaces' blur in px, inside the registry's bounds; the
         # page renderer and theme-loader.js write it as --ws-frost-blur.
         "frost_blur": _registry_int("theme.frost_blur", get("theme.frost_blur")),
+        # The rest of the frost's strengths, whole numbers in their registry
+        # bounds (pages.FROST_KNOBS writes each as a --ws-frost-* property).
+        **{k: _registry_int("theme." + k, get("theme." + k)) for k in FROST_STRENGTHS},
         "custom_css": get("theme.custom_css"),
         "features": {
             "show_simple_auth": get("features.show_simple_auth") == "true",

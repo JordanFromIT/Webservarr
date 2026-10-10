@@ -633,16 +633,18 @@ function onward(list, newest = {}) {
     return at < 0 ? '' : css.slice(at, css.indexOf('}', at));
   };
   const frost = rule('.ws-frost');
-  check('the shared frost is the glass slab: the secondary mixed 30% toward the text colour at 25% over a 15px blur with its boost, a gradient ring',
-    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ \.25\)/.test(css) &&
-    /--ws-frost-tint: color-mix\(in srgb, rgb\(var\(--color-secondary\) \/ \.25\) 70%, rgb\(var\(--color-text\) \/ \.25\)\)/.test(css) &&
+  check('the shared frost is the glass slab: the secondary mixed 30% toward the text colour at the tint setting (.25) over a 15px blur with its boost, a gradient ring',
+    /--ws-frost-tint: rgb\(var\(--color-secondary\) \/ var\(--ws-frost-tint-a\)\)/.test(css) &&
+    /--ws-frost-tint: color-mix\(in srgb, rgb\(var\(--color-secondary\) \/ var\(--ws-frost-tint-a\)\) 70%, rgb\(var\(--color-text\) \/ var\(--ws-frost-tint-a\)\)\)/.test(css) &&
+    /--ws-frost-tint-a: \.25;/.test(css) &&
     /--ws-frost-blur: blur\(15px\)/.test(css) &&
-    /--ws-frost-boost: saturate\(1\.5\) brightness\(1\.06\);/.test(css) &&
+    /--ws-frost-boost: saturate\(calc\(1 \+ \.5 \* var\(--ws-frost-sat\)\)\) brightness\(calc\(1 \+ \.06 \* var\(--ws-frost-sat\)\)\);/.test(css) &&
+    /--ws-frost-sat: 1;/.test(css) &&
     /--ws-frost-edge: rgb\(var\(--color-text\) \/ \.12\)/.test(css) &&
     /--ws-frost-ring-layer: var\(--ws-frost-ring\) border-box border-area;/.test(css) &&
     /-webkit-backdrop-filter: var\(--ws-frost-blur\) var\(--ws-frost-boost\)/.test(frost) &&
     /\bbackdrop-filter: var\(--ws-frost-blur\) var\(--ws-frost-boost\)/.test(frost) &&
-    /background: var\(--ws-frost-ring-layer\), /.test(frost) &&
+    /background: var\(--ws-frost-ring-layer\), var\(--ws-frost-fill\), /.test(frost) &&
     /rgb\(var\(--color-background\) \/ var\(--ws-frost-floor\)\)/.test(frost), frost);
   // No floor, by the owner's choice: over very bright art the panel's words
   // lose contrast; a sheet keeps only its scrim (app/tests/test_frost.py).

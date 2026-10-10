@@ -1047,7 +1047,11 @@ class AppearanceTab(unittest.TestCase):
 
     def test_reset_asks_first(self):
         code = js_code_only(APPEARANCE.read_text(encoding="utf-8"))
-        self.assertEqual(len(re.findall(r"\bapi\.stageDefaults\(", code)), 1)
+        # The whole tab asks first; the frosted glass's own resets (one
+        # slider, or the card's seven) only stage their defaults, which the
+        # save bar's Discard undoes, so they don't.
+        calls = re.findall(r"\bapi\.stageDefaults\(([^)]*)\)", code)
+        self.assertEqual(sorted(calls), sorted(["KEYS", "[f.key]", "FROST_KEYS"]))
         ask = re.search(r"WSSettings\.confirm\(\{([^{}]*)\}\)\.then\(function \(ok\) \{\s*"
                         r"if \(ok\) api\.stageDefaults\(KEYS\);\s*\}\)", code)
         self.assertIsNotNone(ask, "Reset stages the defaults without asking")

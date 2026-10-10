@@ -13,13 +13,13 @@
       background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);
     }
     /* Light glass over the rotating artwork: the site's frost tokens
-       (theme.css), the glass slab's tint, ring and shadow, with the blur
-       from Settings > Appearance and its boost like every other frosted
-       surface. The owner asked for the card to be clearly see-through, so
+       (theme.css), the glass slab's ring, fill (sheen, grain, tint) and
+       shadow, with the blur and strengths from Settings > Appearance like
+       every other frosted surface. The owner asked for the card to be clearly see-through, so
        no dark underlay (that was judged too solid), only the page's own
        overlay under it. */
     .login-glass-card {
-      background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));
+      background: var(--ws-frost-ring-layer), var(--ws-frost-fill);
       -webkit-backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
       backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);
       border: 1px solid var(--ws-frost-edge);

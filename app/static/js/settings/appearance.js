@@ -2,10 +2,13 @@
  * Settings > Appearance: colours (with a live preview), the top bar's meter colours,
  * status colours, font, the frosted glass's blur, custom CSS.
  *
- * The blur slider restyles every frosted surface on the page as it moves
- * (--ws-frost-blur on <html>, as theme-loader.js sets it) and shows it on a
+ * The frosted glass sliders (tint, blur, highlight, sheen, grain, shadow
+ * depth, saturation boost) restyle every frosted surface on the page as they
+ * move (the --ws-frost-* custom properties on <html>, as theme-loader.js sets
+ * them; theme.css's one recipe does the rest in calc()) and show it on a
  * sample pane over a row of posters; Discard and leaving put the saved
- * blur back as they do the colours.
+ * values back as they do the colours. Each has its own Reset, and the card
+ * one for all of them.
  *
  * Contrast guard: as colours change, the pairs the site leans on (PAIRS) are
  * measured with WCAG 2's formula and any that fall short get a plain warning
@@ -74,10 +77,40 @@
     'Nunito Sans', 'Cabin', 'Karla', 'Quicksand', 'Exo 2'];
   // How much every frosted surface blurs what is behind it, in px (--ws-frost-blur).
   var BLUR = 'theme.frost_blur';
+  // The frosted glass's sliders, in the card's order: the setting, its label,
+  // the custom property it drives (app/pages.py FROST_VARS writes the same
+  // one), how that property is written, how the value reads beside the
+  // slider and to a screen reader, and a line of help.
+  function alpha(n) { return n === 0 ? '0' : '.' + (n < 10 ? '0' : '') + n; }
+  function pct(n) { return n + '%'; }
+  var FROST = [
+    { key: 'theme.frost_tint', label: 'Tint', cssVar: '--ws-frost-tint-a', css: function (n) { return String(n / 100); },
+      show: alpha, say: function (n) { return n === 0 ? 'No tint' : 'Opacity ' + n / 100; },
+      help: 'How strongly the glass is coloured. The default is .25.' },
+    { key: BLUR, label: 'Blur', cssVar: '--ws-frost-blur', css: function (n) { return 'blur(' + n + 'px)'; },
+      show: function (n) { return n + ' px'; }, say: function (n) { return n === 0 ? 'No blur' : n + ' pixels'; },
+      help: '0 px is clear glass. The default is 15 px.' },
+    { key: 'theme.frost_highlight', label: 'Highlight', cssVar: '--ws-frost-hl', css: function (n) { return String(n / 100); },
+      show: pct, say: function (n) { return n + ' percent'; },
+      help: 'The light along the top edge and the bright border.' },
+    { key: 'theme.frost_sheen', label: 'Sheen', cssVar: '--ws-frost-sheen', css: function (n) { return String(n / 100); },
+      show: alpha, say: function (n) { return n === 0 ? 'No sheen' : 'Opacity ' + n / 100; },
+      help: 'A soft wash of light from the top-left corner. Off by default.' },
+    { key: 'theme.frost_grain', label: 'Grain', cssVar: '--ws-frost-grain', css: function (n) { return String(n / 100); },
+      show: alpha, say: function (n) { return n === 0 ? 'No grain' : 'Opacity ' + n / 100; },
+      help: 'A fine etched texture on the glass. Off by default.' },
+    { key: 'theme.frost_depth', label: 'Shadow depth', cssVar: '--ws-frost-depth', css: function (n) { return String(n / 100); },
+      show: pct, say: function (n) { return n + ' percent'; },
+      help: 'The shade inside the glass and the shadow under it.' },
+    { key: 'theme.frost_saturation', label: 'Saturation boost', cssVar: '--ws-frost-sat', css: function (n) { return String(n / 100); },
+      show: pct, say: function (n) { return n + ' percent'; },
+      help: 'How much richer the colours behind the glass look.' }
+  ];
+  var FROST_KEYS = FROST.map(function (f) { return f.key; });
   var KEYS = COLORS.map(function (c) { return c[0]; })
     .concat(MEDIA.map(function (m) { return m[0]; }), [NEW_FLAG[0]], [GAUGES_ON],
       GAUGES.map(function (g) { return g[0]; }), STATUS.map(function (x) { return x[0]; }),
-      ['theme.font', BLUR, 'theme.custom_css']);
+      ['theme.font'], FROST_KEYS, ['theme.custom_css']);
   var OTHER = '__other__';
   var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
 
@@ -343,38 +376,47 @@
 
   // ---- Frosted glass ----
 
-  // The blur the site paints for a value, by the server's rule
+  // The number the site paints for a value, by the server's rule
   // (branding._registry_int): a whole number, held inside the registry's
   // bounds; anything else is the default.
-  function blurPx(v) {
-    var m = WSSettings.metaFor(BLUR) || {};
-    var lo = m.min != null ? Number(m.min) : 0, hi = m.max != null ? Number(m.max) : 32;
+  function frostValue(key, v) {
+    var m = WSSettings.metaFor(key) || {};
+    var lo = m.min != null ? Number(m.min) : 0, hi = m.max != null ? Number(m.max) : 0;
     var def = parseInt(m.default, 10);
-    if (isNaN(def)) def = 15;
+    if (isNaN(def)) def = lo;
     var s = String(v == null ? '' : v).trim();
     var n = parseInt(s, 10);
     if (isNaN(n) || String(Number(s)) !== String(n)) return def;      // "4.5", "4px", "1e1"
     return Math.max(lo, Math.min(hi, n));
   }
 
-  function blurControl(api) {
-    var m = WSSettings.metaFor(BLUR) || {};
-    var wrap = el('div', 'min-w-0 ' + cls.fieldWidth);
+  function frostControl(api, f) {
+    var m = WSSettings.metaFor(f.key) || {};
+    var def = frostValue(f.key, m.default);
+    var wrap = el('div', 'min-w-0');
     var range = el('input', 'wsp-range');
     range.type = 'range';
-    range.id = 'ws-f-theme-frost-blur';
+    range.id = 'ws-f-' + f.key.replace(/[._]/g, '-');
     range.min = String(m.min != null ? m.min : 0);
-    range.max = String(m.max != null ? m.max : 32);
+    range.max = String(m.max != null ? m.max : 100);
     range.step = '1';
-    var top = el('div', 'flex items-baseline justify-between gap-4');
-    var label = el('label', cls.label, 'Blur');
+    var top = el('div', 'flex items-center justify-between gap-3 min-h-6 mb-1.5');
+    var label = el('label', cls.label.replace(' mb-1.5', ''), f.label);
     label.htmlFor = range.id;
+    var right = el('div', 'flex items-center gap-1');
     // The number for sighted readers; the slider says it itself (aria-valuetext).
     var shown = el('span', 'text-[13px] font-semibold text-frosted-blue tabular-nums');
     shown.setAttribute('aria-hidden', 'true');
+    var reset = el('button', 'inline-flex items-center min-h-6 px-2 rounded-md text-[13px] font-semibold ' +
+      'text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/10 disabled:opacity-40 ' +
+      'disabled:hover:bg-transparent disabled:cursor-default', 'Reset');
+    reset.type = 'button';
+    reset.setAttribute('aria-label', 'Reset ' + f.label.toLowerCase() + ' to default');
+    right.appendChild(shown);
+    right.appendChild(reset);
     top.appendChild(label);
-    top.appendChild(shown);
-    var help = el('p', cls.help, '0 px is clear glass. The default is 15 px.');
+    top.appendChild(right);
+    var help = el('p', cls.help, f.help);
     help.id = range.id + '-help';
     var err = el('p', cls.error + ' hidden');
     err.id = range.id + '-error';
@@ -386,17 +428,19 @@
     wrap.appendChild(err);
 
     function paint(v) {
-      var px = blurPx(v);
+      var n = frostValue(f.key, v);
       var lo = Number(range.min), hi = Number(range.max);
-      range.value = String(px);
+      range.value = String(n);
       // The player's slider fills to --wsp-p (theme.css .wsp-range).
-      range.style.setProperty('--wsp-p', (hi > lo ? (px - lo) / (hi - lo) * 100 : 0) + '%');
-      range.setAttribute('aria-valuetext', px === 0 ? 'No blur' : px + ' pixels');
-      shown.textContent = px + ' px';
-      root.style.setProperty('--ws-frost-blur', 'blur(' + px + 'px)');
+      range.style.setProperty('--wsp-p', (hi > lo ? (n - lo) / (hi - lo) * 100 : 0) + '%');
+      range.setAttribute('aria-valuetext', f.say(n));
+      shown.textContent = f.show(n);
+      reset.disabled = n === def;
+      root.style.setProperty(f.cssVar, f.css(n));
     }
-    range.addEventListener('input', function () { api.set(BLUR, range.value); }, { signal: signal });
-    api.track(BLUR, { get: function () { return range.value; }, set: paint, el: range, errorEl: err });
+    range.addEventListener('input', function () { api.set(f.key, range.value); }, { signal: signal });
+    reset.addEventListener('click', function () { api.stageDefaults([f.key]); }, { signal: signal });
+    api.track(f.key, { get: function () { return range.value; }, set: paint, el: range, errorEl: err });
     return wrap;
   }
 
@@ -406,7 +450,7 @@
     var stage = el('div', 'relative h-44 overflow-hidden rounded-2xl border border-frosted-blue/10 ' +
       'bg-frosted-blue/[0.04] ' + cls.fieldWidth);
     stage.setAttribute('role', 'group');
-    stage.setAttribute('aria-label', 'Blur preview');
+    stage.setAttribute('aria-label', 'Frosted glass preview');
     var behind = el('div', 'absolute inset-0 p-4');
     behind.setAttribute('aria-hidden', 'true');
     behind.appendChild(el('p', 'text-[20px] font-bold tracking-tight text-frosted-blue whitespace-nowrap',
@@ -574,9 +618,20 @@
       form.appendChild(type.root);
 
       var glass = WSSettings.card('Frosted glass',
-        'Menus, pop-ups, dialogs and the sign-in card are frosted glass. Choose how much they blur what is behind them.');
-      glass.body.appendChild(blurControl(api));
+        'Menus, pop-ups, dialogs, the search bar and the sign-in card are frosted glass. Choose how it looks.');
+      var sliders = el('div', 'grid sm:grid-cols-2 gap-x-8 gap-y-6 ' + cls.fieldWidth);
+      FROST.forEach(function (f) { sliders.appendChild(frostControl(api, f)); });
+      glass.body.appendChild(sliders);
       glass.body.appendChild(blurSample());
+      var resetGlass = el('button', cls.btnQuiet);
+      resetGlass.type = 'button';
+      resetGlass.appendChild(icon('restart_alt', 'text-base'));
+      resetGlass.appendChild(document.createTextNode('Reset frosted glass to default'));
+      // Stages the defaults only: nothing is saved until Save, and Discard undoes it.
+      resetGlass.addEventListener('click', function () { api.stageDefaults(FROST_KEYS); }, { signal: signal });
+      var resetRow = el('div');
+      resetRow.appendChild(resetGlass);
+      glass.body.appendChild(resetRow);
       form.appendChild(glass.root);
 
       var adv = el('details', 'mb-12 group');
@@ -600,7 +655,7 @@
       reset.addEventListener('click', function () {
         WSSettings.confirm({
           title: 'Reset appearance?',
-          body: 'Colours, font, blur and custom CSS go back to the originals. You can review the changes; nothing is saved until you press Save.',
+          body: 'Colours, font, frosted glass and custom CSS go back to the originals. You can review the changes; nothing is saved until you press Save.',
           confirmLabel: 'Reset', cancelLabel: 'Cancel'
         }).then(function (ok) { if (ok) api.stageDefaults(KEYS); });
       }, { signal: signal });

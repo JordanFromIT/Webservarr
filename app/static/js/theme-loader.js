@@ -16,6 +16,17 @@
 (function () {
   'use strict';
 
+  // The frost's strengths: [payload key, custom property, registry maximum]
+  // (app/settings_registry.py theme.frost_*; the minimum is 0 for each).
+  var FROST = [
+    ['frost_tint', '--ws-frost-tint-a', 60],
+    ['frost_highlight', '--ws-frost-hl', 200],
+    ['frost_sheen', '--ws-frost-sheen', 30],
+    ['frost_grain', '--ws-frost-grain', 15],
+    ['frost_depth', '--ws-frost-depth', 200],
+    ['frost_saturation', '--ws-frost-sat', 200]
+  ];
+
   /**
    * Convert hex color to space-separated RGB triplet for Tailwind opacity support.
    * e.g. "#125793" → "18 87 147"
@@ -60,11 +71,20 @@
     });
 
     // Every frosted surface's blur (--ws-frost-blur), as the server's
-    // #ws-theme writes it: a whole number of px from 0 to 32.
+    // #ws-theme writes it: a whole number of px from 0 to 64.
     var blur = data.frost_blur;
-    if (typeof blur === 'number' && blur % 1 === 0 && blur >= 0 && blur <= 32) {
+    if (typeof blur === 'number' && blur % 1 === 0 && blur >= 0 && blur <= 64) {
       root.style.setProperty('--ws-frost-blur', 'blur(' + blur + 'px)');
     }
+    // The rest of the frost's strengths, as #ws-theme writes them (app/pages.py
+    // FROST_VARS): a whole number in its registry bounds, sent as hundredths.
+    // Anything else leaves the server's value in place.
+    FROST.forEach(function (f) {
+      var v = data[f[0]];
+      if (typeof v === 'number' && v % 1 === 0 && v >= 0 && v <= f[2]) {
+        root.style.setProperty(f[1], String(v / 100));
+      }
+    });
 
     // Favicon follows the configured logo, so a rebranded install is branded
     // in the browser tab too. The pages ship a static icon link as well.

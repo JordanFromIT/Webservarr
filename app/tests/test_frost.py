@@ -59,12 +59,6 @@ def default_rgb(name: str) -> tuple:
     return tuple(int(x) for x in m.groups())
 
 
-def alpha_of(expr: str) -> float:
-    m = re.search(r"/ \.?([\d.]+)\)", expr)
-    assert m, expr
-    v = m.group(1)
-    return float(v if "." in v or v in ("0", "1") else "." + v)
-
 
 def lum(rgb) -> float:
     def ch(c):
@@ -93,7 +87,7 @@ def icy(text=None) -> tuple:
 
 def frosted(behind, floor=0.0):
     """What the frost paints over `behind`: the floor, then the tint."""
-    tint = alpha_of(token("--ws-frost-tint"))
+    tint = strength("--ws-frost-tint-a")
     return over(icy(), tint, over(default_rgb("background"), floor, behind))
 
 
@@ -103,8 +97,51 @@ def supported_tint() -> str:
 
 
 BACKDROP = "backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);"
-SLAB_BG = ("background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
-           "rgb(var(--color-background) / var(--ws-frost-floor));")
+SLAB_BG = "background: var(--ws-frost-ring-layer), var(--ws-frost-fill), rgb(var(--color-background) / var(--ws-frost-floor));"
+
+
+def strength(name: str) -> float:
+    """A frost strength's default (theme.css :where(:root)), as a number."""
+    m = re.search(r":where\(:root\) \{.*?\n  " + re.escape(name) + r": ([\d.]+);", THEME, flags=re.S)
+    assert m, name
+    return float(m.group(1))
+
+
+def _num(v: float, unit: str = "") -> str:
+    out = f"{round(v, 4):g}"
+    if not unit:
+        out = re.sub(r"^(-?)0\.", r"\1.", out)
+    return out + unit
+
+
+def _arith(body: str) -> float:
+    """A calc() body of numbers joined by + and * (the recipe's only forms)."""
+    total = 0.0
+    for term in body.split(" + "):
+        v = 1.0
+        for factor in term.split("*"):
+            v *= float(factor.strip())
+        total += v
+    return total
+
+
+def at_defaults(expr: str) -> str:
+    """A token with every strength at its default and each calc(), min() and
+    max() worked out: what the browser paints with the shipped settings."""
+    expr = re.sub(r"var\((--ws-frost-(?:tint-a|hl|sheen|grain|depth|sat))\)", lambda m: repr(strength(m.group(1))), expr)
+    pat = re.compile(r"(calc|min|max)\(([^()]*)\)")
+    while True:
+        m = pat.search(expr)
+        if not m:
+            return expr
+        fn, body = m.groups()
+        unit = "px" if "px" in body else ""
+        if fn == "calc":
+            v = _arith(body.replace("px", ""))
+        else:
+            args = [float(a.replace("px", "")) for a in body.split(",")]
+            v = min(args) if fn == "min" else max(args)
+        expr = expr[:m.start()] + _num(v, unit) + expr[m.end():]
 
 
 # Every surface that floats over the page, and the text that shows its class.
@@ -154,12 +191,14 @@ class OneFrost(unittest.TestCase):
     def test_the_tokens_are_the_icy_glass(self):
         # The card wears the tokens themselves, so its blur follows the setting.
         card = re.search(r"\.login-glass-card \{([^}]*)\}", LOGIN).group(1)
-        self.assertIn("background: var(--ws-frost-ring-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint));", card)
-        # The icy tint: the secondary mixed 30% toward the text colour, at 25%,
-        # from the palette's own tokens; without color-mix() the secondary at 25%.
-        self.assertEqual(supported_tint(), "color-mix(in srgb, rgb(var(--color-secondary) / .25) 70%, "
-                                           "rgb(var(--color-text) / .25))")
-        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / .25)")
+        self.assertIn("background: var(--ws-frost-ring-layer), var(--ws-frost-fill);", card)
+        # The icy tint: the secondary mixed 30% toward the text colour, at the
+        # tint setting (.25 by default), from the palette's own tokens; without
+        # color-mix() the secondary at that alpha.
+        self.assertEqual(supported_tint(), "color-mix(in srgb, rgb(var(--color-secondary) / var(--ws-frost-tint-a)) 70%, "
+                                           "rgb(var(--color-text) / var(--ws-frost-tint-a)))")
+        self.assertEqual(token("--ws-frost-tint"), "rgb(var(--color-secondary) / var(--ws-frost-tint-a))")
+        self.assertEqual(strength("--ws-frost-tint-a"), .25)
         self.assertEqual(tuple(round(c) for c in icy()), (88, 148, 186))
         self.assertIn("-webkit-" + BACKDROP, card)
         self.assertIn("\n      " + BACKDROP, card)
@@ -221,13 +260,15 @@ class OneFrost(unittest.TestCase):
 
 class TheGlassSlab(unittest.TestCase):
     """D8, the glass slab, at tint .25 and blur 15 with every strength at 100%:
-    the mockup's recipe() output, layer by layer."""
+    the mockup's recipe() output, layer by layer. The tokens multiply the
+    slab's own values by the strength settings (test_frost_settings.py); at
+    the defaults they are exactly these."""
 
     def test_backdrop_boost(self):
-        self.assertEqual(token("--ws-frost-boost"), "saturate(1.5) brightness(1.06)")
+        self.assertEqual(at_defaults(token("--ws-frost-boost")), "saturate(1.5) brightness(1.06)")
 
     def test_the_ring_is_a_gradient_border_from_the_top_left(self):
-        self.assertEqual(token("--ws-frost-ring"),
+        self.assertEqual(at_defaults(token("--ws-frost-ring")),
                          "linear-gradient(135deg, rgb(255 255 255 / .55), rgb(var(--color-text) / .165) 40%, "
                          "rgb(var(--color-text) / .04) 75%)")
         # Drawn in the border's own area: it follows every corner, stays put
@@ -243,33 +284,37 @@ class TheGlassSlab(unittest.TestCase):
         self.assertEqual(token("--ws-frost-ring-bar-layer"), "none")
 
     def test_the_shadow_is_rim_thickness_lift_and_glow(self):
-        self.assertEqual(token("--ws-frost-shadow"), ", ".join([
+        self.assertEqual(at_defaults(token("--ws-frost-shadow")), ", ".join([
             "inset 0 1px 0 rgb(255 255 255 / .38)", "inset 1px 0 0 rgb(255 255 255 / .14)",
             "inset 0 -1px 0 rgb(0 0 0 / .256)", "inset 0 -12px 24px -12px rgb(0 0 0 / .32)",
             "inset 0 0 24px rgb(var(--color-text) / .07)",
             "0 1px 2px rgb(0 0 0 / .4)", "0 6px 16px -4px rgb(0 0 0 / .32)", "0 24px 56px -16px rgb(0 0 0 / .5)",
             "0 0 40px -8px var(--ws-frost-glow)"]))
         # The glow is the tint's own colour (the same mix) at .14.
-        self.assertEqual(token("--ws-frost-glow"), "rgb(var(--color-secondary) / .14)")
-        self.assertEqual(supported("color: color-mix(in srgb, red, blue)")["--ws-frost-glow"],
+        self.assertEqual(at_defaults(token("--ws-frost-glow")), "rgb(var(--color-secondary) / .14)")
+        self.assertEqual(at_defaults(supported("color: color-mix(in srgb, red, blue)")["--ws-frost-glow"]),
                          "color-mix(in srgb, rgb(var(--color-secondary) / .14) 70%, rgb(var(--color-text) / .14))")
 
     def test_the_docked_bar_takes_it_turned_over(self):
-        self.assertEqual(token("--ws-frost-ring-bar"),
+        self.assertEqual(at_defaults(token("--ws-frost-ring-bar")),
                          "linear-gradient(90deg, rgb(255 255 255 / .44), rgb(var(--color-text) / .138) 50%, "
                          "rgb(var(--color-text) / .04))")
-        self.assertEqual(token("--ws-frost-shadow-up"), ", ".join([
+        self.assertEqual(at_defaults(token("--ws-frost-shadow-up")), ", ".join([
             "inset 0 1px 0 rgb(255 255 255 / .38)", "inset 0 0 24px rgb(var(--color-text) / .07)",
             "0 -1px 2px rgb(0 0 0 / .4)", "0 -6px 16px -4px rgb(0 0 0 / .32)", "0 -24px 56px -16px rgb(0 0 0 / .5)",
             "0 0 40px -8px var(--ws-frost-glow)"]))
         bar = re.search(r"\n\.ws-tabbar \{([^}]*)\}", THEME).group(1)
-        self.assertIn("background: var(--ws-frost-ring-bar-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), ", bar)
+        self.assertIn("background: var(--ws-frost-ring-bar-layer), var(--ws-frost-fill), ", bar)
         self.assertIn("border-top: 1px solid var(--ws-frost-edge);", bar)
         self.assertIn("box-shadow: var(--ws-frost-shadow-up);", bar)
 
-    def test_no_sheen_grain_light_or_refraction(self):
+    def test_no_sheen_grain_light_or_refraction_in_the_slab(self):
+        # Sheen and grain are settings, at 0 in the slab; live light and
+        # refraction are not part of it at all.
+        self.assertEqual(strength("--ws-frost-sheen"), 0)
+        self.assertEqual(strength("--ws-frost-grain"), 0)
         css = re.sub(r"/\*.*?\*/", "", THEME, flags=re.S)
-        for gone in ("--ws-frost-sheen", "--ws-frost-grain", "--ws-frost-light", "feTurbulence", "feDisplacementMap"):
+        for gone in ("--ws-frost-light", "feDisplacementMap", "--mx", "--my"):
             self.assertNotIn(gone, css)
         # No pseudo-element draws any of it, so none can clash with a
         # surface's own ::before or ::after.
@@ -318,7 +363,7 @@ class FrostContrast(unittest.TestCase):
         # icy tint mixes toward the navy, and over its own page colour 70% text
         # keeps about 4.4:1 (full text well over 4.5:1), as the shipped dark
         # palette keeps 4.5:1 at 70%.
-        tint = alpha_of(token("--ws-frost-tint"))
+        tint = strength("--ws-frost-tint-a")
         for page, text, floor in (((255, 255, 255), (15, 40, 70), 4.4),
                                   (default_rgb("background"), default_rgb("text"), 4.5)):
             bg = over(icy(text), tint, page)

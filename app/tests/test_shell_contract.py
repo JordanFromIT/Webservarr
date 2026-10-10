@@ -594,7 +594,7 @@ class PhoneShellContract(unittest.TestCase):
         # to the bottom edge, it takes the slab turned over: the ring as a line
         # along its top edge and the shadow mirrored upward.
         bar = "".join(css_rules(self.theme, ".ws-tabbar"))
-        self.assertIn("background: var(--ws-frost-ring-bar-layer), linear-gradient(var(--ws-frost-tint), var(--ws-frost-tint)), "
+        self.assertIn("background: var(--ws-frost-ring-bar-layer), var(--ws-frost-fill), "
                       "rgb(var(--color-background) / var(--ws-frost-floor));", bar)
         self.assertIn("backdrop-filter: var(--ws-frost-blur) var(--ws-frost-boost);", bar)
         self.assertIn("border-top: 1px solid var(--ws-frost-edge);", bar)

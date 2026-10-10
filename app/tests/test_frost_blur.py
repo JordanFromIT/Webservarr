@@ -1,6 +1,6 @@
 """
 The frosted glass's blur is a theme setting (theme.frost_blur, whole px from
-0 to 32, shipped as 15: the glass slab's own blur).
+0 to 64, shipped as 15: the glass slab's own blur).
 
 It reaches the page through the theme engine's one chain: the registry, the
 branding payload, the page's #ws-theme (--ws-frost-blur, so the first paint
@@ -41,10 +41,10 @@ class TheSetting(unittest.TestCase):
     def test_registry_row(self):
         d = REGISTRY[KEY]
         self.assertEqual((d.type, d.default, d.min, d.max, d.public, d.allow_empty),
-                         ("int", "15", 0, 32, True, False))
-        for ok in ("0", "4", "16", "32"):
+                         ("int", "15", 0, 64, True, False))
+        for ok in ("0", "4", "16", "32", "64"):
             self.assertIsNone(settings_registry.validate_value(KEY, ok), ok)
-        for bad in ("-1", "33", "4.5", "4px", "", "lots"):
+        for bad in ("-1", "65", "4.5", "4px", "", "lots"):
             self.assertIsNotNone(settings_registry.validate_value(KEY, bad), bad)
 
     def test_seeded_and_served_as_the_default(self):
@@ -72,7 +72,7 @@ class TheSetting(unittest.TestCase):
         self.assertEqual(payload()["frost_blur"], 15)
         self.assertEqual(payload({KEY: "16"})["frost_blur"], 16)
         self.assertEqual(payload({KEY: "0"})["frost_blur"], 0)
-        self.assertEqual(payload({KEY: "99"})["frost_blur"], 32)      # a hand-edited row is held in bounds
+        self.assertEqual(payload({KEY: "99"})["frost_blur"], 64)      # a hand-edited row is held in bounds
         self.assertEqual(payload({KEY: "-5"})["frost_blur"], 0)
         for junk in ("", "4px", "blur(9px)", "x;}"):
             self.assertEqual(payload({KEY: junk})["frost_blur"], 15, junk)
@@ -83,7 +83,7 @@ class TheSetting(unittest.TestCase):
         self.assertEqual(self.ws_theme({KEY: "0"})["--ws-frost-blur"], "blur(0px)")
 
     def test_ws_theme_is_safe_for_any_dict_it_is_handed(self):
-        for odd, want in ((None, 15), ("16", 15), (True, 15), (7.5, 15), (-3, 0), (500, 32), (9, 9)):
+        for odd, want in ((None, 15), ("16", 15), (True, 15), (7.5, 15), (-3, 0), (500, 64), (9, 9)):
             style = pages.theme_style(dict(payload(), frost_blur=odd))
             self.assertIn(f"--ws-frost-blur:blur({want}px)", style, odd)
 
@@ -110,7 +110,7 @@ class TheChain(unittest.TestCase):
     def test_the_loader_sets_it_from_the_payload(self):
         self.assertTrue(live_matches(LOADER, r"var blur = data\.frost_blur;"))
         self.assertTrue(live_matches(
-            LOADER, r"if \(typeof blur === 'number' && blur % 1 === 0 && blur >= 0 && blur <= 32\) \{"))
+            LOADER, r"if \(typeof blur === 'number' && blur % 1 === 0 && blur >= 0 && blur <= 64\) \{"))
         self.assertTrue(live_matches(LOADER, r"root\.style\.setProperty\('--ws-frost-blur', 'blur\(' \+ blur \+ 'px\)'\);"))
 
     def test_every_blur_on_a_frosted_surface_is_the_token(self):
@@ -131,32 +131,35 @@ class AppearanceOffersIt(unittest.TestCase):
     def test_the_slider(self):
         self.assertIn("var BLUR = 'theme.frost_blur';", APPEARANCE)
         self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Frosted glass',"))
+        # One control for every frost slider (frostControl), the blur among them.
+        self.assertTrue(live_matches(APPEARANCE, r"\{ key: BLUR, label: 'Blur', cssVar: '--ws-frost-blur', "
+                                                 r"css: function \(n\) \{ return 'blur\(' \+ n \+ 'px\)'; \},"))
         self.assertTrue(live_matches(APPEARANCE, r"range\.type = 'range';"))
         self.assertTrue(live_matches(APPEARANCE, r"var range = el\('input', 'wsp-range'\);"))
         self.assertTrue(live_matches(APPEARANCE, r"range\.step = '1';"))
-        # Bounds from the registry (the settings meta), with the registry's own as fallback.
+        # Bounds from the registry (the settings meta).
         self.assertTrue(live_matches(APPEARANCE, r"range\.min = String\(m\.min != null \? m\.min : 0\);"))
-        self.assertTrue(live_matches(APPEARANCE, r"range\.max = String\(m\.max != null \? m\.max : 32\);"))
+        self.assertTrue(live_matches(APPEARANCE, r"range\.max = String\(m\.max != null \? m\.max : 100\);"))
         # It stages through the kit, so Save, Discard and Reset treat it like every field.
-        self.assertTrue(live_matches(APPEARANCE, r"api\.set\(BLUR, range\.value\);"))
-        self.assertTrue(live_matches(APPEARANCE, r"api\.track\(BLUR, \{"))
+        self.assertTrue(live_matches(APPEARANCE, r"api\.set\(f\.key, range\.value\);"))
+        self.assertTrue(live_matches(APPEARANCE, r"api\.track\(f\.key, \{"))
         # Named by its label and read out in words.
         self.assertTrue(live_matches(APPEARANCE, r"label\.htmlFor = range\.id;"))
-        self.assertTrue(live_matches(APPEARANCE, r"range\.setAttribute\('aria-valuetext', "))
+        self.assertTrue(live_matches(APPEARANCE, r"range\.setAttribute\('aria-valuetext', f\.say\(n\)\);"))
 
     def test_moving_it_restyles_every_frosted_surface(self):
         # Like a colour: the token on <html>, which every frosted surface reads;
         # the kit repaints from the saved value on Discard or leaving.
-        self.assertTrue(live_matches(
-            APPEARANCE, r"root\.style\.setProperty\('--ws-frost-blur', 'blur\(' \+ px \+ 'px\)'\);"))
+        self.assertTrue(live_matches(APPEARANCE, r"root\.style\.setProperty\(f\.cssVar, f\.css\(n\)\);"))
 
     def test_the_sample_is_the_real_frost(self):
         self.assertTrue(live_matches(APPEARANCE, r"var pane = el\('div', 'ws-frost [^']*'"))
-        self.assertTrue(live_matches(APPEARANCE, r"stage\.setAttribute\('aria-label', 'Blur preview'\);"))
+        self.assertTrue(live_matches(APPEARANCE, r"stage\.setAttribute\('aria-label', 'Frosted glass preview'\);"))
 
     def test_reset_stages_it(self):
         keys = re.search(r"var KEYS = (.*?);\n", APPEARANCE, re.S).group(1)
-        self.assertIn("BLUR", keys)
+        self.assertIn("FROST_KEYS", keys)
+        self.assertIn("var FROST_KEYS = FROST.map(function (f) { return f.key; });", APPEARANCE)
 
     def test_the_skeleton_has_the_card_after_font(self):
         panel = FRAME[FRAME.index('<section id="panel-appearance"'):]
@@ -167,12 +170,24 @@ class AppearanceOffersIt(unittest.TestCase):
         self.assertLess(font, glass)
         self.assertLess(glass, css)
         card = panel[glass:css]
-        self.assertIn('<span class="skel-text">Blur</span>', card)
-        self.assertIn('<div class="h-6 flex items-center"><div class="skel h-1 w-full rounded-full"></div></div>', card)
+        # A row for every slider in the card's order, each with the control's own help.
+        labels = re.findall(r'<div class="block text-\[13px\] font-semibold text-frosted-blue/70">'
+                            r'<span class="skel-text">([^<]+)</span>', card)
+        self.assertEqual(labels, ["Tint", "Blur", "Highlight", "Sheen", "Grain", "Shadow depth", "Saturation boost"])
+        table = APPEARANCE[APPEARANCE.index("var FROST = ["):APPEARANCE.index("var FROST_KEYS")]
+        self.assertEqual(labels, re.findall(r"label: '([^']+)', cssVar:", table))
+        helps = re.findall(r"help: '([^']+)' \}", table)
+        self.assertEqual(len(helps), 7)
+        for help_text in helps:
+            self.assertIn(f'<span class="skel-text">{help_text}</span>', card)
+        self.assertEqual(card.count('<div class="h-6 flex items-center"><div class="skel h-1 w-full rounded-full"></div></div>'), 7)
+        self.assertIn('<div class="grid sm:grid-cols-2 gap-x-8 gap-y-6 max-w-2xl">', card)
+        self.assertTrue(live_matches(APPEARANCE, r"el\('div', 'grid sm:grid-cols-2 gap-x-8 gap-y-6 ' \+ cls\.fieldWidth\)"))
         self.assertIn('<div class="skel h-44 rounded-2xl border border-transparent max-w-2xl"></div>', card)
+        self.assertIn('<span class="invisible">Reset frosted glass to default</span>', card)
         # The words are the tab's own.
-        for words in ("Menus, pop-ups, dialogs and the sign-in card are frosted glass. "
-                      "Choose how much they blur what is behind them.",
+        for words in ("Menus, pop-ups, dialogs, the search bar and the sign-in card are frosted glass. "
+                      "Choose how it looks.",
                       "0 px is clear glass. The default is 15 px."):
             self.assertIn(words, card)
             self.assertIn(words.split(". ")[0], APPEARANCE)

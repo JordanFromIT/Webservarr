@@ -212,11 +212,21 @@ def _build() -> List[SettingDef]:
         _color("theme.color_gauge_net", "#F97316", "Colour of the network gauge (with colourful gauges on)"),
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
-        # The frosted surfaces' blur (menus, pop-ups, dialogs, toasts and the
-        # sign-in card): the page renderer writes it as --ws-frost-blur. 15 is
-        # the glass slab's own blur (theme.css Frosted surfaces).
-        _int("theme.frost_blur", "15", "How much frosted surfaces blur what is behind them, in pixels", 0, 32,
+        # The frosted surfaces (menus, pop-ups, dialogs, toasts, the search
+        # bar, the tab bar and the sign-in card): the page renderer writes each
+        # as a --ws-frost-* custom property that theme.css's one recipe reads
+        # (Frosted surfaces). The defaults are the glass slab's own values.
+        # Blur in px; tint, sheen and grain in hundredths of full opacity;
+        # highlight, depth and saturation as percentages of the slab's own.
+        _int("theme.frost_blur", "15", "How much frosted surfaces blur what is behind them, in pixels", 0, 64,
              public=True),
+        _int("theme.frost_tint", "25", "Frosted glass tint opacity, in hundredths (25 is .25)", 0, 60, public=True),
+        _int("theme.frost_highlight", "100", "Frosted glass lit edge and border strength, in percent", 0, 200,
+             public=True),
+        _int("theme.frost_sheen", "0", "Frosted glass sheen opacity, in hundredths", 0, 30, public=True),
+        _int("theme.frost_grain", "0", "Frosted glass grain opacity, in hundredths", 0, 15, public=True),
+        _int("theme.frost_depth", "100", "Frosted glass shadow depth, in percent", 0, 200, public=True),
+        _int("theme.frost_saturation", "100", "Frosted glass saturation boost, in percent", 0, 200, public=True),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),
         # ---- Sign-in ----
         _bool("features.show_simple_auth", "true", "Allow username and password sign-in", public=True),
@@ -425,6 +435,10 @@ COLOR_KEYS: Tuple[str, ...] = tuple(x.key[len("theme.color_"):] for x in _DEFS i
 # the page renderer and theme-loader.js point at the accent, or at the gauge's
 # own colour (--color-gauge-<id>) while theme.gauges_colourful is on.
 GAUGE_IDS: Tuple[str, ...] = ("cpu", "ram", "net")
+# The frost's strengths besides the blur (theme.<name>), each a whole number
+# the page renderer writes as a --ws-frost-* custom property (app.pages).
+FROST_STRENGTHS: Tuple[str, ...] = ("frost_tint", "frost_highlight", "frost_sheen", "frost_grain", "frost_depth",
+                                    "frost_saturation")
 
 
 def public_defaults() -> Dict[str, str]:

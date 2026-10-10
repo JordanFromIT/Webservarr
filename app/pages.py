@@ -34,7 +34,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.home_event_log import PINNED_EMPTY as EVENT_PINNED_EMPTY, render_pinned
 from app.settings_registry import (
-    COLOR_KEYS, GAUGE_IDS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color,
+    COLOR_KEYS, FROST_STRENGTHS, GAUGE_IDS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color,
     safe_font,
 )
 from app.settings_registry import REGISTRY as _REGISTRY
@@ -145,21 +145,41 @@ def theme_css(branding: dict) -> str:
     for g in GAUGE_IDS:
         decls.append(f"--ws-gauge-{g}:var(--color-{'gauge-' + g if colourful else 'accent'})")
     decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')
-    # Every frosted surface's blur (theme.css .ws-frost and the sign-in card).
+    # Every frosted surface's blur (theme.css .ws-frost and the sign-in card),
+    # and the rest of the frost's strengths, as the numbers theme.css's one
+    # recipe multiplies by (Frosted surfaces): the first paint is already right.
     decls.append(f"--ws-frost-blur:blur({frost_blur(branding)}px)")
+    for key in FROST_STRENGTHS:
+        decls.append(f"{FROST_VARS[key]}:{frost_value(branding, key) / 100:g}")
     return ":root{" + ";".join(decls) + "}"
 
 
-_FROST = _REGISTRY["theme.frost_blur"]
+# Each strength's custom property: a number theme.css multiplies by. Tint,
+# sheen and grain are opacities (25 hundredths is .25); highlight, depth and
+# saturation scale the slab's own values (100 percent is 1).
+FROST_VARS = {
+    "frost_tint": "--ws-frost-tint-a",
+    "frost_highlight": "--ws-frost-hl",
+    "frost_sheen": "--ws-frost-sheen",
+    "frost_grain": "--ws-frost-grain",
+    "frost_depth": "--ws-frost-depth",
+    "frost_saturation": "--ws-frost-sat",
+}
+
+
+def frost_value(branding: dict, key: str) -> int:
+    """A frost setting from the payload (frost_blur, frost_tint, ...): its
+    whole number inside the registry's bounds, else the registry default."""
+    d = _REGISTRY["theme." + key]
+    v = branding.get(key)
+    if isinstance(v, bool) or not isinstance(v, int):
+        return int(d.default)
+    return max(d.min, min(d.max, v))
 
 
 def frost_blur(branding: dict) -> int:
-    """The frosted surfaces' blur in px: the payload's whole number inside the
-    registry's bounds, else the registry default (15, the glass slab)."""
-    v = branding.get("frost_blur")
-    if isinstance(v, bool) or not isinstance(v, int):
-        return int(_FROST.default)
-    return max(_FROST.min, min(_FROST.max, v))
+    """The frosted surfaces' blur in px (default 15, the glass slab)."""
+    return frost_value(branding, "frost_blur")
 
 
 def custom_css_style(branding: dict) -> str:
