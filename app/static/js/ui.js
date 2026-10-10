@@ -390,18 +390,21 @@
   // the ellipsis back, destroy when the box is done with.
   //
   // opts.group (a name): the marquees of one group keep one beat, so rows
-  // read as one block. They share one slide time, long enough for the one
-  // that runs furthest (rounded up to a whole second, so a pixel or two
-  // does not retime them all), and each covers its own distance in it: all
-  // set off, rest and come back together. The beat is the page's clock
-  // (each slide's start time is the document timeline's zero), so a box
-  // that joins later, or gets new words, falls in step at once instead of
-  // starting over.
+  // read as one block. They all set off at the same moment at the same
+  // speed; a box with less to show gets to its end sooner and waits there.
+  // Once the one that runs furthest is at its end, all rest, then all set
+  // off back together at the same speed, and the shorter ones are home
+  // first and wait. So no two boxes ever move different ways or at
+  // different speeds. The beat's length comes from the furthest one
+  // (rounded up to half a second, so a pixel or two does not retime them
+  // all) and is the page's clock (each slide's start time is the document
+  // timeline's zero), so a box that joins later, or gets new words, falls
+  // in step at once instead of starting over.
 
   var MARQUEE_PX_S = 32;      // the slide's speed, px a second
   var MARQUEE_REST_S = 1.75;  // the rest at each end, seconds
-  var MARQUEE_MIN_PX = 2;     // cut off by less is rounding, not words missing
-  var MARQUEE_STEP_S = 1;     // a group's slide time is rounded up to this
+  var MARQUEE_FIT_PX = 0.02;  // words this close to the box's width fit (sub-pixel noise)
+  var MARQUEE_STEP_S = 0.5;   // a group's slide time is rounded up to this
   var marquees = [];
   var marqueeRO = null;
   var marqueeIO = null;
@@ -492,7 +495,7 @@
   function marqueeStill(m) {
     var was = m.dist > 0;
     m.dist = 0;
-    ['--marquee-shift', '--marquee-time', '--marquee-delay', '--marquee-ease'].forEach(function (p) { m.box.style.removeProperty(p); });
+    ['--marquee-shift', '--marquee-time', '--marquee-delay', '--marquee-ease', '--marquee-dir'].forEach(function (p) { m.box.style.removeProperty(p); });
     marqueePaint(m);
     if (was && m.onChange) m.onChange(false);
   }
@@ -513,25 +516,66 @@
     });
   }
 
-  // A group's one slide time, from the box that runs furthest, given to
-  // every box of it that moves.
+  // A group's beat, from the box that runs furthest, given to every box of
+  // it that moves. One beat is a whole cycle, played forwards (not
+  // alternating), so each box can keep the same speed both ways: out over
+  // its own distance and hold, then, half a beat in, back and hold. The
+  // ease is the box's position over the beat (0 home, 1 at its end).
   function marqueeGroupTime(group) {
     if (!group) return;
     var moving = marquees.filter(function (x) { return x.group === group && x.dist > 0; });
     if (!moving.length) return;
     var far = Math.max.apply(null, moving.map(function (x) { return x.dist; }));
     var travel = Math.ceil(far / MARQUEE_PX_S / MARQUEE_STEP_S) * MARQUEE_STEP_S;
-    moving.forEach(function (x) { marqueeTime(x, travel); });
+    var beat = 2 * (travel + MARQUEE_REST_S);
+    moving.forEach(function (x) {
+      var there = x.dist / MARQUEE_PX_S / beat * 100;   // its slide, in % of the beat
+      var set = {
+        '--marquee-time': beat.toFixed(3) + 's',
+        '--marquee-dir': 'normal',
+        // A whole rest before the first slide out.
+        '--marquee-delay': MARQUEE_REST_S.toFixed(3) + 's',
+        '--marquee-ease': 'linear(0, 1 ' + there.toFixed(3) + '%, 1 50%, 0 ' + (50 + there).toFixed(3) + '%, 0)'
+      };
+      Object.keys(set).forEach(function (p) {
+        if (x.box.style.getPropertyValue(p) !== set[p]) x.box.style.setProperty(p, set[p]);
+      });
+    });
+  }
+
+  // How far the words run past the box, in px: from the layout's own
+  // fractional widths where it gives them (untouched by any transform on
+  // the way up), so words cut off by a pixel or less still count. The
+  // track is an inline box at rest, which has no width of its own to read;
+  // it is made an inline-block for the one reading and put back in the
+  // same task, so nothing is drawn in between. Without fractional widths,
+  // whole pixels: the track's (a slide under way does not change it) or,
+  // at rest, the box's scroll width.
+  function marqueeOverflow(m) {
+    var box = m.box;
+    var whole = Math.max(box.scrollWidth, m.track.offsetWidth) - box.clientWidth;
+    if (!window.getComputedStyle) return whole;
+    var bs = window.getComputedStyle(box);
+    var inline = m.track.style.display;
+    m.track.style.display = 'inline-block';
+    var words = parseFloat(window.getComputedStyle(m.track).width);
+    m.track.style.display = inline;
+    var room = parseFloat(bs.width);
+    if (bs.boxSizing === 'border-box') {
+      ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].forEach(function (k) { room -= parseFloat(bs[k]) || 0; });
+    }
+    return isFinite(words) && isFinite(room) && room > 0 ? words - room : whole;
   }
 
   // How far the words run past the box, and the slide that shows them.
   function marqueeApply(m) {
     var fresh = marqueeTrack(m);
     if (!m.on || !m.box.isConnected || reducedMotion()) { marqueeStill(m); marqueeGroupTime(m.group); return; }
-    // The track's own width (a slide under way does not change it) or,
-    // at rest, the box's scroll width: whichever is wider.
-    var d = Math.max(m.box.scrollWidth, m.track.offsetWidth) - m.box.clientWidth;
-    if (!(d >= MARQUEE_MIN_PX)) { marqueeStill(m); marqueeGroupTime(m.group); return; }
+    // Any real overflow slides, by whole pixels so the last letter is shown
+    // whole; words that fit (to sub-pixel noise) stay still.
+    var over = marqueeOverflow(m);
+    if (!(over > MARQUEE_FIT_PX)) { marqueeStill(m); marqueeGroupTime(m.group); return; }
+    var d = Math.ceil(over - MARQUEE_FIT_PX);
     if (fresh || Math.abs(d - m.dist) >= 1) {
       var was = m.dist > 0;
       var rtl = window.getComputedStyle && window.getComputedStyle(m.box).direction === 'rtl';

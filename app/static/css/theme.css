@@ -1024,7 +1024,7 @@ html[data-shell="hidden"] .ws-toasts { inset-block-start: calc(env(safe-area-ins
  * so a phone held sideways keeps its content clear of the notch.
  *
  * The tab bar wears the shared frost (Frosted surfaces, below: the tint,
- * the blur setting and its boost), on trial. Like every frosted surface it
+ * the blur setting and its boost). Like every frosted surface it
  * has no floor, so over a bright poster its 70% labels lose contrast (a
  * choice, see Frosted surfaces). The bar is docked to the bottom edge, not
  * floating, so it takes the slab turned over: the ring as one line along
@@ -1671,7 +1671,10 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
  * data-marquee ("run", or "held" while it is off screen or the tab is
  * hidden) and writes the slide on it: --marquee-shift (how far),
  * --marquee-time (one way, rests included), --marquee-delay and
- * --marquee-ease (a linear() that rests at each end). The words are its one
+ * --marquee-ease (a linear() that rests at each end). A group's box (the
+ * event log's lines) also has --marquee-dir: normal, its time is a whole
+ * beat there and back, and its ease holds it at each end while the
+ * furthest box finishes, so every line moves at one speed. The words are its one
  * .ws-marquee__track. At rest, and under reduced motion (ui.js marks
  * nothing then), the box keeps its ellipsis; sliding, the words are clipped
  * at the box's edge instead. After the event log's rules, so this clip wins
@@ -1681,7 +1684,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 [data-marquee] > .ws-marquee__track {
   display: inline-block;
   white-space: nowrap;
-  animation: ws-marquee var(--marquee-time, 0s) var(--marquee-ease, linear) var(--marquee-delay, 0s) infinite alternate both;
+  animation: ws-marquee var(--marquee-time, 0s) var(--marquee-ease, linear) var(--marquee-delay, 0s) infinite var(--marquee-dir, alternate) both;
 }
 [data-marquee="held"] > .ws-marquee__track { animation-play-state: paused; }
 @keyframes ws-marquee { to { transform: translateX(var(--marquee-shift, 0px)); } }

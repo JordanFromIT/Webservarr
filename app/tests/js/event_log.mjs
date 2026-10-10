@@ -1164,7 +1164,7 @@ await run('live updates: rewritten words start over, a line that leaves stops, n
   check('the owner\'s end stops every slide', t.slides.watched().length === 0 && boxes.every((b) => !b.hasAttribute('data-marquee')));
 });
 
-await run('the lines slide in step: one beat, each its own distance, a later line joins it', async (make) => {
+await run('the lines slide in step: one beat, one speed, each its own distance, a later line joins it', async (make) => {
   const t = make({ answer: SLIDES, marquee: true });
   await t.open();
   const grab = boxOf(lineOf(t, 'Downloading'));
@@ -1172,12 +1172,18 @@ await run('the lines slide in step: one beat, each its own distance, a later lin
   const fits = boxOf(lineOf(t, 'New shelves'));
   const time = (b) => b.style.getPropertyValue('--marquee-time');
   const far = (LONG_GRAB.length * 8 - BOX_PX);
-  // The grab's title runs furthest; the group's slide is its travel rounded
-  // up to a whole second, with the 1.75 s of rests.
-  const want = (Math.ceil(far / 32) + 1.75).toFixed(3) + 's';
-  check('both cut-off lines share one slide time, from the furthest', time(grab) === want && time(longNote) === want, [time(grab), time(longNote), want]);
-  check('and one ease and delay', grab.style.getPropertyValue('--marquee-ease') === longNote.style.getPropertyValue('--marquee-ease') &&
-    grab.style.getPropertyValue('--marquee-delay') === longNote.style.getPropertyValue('--marquee-delay'));
+  // The grab's title runs furthest; the group's beat is its travel rounded
+  // up to half a second, plus the 1.75 s rest, there and back.
+  const beatOf = (px) => (2 * (Math.ceil(px / 32 / 0.5) * 0.5 + 1.75)).toFixed(3) + 's';
+  const want = beatOf(far);
+  // Each line's speed out, from its ease: its distance over its slide's
+  // share of the beat; and when it sets off back (at half the beat).
+  const ease = (b) => b.style.getPropertyValue('--marquee-ease').match(/^linear\(0, 1 ([\d.]+)%, 1 50%, 0 ([\d.]+)%, 0\)$/);
+  const speed = (b) => { const e = ease(b); return -parseFloat(b.style.getPropertyValue('--marquee-shift')) / (parseFloat(e[1]) / 100 * parseFloat(time(b))); };
+  const sameSpeed = (bs) => bs.every((b) => ease(b) && Math.abs(speed(b) - 32) < 0.1 && Math.abs(parseFloat(ease(b)[2]) - 50 - parseFloat(ease(b)[1])) < 0.002);
+  check('both cut-off lines share one beat, from the furthest', time(grab) === want && time(longNote) === want, [time(grab), time(longNote), want]);
+  check('one delay, played forwards', [grab, longNote].every((b) => b.style.getPropertyValue('--marquee-delay') === '1.750s' && b.style.getPropertyValue('--marquee-dir') === 'normal'));
+  check('one speed for both, out and back, whatever their distance', sameSpeed([grab, longNote]), [grab, longNote].map(speed));
   check('each its own distance', grab.style.getPropertyValue('--marquee-shift') === -far + 'px' &&
     longNote.style.getPropertyValue('--marquee-shift') === -(LONG_NOTE.length * 8 - BOX_PX) + 'px');
   check('both started at the page\'s zero: in step', t.slides.startOf(grab) === 0 && t.slides.startOf(longNote) === 0);
@@ -1187,11 +1193,12 @@ await run('the lines slide in step: one beat, each its own distance, a later lin
   await t.poll(answer('ok', [], SLIDES.items.concat([lib(9, longest, 1)])));
   await t.clock.advance(3000);
   const added = boxOf(lineOf(t, 'Added: The Lord'));
-  const want2 = (Math.ceil((longest.length * 8 - BOX_PX) / 32) + 1.75).toFixed(3) + 's';
+  const want2 = beatOf(longest.length * 8 - BOX_PX);
   const moving = t.settled().map(boxOf).filter((b) => b.getAttribute('data-marquee') === 'run');
   check('the new line slides, in step', added.getAttribute('data-marquee') === 'run' && t.slides.startOf(added) === 0);
   check('every sliding line, old and new, on the same time', moving.length === 3 && moving.every((b) => time(b) === want2), moving.map(time).concat(want2));
   check('every sliding line on the beat', moving.every((b) => t.slides.startOf(b) === 0));
+  check('and at one speed, the newest included', sameSpeed(moving), moving.map(speed));
   // A soft navigation moves the section into the new page, and the browser
   // restarts a moved slide from its beginning (no resize is reported: the
   // boxes keep their size). The lines are put back on the beat at once.
