@@ -1101,8 +1101,24 @@ export async function mount(ctx) {
     }
     if (finished && win.guideWaiting && !signal.aborted) {
       win.guideWaiting = false;
-      ctx.setTimeout(startGuide, 300);
+      guideAfterFirstAct();
     }
+  }
+
+  /** The guide after the window, but only once the person does something
+      (a tap, a key, a scroll, the card's Okay): until then the inline card
+      that just came in stays where they can read it, and the guide's first
+      spotlight does not scroll it away. */
+  function guideAfterFirstAct() {
+    const waiting = new AbortController();
+    const go = function () {
+      waiting.abort();
+      ctx.setTimeout(startGuide, 300);
+    };
+    ['pointerdown', 'keydown', 'wheel', 'touchmove', 'scroll'].forEach(function (type) {
+      document.addEventListener(type, go, { capture: true, passive: true, signal: waiting.signal });
+    });
+    signal.addEventListener('abort', function () { waiting.abort(); }, { once: true, signal: waiting.signal });
   }
 
   function closeWindow() {

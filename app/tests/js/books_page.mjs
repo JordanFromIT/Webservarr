@@ -2854,6 +2854,36 @@ await run('after the window closes: the inline card on every visit this session 
   await finish(t, reload, stale, hidden);
 });
 
+await run('after the window: the guide waits for the person\'s first act (a key, a tap, the card\'s Okay)', async (make) => {
+  const key = withTour(firstVisit(make));
+  key.mount();
+  await key.clock.advance(15000);
+  key.click('#booksNoticeWindowOkay');
+  await key.clock.advance(5000);
+  check('waiting, the card in view', !tourOn(key) && inlineOn(key));
+  key.doc.dispatchEvent(new key.win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  await key.clock.advance(400);
+  check('a key starts it', tourOn(key));
+  const tap = withTour(firstVisit(make));
+  tap.mount();
+  await tap.clock.advance(15000);
+  tap.click('#booksNoticeWindowOkay');
+  await tap.clock.advance(1000);
+  tap.q('#booksNoticeOkay').dispatchEvent(new tap.win.PointerEvent('pointerdown', { bubbles: true }));
+  tap.click('#booksNoticeOkay');
+  await tap.clock.advance(400);
+  check('the card\'s Okay: the card goes, then the guide', !inlineOn(tap) && tourOn(tap));
+  const left = withTour(firstVisit(make));
+  left.mount();
+  await left.clock.advance(15000);
+  left.click('#booksNoticeWindowOkay');
+  left.ctl.abort();
+  left.doc.dispatchEvent(new left.win.Event('scroll'));
+  await left.clock.advance(400);
+  check('a visit that ended starts nothing', !tourOn(left));
+  await finish(key, tap, left);
+});
+
 await run('the window: reduced motion has no sweep, and the number still counts', async (make) => {
   const t = firstVisit(make, { reduced: true });
   t.mount();
@@ -2872,8 +2902,11 @@ await run('the window and the first-visit guide never run at once: the guide wai
   await t.clock.advance(12000);
   check('the count done, the guide still waits for the window to close', !tourOn(t));
   t.click('#booksNoticeWindowOkay');
+  await t.clock.advance(2000);
+  check('closed: the inline card comes in and stays in view, no guide yet', !windowOn(t) && inlineOn(t) && !tourOn(t));
+  t.doc.dispatchEvent(new t.win.Event('scroll'));
   await t.clock.advance(400);
-  check('then it starts', !windowOn(t) && tourOn(t));
+  check('the person scrolls: then it starts', tourOn(t));
   await finish(t);
 });
 
@@ -2885,6 +2918,8 @@ await run('the window: Okay that cannot be kept still closes it, and the guide s
   await t.clock.advance(400);
   check('closed, sent once, no error shown', !windowOn(t) && posts(t).length === 1 && t.toasts.length === 0);
   check('the inline card shows, and this session treats the window as seen', inlineOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'seen');
+  t.doc.dispatchEvent(new t.win.Event('scroll'));
+  await t.clock.advance(400);
   check('the guide runs', tourOn(t));
   await finish(t);
 });
