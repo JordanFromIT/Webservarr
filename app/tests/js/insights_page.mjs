@@ -414,6 +414,8 @@ await run('a person opens in the dialog, with their history, and Close gives foc
   await flush();
   const dialog = t.q('#insDetail');
   check('the dialog is open', dialog.hasAttribute('open'));
+  check('from sm up the box keeps 16px clear of each side, up to its 760px', /(^| )sm:w-\[calc\(100%-2rem\)\]( |$)/.test(dialog.className) &&
+    /(^| )sm:max-w-\[760px\]( |$)/.test(dialog.className));
   check('it asked for that person in this time zone', /^\/api\/admin\/insights\/person\?key=a{24}(&tz=.+)?$/.test(t.net.urls('/api/admin/insights/person')[0] || ''),
     t.net.urls('/api/admin/insights/person'));
   check('the title is the name', rr(t.text('#insDetailTitle')) === 'Sam');
