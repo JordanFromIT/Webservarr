@@ -276,7 +276,7 @@ class ShellRendering(unittest.TestCase):
                 out = render(user=ADMIN, b=b, flags=flags)
                 self.assertEqual('id="pageOffBanner"' in out, bool(flags.get("page_off")))
                 nav = re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
-                self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
+                self.assertEqual(len(re.findall(r"<a ", nav)), 9)      # every page is in the nav, and the admin's Insights link
                 self.assertEqual(nav.count('class="nav-new-badge"'), 8)
                 ids = re.findall(r'''\sid=["']([^"']+)["']''', out)
                 dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -462,7 +462,7 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('<img src="/static/uploads/logo.png" alt="Logo"', out)
 
     def test_every_page_mapping_targets_a_nav_item(self):
-        ids = {i["id"] for i in NAV_ITEMS}
+        ids = {i["id"] for i in NAV_ITEMS + pages.ADMIN_LINKS}
         for page, nav in PAGE_NAV.items():
             self.assertIn(nav, ids, page)
 
@@ -769,7 +769,7 @@ class NavModel(unittest.TestCase):
     def test_nav_follows_pages_order(self):
         b = branding(**{"pages.order": '["home","wiki","calendar","requests","issues","tickets","library","settings"]'})
         self.assertEqual(self.nav_hrefs(render(b=b)),
-                         ["/", "/wiki", "/calendar", "/requests", "/issues", "/tickets", "/settings"])
+                         ["/", "/wiki", "/calendar", "/requests", "/issues", "/tickets", "/insights", "/settings"])
 
     def test_bad_order_is_normalised(self):
         b = branding(**{"pages.order": '["settings","wiki","home"]'})
@@ -831,7 +831,7 @@ class NavModel(unittest.TestCase):
         # rendered links are the registry's addresses in that order.
         order = ["home", "library", "wiki", "tickets", "calendar", "issues", "requests", "settings"]
         b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000", "pages.order": json.dumps(order)})
-        self.assertEqual(self.nav_hrefs(render(b=b)), [reg.PAGE_ADDRESSES[p] for p in order])
+        self.assertEqual(self.nav_hrefs(render(b=b)), [reg.PAGE_ADDRESSES[p] for p in order[:-1]] + ["/insights", "/settings"])
 
     def test_migrated_seerr_embed_install_shows_one_requests_item(self):
         # An install that had the built-in Requests page off and the Seerr embed

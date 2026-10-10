@@ -63,7 +63,7 @@ class TabBar(unittest.TestCase):
         self.assertEqual(tabs(out), [("/", "Home", "page"), ("/requests", "Requests", None),
                                      ("/books", "Books", None), ("/issues", "Issues", None),
                                      ("/calendar", "Calendar", None), ("more", "More", None)])
-        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/wiki", "/settings"])
+        self.assertEqual([r[0] for r in more_rows(out)], ["/tickets", "/wiki", "/insights", "/settings"])
 
     def test_members_get_their_own_set(self):
         out = render(user=MEMBER, b=branding(**ALL_ON))

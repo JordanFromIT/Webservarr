@@ -788,6 +788,22 @@ async def settings_page(
     return await shell_page("settings", request, user)
 
 
+# Insights page (admin): reading and listening across everyone
+@app.get("/insights", response_class=HTMLResponse, tags=["Pages"])
+async def insights_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve Insights. Admins only, as Settings: signed out goes to /login, a
+    member to Home, for a full load and a soft navigation alike."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    if user.get("is_admin") != "true":
+        return RedirectResponse(url="/", status_code=302)
+    return await shell_page("insights", request, user)
+
+
 # The audiobook player's test launcher (admin only, not in the navigation)
 @app.get("/player-test", response_class=HTMLResponse, include_in_schema=False)
 async def player_test_page(

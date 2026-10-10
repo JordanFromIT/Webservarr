@@ -71,6 +71,16 @@ NAV_ITEMS = [
     for pid in SIDEBAR_PAGE_IDS
 ]
 
+# Links only an admin sees, just above Settings. Not pages of Settings >
+# Pages: no switch, label, order or New flag
+# (docs/superpowers/specs/2026-10-10-insights-design.md, section 2.1), so the
+# page-order rules ("Home first, Settings last, every page once") are unchanged.
+ADMIN_LINKS = [
+    {"id": "insights", "href": "/insights", "label": "Insights", "sublabel": "See reading and listening",
+     "icon": "insights", "admin_only": True},
+]
+_ADMIN_LABELS = {link["id"]: link["label"] for link in ADMIN_LINKS}
+
 # Which nav item a page highlights. The news archive and the status feed are
 # part of Home; the Seerr embed is what Requests shows when its source is
 # "seerr_embed".
@@ -89,6 +99,7 @@ PAGE_NAV = {
     "books-series": "library",
     "books-stats": "library",
     "wiki": "wiki",
+    "insights": "insights",
     "settings": "settings",
 }
 
@@ -504,6 +515,9 @@ def visible_nav_items(branding: dict, is_admin: bool) -> list:
             it["sublabel"] = sublabels[item["id"]]
         it["new"] = bool(new_flags.get(item["id"]))
         out.append(it)
+    if is_admin:
+        at = next((i for i, it in enumerate(out) if it["id"] == "settings"), len(out))
+        out[at:at] = [dict(link, new=False) for link in ADMIN_LINKS]
     return out
 
 
@@ -588,7 +602,8 @@ def bar_title(branding: dict, active_id: Optional[str], static_title: str = "") 
     """The phone top bar's words: the label of the nav item the page belongs
     to (the operator's, so it matches the tab), else the page's own title."""
     if active_id:
-        return (branding.get("sidebar_labels") or {}).get(active_id) or PAGE_DEFAULTS[active_id][0]
+        default = PAGE_DEFAULTS[active_id][0] if active_id in PAGE_DEFAULTS else _ADMIN_LABELS.get(active_id, "")
+        return (branding.get("sidebar_labels") or {}).get(active_id) or default
     m = _TITLE_SUFFIX_RE.match(static_title or "")
     return m.group("suffix") if m else ""
 

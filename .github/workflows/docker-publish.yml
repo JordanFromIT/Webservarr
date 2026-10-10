@@ -132,6 +132,7 @@ jobs:
           node app/tests/js/plex_callback.mjs
           node app/tests/js/login_request.mjs
           node app/tests/js/settings_access.mjs
+          node app/tests/js/insights_page.mjs
 
   build-and-push:
     needs: [test, js-checks]

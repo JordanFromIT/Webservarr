@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Insights</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+  /* The bars grow from the baseline once, as a section arrives (a transform,
+     so nothing around them moves). Reduced motion: drawn still. */
+  .ins-bar { transform-origin: bottom; }
+  @media (prefers-reduced-motion: no-preference) {
+    .ins-bar { animation: ins-grow 250ms ease-out both; }
+  }
+  @keyframes ins-grow { from { transform: scaleY(0); } }
+  /* Time in Plex apps is an estimate, so wherever it is a mark (a bar part, a
+     legend swatch) it is hatched in the text colour, never a plain lighter
+     fill alone. */
+  .ins-est { background: repeating-linear-gradient(135deg, rgb(var(--color-text) / .62) 0 2px, rgb(var(--color-text) / .2) 2px 5px); }
+  /* The scrim behind the detail dialog: the theme's own (theme.css .ws-scrim). */
+  #insDetail::backdrop { background-color: rgb(var(--color-background) / .7); }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+<!-- Insights, for admins only (pages/insights.js): each section's body arrives in one write over its skeleton. -->
+<div id="wsPage" data-ws-module="/static/js/pages/insights.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden [color-scheme:dark]">
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="max-w-[1200px] w-full mx-auto min-w-0">
+<!-- ws:event-log -->
+
+  <h1 class="text-[24px] sm:text-[32px] font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Insights</h1>
+  <p class="mt-2 text-[15px] leading-6 text-frosted-blue/70">Reading and listening across everyone. Only admins can see this page.</p>
+
+  <section id="insNow" data-arrive="ins-now" aria-labelledby="insNowTitle" aria-busy="true" class="mt-10">
+    <h2 id="insNowTitle" class="text-xl font-bold leading-snug text-frosted-blue">Right now</h2>
+    <div data-ins-body aria-hidden="true" class="mt-4 grid gap-2 sm:grid-cols-2">
+      <div class="skel h-20 rounded-xl"></div><div class="skel h-20 rounded-xl"></div>
+    </div>
+  </section>
+
+  <section id="insPeople" data-arrive="ins-people" aria-labelledby="insPeopleTitle" aria-busy="true" class="mt-12">
+    <h2 id="insPeopleTitle" class="text-xl font-bold leading-snug text-frosted-blue">People</h2>
+    <div data-ins-body aria-hidden="true" class="mt-4 space-y-3">
+      <div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div>
+    </div>
+  </section>
+
+  <!-- A person or a book, over the page: a full-height sheet on a phone, a
+       centred box from sm up. A native dialog: focus moves in; Close, Escape
+       or a click on the dim area closes it. -->
+  <dialog id="insDetail" aria-labelledby="insDetailTitle" class="ws-frost m-0 h-full max-h-full w-full max-w-full p-0 text-frosted-blue sm:m-auto sm:h-auto sm:max-h-[85svh] sm:max-w-[760px] sm:rounded-2xl sm:border">
+    <div class="flex h-full max-h-[inherit] flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:p-0">
+      <div class="flex items-start gap-3 border-b border-frosted-blue/10 px-4 py-3 sm:px-6">
+        <h2 id="insDetailTitle" class="min-w-0 flex-1 break-words text-xl font-bold leading-snug text-frosted-blue"></h2>
+        <button type="button" data-ins-close aria-label="Close" class="ws-lift inline-flex size-10 shrink-0 items-center justify-center rounded-[10px] text-frosted-blue hover:bg-frosted-blue/[0.07] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <div id="insDetailBody" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 custom-scrollbar"></div>
+    </div>
+  </dialog>
+
+</div>
+</div>
+</div>
+</main>
+
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+</body></html>
