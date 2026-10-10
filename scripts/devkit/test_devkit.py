@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import devkit  # noqa: E402
@@ -64,6 +65,57 @@ class ReservedRange(unittest.TestCase):
         args = devkit.build_parser().parse_args(
             ["seed-listen", "--identity", "plex:990011", "--book-key", "283644:1", "--ms", "5"])
         self.assertEqual(args.identity, "plex:990011")
+
+
+def mountinfo(data_root: str) -> str:
+    """A container's /proc/self/mountinfo with its data folder bind-mounted from data_root."""
+    return ("812 700 0:52 / / rw,relatime - overlay overlay rw\n"
+            "813 812 0:55 / /proc rw,nosuid - proc proc rw\n"
+            f"820 812 259:2 {data_root} /app/data rw,relatime - ext4 /dev/sda1 rw\n"
+            "821 812 259:2 /srv/x/app /app/app rw,relatime - ext4 /dev/sda1 rw\n")
+
+
+class DevInstanceOnly(unittest.TestCase):
+    DB = "/app/data/webservarr.db"
+
+    def test_a_database_mounted_from_a_dev_checkout_is_allowed(self):
+        for root in ("/root/webservarr-dev/data", "/srv/stacks/site-dev/data", "/root/my\\040site-dev/data"):
+            with self.subTest(root=root):
+                devkit.require_dev_instance(self.DB, mountinfo(root))
+
+    def test_anything_else_is_refused(self):
+        for root in ("/root/webservarr/data", "/root/webservarr-dev-old/data", "/root/-dev/data",
+                     "/var/lib/docker/volumes/webservarr_data/_data", "/", "/data"):
+            with self.subTest(root=root), self.assertRaises(devkit.DevkitError):
+                devkit.require_dev_instance(self.DB, mountinfo(root))
+        with self.assertRaises(devkit.DevkitError):            # no mount holds the database at all
+            devkit.require_dev_instance(self.DB, "")
+
+    def test_the_deepest_mount_holding_the_database_decides(self):
+        text = mountinfo("/root/webservarr/data") + "830 820 259:2 /root/webservarr-dev/data /app/data/sub rw - ext4 x rw\n"
+        with self.assertRaises(devkit.DevkitError):
+            devkit.require_dev_instance(self.DB, text)
+        devkit.require_dev_instance("/app/data/sub/webservarr.db", text)
+
+    def test_unreadable_mounts_are_refused(self):
+        with mock.patch.object(devkit, "MOUNTINFO", Path("/nonexistent/mountinfo")), \
+                self.assertRaises(devkit.DevkitError):
+            devkit.require_dev_instance(self.DB)
+
+    def test_every_command_refuses_before_it_touches_the_database_or_redis(self):
+        argvs = (["session", "--role", "admin"], ["cleanup"], ["snapshot", "x"], ["restore", "x"],
+                 ["seed-listen", "--identity", "plex:990011", "--book-key", "1:1", "--ms", "5"])
+        with tempfile.NamedTemporaryFile("w", suffix="mountinfo", delete=False) as f:
+            f.write(mountinfo("/root/webservarr/data"))
+        self.addCleanup(Path(f.name).unlink)
+        for argv in argvs:
+            with self.subTest(argv=argv), _quiet(), \
+                    mock.patch.object(devkit, "MOUNTINFO", Path(f.name)), \
+                    mock.patch.object(devkit, "import_app"), \
+                    mock.patch.object(devkit, "database_path", return_value=self.DB), \
+                    mock.patch.object(devkit, "connect", side_effect=AssertionError("the database was opened")), \
+                    mock.patch.object(devkit, "mint_session", side_effect=AssertionError("a session was minted")):
+                self.assertEqual(devkit.main(argv), 1)
 
 
 class _quiet:

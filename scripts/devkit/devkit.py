@@ -13,6 +13,11 @@ cleanup only ever touches this range, so real people's data is out of reach.
 
 Nothing here prints a secret. `session` prints the new session id (the cookie
 value) and nothing else on stdout; everything else goes to stderr.
+
+It runs only on a dev instance: every command first checks that the folder
+holding the database is bind-mounted from a dev checkout, one whose folder
+name ends in "-dev" (require_dev_instance). Piped into any other container,
+it refuses before it reads the database or mints a session.
 """
 from __future__ import annotations
 
@@ -71,6 +76,52 @@ def require_reserved(identity: object) -> str:
     if not is_reserved(identity):
         raise DevkitError(f"identity {identity!r} is outside the reserved test range plex:990000 to plex:990099")
     return identity  # type: ignore[return-value]
+
+
+# --- the dev instance only ----------------------------------------------------
+
+MOUNTINFO = Path("/proc/self/mountinfo")
+DEV_CHECKOUT_SUFFIX = "-dev"
+_MOUNT_ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
+def _unescape(field: str) -> str:
+    """mountinfo writes a space, tab, newline or backslash in a path as \\ooo."""
+    return _MOUNT_ESCAPE.sub(lambda m: chr(int(m.group(1), 8)), field)
+
+
+def mount_source(mountinfo: str, path: str) -> str | None:
+    """The folder mounted at the deepest mount point holding `path` (an
+    absolute path), as mountinfo's root field gives it: for a bind mount, the
+    folder on the host. None when no mount holds it."""
+    best: tuple[str, str] | None = None
+    for line in mountinfo.splitlines():
+        fields = line.split(" ")
+        if len(fields) < 5:
+            continue
+        root, point = _unescape(fields[3]), _unescape(fields[4])
+        inside = path == point or path.startswith(point.rstrip("/") + "/")
+        if inside and (best is None or len(point) > len(best[0])):
+            best = (point, root)
+    return None if best is None else best[1]
+
+
+def require_dev_instance(db_path: str, mountinfo: str | None = None) -> None:
+    """Refuse unless the folder holding the database is bind-mounted from a
+    dev checkout: the mount's host folder sits in a folder whose name ends in
+    DEV_CHECKOUT_SUFFIX (the dev checkout's data folder). Anything else,
+    including a mount that can't be read, is refused."""
+    if mountinfo is None:
+        try:
+            mountinfo = MOUNTINFO.read_text()
+        except OSError as exc:
+            raise DevkitError("refused: can't tell whether this is the dev instance "
+                              f"(mounts unreadable: {type(exc).__name__})") from exc
+    source = mount_source(mountinfo, os.path.dirname(os.path.abspath(db_path)))
+    checkout = os.path.basename(os.path.dirname(source.rstrip("/"))) if source else ""
+    if not checkout.endswith(DEV_CHECKOUT_SUFFIX) or checkout == DEV_CHECKOUT_SUFFIX:
+        raise DevkitError("refused: this is not the dev instance (its database is not mounted from a "
+                          f"*{DEV_CHECKOUT_SUFFIX} checkout)")
 
 
 # --- database ----------------------------------------------------------------
@@ -596,6 +647,7 @@ def import_app() -> None:
 
 def run(args: argparse.Namespace) -> int:
     import_app()
+    require_dev_instance(database_path())
     if args.command == "session":
         identity = args.identity or DEFAULT_IDENTITY[args.role]
         print(asyncio.run(finish(mint_session(args.role, identity, args.kavita_link))))

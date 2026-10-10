@@ -34,6 +34,12 @@ Then, for example, `dk cleanup`. Results go to stdout, refusals and warnings to
 stderr, exit 0 on success, 1 on a refusal or failure, 2 on bad arguments.
 Nothing it prints is a secret.
 
+The kit runs only on the dev instance. Before any command it reads the
+container's `/proc/self/mountinfo` and refuses unless the folder holding the
+database is bind-mounted from a dev checkout (a host folder whose name ends in
+`-dev`, as `<checkout>-dev/data`). Piped into any other container, it stops
+before it opens the database or mints a session. Nothing needs passing for it.
+
 ## Commands
 
 ```bash
