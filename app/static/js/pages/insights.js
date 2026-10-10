@@ -7,7 +7,10 @@
  * and listening across everyone, in sections that each load on their own, so
  * one that fails, or whose source is down, never takes the others with it.
  * Right now is read again every 30 s while the page is visible. A person opens
- * in the detail dialog.
+ * in the detail dialog. Trends, Books and Habits share one period picker; the
+ * choice is remembered in this browser (localStorage, a convenience: the page
+ * works without it). A book opens in the same dialog, from Trends, Books or a
+ * person's books.
  *
  * Every read goes through readLive, on the page's signal. Markup is built with
  * textContent only. Time in Plex apps is called an estimate wherever it shows,
@@ -36,6 +39,12 @@ const WHAT = {
   listening: 'listening', plex: 'listening in a Plex app', reading: 'reading',
   visit: 'opening Books', request: 'asking for a book'
 };
+const PERIODS = ['30d', '90d', '1y', 'all'];
+const PERIOD_KEY = 'webservarr:insights:period';
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// The heatmap's five steps, none to most; the key under it shows the same five.
+const HEAT = ['bg-frosted-blue/[0.04]', 'bg-frosted-blue/20', 'bg-frosted-blue/40', 'bg-frosted-blue/65', 'bg-frosted-blue'];
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
@@ -109,12 +118,48 @@ function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+/** The period this browser chose last time; 90 days without one (or without storage). */
+function storedPeriod() {
+  try {
+    const p = window.localStorage.getItem(PERIOD_KEY);
+    return PERIODS.indexOf(p) === -1 ? '90d' : p;
+  } catch (e) {
+    return '90d';              // storage blocked (a private window): the default
+  }
+}
+
+function storePeriod(p) {
+  try {
+    window.localStorage.setItem(PERIOD_KEY, p);
+  } catch (e) {
+    // Storage blocked: the choice lasts this visit only, which is all a convenience owes.
+  }
+}
+
+/** A bucket's start in words, day first as the rest of the page: a day,
+    "Week of 5 Oct 2026", or "October 2026". */
+function bucketLabel(start, unit) {
+  if (unit === 'week') return 'Week of ' + dayLabel(start);
+  if (unit !== 'month') return dayLabel(start);
+  const m = /^(\d{4})-(\d{2})/.exec(text(start));
+  if (!m) return '';
+  try {
+    return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  } catch (e) {
+    return m[0];
+  }
+}
+
+function people(n) { return num(n).toLocaleString() + (num(n) === 1 ? ' person' : ' people'); }
+
+function hourLabel(h) { return (h < 10 ? '0' : '') + h + ':00'; }
+
 export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
   const tz = timeZone();
-  const state = { gen: {}, nowJSON: '', opener: null, detailGen: 0 };
+  const state = { gen: {}, nowJSON: '', opener: null, detailGen: 0, period: storedPeriod() };
 
   function quiet(err) { return signal.aborted || isAbort(err); }
 
@@ -320,7 +365,8 @@ export async function mount(ctx) {
     giveFocusBack();
   }
 
-  dialog.querySelector('[data-ins-close]').addEventListener('click', closeDetail, { signal: signal });
+  const closeButton = dialog.querySelector('[data-ins-close]');
+  closeButton.addEventListener('click', closeDetail, { signal: signal });
   // Escape (the browser closes the dialog itself) gives focus back the same way.
   // Leaving the page swaps #wsPage out, dialog and all, which takes it off the
   // top layer; a late answer then draws nothing (state.detailGen, signal).
@@ -332,9 +378,12 @@ export async function mount(ctx) {
   function openDetail(title, url, draw, opener) {
     state.detailGen += 1;
     const gen = state.detailGen;
-    state.opener = opener || null;
+    if (opener) state.opener = opener;   // a book opened from a person keeps the row that opened the person
     $('insDetailTitle').textContent = title;
     const body = $('insDetailBody');
+    // A book opened from inside the dialog: the button that had focus is about
+    // to go, so focus moves to Close rather than falling out to the page.
+    if (body.contains(document.activeElement)) closeButton.focus();
     clear(body);
     body.appendChild(el('div', 'skel h-40 rounded-xl'));
     if (!dialog.hasAttribute('open')) {
@@ -383,6 +432,7 @@ export async function mount(ctx) {
   function peak(words) {
     const p = el('p', 'mt-3 tabular-nums ' + SMALL, words);
     p.setAttribute('aria-hidden', 'true');
+    p.setAttribute('data-ins-peak', '');
     return p;
   }
 
@@ -457,10 +507,9 @@ export async function mount(ctx) {
     const now = Date.now();
     const list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
     books.forEach(function (b) {
-      const li = el('li', 'min-w-0 py-2');
+      // No opener: Close then gives focus back to the person's row in People.
+      const li = bookItem(b.book_id, text(b.title), bookLine(b, now), 'data-ins-detail-book', false);
       li.setAttribute('data-ins-book-row', '');
-      li.appendChild(el('p', 'break-words text-[15px] font-semibold text-frosted-blue', text(b.title)));
-      li.appendChild(el('p', 'break-words ' + SMALL, bookLine(b, now)));
       list.appendChild(li);
     });
     section.appendChild(list);
@@ -510,11 +559,412 @@ export async function mount(ctx) {
     openDetail(name, withZone(API + 'person?key=' + encodeURIComponent(key)), drawPerson, opener);
   }
 
+  // ---- Charts and lists shared by Trends, Books and Habits ----
+
+  /** A bar chart over time: its tallest value on the dashed top edge, a bar a
+      bucket (each said in words), the first and last bucket under it. */
+  function barChart(hook, title, buckets, unit, parts, words, peakWords, heightCls) {
+    const section = el('section', 'min-w-0');
+    section.setAttribute(hook, '');
+    section.appendChild(el('h3', H3, title));
+    const most = buckets.reduce(function (m, b) {
+      return Math.max(m, parts.reduce(function (sum, p) { return sum + num(b[p[0]]); }, 0));
+    }, 0);
+    if (!most) {
+      section.appendChild(el('p', MUTED + ' mt-1', 'Nothing in this period.'));
+      return section;
+    }
+    section.appendChild(peak(peakWords(most)));
+    const list = el('ol', 'mt-1 flex ' + heightCls + ' items-end gap-px border-y border-frosted-blue/10 sm:gap-1');
+    list.style.borderTopStyle = 'dashed';
+    buckets.forEach(function (b) {
+      const said = words(b);
+      const li = el('li', 'flex h-full min-w-0 flex-1 flex-col justify-end');
+      li.title = said;
+      li.appendChild(el('span', 'sr-only', said));
+      stack(li, parts, b, most);
+      list.appendChild(li);
+    });
+    section.appendChild(list);
+    const first = buckets[0];
+    const last = buckets[buckets.length - 1];
+    section.appendChild(ends(bucketLabel(first.start || first.week, unit), bucketLabel(last.start || last.week, unit)));
+    return section;
+  }
+
+  /** A book in a list: a button that opens it when it is a library book, else
+      plain words. An opener of false keeps whatever opened the dialog already. */
+  function bookItem(bookId, title, line, hook, opener) {
+    const li = el('li', 'min-w-0 py-1');
+    const isBook = typeof bookId === 'number';
+    const holder = isBook ? el('button', ROW) : el('div', 'px-3 py-2 -mx-3');
+    const words = el('span', 'block min-w-0 flex-1');
+    words.appendChild(el('span', 'block break-words text-[15px] font-semibold text-frosted-blue', title));
+    words.appendChild(el('span', 'block break-words ' + SMALL, line));
+    holder.appendChild(words);
+    if (isBook) {
+      holder.type = 'button';
+      holder.setAttribute(hook || 'data-ins-book', String(bookId));
+      holder.appendChild(icon('chevron_right', 'mt-0.5 text-xl text-frosted-blue/50'));
+      holder.addEventListener('click', function () {
+        openBook(bookId, title, opener === false ? null : holder);
+      }, { signal: signal });
+    }
+    li.appendChild(holder);
+    return li;
+  }
+
+  function topList(title, rows, books) {
+    const section = el('section', 'min-w-0');
+    section.setAttribute('data-ins-top', title);
+    section.appendChild(el('h3', H3, title));
+    const list = (Array.isArray(rows) ? rows : []).filter(function (r) { return r && (text(r.title) || text(r.name)); });
+    if (!list.length) {
+      section.appendChild(el('p', MUTED + ' mt-1', 'Nothing in this period.'));
+      return section;
+    }
+    const ol = el('ol', 'mt-2 space-y-1');
+    list.forEach(function (r) {
+      const line = (num(r.listened_ms) ? duration(r.listened_ms) + ' · ' : '') + people(r.people);
+      const li = bookItem(books ? r.book_id : null, text(r.title) || text(r.name), line);
+      ol.appendChild(li);
+    });
+    section.appendChild(ol);
+    return section;
+  }
+
+  // ---- Trends ----
+
+  function drawTrends(data) {
+    const box = el('div', 'mt-2');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const unit = text(data.bucket);
+    const buckets = Array.isArray(data.buckets) ? data.buckets.filter(Boolean) : [];
+    const tracking = data.tracking || {};
+    // From lg: Hours listened leads in a 3fr column; the two smaller charts stack in 2fr beside it.
+    const grid = el('div', 'mt-2 grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-10');
+    const lead = el('div', 'min-w-0');
+    lead.appendChild(barChart('data-ins-trend', 'Hours listened', buckets, unit, LISTEN_PARTS, function (b) {
+      return bucketLabel(b.start, unit) + ': ' + duration(b.web_ms) +
+        (num(b.plex_ms) ? ', and ' + duration(b.plex_ms) + ' in Plex apps (an estimate)' : '');
+    }, duration, 'h-40 lg:h-[216px]'));
+    if (buckets.some(function (b) { return num(b.web_ms) + num(b.plex_ms); })) lead.appendChild(legend());
+    grid.appendChild(lead);
+    const side = el('div', 'grid min-w-0 content-start gap-8 lg:gap-6');
+    if (!buckets.length || buckets.every(function (b) { return b.pages === null || b.pages === undefined; })) {
+      const pages = el('section', 'min-w-0');
+      pages.setAttribute('data-ins-pages', '');
+      pages.appendChild(el('h3', H3, 'Pages read'));
+      pages.appendChild(emptyLine('Pages read show here once reading in Kavita is recorded.', tracking.reading));
+      side.appendChild(pages);
+    } else {
+      const pages = barChart('data-ins-pages', 'Pages read', buckets, unit, [['pages', 'bg-frosted-blue/70']], function (b) {
+        return bucketLabel(b.start, unit) + ': ' + num(b.pages).toLocaleString() + ' pages';
+      }, function (most) { return most.toLocaleString() + ' pages'; }, 'h-28 lg:h-20');
+      pages.appendChild(el('p', 'mt-1 ' + SMALL, 'By Kavita’s count; across days without a read, an estimate.'));
+      side.appendChild(pages);
+    }
+    const active = Array.isArray(data.active) ? data.active.filter(Boolean) : [];
+    side.appendChild(barChart('data-ins-active', 'Active people each week', active, 'week', [['people', 'bg-frosted-blue/70']], function (w) {
+      return 'Week of ' + dayLabel(w.week) + ': ' + people(w.people);
+    }, people, 'h-28 lg:h-20'));
+    grid.appendChild(side);
+    box.appendChild(grid);
+    const tops = el('div', 'mt-10 grid gap-8 lg:grid-cols-3');
+    tops.appendChild(topList('Top books', data.top_books, true));
+    tops.appendChild(topList('Top authors', data.top_authors, false));
+    tops.appendChild(topList('Top series', data.top_series, false));
+    box.appendChild(tops);
+    const timed = [data.top_books, data.top_authors, data.top_series].some(function (rows) {
+      return Array.isArray(rows) && rows.some(function (r) { return r && num(r.listened_ms); });
+    });
+    if (timed) box.appendChild(el('p', 'mt-3 ' + SMALL, 'Times include listening in Plex apps, which is an estimate.'));
+    return box;
+  }
+
+  // ---- Books ----
+
+  function drawBooks(data) {
+    const box = el('div', 'mt-2');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const now = Date.now();
+    const cols = el('div', 'grid gap-8 lg:grid-cols-2 lg:gap-x-10');
+
+    const gone = el('section', 'mt-2 min-w-0');
+    gone.setAttribute('data-ins-abandoned', '');
+    gone.appendChild(el('h3', H3, 'Abandoned'));
+    gone.appendChild(el('p', SMALL, 'Unfinished and untouched for 30 days or more.'));
+    const abandoned = Array.isArray(data.abandoned) ? data.abandoned.filter(Boolean) : [];
+    if (!abandoned.length) {
+      gone.appendChild(el('p', MUTED + ' mt-2', 'Nothing abandoned.'));
+    } else {
+      const list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+      abandoned.forEach(function (a) {
+        const bits = [text(a.name)];
+        if (typeof a.percent === 'number') bits.push(a.percent + '%');
+        if (text(a.chapter)) bits.push('stopped in ' + a.chapter);
+        const when = ago(a.last_at, now);
+        if (when) bits.push('last touched ' + when);
+        list.appendChild(bookItem(a.book_id, text(a.title), bits.join(' · ')));
+      });
+      gone.appendChild(list);
+    }
+    cols.appendChild(gone);
+
+    const fin = el('section', 'mt-2 min-w-0');
+    fin.setAttribute('data-ins-finish', '');
+    fin.appendChild(el('h3', H3, 'Finish rate'));
+    fin.appendChild(el('p', SMALL, 'Books two or more people started in this period.'));
+    const finish = Array.isArray(data.finish) ? data.finish.filter(Boolean) : [];
+    if (!finish.length) {
+      fin.appendChild(el('p', MUTED + ' mt-2', 'No book has two starters in this period.'));
+    } else {
+      const list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+      finish.forEach(function (f) {
+        let words = num(f.started) + ' started · ' + num(f.finished) + ' finished · ' + num(f.rate) + '%';
+        if (f.drop_off && text(f.drop_off.chapter)) {
+          words += ' · most who stopped, stopped in ' + f.drop_off.chapter + ' (' + people(f.drop_off.people) + ')';
+        }
+        list.appendChild(bookItem(f.book_id, text(f.title), words));
+      });
+      fin.appendChild(list);
+    }
+    cols.appendChild(fin);
+    box.appendChild(cols);
+
+    const never = el('section', 'mt-8');
+    never.setAttribute('data-ins-never', '');
+    never.appendChild(el('h3', H3, 'Never opened'));
+    const nv = data.never_opened && typeof data.never_opened === 'object' ? data.never_opened : {};
+    const count = num(nv.count);
+    never.appendChild(el('p', SMALL, count.toLocaleString() + (count === 1 ? ' book' : ' books') +
+      ' no one has opened, as far as WebServarr can tell.'));
+    const items = Array.isArray(nv.items) ? nv.items.filter(Boolean) : [];
+    if (items.length) {
+      const list = el('ul', 'mt-2 grid divide-y divide-frosted-blue/10 lg:grid-cols-2 lg:gap-x-10 lg:divide-y-0');
+      items.forEach(function (b) {
+        list.appendChild(bookItem(b.book_id, text(b.title), [text(b.author), b.added_at ? 'added ' + dayLabel(b.added_at) : '']
+          .filter(Boolean).join(' · ')));
+      });
+      never.appendChild(list);
+    }
+    box.appendChild(never);
+    return box;
+  }
+
+  // ---- Habits ----
+
+  function heatmap(rows) {
+    const section = el('section', 'mt-8');
+    section.setAttribute('data-ins-heatmap', '');
+    section.appendChild(el('h3', H3, 'Time of day'));
+    const grid = DAYS.map(function (_d, i) {
+      const row = Array.isArray(rows) && Array.isArray(rows[i]) ? rows[i] : [];
+      const hours = [];
+      for (let h = 0; h < 24; h++) hours.push(num(row[h]));
+      return hours;
+    });
+    let most = 0;
+    let busiest = null;
+    grid.forEach(function (hours, d) {
+      hours.forEach(function (ms, h) { if (ms > most) { most = ms; busiest = [d, h]; } });
+    });
+    const line = el('p', SMALL, busiest ? 'Busiest: ' + DAYS[busiest[0]] + ', ' + hourLabel(busiest[1]) : 'No listening in this period.');
+    line.setAttribute('data-ins-busiest', '');
+    section.appendChild(line);
+    if (!busiest) return section;
+    const wrap = el('div', 'mt-3 max-w-full lg:max-w-[880px]');
+    const table = el('table', 'w-full table-fixed border-separate border-spacing-[2px]');
+    table.appendChild(el('caption', 'sr-only', 'Listening by day and hour, in your time zone. The Plex app part is an estimate.'));
+    const head = el('thead', '');
+    const hr = el('tr', '');
+    hr.appendChild(el('th', 'w-9', ''));
+    for (let h = 0; h < 24; h++) {
+      const th = el('th', 'p-0 text-center text-[12px] font-normal text-frosted-blue/60', h % 6 === 0 ? String(h) : '');
+      th.setAttribute('scope', 'col');
+      th.setAttribute('aria-label', hourLabel(h));
+      hr.appendChild(th);
+    }
+    head.appendChild(hr);
+    table.appendChild(head);
+    const body = el('tbody', '');
+    grid.forEach(function (hours, d) {
+      const tr = el('tr', '');
+      const th = el('th', 'pr-1 text-left text-[12px] font-normal text-frosted-blue/70', DAY_SHORT[d]);
+      th.setAttribute('scope', 'row');
+      th.setAttribute('aria-label', DAYS[d]);
+      tr.appendChild(th);
+      hours.forEach(function (ms, h) {
+        const level = ms ? Math.min(4, Math.ceil(ms / most * 4)) : 0;
+        const td = el('td', 'h-4 rounded-[3px] p-0 sm:h-5 ' + HEAT[level]);
+        const said = DAYS[d] + ', ' + hourLabel(h) + ': ' + (ms ? duration(ms) : 'nothing');
+        td.title = said;
+        td.appendChild(el('span', 'sr-only', said));
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    wrap.appendChild(table);
+    // In sight, not only in the caption: the estimate rule covers every figure that includes Plex.
+    const foot = el('div', 'mt-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 ' + SMALL);
+    foot.appendChild(el('span', 'min-w-0', 'In your time zone. Plex app listening in it is an estimate.'));
+    const key = el('span', 'inline-flex items-center gap-1');
+    key.setAttribute('aria-hidden', 'true');
+    key.setAttribute('data-ins-key', '');
+    key.appendChild(el('span', 'mr-1', 'Less'));
+    HEAT.forEach(function (c) { key.appendChild(el('span', 'inline-block size-3 rounded-[3px] ' + c)); });
+    key.appendChild(el('span', 'ml-1', 'More'));
+    foot.appendChild(key);
+    wrap.appendChild(foot);
+    section.appendChild(wrap);
+    return section;
+  }
+
+  function drawHabits(data) {
+    const box = el('div', 'mt-2');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const split = data.split && typeof data.split === 'object' ? data.split : {};
+    const web = num(split.web_ms);
+    const plex = num(split.plex_ms);
+    const both = el('section', 'mt-2 lg:max-w-[880px]');
+    both.setAttribute('data-ins-split', '');
+    both.appendChild(el('h3', H3, 'Web player and Plex apps'));
+    if (!web && !plex) {
+      both.appendChild(el('p', MUTED + ' mt-1', 'No listening in this period.'));
+    } else {
+      // The web player solid, the Plex estimate hatched after a 2px gap.
+      const track = el('div', 'mt-3 flex h-3 gap-[2px] overflow-hidden rounded-full');
+      track.setAttribute('aria-hidden', 'true');
+      if (web) {
+        const a = el('span', 'block h-full bg-frosted-blue');
+        a.style.width = Math.round(web / (web + plex) * 100) + '%';
+        track.appendChild(a);
+      }
+      if (plex) track.appendChild(el('span', 'block h-full flex-1 ' + EST));
+      both.appendChild(track);
+      both.appendChild(el('p', 'mt-2 ' + SMALL, 'Web player ' + duration(web) + ' · Plex apps ' + duration(plex) + ' (an estimate)'));
+    }
+    box.appendChild(both);
+    box.appendChild(heatmap(data.heatmap));
+
+    const asked = el('section', 'mt-8');
+    asked.setAttribute('data-ins-requested', '');
+    asked.appendChild(el('h3', H3, 'Requested then read'));
+    const req = data.requested && typeof data.requested === 'object' ? data.requested : {};
+    const items = Array.isArray(req.items) ? req.items.filter(Boolean) : [];
+    if (!num(req.total)) {
+      asked.appendChild(emptyLine('No book requests in this period.', (data.tracking || {}).requests));
+    } else {
+      asked.appendChild(el('p', SMALL, num(req.read) + ' of ' + num(req.total) +
+        (num(req.total) === 1 ? ' requested book was' : ' requested books were') +
+        ' started by the person who asked (matched by title).'));
+      const list = el('ul', 'mt-2 grid divide-y divide-frosted-blue/10 lg:grid-cols-2 lg:gap-x-10 lg:divide-y-0');
+      items.forEach(function (r) {
+        const how = r.book_id === null || r.book_id === undefined ? 'not in the library yet'
+          : (r.started_at ? 'started ' + dayLabel(r.started_at) : 'not started');
+        list.appendChild(bookItem(r.book_id, text(r.title), text(r.name) + ' · asked ' + dayLabel(r.requested_at) + ' · ' + how));
+      });
+      asked.appendChild(list);
+    }
+    box.appendChild(asked);
+    return box;
+  }
+
+  // ---- One book ----
+
+  function drawBook(data) {
+    const box = el('div', '');
+    const lines = unavailableLines(data.unavailable);
+    if (lines) box.appendChild(lines);
+    const meta = [text(data.author), text(data.series)].filter(Boolean).join(' · ');
+    if (meta) box.appendChild(el('p', MUTED, meta));
+    const t = data.totals && typeof data.totals === 'object' ? data.totals : {};
+    const row = el('div', 'mt-4 grid grid-cols-2 gap-x-8 gap-y-4 sm:flex sm:flex-wrap sm:gap-x-12');
+    row.setAttribute('data-ins-totals', '');
+    row.appendChild(figure(num(t.started).toLocaleString(), 'Started'));
+    row.appendChild(figure(num(t.finished).toLocaleString(), 'Finished'));
+    row.appendChild(figure(num(t.rate) + '%', 'Finish rate'));
+    row.appendChild(figure(duration(t.listened_ms), 'In the web player'));
+    if (num(t.plex_ms)) row.appendChild(figure(duration(t.plex_ms), 'In Plex apps (an estimate)'));
+    box.appendChild(row);
+    if (data.drop_off && text(data.drop_off.chapter)) {
+      box.appendChild(el('p', MUTED + ' mt-4', 'Most who stopped, stopped in ' + data.drop_off.chapter + ' (' + people(data.drop_off.people) + ').'));
+    }
+    const now = Date.now();
+    const who = el('section', 'mt-8');
+    who.appendChild(el('h3', H3, 'People'));
+    const listed = Array.isArray(data.people) ? data.people.filter(Boolean) : [];
+    if (!listed.length) {
+      who.appendChild(el('p', MUTED + ' mt-1', 'No one has started it yet.'));
+    } else {
+      const list = el('ul', 'mt-2 divide-y divide-frosted-blue/10');
+      listed.forEach(function (p) {
+        const li = el('li', 'min-w-0 py-2');
+        li.appendChild(el('p', 'break-words text-[15px] font-semibold text-frosted-blue', text(p.name)));
+        li.appendChild(el('p', 'break-words ' + SMALL, bookLine(p, now)));
+        list.appendChild(li);
+      });
+      who.appendChild(list);
+    }
+    box.appendChild(who);
+    const asked = Array.isArray(data.requested_by) ? data.requested_by.filter(Boolean) : [];
+    if (asked.length) {
+      const req = el('section', 'mt-8');
+      req.appendChild(el('h3', H3, 'Requested by'));
+      const list = el('ul', 'mt-2 space-y-1');
+      asked.forEach(function (r) {
+        list.appendChild(el('li', SMALL, text(r.name) + ' · asked ' + dayLabel(r.requested_at) + ' (matched by title)'));
+      });
+      req.appendChild(list);
+      box.appendChild(req);
+    }
+    return box;
+  }
+
+  function openBook(bookId, title, opener) {
+    openDetail(title, API + 'book/' + encodeURIComponent(String(bookId)), drawBook, opener);
+  }
+
+  // ---- The period ----
+
+  function showPeriod() {
+    root.querySelectorAll('[data-period]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-period') === state.period));
+    });
+  }
+
+  function loadPeriodSections() {
+    const p = encodeURIComponent(state.period);
+    return Promise.all([
+      load('insTrends', 'ins-trends', withZone(API + 'trends?period=' + p), drawTrends),
+      load('insBooks', 'ins-books', API + 'books?period=' + p, drawBooks),
+      load('insHabits', 'ins-habits', withZone(API + 'habits?period=' + p), drawHabits)
+    ]);
+  }
+
+  root.querySelectorAll('[data-period]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const p = b.getAttribute('data-period');
+      if (PERIODS.indexOf(p) === -1 || p === state.period) return;
+      state.period = p;
+      storePeriod(p);
+      showPeriod();
+      ['insTrends', 'insBooks', 'insHabits'].forEach(function (id) { $(id).setAttribute('aria-busy', 'true'); });
+      loadPeriodSections();
+    }, { signal: signal });
+  });
+  showPeriod();
+
   // ---- Boot ----
 
   const first = Promise.all([
     load('insNow', 'ins-now', API + 'now', drawNow),
-    load('insPeople', 'ins-people', API + 'people', drawPeople)
+    load('insPeople', 'ins-people', API + 'people', drawPeople),
+    loadPeriodSections()
   ]);
   ctx.poll(function () {
     if (document.visibilityState !== 'hidden') refreshNow();

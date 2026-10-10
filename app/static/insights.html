@@ -52,6 +52,32 @@
     </div>
   </section>
 
+  <!-- The period for Trends, Books and Habits; remembered in this browser (pages/insights.js). -->
+  <div id="insPeriodBar" class="mt-12 flex flex-wrap items-center gap-3">
+    <p id="insPeriodLabel" class="text-[15px] font-semibold text-frosted-blue">Period</p>
+    <div id="insPeriod" role="group" aria-labelledby="insPeriodLabel" class="inline-flex flex-wrap gap-1 rounded-[12px] border border-frosted-blue/15 p-1">
+      <button type="button" data-period="30d" aria-pressed="false" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">30 days</button>
+      <button type="button" data-period="90d" aria-pressed="true" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">90 days</button>
+      <button type="button" data-period="1y" aria-pressed="false" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">1 year</button>
+      <button type="button" data-period="all" aria-pressed="false" class="ws-lift h-9 rounded-[9px] px-3 text-[14px] font-semibold text-frosted-blue/80 aria-pressed:bg-frosted-blue/15 aria-pressed:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">All time</button>
+    </div>
+  </div>
+
+  <section id="insTrends" data-arrive="ins-trends" aria-labelledby="insTrendsTitle" aria-busy="true" class="mt-8">
+    <h2 id="insTrendsTitle" class="text-xl font-bold leading-snug text-frosted-blue">Trends</h2>
+    <div data-ins-body aria-hidden="true" class="mt-4 space-y-4"><div class="skel h-40 rounded-xl"></div><div class="skel h-24 rounded-xl"></div></div>
+  </section>
+
+  <section id="insBooks" data-arrive="ins-books" aria-labelledby="insBooksTitle" aria-busy="true" class="mt-12">
+    <h2 id="insBooksTitle" class="text-xl font-bold leading-snug text-frosted-blue">Books</h2>
+    <div data-ins-body aria-hidden="true" class="mt-4 space-y-3"><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div><div class="skel h-16 rounded-xl"></div></div>
+  </section>
+
+  <section id="insHabits" data-arrive="ins-habits" aria-labelledby="insHabitsTitle" aria-busy="true" class="mt-12">
+    <h2 id="insHabitsTitle" class="text-xl font-bold leading-snug text-frosted-blue">Habits</h2>
+    <div data-ins-body aria-hidden="true" class="mt-4 space-y-4"><div class="skel h-10 rounded-xl"></div><div class="skel h-48 rounded-xl"></div></div>
+  </section>
+
   <!-- A person or a book, over the page: a full-height sheet on a phone, a
        centred box from sm up. A native dialog: focus moves in; Close, Escape
        or a click on the dim area closes it. -->

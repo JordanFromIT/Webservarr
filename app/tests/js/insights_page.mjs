@@ -221,14 +221,50 @@ const PERSON_ANSWER = {
   requests: [{ key: SAM, name: 'Sam', title: 'Children of Dune', format: 'both', requested_at: '2026-10-01T09:00:00.000Z', book_id: null, started_at: null }],
   unavailable: [], tracking: TRACKING
 };
+const TRENDS_ANSWER = {
+  period: '90d', bucket: 'week',
+  buckets: MONDAYS.map((start, i) => ({ start, web_ms: (i + 1) * 10 * M, plex_ms: i % 2 ? 15 * M : 0, pages: i * 5 })),
+  active: MONDAYS.map((week, i) => ({ week, people: i % 4 })),
+  top_books: [{ book_id: 1, title: 'Dune', author: 'Frank Herbert', listened_ms: 5 * H, people: 2 }],
+  top_authors: [{ name: 'Frank Herbert', listened_ms: 5 * H, people: 2 }],
+  top_series: [],
+  unavailable: [], tracking: TRACKING
+};
+const BOOKS_ANSWER = {
+  abandoned: [{ key: KIM, name: 'Kim', book_id: 2, title: 'Emma', format: 'audio', percent: 12, chapter: 'Chapter 7', last_at: hoursAgo(24 * 40) }],
+  never_opened: { count: 3, items: [{ book_id: 9, title: 'Walden', author: 'Henry David Thoreau', added_at: '2026-10-01T00:00:00.000Z' }] },
+  finish: [{ book_id: 1, title: 'Dune', author: 'Frank Herbert', started: 3, finished: 1, rate: 33, drop_off: { chapter: 'Chapter 7', people: 2 } }],
+  unavailable: [], tracking: TRACKING
+};
+const HEAT = Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => (d === 4 && h === 21 ? 3 * H : (h === 8 ? 10 * M : 0))));
+const HABITS_ANSWER = {
+  split: { web_ms: 9 * H, plex_ms: 3 * H }, heatmap: HEAT,
+  requested: { total: 2, read: 1, items: [
+    { key: SAM, name: 'Sam', title: 'Dune', format: 'both', requested_at: '2026-10-01T09:00:00.000Z', book_id: 1, started_at: '2026-10-02T09:00:00.000Z' },
+    { key: KIM, name: 'Kim', title: 'Not Here Yet', format: 'ebook', requested_at: '2026-10-02T09:00:00.000Z', book_id: null, started_at: null }] },
+  unavailable: [], tracking: TRACKING
+};
+const BOOK_ANSWER = {
+  book_id: 1, title: 'Dune', author: 'Frank Herbert', series: 'Dune', formats: ['audio'],
+  people: [{ key: SAM, name: 'Sam', formats: ['audio'], percent: 42, finished: false, listened_ms: 3 * H, plex_ms: 0, last_at: hoursAgo(3) }],
+  totals: { started: 3, finished: 1, rate: 33, listened_ms: 5 * H, plex_ms: 30 * M },
+  drop_off: { chapter: 'Chapter 7', people: 2 },
+  requested_by: [{ key: KIM, name: 'Kim', requested_at: '2026-09-01T00:00:00.000Z' }],
+  unavailable: []
+};
 
 function routes(over = {}) {
   return (net) => {
     net.on('/api/admin/insights/now', over.now || (() => ({ body: NOW_ANSWER })));
     net.on('/api/admin/insights/people', over.people || (() => ({ body: PEOPLE_ANSWER })));
     net.on('/api/admin/insights/person', over.person || (() => ({ body: PERSON_ANSWER })));
+    net.on('/api/admin/insights/trends', over.trends || (() => ({ body: TRENDS_ANSWER })));
+    net.on('/api/admin/insights/books', over.books || (() => ({ body: BOOKS_ANSWER })));
+    net.on('/api/admin/insights/habits', over.habits || (() => ({ body: HABITS_ANSWER })));
+    net.on('/api/admin/insights/book/', over.book || (() => ({ body: BOOK_ANSWER })));
   };
 }
+const ALL = ['#insNow', '#insPeople', '#insTrends', '#insBooks', '#insHabits'];
 
 async function mounted(make, over) {
   const t = make({ routes: routes(over) });
@@ -248,15 +284,15 @@ await run('the skeletons hold the page, then each section arrives in one write, 
   const heading = t.q('#insPeople h2');
   const m = t.mount();
   await flush();
-  check('both sections start busy, each with a skeleton', ['#insNow', '#insPeople'].every((s) =>
+  check('both sections start busy, each with a skeleton', ALL.every((s) =>
     t.q(s).getAttribute('aria-busy') === 'true' && t.qa(s + ' [data-ins-body] .skel').length > 0));
   check('People waits for Right now above it', t.q('#insPeople').getAttribute('aria-busy') === 'true');
   slow.resolve();
   await flush();
-  check('both arrived, in order', t.WS.arrived.join(',') === 'ins-now,ins-people', t.WS.arrived);
+  check('every section arrived, in order', t.WS.arrived.join(',') === 'ins-now,ins-people,ins-trends,ins-books,ins-habits', t.WS.arrived);
   await t.clock.advance(1600);
   await m;
-  check('not busy', ['#insNow', '#insPeople'].every((s) => t.q(s).getAttribute('aria-busy') === 'false'));
+  check('not busy', ALL.every((s) => t.q(s).getAttribute('aria-busy') === 'false'));
   check('the headings are the same nodes (nothing above a body moved)', t.q('#insPeople h2') === heading);
   const now = t.qa('[data-ins-now]');
   check('Right now: who, what and how', now.length === 2 && rr(now[0].querySelector('div').textContent) === 'SamDunePlaying · in the web player · 42% through',
@@ -368,7 +404,138 @@ await run('a page that was left draws nothing', async (make) => {
   slow.resolve();
   await t.clock.advance(1600);
   await m;
-  check('still the skeletons', ['#insNow', '#insPeople'].every((s) => t.q(s).getAttribute('aria-busy') === 'true'));
+  check('still the skeletons', ALL.every((s) => t.q(s).getAttribute('aria-busy') === 'true'));
+});
+
+await run('Trends, Books and Habits draw under the period picker, 90 days first', async (make) => {
+  const t = await mounted(make);
+  const pressed = t.qa('[data-period]').map((b) => b.getAttribute('data-period') + '=' + b.getAttribute('aria-pressed'));
+  check('90 days is chosen', pressed.join(',') === '30d=false,90d=true,1y=false,all=false', pressed);
+  check('each asked for 90 days, in this time zone where it matters',
+    /^\/api\/admin\/insights\/trends\?period=90d(&tz=.+)?$/.test(t.net.urls('/api/admin/insights/trends')[0] || '') &&
+    t.net.urls('/api/admin/insights/books')[0] === '/api/admin/insights/books?period=90d' &&
+    /^\/api\/admin\/insights\/habits\?period=90d(&tz=.+)?$/.test(t.net.urls('/api/admin/insights/habits')[0] || ''));
+  const weeks = t.qa('[data-ins-trend] li');
+  check('a bar a week, said in words with the Plex part an estimate', weeks.length === 12 &&
+    weeks.every((li) => /^Week of /.test(li.querySelector('.sr-only').textContent)) &&
+    /in Plex apps \(an estimate\)/.test(weeks[1].querySelector('.sr-only').textContent));
+  check('pages read beside it', t.qa('[data-ins-pages] li').length === 12);
+  check('active people a week', t.qa('[data-ins-active] li').length === 12 &&
+    /^Week of .*: 3 people$/.test(t.qa('[data-ins-active] li .sr-only')[3].textContent));
+  check('top books open a book', !!t.q('[data-ins-top="Top books"] [data-ins-book="1"]'));
+  check('an empty top list says so', rr(t.text('[data-ins-top="Top series"]')).includes('Nothing in this period.'));
+  check('abandoned', rr(t.text('[data-ins-abandoned]')).includes('Emma') && rr(t.text('[data-ins-abandoned]')).includes('Kim · 12% · stopped in Chapter 7'));
+  check('never opened', rr(t.text('[data-ins-never]')).includes('3 books no one has opened, as far as WebServarr can tell.'));
+  check('finish rate and drop-off', rr(t.text('[data-ins-finish]')).includes('3 started · 1 finished · 33% · most who stopped, stopped in Chapter 7 (2 people)'));
+  check('the split in words', rr(t.text('[data-ins-split]')).includes('Web player 9 hr · Plex apps 3 hr (an estimate)'));
+  const table = t.q('[data-ins-heatmap] table');
+  check('the heatmap is a table, 7 days by 24 hours', !!table && t.qa('[data-ins-heatmap] tbody tr').length === 7 &&
+    t.qa('[data-ins-heatmap] tbody tr').every((tr) => tr.querySelectorAll('td').length === 24));
+  check('the busiest hour named above it', rr(t.text('[data-ins-heatmap] [data-ins-busiest]')) === 'Busiest: Friday, 21:00');
+  check('requested then read', rr(t.text('[data-ins-requested]')).includes('1 of 2 requested books were started by the person who asked (matched by title).'));
+  check('no blue primary button anywhere', t.qa('#wsPage [class*="bg-primary"]').length === 0);
+});
+
+await run('the period picker reloads the three period sections and remembers the choice', async (make) => {
+  const t = await mounted(make);
+  t.q('[data-period="1y"]').click();
+  await flush();
+  check('1 year is chosen', t.q('[data-period="1y"]').getAttribute('aria-pressed') === 'true' && t.q('[data-period="90d"]').getAttribute('aria-pressed') === 'false');
+  check('the three asked again for 1 year', ['trends', 'books', 'habits'].every((s) => t.net.urls('/api/admin/insights/' + s).length === 2 &&
+    /period=1y/.test(t.net.urls('/api/admin/insights/' + s)[1])));
+  check('Right now and People were not asked again', t.net.urls('/api/admin/insights/now').length === 1 && t.net.urls('/api/admin/insights/people').length === 1);
+  check('remembered in this browser', t.win.localStorage.getItem('webservarr:insights:period') === '1y');
+  const u = make({ routes: routes() });
+  u.win.localStorage.setItem('webservarr:insights:period', 'all');
+  const m = u.mount();
+  await u.clock.advance(1600);
+  await m;
+  check('a visit starts from the remembered choice', /period=all/.test(u.net.urls('/api/admin/insights/trends')[0] || '') &&
+    u.q('[data-period="all"]').getAttribute('aria-pressed') === 'true');
+  const v = make({ routes: routes() });
+  Object.defineProperty(v.win, 'localStorage', { get() { throw new Error('blocked'); }, configurable: true });
+  const n = v.mount();
+  await v.clock.advance(1600);
+  await n;
+  check('without storage the page still works, at 90 days', /period=90d/.test(v.net.urls('/api/admin/insights/trends')[0] || '') &&
+    !v.q('[data-ins-failed]'));
+});
+
+await run('pages and requests not yet recorded say since when', async (make) => {
+  const t = await mounted(make, {
+    trends: () => ({ body: Object.assign({}, TRENDS_ANSWER, { buckets: TRENDS_ANSWER.buckets.map((b) => Object.assign({}, b, { pages: null })) }) }),
+    habits: () => ({ body: Object.assign({}, HABITS_ANSWER, { requested: { total: 0, read: 0, items: [] } }) })
+  });
+  check('pages: since when', /Tracking started on .+2026\.$/.test(rr(t.text('[data-ins-pages] [data-ins-empty]'))));
+  check('requests: none, and since when', rr(t.text('[data-ins-requested] [data-ins-empty]')).startsWith('No book requests in this period.Tracking started on'));
+});
+
+await run('a book opens from Trends and from a person, and Close gives focus back to what opened it', async (make) => {
+  const t = await mounted(make);
+  const top = t.q('[data-ins-top="Top books"] [data-ins-book="1"]');
+  top.focus();
+  top.click();
+  await flush();
+  check('the book is asked for', t.net.urls('/api/admin/insights/book/')[0] === '/api/admin/insights/book/1');
+  check('its title, totals and drop-off', rr(t.text('#insDetailTitle')) === 'Dune' && rr(t.text('[data-ins-totals]')).includes('Finish rate33%') &&
+    rr(t.text('#insDetailBody')).includes('Most who stopped, stopped in Chapter 7 (2 people).'));
+  check('who asked for it', rr(t.text('#insDetailBody')).includes('Requested by') && rr(t.text('#insDetailBody')).includes('Kim'));
+  t.q('[data-ins-close]').click();
+  await flush();
+  check('focus back on the top book', t.doc.activeElement === top);
+  const row = t.q(`[data-ins-person="${SAM}"]`);
+  row.focus();
+  row.click();
+  await flush();
+  t.q('[data-ins-detail-book="1"]').click();
+  await flush();
+  check('a book from a person opens in the same dialog', t.q('#insDetail').hasAttribute('open') && rr(t.text('#insDetailTitle')) === 'Dune');
+  t.q('[data-ins-close]').click();
+  await flush();
+  check('focus back on the person who led there', t.doc.activeElement === row);
+});
+
+await run('Plex unavailable in Trends is a line, and its bars still draw', async (make) => {
+  const t = await mounted(make, { trends: () => ({ body: Object.assign({}, TRENDS_ANSWER, { unavailable: ['plex'] }) }) });
+  check('the line', !!t.q('#insTrends [data-ins-unavailable="plex"]'));
+  check('the bars', t.qa('[data-ins-trend] li').length === 12);
+});
+
+await run('the approved design: hatched estimates, each chart names its tallest value, the heatmap key', async (make) => {
+  const t = await mounted(make);
+  check('the Plex part of a Trends bar is hatched, never a plain lighter fill', t.qa('[data-ins-trend] .ins-bar.ins-est').length === 6 &&
+    !/bg-frosted-blue\/35/.test(t.q('#insTrends').innerHTML + t.q('#insHabits').innerHTML));
+  check('the Trends legend names the estimate', rr(t.text('#insTrends')).includes('Plex apps (an estimate)') && t.qa('#insTrends p .ins-est').length === 1);
+  check('each chart names its tallest value', rr(t.text('[data-ins-trend] [data-ins-peak]')) === '2 hr 15 min' &&
+    rr(t.text('[data-ins-pages] [data-ins-peak]')) === '55 pages' && rr(t.text('[data-ins-active] [data-ins-peak]')) === '3 people',
+    [t.text('[data-ins-trend] [data-ins-peak]'), t.text('[data-ins-pages] [data-ins-peak]'), t.text('[data-ins-active] [data-ins-peak]')]);
+  check('the split bar hatches the Plex part', t.qa('[data-ins-split] .ins-est').length === 1);
+  check('the heatmap says where it is an estimate, in sight', rr(t.text('[data-ins-heatmap]')).includes('In your time zone. Plex app listening in it is an estimate.'));
+  check('and has a Less to More key', /^Less\s*More$/.test(rr(t.text('[data-ins-heatmap] [data-ins-key]'))) && t.qa('[data-ins-heatmap] [data-ins-key] span.rounded-\\[3px\\]').length === 5);
+  check('the busiest hour is the darkest cell', t.qa('[data-ins-heatmap] td.bg-frosted-blue').length === 1);
+  check('an abandoned book says when it was last touched', /last touched \d{1,2} [A-Z][a-z]{2} \d{4}/.test(rr(t.text('[data-ins-abandoned]'))), rr(t.text('[data-ins-abandoned]')));
+  check('a book with no library id is plain text, not a button', !t.q('[data-ins-requested] button[data-ins-book="null"]') &&
+    t.qa('[data-ins-requested] button[data-ins-book]').length === 1);
+});
+
+await run('Trends with no listening yet says so and draws no legend', async (make) => {
+  const t = await mounted(make, { trends: () => ({ body: Object.assign({}, TRENDS_ANSWER, {
+    buckets: TRENDS_ANSWER.buckets.map((b) => ({ start: b.start, web_ms: 0, plex_ms: 0, pages: null })),
+    active: TRENDS_ANSWER.active.map((a) => ({ week: a.week, people: 0 })), top_books: [], top_authors: [] }) }) });
+  check('Hours listened: nothing', rr(t.text('[data-ins-trend]')).includes('Nothing in this period.'));
+  check('no legend, no bars', !t.q('#insTrends .ins-est') && t.qa('#insTrends .ins-bar').length === 0);
+  check('no note about times when no time is listed', !rr(t.text('#insTrends')).includes('Times include listening in Plex apps'));
+});
+
+await run('a book opened from a person moves focus to Close, inside the dialog', async (make) => {
+  const t = await mounted(make);
+  t.q(`[data-ins-person="${SAM}"]`).click();
+  await flush();
+  const b = t.q('[data-ins-detail-book="1"]');
+  b.focus();
+  b.click();
+  await flush();
+  check('focus stays in the dialog', t.doc.activeElement === t.q('[data-ins-close]'));
 });
 
 console.log(`insights page: ${total - failed}/${total} checks pass`);
