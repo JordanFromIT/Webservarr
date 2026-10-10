@@ -1797,6 +1797,10 @@ function filterRoutes(over = {}) {
   };
 }
 
+// The pickers' own asks for names: the audiobook notice's one ask for the
+// format counts (on every visit until Got it) is not a picker's.
+const NOTICE_PROBE = '/api/books/facets?facet=format';
+const pickerAsks = (t) => t.net.urls('/api/books/facets').filter((u) => u !== NOTICE_PROBE);
 const pickerBox = (t) => t.q('[role="combobox"]');
 const options = (t) => t.qa('[role="listbox"] [role="option"]');
 function pickerKey(t, key) {
@@ -1832,7 +1836,7 @@ await run('filters: three closed buttons after the format chips; no filter chang
   check('they sit in the toolbar after the format chips', t.q('#toolbar').children[1] === t.q('#filterButtons'));
   check('no row of filters in use', t.hidden('#activeFilters') && t.qa('#activeFilters button').length === 0);
   check('the library is asked for as before', t.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36');
-  check('no names are asked for until a picker is opened', t.net.urls('/api/books/facets').length === 0);
+  check('no names are asked for until a picker is opened', pickerAsks(t).length === 0);
   check('the skeleton holds no row for filters', !t.doc.documentElement.hasAttribute('data-books-filtered'));
 });
 
@@ -1870,7 +1874,7 @@ await run('filters: a picker lists the names with counts, finds by typing, picks
   check('the button says it is open', btn.getAttribute('aria-expanded') === 'true');
   check('it is a dialog on the shared stack, the search box first', kit.opened === 1 && t.doc.activeElement === pickerBox(t));
   await t.clock.advance(50);
-  check('the names are asked for in this format', t.net.urls('/api/books/facets')[0] === '/api/books/facets?facet=author&format=all', t.net.urls('/api/books/facets'));
+  check('the names are asked for in this format', pickerAsks(t)[0] === '/api/books/facets?facet=author&format=all', pickerAsks(t));
   const opts = options(t);
   check('"All authors" first, then each name with its count', opts.map((o) => o.textContent.replace('check', '')).join('|') === 'All authors|Charlotte Brontë1|Frank Herbert3|Jane Austen2',
     opts.map((o) => o.textContent));
@@ -1912,7 +1916,7 @@ await run('filters: a picker asks with the format and the other filters, never i
   await t.mount();
   t.click('[data-filter="author"]');
   await t.clock.advance(50);
-  check('author: the format and the series', t.net.urls('/api/books/facets').pop() === '/api/books/facets?facet=author&format=ebook&series=Dune', t.net.urls('/api/books/facets'));
+  check('author: the format and the series', pickerAsks(t).pop() === '/api/books/facets?facet=author&format=ebook&series=Dune', pickerAsks(t));
   check('the author in use starts highlighted', pickerBox(t).getAttribute('aria-activedescendant') === options(t).find((o) => o.getAttribute('aria-selected') === 'true').id);
 });
 
@@ -2038,7 +2042,7 @@ await run('filters: the picker while its list loads, when it fails, and Try agai
   fail = false;
   t.q('[role="listbox"] button').click();
   await t.clock.advance(50);
-  check('Try again asks again and shows the names', options(t).length === 4 && t.net.urls('/api/books/facets').length === 2);
+  check('Try again asks again and shows the names', options(t).length === 4 && pickerAsks(t).length === 2);
   check('and the focus is back in the search', t.doc.activeElement === pickerBox(t));
 });
 
@@ -2674,6 +2678,204 @@ await run('CLS: a library slower than the wait brings in the toolbar alone, only
   await u.clock.advance(4100);
   check('the same height: the toolbar comes in on its own, the grid\'s skeleton stays where it is', u.hidden('#toolbarSkel') && !u.hidden('#toolbar') && !u.hidden('#gridSkeleton') && !!u.q('#continueHost .skel'));
 });
+
+// ---- The audiobook notice (#booksNotice): where to listen ----
+//
+// Shown to a person the player lets in (the format counts the Books APIs give
+// them include audiobooks), only when it can be there from the first paint:
+// the last visit's answer is kept, so a first visit never pushes the page
+// down, and never on a visit the first-visit guide is still to be shown. Got
+// it is kept on this device; storage that fails brings it back next visit.
+
+const LOADER = readFileSync(join(STATIC, 'js/theme-loader.js'), 'utf8');
+const AUDIO_FLAG = 'webservarr_books_audio:sam';
+const NOTICE_DONE = 'webservarr_books_notice_done:sam';
+// Someone who has had the guide and whom the last visit found could listen.
+const HEARD = { [GUIDE_FLAG]: '1', [AUDIO_FLAG]: '1' };
+const formatCounts = (audio, notes) => ({ body: { facets: { format: [{ name: 'all', count: 9 }, { name: 'ebook', count: 6 }, { name: 'audio', count: audio }] },
+  facet: 'format', values: [], notes: notes || [] } });
+const noticeRoutes = (audio, notes) => (net) => { usual()(net); net.on('/api/books/facets', () => formatCounts(audio, notes)); };
+const noticeOn = (t) => !t.q('#booksNotice').hidden;
+const probes = (t) => t.net.urls(NOTICE_PROBE).length;
+// This browser's storage, carried to the next visit.
+const kept = (t) => { const out = {}; for (let i = 0; i < t.win.localStorage.length; i++) { const k = t.win.localStorage.key(i); out[k] = t.win.localStorage.getItem(k); } return out; };
+
+await run('the notice: shown to a person who can play the audiobooks, as a region with a heading, the site named', async (make) => {
+  const t = make({ storage: HEARD, branding: { app_name: '  Riverbend ' }, routes: noticeRoutes(4) });
+  const m = t.mount();
+  check('there from the visit\'s first frame, before anything is awaited', noticeOn(t));
+  const box = t.q('#booksNotice');
+  check('a section named by its heading', box.tagName === 'SECTION' && box.getAttribute('aria-labelledby') === 'booksNoticeTitle' &&
+    t.q('#booksNoticeTitle').tagName === 'H2' && t.text('#booksNoticeTitle') === 'Best heard here');
+  const words = box.querySelector('p').textContent;
+  check('the words, with the site\'s own name', words === 'For the best audiobook experience, listen here on Riverbend. Plex and Plexamp work too, and your place syncs between them, but they\'re made for music: books show up as albums, chapters as tracks, and there\'s no series or reading order. Sticking to one app also keeps your place the most reliable.', words);
+  const done = t.q('#booksNoticeDone');
+  check('Got it is a real button with the shared focus ring', done.tagName === 'BUTTON' && done.getAttribute('type') === 'button' && done.textContent === 'Got it' &&
+    /focus-visible:ring-focus/.test(done.className) && !done.hasAttribute('tabindex'));
+  check('directly under the event log, above the page\'s title', /<!-- ws:event-log -->\s*<!--[\s\S]*?-->\s*<section id="booksNotice"/.test(BOOKS_HTML) &&
+    box.compareDocumentPosition(t.q('h1')) === 4);
+  check('the first paint\'s mark is the page\'s to take off', !t.doc.documentElement.hasAttribute('data-books-notice'));
+  await t.clock.advance(50);
+  await m;
+  check('still there once the player\'s answer is in, asked for once', noticeOn(t) && probes(t) === 1, probes(t));
+  check('and kept for the next visit', t.win.localStorage.getItem(AUDIO_FLAG) === '1');
+});
+
+await run('the notice: a site with no name says "this site"', async (make) => {
+  for (const branding of [{ app_name: '' }, { app_name: '   ' }, undefined]) {
+    const t = make({ storage: HEARD, branding, routes: noticeRoutes(4) });
+    t.mount();
+    check(`${JSON.stringify(branding)}: this site`, /listen here on this site\./.test(t.q('#booksNotice p').textContent), t.q('#booksNotice p').textContent);
+  }
+});
+
+await run('the notice: never shown to a person without the audiobooks', async (make) => {
+  const no = make({ storage: { [GUIDE_FLAG]: '1', [AUDIO_FLAG]: '0' }, routes: noticeRoutes(0) });
+  const m = no.mount();
+  check('the last visit found they cannot: not shown', !noticeOn(no));
+  await no.clock.advance(50);
+  await m;
+  check('and the answer agrees: still not shown, still remembered so', !noticeOn(no) && no.win.localStorage.getItem(AUDIO_FLAG) === '0');
+
+  const gone = make({ storage: HEARD, routes: noticeRoutes(0) });
+  const g = gone.mount();
+  await gone.clock.advance(50);
+  await g;
+  check('a share that no longer has the audiobooks (or the player off): it goes, and is remembered', !noticeOn(gone) &&
+    gone.win.localStorage.getItem(AUDIO_FLAG) === '0' && !gone.doc.documentElement.hasAttribute('data-books-notice'));
+
+  const fresh = make({ storage: { [GUIDE_FLAG]: '1' }, routes: noticeRoutes(0) });
+  const f = fresh.mount();
+  await fresh.clock.advance(50);
+  await f;
+  check('nothing remembered and no audiobooks: not shown', !noticeOn(fresh) && fresh.win.localStorage.getItem(AUDIO_FLAG) === '0');
+});
+
+await run('the notice: an answer that cannot say keeps what was remembered', async (make) => {
+  const down = make({ storage: HEARD, routes: noticeRoutes(0, [{ source: 'plex', reason: 'unavailable', text: 'Audiobooks are unavailable right now' }]) });
+  const d = down.mount();
+  await down.clock.advance(50);
+  await d;
+  check('Plex not answering: still shown, the memory as it was', noticeOn(down) && down.win.localStorage.getItem(AUDIO_FLAG) === '1');
+  const failed = make({ storage: HEARD, routes: (net) => { usual()(net); net.on('/api/books/facets', () => ({ status: 503, body: {} })); } });
+  const x = failed.mount();
+  await failed.clock.advance(50);
+  await x;
+  check('the ask failing: still shown, the memory as it was', noticeOn(failed) && failed.win.localStorage.getItem(AUDIO_FLAG) === '1');
+});
+
+await run('the notice: a first visit after it ships finds out, and the next visit shows it from its first frame', async (make) => {
+  const t = make({ storage: { [GUIDE_FLAG]: '1' }, routes: noticeRoutes(4) });
+  const m = t.mount();
+  await t.clock.advance(50);
+  await m;
+  check('not shown on the visit that found out (it would push the page down)', !noticeOn(t));
+  check('the answer is kept', t.win.localStorage.getItem(AUDIO_FLAG) === '1');
+  const next = make({ storage: kept(t), routes: noticeRoutes(4) });
+  next.mount();
+  check('the next visit has it from the start', noticeOn(next));
+});
+
+await run('the notice and the first-visit guide never share a visit', async (make) => {
+  const t = withTour(make({ storage: { [AUDIO_FLAG]: '1' }, routes: noticeRoutes(4) }));
+  const m = t.mount();
+  check('a visit the guide is still to be shown: no notice', !noticeOn(t));
+  await t.clock.advance(1500);
+  await m;
+  check('the guide runs on its own', tourOn(t) && !noticeOn(t));
+  const next = withTour(make({ storage: kept(t), routes: noticeRoutes(4) }));
+  const n = next.mount();
+  check('the visit after: the notice', noticeOn(next));
+  await next.clock.advance(1500);
+  await n;
+  check('and no guide over it', !tourOn(next) && noticeOn(next));
+});
+
+await run('the notice: Got it hides it for good on this device', async (make) => {
+  const t = make({ storage: HEARD, routes: noticeRoutes(4) });
+  const m = t.mount();
+  await t.clock.advance(50);
+  await m;
+  t.click('#booksNoticeDone');
+  check('it goes at once', !noticeOn(t));
+  check('kept for this person on this device', t.win.localStorage.getItem(NOTICE_DONE) === '1');
+  const h1 = t.q('h1');
+  check('the focus goes to the page\'s heading, not lost with the button', t.doc.activeElement === h1 && h1.getAttribute('tabindex') === '-1');
+  const next = make({ storage: kept(t), routes: noticeRoutes(4) });
+  const n = next.mount();
+  await next.clock.advance(50);
+  await n;
+  check('the next visit: not shown, and the player is not asked', !noticeOn(next) && probes(next) === 0, probes(next));
+});
+
+await run('the notice: storage that fails', async (make) => {
+  const t = make({ storage: HEARD, routes: noticeRoutes(4) });
+  const real = t.win.localStorage;
+  // Reads work, writes throw (a full quota, a locked-down browser).
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true,
+    value: { getItem: (k) => real.getItem(k), setItem() { throw new Error('QuotaExceededError'); }, removeItem() {} } });
+  const m = t.mount();
+  await t.clock.advance(50);
+  await m;
+  check('shown, from what could be read', noticeOn(t));
+  let threw = null;
+  try { t.click('#booksNoticeDone'); } catch (e) { threw = e; }
+  check('Got it still hides it, without an error', !threw && !noticeOn(t), threw && String(threw));
+  check('nothing was kept', real.getItem(NOTICE_DONE) === null);
+  const next = make({ storage: HEARD, routes: noticeRoutes(4) });
+  next.mount();
+  check('so it is back on the next visit', noticeOn(next));
+
+  const blocked = make({ storage: HEARD, routes: noticeRoutes(4) });
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('SecurityError'); } });
+  let err = null;
+  let b;
+  try { b = blocked.mount(); } catch (e) { err = e; }
+  await blocked.clock.advance(50);
+  await b;
+  check('storage that cannot be read at all: not shown, and the page still draws', !err && !noticeOn(blocked) && !blocked.hidden('#libraryGrid'), err && String(err));
+});
+
+await run('the notice on a soft navigation into Books', async (make) => {
+  // The router swaps in the page as the server sent it (hidden, no mark on
+  // <html>) and mounts it: the visit decides before its first await.
+  const t = make({ storage: HEARD, routes: noticeRoutes(4) });
+  check('swapped in hidden, as the markup has it', t.q('#booksNotice').hidden);
+  t.mount();
+  check('shown in the same frame the page is mounted', noticeOn(t));
+  t.ctl.abort();
+  // Back to Books later in the same document, after Got it on another visit.
+  const back = make({ storage: Object.assign({}, HEARD, { [NOTICE_DONE]: '1' }), routes: noticeRoutes(4) });
+  back.doc.documentElement.setAttribute('data-books-notice', '');
+  back.mount();
+  check('a stale mark is taken off, and Got it holds', !noticeOn(back) && !back.doc.documentElement.hasAttribute('data-books-notice'));
+});
+
+current = 'the notice on a full load: theme-loader.js holds its room before the first paint';
+{
+  const load = (store, opts = {}) => {
+    const w = new Window({ url: 'https://ws.test/books' });
+    if (opts.blocked) Object.defineProperty(w, 'localStorage', { get() { throw new Error('blocked'); }, configurable: true });
+    else for (const [k, v] of Object.entries(store)) w.localStorage.setItem(k, v);
+    const data = { branding: { app_name: 'Riverbend' }, user: { username: 'sam' }, page: opts.page || 'books' };
+    w.document.head.innerHTML = '<script id="ws-data" type="application/json">' + JSON.stringify(data) + '</script>';
+    w.console.error = () => {};
+    let err = null;
+    try { w.eval(LOADER); } catch (e) { err = e; }
+    return { marked: w.document.documentElement.hasAttribute('data-books-notice'), err };
+  };
+  check('a person the last visit found could listen: marked', load(HEARD).marked);
+  check('after Got it: not', !load(Object.assign({}, HEARD, { [NOTICE_DONE]: '1' })).marked);
+  check('no audiobooks last visit: not', !load({ [GUIDE_FLAG]: '1', [AUDIO_FLAG]: '0' }).marked);
+  check('the guide still to come: not', !load({ [AUDIO_FLAG]: '1' }).marked);
+  check('another person on this browser: not', !load({ 'webservarr_books_guide_seen:kim': '1', 'webservarr_books_audio:kim': '1' }).marked);
+  check('another page: not', !load(HEARD, { page: 'index' }).marked);
+  const blocked = load(HEARD, { blocked: true });
+  check('storage blocked: not, and no error', !blocked.marked && !blocked.err, blocked.err && String(blocked.err));
+  check('the mark holds the room with the words unseen (books.html\'s page style)',
+    /html\[data-books-notice\] #booksNotice\[hidden\] \{ display: block; visibility: hidden; \}/.test(BOOKS_HTML));
+  check('the section has no display utility of its own (it would beat hidden)', /<section id="booksNotice" hidden aria-labelledby="booksNoticeTitle">/.test(BOOKS_HTML));
+}
 
 // ---- Requests: ?q= runs the search on arrival ----
 

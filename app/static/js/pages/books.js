@@ -86,6 +86,13 @@ const ROWS = {
 const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];
 const MOVE_MS = 200;               // a card trading places with its neighbour
 const GUIDE_KEY = 'webservarr_books_guide_seen:';
+// The audiobook notice (#booksNotice): whether the last visit found this
+// person could play the audiobooks ("1" or "0"), and Got it.
+const AUDIO_KEY = 'webservarr_books_audio:';
+const NOTICE_DONE_KEY = 'webservarr_books_notice_done:';
+// The player's own answer, without a book list: the format counts of the books
+// this person may see (an audiobook only with a share that includes the library).
+const NOTICE_PROBE_URL = '/api/books/facets?facet=format';
 // The cards have their covers by then, so the first spotlight sits on something drawn.
 const GUIDE_WAIT_MS = 900;
 
@@ -949,6 +956,51 @@ export async function mount(ctx) {
     markRow(name, hint === '1');
     state.unsettled[name] = true;
   });
+
+  // ---- The audiobook notice ----
+
+  // Where to listen, for a person who can play the audiobooks: shown only
+  // when it can be there from the first paint (the last visit found they can),
+  // so it never pushes the page down, and never on a visit the first-visit
+  // guide is still to be shown. The player's answer is asked for on every
+  // visit until Got it, and kept for the next one.
+  const notice = $('booksNotice');
+  function hideNotice() {
+    notice.hidden = true;
+    html.removeAttribute('data-books-notice');
+  }
+  if (notice) {
+    const brand = window.WEBSERVARR_THEME || (ctx.data || {}).branding || {};
+    const site = typeof brand.app_name === 'string' ? brand.app_name.trim() : '';
+    notice.querySelector('[data-books-notice-site]').textContent = site || 'this site';
+    const done = storageGet(NOTICE_DONE_KEY + user) === '1';
+    notice.hidden = done || storageGet(AUDIO_KEY + user) !== '1' || storageGet(GUIDE_KEY + user) !== '1';
+    html.removeAttribute('data-books-notice');
+    $('booksNoticeDone').addEventListener('click', function () {
+      // Kept on this device; if it cannot be kept, it is back next visit.
+      storageSet(NOTICE_DONE_KEY + user, '1');
+      hideNotice();
+      // The button has gone: the focus goes to the page's heading, as after a navigation.
+      const h1 = root.querySelector('h1');
+      if (h1) {
+        if (!h1.hasAttribute('tabindex')) h1.setAttribute('tabindex', '-1');
+        h1.focus({ preventScroll: true });
+      }
+    }, { signal: signal });
+    if (!done) {
+      WS.getJSON(NOTICE_PROBE_URL, { signal: signal }).then(function (data) {
+        // Plex not answering: not known either way, so the memory stays as it is.
+        const notes = data && Array.isArray(data.notes) ? data.notes : [];
+        if (signal.aborted || notes.some(function (n) { return n && n.source === 'plex'; })) return;
+        const formats = data && data.facets && Array.isArray(data.facets.format) ? data.facets.format : [];
+        const audio = formats.filter(function (f) { return f && f.name === 'audio'; })[0];
+        const can = !!(audio && audio.count > 0);
+        storageSet(AUDIO_KEY + user, can ? '1' : '0');
+        // Access gone since the last visit: it goes now.
+        if (!can) hideNotice();
+      }, function () { /* the memory stays; asked again next visit */ });
+    }
+  }
 
   // ---- Showing one body at a time ----
 
