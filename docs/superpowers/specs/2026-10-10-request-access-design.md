@@ -401,7 +401,10 @@ accessible name is "Access requests, 3 waiting". The panel, top to bottom:
   with many Plex accounts could fill the 20 slots. The admin's remedy is deny and block. This is
   accepted.
 - **Logging:** request id, Plex account id and outcome only. No note, email, token or cookie.
-- **Admin token:** sent only to fixed plex.tv hosts, in a header. There are no user-supplied URLs, so
+- **Admin token:** always in a header. The share client's own calls go only to fixed plex.tv hosts.
+  Finding the machine id reuses the sign-in gate's `_fetch_configured_server_identifiers`, which also
+  sends the token to the configured Plex server's `/identity` (the admin-set `integration.plex.url`,
+  TLS not verified on that LAN hop), as sign-in already does. There are no user-supplied URLs, so
   there is no SSRF surface.
 - **Audit scope:** the three public routes, the identify flow and the callback page's `for=access`
   branch go on the v2.0 audit list.
