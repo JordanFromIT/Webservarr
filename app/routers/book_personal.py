@@ -1,7 +1,8 @@
 """
 A person's own Books data (/api/books/me/... and /api/books/<id>/list,
-/queue, /rating, /continue-hidden): My list, the Up next queue, star ratings
-and the books they took out of their Continue row. The rows are
+/queue, /rating, /continue-hidden): My list, the Up next queue, star ratings,
+the books they took out of their Continue row, and their answer to the
+audiobook notice (/api/books/me/notice). The rows are
 app/services/book_personal.py's; this module decides what the caller may see
 and change.
 
@@ -16,7 +17,7 @@ followed to the surviving book. Errors are 4xx or 503, never 500.
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
@@ -322,3 +323,24 @@ async def show_in_continue(request: Request, book_id: BookId, identity: str = De
     """Undo: the book is back in the caller's Continue row: {"hidden": false}."""
     book_personal.show_in_continue(db, identity, _ids_to_clear(db, book_id))
     return {"hidden": False}
+
+
+# --- The audiobook notice -------------------------------------------------------------
+
+class NoticeIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    # seen: Okay on the first-visit window. off: Don't show again.
+    state: Literal["seen", "off"]
+
+
+@router.post("/me/notice", dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
+@books._limit(WRITE_LIMIT, "me-write")
+@books._db_503
+async def answer_notice(request: Request, body: NoticeIn, identity: str = Depends(_owner),
+                        db: Session = Depends(get_db)):
+    """The caller's answer to the audiobook notice, kept for their account on
+    every device: {"notice": "inline"} once the first-visit window is seen,
+    {"notice": "off"} after Don't show again (which no later answer undoes).
+    The Books page reads it back from its own render (main.books_notice)."""
+    return {"notice": book_personal.set_notice(db, identity, body.state)}

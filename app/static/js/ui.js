@@ -201,6 +201,8 @@
   function onKey(e) {
     var d = topDialog();
     if (!d) return;
+    // A held dialog (modal's hold option) takes Escape and does nothing with it.
+    if (e.key === 'Escape' && !e.isComposing && d.held) { e.preventDefault(); e.stopPropagation(); return; }
     // Mid-composition, Escape belongs to the input method, not the dialog.
     if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }
     if (e.key !== 'Tab') return;
@@ -330,8 +332,12 @@
   // opts: { box: the dialog box (default the overlay's [data-dialog-box]),
   //         initial: what takes focus first (default the first control),
   //         onClose: hides the overlay; runs on Escape, on close(), and when
-  //         the router closes every dialog before a soft navigation }.
-  // Returns { close() }; closing twice does nothing.
+  //         the router closes every dialog before a soft navigation,
+  //         hold (opt-in): Escape does nothing until release() is called, for
+  //         a dialog that must stay up a while (the Books notice's countdown).
+  //         The page ignores its own backdrop clicks meanwhile. close() and
+  //         the router still close it }.
+  // Returns { close(), release() }; closing twice does nothing.
   function modal(overlay, opts) {
     opts = opts || {};
     var box = opts.box || overlay.querySelector('[data-dialog-box]') || overlay;
@@ -339,7 +345,7 @@
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     if (!box.hasAttribute('tabindex')) box.setAttribute('tabindex', '-1');
-    var entry = { box: box, close: close, dismiss: false };
+    var entry = { box: box, close: close, dismiss: false, held: !!opts.hold };
     var done = false;
     function close() {
       if (done) return;
@@ -366,7 +372,7 @@
     stack.push(entry);
     var first = opts.initial || focusables(box)[0] || box;
     first.focus({ preventScroll: true });
-    return { close: close };
+    return { close: close, release: function () { entry.held = false; } };
   }
 
   function isDialogOpen() { return stack.length > 0; }

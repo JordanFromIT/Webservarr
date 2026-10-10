@@ -30,6 +30,7 @@ from app.routers import news, status, admin, admin_settings, admin_integrations,
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services import book_requests as book_requests_service
+from app.services import book_personal as book_personal_service
 from app.services import status_feed as status_feed_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
 from app.services.request_status_warmer import (
@@ -524,6 +525,27 @@ def _event_log_off() -> bool:
             db.close()
 
 
+def books_notice(user: dict) -> str:
+    """What the Books page shows this person about where to listen: "window"
+    (the first visit's), "inline" (later visits) or "off" (Don't show again),
+    from their account's answer (book_personal.set_notice), so it holds on
+    every device. Read with the page, so the page knows from its first paint.
+    No identity (nothing can be kept for it) or no database: "off"."""
+    identity = tickets.account_identity(user)
+    if not identity:
+        return book_personal_service.NOTICE_OFF
+    db = None
+    try:
+        db = SessionLocal()
+        return book_personal_service.notice_state(db, identity)
+    except Exception:  # noqa: BLE001 - the page still loads, without the notice
+        logger.warning("Could not read the Books notice state", exc_info=True)
+        return book_personal_service.NOTICE_OFF
+    finally:
+        if db is not None:
+            db.close()
+
+
 # Login page
 @app.get("/login", response_class=HTMLResponse, tags=["Pages"])
 async def login_page(request: Request):
@@ -667,7 +689,8 @@ async def books_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return await shell_page("books", request, user, gate="library")
+    return await shell_page("books", request, user, gate="library",
+                            extra_flags={"books_notice": books_notice(user)})
 
 
 # A person's or a series' books (names travel in the query string, so a "/" or a
@@ -723,7 +746,8 @@ async def book_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return await shell_page("books", request, user, gate="library", extra_flags={"book_open": True})
+    return await shell_page("books", request, user, gate="library",
+                            extra_flags={"book_open": True, "books_notice": books_notice(user)})
 
 
 # Legacy redirects: /ebooks (the old eBooks page) and /library (before that) → /books (301)

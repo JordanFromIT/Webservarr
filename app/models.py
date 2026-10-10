@@ -792,3 +792,19 @@ class BookRequestTime(Base):
 
     def __repr__(self):
         return f"<BookRequestTime(book_id={self.book_id})>"
+
+
+class BookNotice(Base):
+    """One person's answer to the audiobook notice on Books (pages/books.js):
+    no row means they have not had the first-visit window yet; `seen` means
+    they pressed Okay on it, so later visits get the inline notice; `off`
+    means Don't show again. Keyed by account identity, so it holds across
+    devices."""
+    __tablename__ = "book_notice"
+
+    identity = Column(String(255), primary_key=True)
+    state = Column(String(10), nullable=False)
+    updated_at = Column(DateTime, nullable=False)                   # naive UTC
+
+    def __repr__(self):
+        return f"<BookNotice(identity='{self.identity}', state='{self.state}')>"

@@ -36,13 +36,14 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import session_manager
 from app.database import SessionLocal
 from app.integrations import kavita
 from app.integrations import plex_player as pp
 from app.integrations.config import same_address
-from app.models import BookContinueHidden, BookListEntry, BookQueueEntry, BookRating
+from app.models import BookContinueHidden, BookListEntry, BookNotice, BookQueueEntry, BookRating
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,48 @@ def remove_from_list(db, identity: str, book_ids: Iterable[int]) -> None:
     db.query(BookListEntry).filter(BookListEntry.identity == identity,
                                    BookListEntry.book_id.in_(list(book_ids))).delete(synchronize_session=False)
     db.commit()
+
+
+# --- The audiobook notice ------------------------------------------------------------
+#
+# What the Books page shows about where to listen (pages/books.js): the
+# first-visit window until the person presses its Okay, then the inline notice
+# on later visits until they press Don't show again. One row per identity,
+# so the answer holds on every device.
+
+NOTICE_WINDOW = "window"     # no row: the first-visit window
+NOTICE_INLINE = "inline"     # Okay pressed on the window: the inline notice
+NOTICE_OFF = "off"           # Don't show again
+NOTICE_SEEN = "seen"         # the stored state behind NOTICE_INLINE
+
+
+def notice_state(db, identity: str) -> str:
+    """What the Books page shows this person: window, inline or off."""
+    row = db.query(BookNotice.state).filter(BookNotice.identity == identity).first()
+    if row is None:
+        return NOTICE_WINDOW
+    return NOTICE_OFF if row[0] == NOTICE_OFF else NOTICE_INLINE
+
+
+def set_notice(db, identity: str, state: str) -> str:
+    """Record "seen" (Okay on the window) or "off" (Don't show again) and
+    return what the page shows now. Off is for good: a later "seen" (another
+    tab's window) never brings the notice back."""
+    if state not in (NOTICE_SEEN, NOTICE_OFF):
+        raise ValueError(state)
+    for _ in range(2):
+        row = db.query(BookNotice).filter(BookNotice.identity == identity).first()
+        if row is None:
+            db.add(BookNotice(identity=identity, state=state, updated_at=_now()))
+        elif row.state != NOTICE_OFF and row.state != state:
+            row.state, row.updated_at = state, _now()
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            # Another worker added this person's row first: read it and decide again.
+            db.rollback()
+    return notice_state(db, identity)
 
 
 # --- Up next ------------------------------------------------------------------------

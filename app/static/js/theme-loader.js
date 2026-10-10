@@ -418,18 +418,22 @@
         document.documentElement.setAttribute(rows[i][1], '');
       }
     }
-    // The audiobook notice (#booksNotice): for a person the last visit found
-    // could play the audiobooks (webservarr_books_audio:<name>), who has not
-    // pressed Got it (webservarr_books_notice_done:<name>) and has had the
-    // first-visit guide. pages/books.js decides the same on every visit.
-    if (localStorage.getItem('webservarr_books_audio:' + name) === '1' &&
-        localStorage.getItem('webservarr_books_notice_done:' + name) !== '1' &&
-        localStorage.getItem('webservarr_books_guide_seen:' + name) === '1') {
-      document.documentElement.setAttribute('data-books-notice', '');
-    }
     // The person's remembered view: Group series off gives every card a third line.
     view = JSON.parse(localStorage.getItem('webservarr_books_view:' + name) || 'null');
   } catch (e) { /* private mode: no slot reserved, the row arrives when it arrives */ }
+  // The audiobook notice's inline card (#booksNotice): the page says so
+  // (books_notice, from the person's account), unless Okay or Don't show
+  // again hid it earlier in this browser session (sessionStorage
+  // webservarr_books_notice:<account>). pages/books.js decides the same on
+  // every visit.
+  if (data.books_notice === 'inline') {
+    var held = null;
+    try {
+      var who = data.user || {};
+      held = sessionStorage.getItem('webservarr_books_notice:' + (who.identity_key || who.username || ''));
+    } catch (e) { /* storage blocked: shown, as pages/books.js does */ }
+    if (!held) document.documentElement.setAttribute('data-books-notice', '');
+  }
   // The toolbar's filters: an address that carries one gets the room of the
   // row of filters in use (pages/books.js keeps this in step on soft visits).
   if (/[?&](author|series|narrator)=[^&]/.test(window.location.search)) {

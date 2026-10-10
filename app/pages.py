@@ -375,7 +375,7 @@ def app_head_links(branding: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def data_block(branding: dict, user: Optional[dict], version: str, name: str,
-               setup: Optional[dict] = None) -> str:
+               setup: Optional[dict] = None, books_notice: Optional[str] = None) -> str:
     """
     The payload the client reads at parse time.
 
@@ -384,10 +384,14 @@ def data_block(branding: dict, user: Optional[dict], version: str, name: str,
 
     setup: which connections are set up (settings_setup), on the Settings
     page only.
+    books_notice: what the Books page shows this person about where to
+    listen ("window", "inline" or "off"; main.books_notice), on Books only.
     """
     payload = {"branding": branding, "user": user, "version": version, "page": name}
     if setup is not None:
         payload["setup"] = setup
+    if books_notice is not None:
+        payload["books_notice"] = books_notice
     text = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
     return f'<script id="ws-data" type="application/json">{text}</script>'
 
@@ -912,7 +916,7 @@ def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], sta
 
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
                  name: str, base_url: str, path: str, setup: Optional[dict] = None,
-                 custom_css: bool = True) -> str:
+                 custom_css: bool = True, books_notice: Optional[str] = None) -> str:
     """Rewrite <title> and append, right after it: preview tags, theme, font, data.
     The custom CSS goes last in <head> instead, after every stylesheet."""
     app_name, tags = _preview_meta(branding, base_url, path)
@@ -920,7 +924,7 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
     # falls back to the tagline (or nothing) rather than a dangling " - ".
     bare_title = app_name or (branding.get("tagline") or "").strip()
     extra = "\n".join([tags, app_head_links(branding), theme_style(branding), font_links(branding),
-                       icon_font_head(), data_block(branding, user, version, name, setup)])
+                       icon_font_head(), data_block(branding, user, version, name, setup, books_notice)])
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]
@@ -1019,6 +1023,10 @@ LOGIN_LOGO_ALONE_CLS = "sm:h-56"
 # The sign-in card's places other than the default (the registry's choices
 # after the first), each a data-login-card value login.html styles.
 LOGIN_CARD_MOVED = _REGISTRY["login.card_position"].choices[1:]
+
+
+# The site's name in the Books page's audiobook notice (books.html).
+BOOKS_NOTICE_SITE = "<span data-books-notice-site>this site</span>"
 
 
 def _fill_login_name(out: str, branding: dict) -> str:
@@ -1127,7 +1135,7 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     title = _TITLE_RE.search(page_html)
     static_title = title.group(0)[len("<title>"):-len("</title>")] if title else ""
     out = _inject_head(_tag_page_styles(page_html), branding, user, version, name, base_url, path,
-                       flags.get("setup"), custom_css=not safe)
+                       flags.get("setup"), custom_css=not safe, books_notice=flags.get("books_notice"))
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         out = _cover_viewport(out)
@@ -1144,6 +1152,12 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
 
     if name == "login":
         out = _fill_login_name(out, branding)
+
+    if name == "books":
+        # The audiobook notice names the site (pages/books.js writes it again
+        # on every visit), so its held room is its real height from the first paint.
+        out = out.replace(BOOKS_NOTICE_SITE, "<span data-books-notice-site>"
+                          + html.escape(_site_name(branding) or "this site") + "</span>")
 
     if EVENT_LOG_MARKER in out and name != "reader":
         # The event log at the top of the page's content (event_log_html).

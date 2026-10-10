@@ -38,7 +38,7 @@ DEFAULT_IDENTITY = {"admin": "plex:990001", "member": "plex:990002"}
 
 # Tables keyed by a listener's identity: what cleanup scrubs.
 IDENTITY_TABLES = ("listening_positions", "listening_log", "listening_claims",
-                   "listening_dismissals", "player_prefs", "book_continue_hidden")
+                   "listening_dismissals", "player_prefs", "book_continue_hidden", "book_notice")
 # What snapshot saves unless told otherwise: the identity tables plus the
 # settings and the pairing choices that the Books checks change.
 DEFAULT_SNAPSHOT_TABLES = IDENTITY_TABLES + ("settings", "book_pair_overrides")
