@@ -559,14 +559,15 @@ class ShellRendering(unittest.TestCase):
         self.assertTrue(stack.end() < log < push < pair < news < requests < services < releases < streams)
         self.assertNotIn("data-arrive=\"feed\"", page)
         # From lg the grid order makes Service Health a strip across the top,
-        # with Recent Requests and News sharing the row under it, as before.
+        # with News and Recent Requests sharing the row under it: News on the
+        # left, so left to right is the phone's top to bottom.
         pair_classes = pair_tag.group(1).split()
         for cls in ("grid", "grid-cols-1", "lg:grid-cols-2", "gap-8", "items-start",
                     "lg:[reading-flow:grid-order]"):
             self.assertIn(cls, pair_classes, cls)
-        self.assertIn('<section data-arrive="news" class="lg:order-3">', page)
+        self.assertIn('<section data-arrive="news" class="lg:order-2">', page)
         self.assertIn('<section data-arrive="services" class="lg:order-1 lg:col-span-full">', page)
-        self.assertIn('<section data-arrive="requests" class="lg:order-2">', page)
+        self.assertIn('<section data-arrive="requests" class="lg:order-3">', page)
         # The grid closes before Upcoming Releases: all three sections sit inside it.
         between = page[pair:releases]
         self.assertEqual(between.count("<div") + 1, between.count("</div>"))

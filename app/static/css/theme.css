@@ -1441,7 +1441,7 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
  * The server lists them on <html data-home-hide="news streams">, so a section
  * that is off is never painted and index.html never loads it. News, Service
  * Health and Recent Requests share one grid ([data-home-pair]); from lg
- * Recent Requests and News share a row under Service Health: with one of them
+ * News and Recent Requests share a row under Service Health: with one of them
  * off the other takes the full width, and with all three off the grid goes.
  * The event log above them is the shell's (partials/shell-event-log.html).
  */

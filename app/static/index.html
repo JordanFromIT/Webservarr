@@ -49,14 +49,15 @@
 <!-- News & Updates, Recent Requests and Service Health. Below lg they are
      one column in the order written here, so on a phone the news comes first
      after the event log and Tab meets each section where it is seen. From lg
-     the grid order puts Service Health in a strip across the page and Recent
-     Requests and News side by side under it, and
+     the grid order puts Service Health in a strip across the page and News
+     and Recent Requests side by side under it (News on the left, so the
+     phone's order reads left to right), and
      reading-flow takes Tab through them in that order where the browser has
      it. A section that is switched off or hidden is not displayed, so it
      takes no cell and no gap (theme.css, "Home sections switched off"). -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start lg:[reading-flow:grid-order]" data-home-pair>
 <!-- News & Updates -->
-<section data-arrive="news" class="lg:order-3">
+<section data-arrive="news" class="lg:order-2">
 <div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
 <span id="iconSectionNews" class="ws-section-icon material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
@@ -84,7 +85,7 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 </section>
 <!-- Recent Requests, compact -->
-<section data-arrive="requests" class="lg:order-2">
+<section data-arrive="requests" class="lg:order-3">
 <!-- Wraps only on the narrowest phones (320px), where the heading and the
      link cannot share a line: the link then sits under the heading. The link
      is the site's primary button (as "Turn on" on the push banner), one line

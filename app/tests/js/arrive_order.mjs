@@ -1,7 +1,7 @@
 // WS.arrive (shell.js): sections reveal top-down as they are laid out, which
 // is document order except where a breakpoint places a section out of it.
 // Home writes News before Service Health for the phone's single column, and
-// from lg the grid puts Service Health first with Recent Requests and News
+// from lg the grid puts Service Health first with News and Recent Requests
 // side by side under it. A section that is not displayed keeps its place.
 // Runs the real shell.js in a vm with a fake document whose sections report
 // the boxes a browser would lay out.
@@ -80,14 +80,14 @@ function arrivalOrder(sections, calls) {
   const ran = arrivalOrder([
     section('continue', null),
     section('feed', { top: 96, left: 288 }),
-    section('news', { top: 401, left: 861 }),
+    section('news', { top: 401, left: 288 }),
     section('services', { top: 260, left: 288 }),
-    section('requests', { top: 401, left: 288 }),
+    section('requests', { top: 401, left: 861 }),
     section('releases', { top: 1044, left: 288 }),
     section('streams', { top: 1269, left: 288 })
   ]);
-  check('from lg: Service Health, then Recent Requests and News left to right, then the week, then streams',
-    ran.join() === 'continue,feed,services,requests,news,releases,streams', ran);
+  check('from lg: Service Health, then News and Recent Requests left to right, then the week, then streams',
+    ran.join() === 'continue,feed,services,news,requests,releases,streams', ran);
 }
 
 // A rounding difference of under half a pixel is the same row.

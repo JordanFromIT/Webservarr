@@ -344,7 +344,7 @@ await scenario('an event log the admin switched off is not toured', async () => 
 await scenario('News: Home’s News & Updates when it has posts, before Calendar', async () => {
   const NEWS = '[data-arrive="news"]';
   const box = (d) => {
-    d.querySelector(NEWS).getBoundingClientRect = () => ({ width: 540, height: 560, top: 270, left: 860, right: 1400, bottom: 830 });
+    d.querySelector(NEWS).getBoundingClientRect = () => ({ width: 540, height: 560, top: 270, left: 288, right: 828, bottom: 830 });
   };
   for (const [width, ua, order] of [
     [1440, 'desktop', ['Event log', 'Service status', 'Notifications', 'News & Updates', 'Calendar', 'Books']],

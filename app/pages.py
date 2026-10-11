@@ -671,7 +671,7 @@ EVENT_LOG_OPEN = '<section id="wsEventLog"'
 # with the real cards (app/home_news.py) and marks the section arrived.
 HOME_NEWS_OPEN = "<!-- ws:home-news -->"
 HOME_NEWS_CLOSE = "<!-- /ws:home-news -->"
-HOME_NEWS_SECTION = '<section data-arrive="news" class="lg:order-3"'
+HOME_NEWS_SECTION = '<section data-arrive="news" class="lg:order-2"'
 HOME_NEWS_VIEW_ALL = 'id="newsViewAll" class="invisible '
 
 

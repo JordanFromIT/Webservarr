@@ -166,7 +166,7 @@ class ThePageRender(unittest.TestCase):
     def test_the_skeleton_stays_when_the_server_has_no_news(self):
         section = self.news_section(self.out(None))
         self.assertIn('<div class="skel rounded-xl', section)
-        self.assertIn('<section data-arrive="news" class="lg:order-3">', section)
+        self.assertIn('<section data-arrive="news" class="lg:order-2">', section)
         self.assertIn('id="newsViewAll" class="invisible ', section)
 
     def test_the_cards_replace_the_skeleton(self):
@@ -177,13 +177,13 @@ class ThePageRender(unittest.TestCase):
         self.assertIn('<div id="newsContainer" class="grid gap-3">\n' + case["html"] + "\n</div>", section)
         self.assertNotIn('class="skel', section)
         self.assertNotIn("ws:home-news", out)
-        self.assertIn('<section data-arrive="news" class="lg:order-3" data-arrived>', section)
+        self.assertIn('<section data-arrive="news" class="lg:order-2" data-arrived>', section)
         self.assertIn('id="newsViewAll" class="inline-flex', section)
 
     def test_no_posts_is_the_empty_state(self):
         section = self.news_section(self.out({"posts": [], "count": 3, "now_ms": VECTORS["now_ms"]}))
         self.assertIn(VECTORS["empty_html"], section)
-        self.assertIn('class="lg:order-3" data-arrived>', section)
+        self.assertIn('class="lg:order-2" data-arrived>', section)
 
     def test_only_home_is_filled(self):
         out = render(ADMIN, "news", flags={"home_news": {"posts": [], "count": 3, "now_ms": 0}},
