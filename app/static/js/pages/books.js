@@ -2203,11 +2203,12 @@ export async function mount(ctx) {
     $('seriesMeta').textContent = seriesMeta(state.opened.author, count);
     showBody(state.body);
     $('seriesOpen').classList.remove('hidden');
-    // Its top (All series, the heading) at the top of the screen, clear of the
-    // phone's header (the section's scroll margin), so its books are in view.
+    // Its skeleton first, so the page is tall enough for what follows: its top
+    // (All series, the heading) at the top of the screen, clear of the phone's
+    // header (the section's scroll margin), so its books are in view.
+    loadSeries();
     $('seriesTitle').focus({ preventScroll: true });
     if (typeof $('seriesOpen').scrollIntoView === 'function') $('seriesOpen').scrollIntoView({ block: 'start' });
-    loadSeries();
   }
 
   function seriesSkeleton(count) {
