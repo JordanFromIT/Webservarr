@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Pre-push check for dev and main: runs the part of CI that works outside the
+# container, on the exact commits being pushed (not the working tree), so a
+# test pushed without its fix or an uncommitted fix is caught here.
+#
+#   * the unittest modules below, which need neither Redis nor the image's
+#     /app layout (the rest import app.main, which mounts /app/app/static, or
+#     need Redis: run the full suite in the dev container for those);
+#   * every JavaScript check in app/tests/js (the js-checks job), in parallel.
+#
+# Turn on once per clone (covers its worktrees): git config core.hooksPath .githooks
+# Skip once: git push --no-verify
+set -euo pipefail
+
+# Passing outside the container on a clean dev. test_icon_font's PageHead
+# imports app.main, so only its other classes are here.
+LOCAL_TESTS=(
+  test_access_admin test_access_notify test_access_public test_access_requests_model
+  test_audit_mechanical test_books_kavita_first test_brand_name test_branding_logo
+  test_branding_theme test_chaptarr_request test_content test_css_build test_debug_mode
+  test_frost test_headers test_home_services_off test_insights_kavita test_insights_live
+  test_insights_page test_insights_plex test_insights_tracking test_kavita_connect
+  test_login_card_position test_migrations_v111 test_motion test_nav_icons
+  test_no_email_identity test_notification_poller test_page_gating test_phone_nav
+  test_player_api test_player_window test_plex_pin_claim test_plex_player test_plex_share
+  test_poller_lease test_push test_push_cap_race test_push_prompt_grant test_push_routes
+  test_redis_isolation test_request_modal_ids test_request_status_labels test_same_address
+  test_same_origin_path test_same_origin_writes test_section_icons test_seerr_title_lookup
+  test_settings_gate test_settings_static test_shell_contract test_shell_icons
+  test_soft_nav test_theme_sweep test_ticket_claim_signin test_ticket_creator_email
+  test_ticket_ownership test_tickets_page test_web_analytics_csp
+  test_icon_font.TheList test_icon_font.TheFont test_icon_font.IconSettings
+)
+
+block() {
+  echo "pre-push: BLOCKED: $1 (bypass: git push --no-verify)" >&2
+  exit 1
+}
+
+# stdin: one "<local ref> <local sha> <remote ref> <remote sha>" line per ref.
+shas=()
+while read -r _ local_sha remote_ref _; do
+  case "$remote_ref" in
+    refs/heads/dev | refs/heads/main) ;;
+    *) continue ;;
+  esac
+  [[ "$local_sha" =~ ^0+$ ]] && continue # deleting the branch
+  shas+=("$local_sha")
+done
+((${#shas[@]})) || exit 0
+
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+top=$(git rev-parse --show-toplevel)
+main_clone=$(dirname "$common")
+
+# The venv lives in the shared .git dir, so every worktree uses the same one.
+# requirements.txt pins SQLAlchemy 2.0.25, which does not import on 3.13+.
+venv="$common/prepush-venv"
+if [[ ! -x "$venv/bin/python" ]]; then
+  python=$(command -v python3.11 || command -v python3.12) ||
+    block "no python3.11 or python3.12 on PATH to create $venv"
+  "$python" -m venv "$venv" || block "could not create $venv"
+fi
+
+node_modules="$top/node_modules"
+[[ -d "$node_modules" ]] || node_modules="$main_clone/node_modules"
+[[ -d "$node_modules" ]] || block "no node_modules for the JS checks: run npm install in $main_clone"
+
+tmp=$(mktemp -d) || block "mktemp failed"
+trap 'rm -rf "$tmp"' EXIT
+
+started=$SECONDS
+for sha in $(printf '%s\n' "${shas[@]}" | sort -u); do
+  short=${sha:0:9}
+  tree="$tmp/$short"
+  mkdir "$tree"
+  if ! git archive "$sha" | tar -x -C "$tree"; then
+    block "could not export $short"
+  fi
+  ln -s "$node_modules" "$tree/node_modules"
+
+  wanted=$(sha256sum "$tree/requirements.txt" | cut -d' ' -f1)
+  if [[ "$(cat "$venv/requirements.sha256" 2>/dev/null)" != "$wanted" ]]; then
+    echo "pre-push: installing requirements.txt into $venv"
+    "$venv/bin/pip" install -q --disable-pip-version-check -r "$tree/requirements.txt" ||
+      block "pip install -r requirements.txt failed"
+    echo "$wanted" >"$venv/requirements.sha256"
+  fi
+
+  echo "pre-push: checking $short (Python static tests, then JS checks)"
+  modules=("${LOCAL_TESTS[@]/#/app.tests.}")
+  if ! (cd "$tree" && "$venv/bin/python" -m unittest -q "${modules[@]}") >"$tmp/python.log" 2>&1; then
+    # From the first failure on, past the app's own log lines.
+    failures=$(sed -n '/^======/,$p' "$tmp/python.log")
+    if [[ -n "$failures" ]]; then echo "$failures" >&2; else cat "$tmp/python.log" >&2; fi
+    block "Python tests failed on $short: $(grep -cE '^(FAIL|ERROR):' "$tmp/python.log") failing, details above"
+  fi
+
+  # Each check writes its own log; the names of the failing ones go to failed.
+  # shellcheck disable=SC2016 # $1 is for the inner sh
+  (cd "$tree" && printf '%s\0' app/tests/js/*.mjs |
+    xargs -0 -P 8 -I{} sh -c 'node "$1" >"$1.log" 2>&1 || echo "$1"' _ {}) >"$tmp/failed"
+  if [[ -s "$tmp/failed" ]]; then
+    while read -r check; do
+      echo "--- $check" >&2
+      tail -n 20 "$tree/$check.log" >&2
+    done <"$tmp/failed"
+    block "JS checks failed on $short: $(xargs -n1 basename <"$tmp/failed" | paste -sd' ')"
+  fi
+done
+echo "pre-push: all checks passed in $((SECONDS - started))s"

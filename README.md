@@ -143,6 +143,11 @@ from. The Python tests use the standard library only:
 docker exec webservarr python -m unittest discover -s /app/app/tests -t /app -v
 ```
 
+Once per clone, turn on the pre-push check with `git config core.hooksPath .githooks`:
+before a push to `dev` or `main` it runs the tests that need no container plus
+the JavaScript checks (about 30 seconds; needs Python 3.11 or 3.12 and
+`npm install`). `git push --no-verify` skips it.
+
 ## Updating
 
 ```bash
