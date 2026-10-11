@@ -32,7 +32,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.dependencies import get_current_user, require_same_origin
 from app.integrations.config import same_address
-from app.limiter import limiter
+from app.limiter import limiter, rate_limit_key
 from app.integrations import kavita as kavita_api
 from app.models import Book, Setting
 from app.settings_registry import switch_is_off
@@ -867,12 +867,35 @@ async def _note_reading(user: Dict[str, str], body: bytes) -> None:
     await insights.note_reading(r, account_identity(user), body)
 
 
+# Two budgets per client (an IPv4 address or an IPv6 /64) across every
+# /kavita path: one for what the reader loads as it turns pages (the book
+# page, the images inside it, covers), which comes in bursts, and one for
+# everything else (book info, progress saves, bookmarks, search).
+# Measured on dev: paging as fast as pages load (50 pages in 19 s) is about
+# 160 page loads a minute plus a few calls. 600 and 120 cover that with room
+# for image-heavy pages; the values here are doubled again per the operator.
+PAGE_LIMIT = "1200/minute"
+API_LIMIT = "240/minute"
+_PAGE_LOAD_PATH = re.compile(r"^api/(image/.+|book/\d+/(book-page|book-resources))$", re.IGNORECASE)
+
+
+def _kavita_rate_key(request: Request) -> str:
+    """The client's bucket, with which of the two budgets it draws on."""
+    kind = "page" if (request.method == "GET"
+                      and _PAGE_LOAD_PATH.match(request.path_params.get("path", ""))) else "api"
+    return f"kavita-{kind}:{rate_limit_key(request)}"
+
+
+def _kavita_rate(key: str) -> str:
+    return PAGE_LIMIT if key.startswith("kavita-page:") else API_LIMIT
+
+
 @router.api_route(
     "/kavita/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     include_in_schema=False,
 )
-@limiter.limit("240/minute")
+@limiter.limit(_kavita_rate, key_func=_kavita_rate_key)
 async def kavita_proxy(
     path: str,
     request: Request,

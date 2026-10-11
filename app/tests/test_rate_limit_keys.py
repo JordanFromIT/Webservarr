@@ -28,6 +28,9 @@ if HAVE_APP:
 
 KOMETA_TOKEN = "kometaRateToken0123456789abcdefgh"
 KOMETA_LIMIT = 30
+# Page loads, other calls (app/routers/kavita_proxy.py): twice what the
+# reader's fastest paging on dev was sized at, as the operator asked.
+PINNED_KAVITA_LIMITS = ("1200/minute", "240/minute")
 # A trusted front proxy (loopback), so CF-Connecting-IP is believed.
 PROXY = ("127.0.0.1", 50000)
 
@@ -107,6 +110,74 @@ class KometaBudget(unittest.TestCase):
         text = "\n".join(logged.output)
         self.assertIn("kometa_webhook", text)
         self.assertNotIn(secret, text)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class KavitaBudgets(unittest.TestCase):
+    """/kavita/<path> has two budgets per client, whatever the path: a large
+    one for what turning pages loads (book pages, the images in them, covers)
+    and a smaller one for every other call. Kavita itself is never reached:
+    the proxy answers 503 (no Kavita address) until a budget runs out."""
+
+    PAGE = "/kavita/api/Book/7/book-page?page=1"
+    IMAGE = "/kavita/api/image/series-cover?seriesId=3"
+    API = "/kavita/api/Book/7/book-info"
+
+    def setUp(self):
+        for p in (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                  mock.patch("app.routers.kavita_proxy.kavita_url_for", return_value=None)):
+            p.start()
+            self.addCleanup(p.stop)
+        helpers.api_client(helpers.make_sessionmaker(), user=helpers.MEMBER)
+        self.addCleanup(helpers.reset_overrides)
+        self.addCleanup(_private_limiter())
+        helpers.set_rate_limits(True)
+        from app.main import app
+        self.client = TestClient(app, client=PROXY)
+
+    def get(self, path, ip="203.0.113.5"):
+        return self.client.get(path, headers={"CF-Connecting-IP": ip}).status_code
+
+    def budget(self, limit):
+        return int(limit.split("/")[0])
+
+    def test_the_limits(self):
+        from app.routers import kavita_proxy
+        self.assertEqual((kavita_proxy.PAGE_LIMIT, kavita_proxy.API_LIMIT), PINNED_KAVITA_LIMITS)
+
+    def test_page_loads_share_the_large_budget_and_calls_keep_their_own(self):
+        from app.routers import kavita_proxy
+        pages = self.budget(kavita_proxy.PAGE_LIMIT)
+        codes = [self.get(self.PAGE if i % 2 else self.IMAGE) for i in range(pages + 1)]
+        self.assertEqual(codes[:pages], [503] * pages)
+        self.assertEqual(codes[pages], 429)
+        # The other calls still answer, until their own budget runs out.
+        calls = self.budget(kavita_proxy.API_LIMIT)
+        codes = [self.get(self.API) for _ in range(calls + 1)]
+        self.assertEqual(codes[:calls], [503] * calls)
+        self.assertEqual(codes[calls], 429)
+
+    def test_an_ipv6_64_is_one_client(self):
+        from app.routers import kavita_proxy
+        calls = self.budget(kavita_proxy.API_LIMIT)
+        codes = [self.get(self.API, ip=f"2001:db8:1:2::{i + 1:x}") for i in range(calls + 1)]
+        self.assertEqual(codes[calls], 429)
+        self.assertEqual(self.get(self.API, ip="2001:db8:1:3::1"), 503)
+
+    def test_only_a_get_of_a_page_image_or_cover_is_a_page_load(self):
+        from app.routers import kavita_proxy
+
+        def kind(method, path):
+            request = Request({"type": "http", "method": method, "path": "/kavita/" + path, "headers": [],
+                               "client": ("203.0.113.5", 1), "query_string": b"", "path_params": {"path": path}})
+            return kavita_proxy._kavita_rate_key(request).split(":")[0]
+        for path in ("api/Book/7/book-page", "api/book/7/book-resources", "api/image/series-cover",
+                     "api/image/chapter-cover"):
+            self.assertEqual(kind("GET", path), "kavita-page", path)
+        for method, path in (("GET", "api/Book/7/book-info"), ("GET", "api/Reader/get-progress"),
+                             ("POST", "api/Reader/progress"), ("POST", "api/Book/7/book-page"),
+                             ("GET", "api/Series/series-detail"), ("GET", "api/image/")):
+            self.assertEqual(kind(method, path), "kavita-api", (method, path))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
