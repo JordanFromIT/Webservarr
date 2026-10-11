@@ -76,5 +76,29 @@ class OffSiteAddresses(unittest.TestCase):
         self.assertNotIn("onerror", out)
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class NewsEditorMarkup(unittest.TestCase):
+    """What the news editor saves (a real post's shape: paragraphs, blank-line
+    paragraphs, a bold bulleted list) keeps its structure, so the page can
+    show it as the editor did; active markup still goes."""
+
+    POST = ("<p>Intro</p><p><br></p><strong><ul><li><strong>One</strong> first</li>"
+            "<li><strong>Two</strong> second</li></ul><div><br></div></strong>"
+            "<p>After</p><p><br></p><ol><li>a</li><li>b</li></ol><h2>H</h2><h3>S</h3>"
+            "<blockquote>q</blockquote><pre><code>c</code></pre><hr><p><s>x</s> <code>y</code></p>")
+
+    def test_the_structure_survives(self):
+        self.assertEqual(sanitize_html(self.POST), self.POST)
+
+    def test_script_and_handlers_are_still_stripped(self):
+        out = sanitize_html('<ul><li onclick="x()">a<script>alert(1)</script></li></ul>'
+                            '<p style="color:red" onmouseover="x()">b<img src="/uploads/x.png" onerror="x()"></p>'
+                            '<iframe src="https://example.com/"></iframe><style>p{}</style>')
+        for bad in ("<script", "onclick", "onerror", "onmouseover", "style", "<iframe"):
+            self.assertNotIn(bad, out)
+        self.assertIn("<ul><li>a", out)
+        self.assertIn("<p>b<img", out)
+
+
 if __name__ == "__main__":
     unittest.main()

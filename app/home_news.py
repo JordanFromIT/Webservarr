@@ -36,7 +36,7 @@ _JS_SPACES_RE = re.compile("[" + re.escape(_JS_SPACE) + "]+")
 _JS_TRIM_END_RE = re.compile("[" + re.escape(_JS_SPACE) + "]+$")
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
-BODY_CLASSES = "text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block"
+BODY_CLASSES = "text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none news-body"
 
 # pages/home.js: NEWS_EMPTY_HTML.
 NEWS_EMPTY_HTML = ('<div class="text-center text-steel-blue py-8">'

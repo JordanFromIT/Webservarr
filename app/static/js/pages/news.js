@@ -52,7 +52,7 @@ function renderCard(post, isAdmin) {
   }
   const id = escapeHtml(String(post.id));
 
-  const bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
+  const bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none news-body';
 
   // min-w-0: see the matching note on the homepage renderer. Grid items
   // default to min-width:auto and will otherwise overflow the page on mobile.

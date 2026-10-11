@@ -107,6 +107,7 @@ jobs:
           node app/tests/js/status_panel.mjs
           node app/tests/js/arrive_order.mjs
           node app/tests/js/news_cards.mjs
+          node app/tests/js/news_body.mjs
           node app/tests/js/reader_progress.mjs
           node app/tests/js/player_engine.mjs
           node app/tests/js/player_saves.mjs

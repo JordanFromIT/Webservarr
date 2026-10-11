@@ -86,7 +86,7 @@ function renderNewsCard(post, expanded) {
 
     var open = expanded || post.pinned || isFresh;
     var excerpt = newsExcerpt(post.content_html, 140);
-    var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
+    var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none news-body';
 
     var body = open
         ? '<div class="' + bodyClasses + '" style="white-space:pre-line">' + post.content_html + '</div>'
