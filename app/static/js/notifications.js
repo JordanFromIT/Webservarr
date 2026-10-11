@@ -926,6 +926,7 @@
     dismissed: "Notifications weren't allowed. Turn this on again and choose Allow when your browser asks.",
     timeout: "Your browser didn't finish getting ready. Reload the page and try again.",
     noEmail: "This account doesn't have an email address, so notifications can't be sent to it.",
+    brave: "Brave blocks notifications by default. Open brave://settings/privacy, turn on \"Use Google services for push messaging\", then try again.",
     failed: "We couldn't turn on notifications for this device. Please try again in a moment.",
     offFailed: "We couldn't turn off notifications for this device. Please try again in a moment."
   };
@@ -934,7 +935,7 @@
   function pushFailureKind(err) {
     if (err && err.permission) return err.permission === 'denied' ? 'blocked' : 'dismissed';
     if (err && err.message === 'sw-timeout') return 'timeout';
-    if (err && err.reason) return err.reason;      // 'unconfigured' | 'noEmail'
+    if (err && err.reason) return err.reason;      // 'unconfigured' | 'noEmail' | 'brave'
     return 'failed';
   }
 
@@ -1079,6 +1080,29 @@
     return true;
   }
 
+  /** True in Brave only, which says so itself. Any doubt reads as not Brave. */
+  function isBrave() {
+    var brave = navigator.brave;
+    if (!brave || typeof brave.isBrave !== 'function') return Promise.resolve(false);
+    return Promise.resolve().then(function() { return brave.isBrave(); })
+      .then(function(yes) { return yes === true; }, function() { return false; });
+  }
+
+  /** The push service refused to subscribe. Brave ships with its push
+   *  service off ("Use Google services for push messaging" in its privacy
+   *  settings), so there the refusal has one likely cause and one fix, and
+   *  the failure says so (reason 'brave'). Anywhere else it stays as it was. */
+  function pushServiceRefused(err) {
+    if (err && err.message === 'subscribe-timeout') return Promise.reject(err);   // no answer, not a refusal
+    return isBrave().then(function(yes) {
+      if (!yes) throw err;
+      var brave = new Error('push-service-off');
+      brave.reason = 'brave';
+      brave.cause = err;
+      throw brave;
+    });
+  }
+
   /** The browser's subscription for this server key, creating one if needed.
    *  Resolves to { subscription, created }: created is true only when this
    *  call made it, so a failure path never throws away one that was working. */
@@ -1092,7 +1116,7 @@
         return withTimeout(reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidKey)
-        }), SUBSCRIBE_TIMEOUT_MS, 'subscribe-timeout');
+        }), SUBSCRIBE_TIMEOUT_MS, 'subscribe-timeout').then(null, pushServiceRefused);
       }).then(function(subscription) {
         return { subscription: subscription, created: true };
       });

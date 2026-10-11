@@ -19,6 +19,9 @@
 //    unread in the badge until the list is opened or it is answered; it
 //    outlives a soft navigation and nothing it leaves starts a bubble
 //  * an iPhone in a Safari tab: the home screen first, notifications after
+//  * a push service that refuses in Brave (its push service is off until
+//    switched on): the bell and the tour say how to switch it on; any other
+//    browser keeps the general words
 //  * nothing offered where it cannot be: already allowed, no push, blocked
 //    (says how to unblock), already on the home screen
 //  * one ask per visit: the banner and the tour never both
@@ -121,7 +124,8 @@ function shell({ booksInMore = false, eventLog = true, releases = false, news = 
    permission state and what this device remembers (store). */
 function browser({ width = 1440, ua = 'desktop', push = true, permission = 'default', answer = 'granted',
                    store = {}, standalone = false, user = { username: 'sam', has_email: true },
-                   booksInMore = false, eventLog = true, releases = false, news = '', prompt = null, unread = 0 } = {}) {
+                   booksInMore = false, eventLog = true, releases = false, news = '', prompt = null, unread = 0,
+                   brave = null, pushRefused = false } = {}) {
   const w = new Window({ url: 'https://dev.example.test/', width, height: width >= 1024 ? 900 : 844 });
   Object.defineProperty(w.navigator, 'userAgent', { value: UA[ua], configurable: true });
   if (ua === 'iphone') Object.defineProperty(w.navigator, 'standalone', { value: standalone, configurable: true });
@@ -135,10 +139,22 @@ function browser({ width = 1440, ua = 'desktop', push = true, permission = 'defa
     };
     const reg = { pushManager: {
       getSubscription: () => Promise.resolve(null),
-      subscribe: () => { calls.subscribed += 1; return Promise.resolve(sub); }
+      subscribe: () => {
+        calls.subscribed += 1;
+        // A push service that refuses, as Brave's does while it is switched off.
+        if (pushRefused) return Promise.reject(Object.assign(new Error('Registration failed - push service error'), { name: 'AbortError' }));
+        return Promise.resolve(sub);
+      }
     } };
     Object.defineProperty(w.navigator, 'serviceWorker', { value: { ready: Promise.resolve(reg), register: () => Promise.resolve(reg) }, configurable: true });
     w.PushManager = function PushManager() {};
+    // Brave says it is Brave (navigator.brave.isBrave); brave: 'throws' is
+    // one whose answer fails, which must read as any other browser.
+    if (brave) {
+      Object.defineProperty(w.navigator, 'brave', { value: {
+        isBrave: () => (brave === 'throws' ? Promise.reject(new Error('no')) : Promise.resolve(true))
+      }, configurable: true });
+    }
     const N = {
       permission,
       requestPermission() { calls.asked += 1; N.permission = answer; return Promise.resolve(answer); }
@@ -912,6 +928,55 @@ await scenario('Turn on: a failure says why and keeps the buttons', async () => 
   await wait(20);
   check('closed: later', !notice(shut.d) && key(shut.w, 'ws-push-ask') === 'later');
   await shut.w.happyDOM.close();
+});
+
+const BRAVE_WORDS = 'Brave blocks notifications by default. Open brave://settings/privacy, turn on "Use Google services for push messaging", then try again.';
+
+await scenario('a push service that refuses in Brave: the bell says how to switch it on', async () => {
+  const { w, d, calls } = browser({ store: LATER, brave: true, pushRefused: true });
+  await bellUp(w);
+  await openBell(d);
+  noticeAction(d, 'Turn on').click();
+  await wait(20);
+  check('the words are the shared ones', w.WSPush.messages.brave === BRAVE_WORDS, w.WSPush.messages.brave);
+  check('the push service was asked', calls.subscribed === 1 && calls.posts.length === 0, calls);
+  // The browser said yes, so the notice has gone and the words are a toast.
+  check('Brave: says how to turn its push service on', calls.toasts.length === 1 && calls.toasts[0] === BRAVE_WORDS, calls.toasts);
+  await w.happyDOM.close();
+});
+
+await scenario('the same refusal anywhere else keeps the general words', async () => {
+  for (const [what, brave] of [['not Brave', null], ['Brave that cannot say so', 'throws']]) {
+    const { w, d, calls } = browser({ store: LATER, brave, pushRefused: true });
+    await bellUp(w);
+    await openBell(d);
+    noticeAction(d, 'Turn on').click();
+    await wait(20);
+    check(what + ': the general words', calls.toasts.length === 1 && calls.toasts[0] === w.WSPush.messages.failed, calls.toasts);
+    await w.happyDOM.close();
+  }
+  // Brave with its push service on: nothing to say, it just works.
+  const ok = browser({ store: LATER, brave: true });
+  await bellUp(ok.w);
+  await openBell(ok.d);
+  noticeAction(ok.d, 'Turn on').click();
+  await wait(20);
+  check('Brave with push on: subscribed and saved, no words', ok.calls.posts.length === 1 && ok.calls.toasts.length === 0, ok.calls);
+  await ok.w.happyDOM.close();
+});
+
+await scenario('the tour’s notifications step says the same in Brave', async () => {
+  for (const [brave, words] of [[true, BRAVE_WORDS], [null, null]]) {
+    const { w, d, calls } = browser({ brave, pushRefused: true });
+    visit(w);
+    await wait(10);
+    while (title(d) !== 'Notifications') $(d, 'tourNext').click();
+    action(d, 'Turn on notifications').click();
+    await wait(20);
+    const want = words || w.WSPush.messages.failed;
+    check((brave ? 'Brave' : 'not Brave') + ': the tour’s words', calls.toasts.length === 1 && calls.toasts[0] === want, calls.toasts);
+    await w.happyDOM.close();
+  }
 });
 
 await scenario('blocked: how to unblock, no Turn on', async () => {
