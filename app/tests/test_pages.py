@@ -1280,3 +1280,57 @@ class StreamsPreview(unittest.TestCase):
         self.assertNotIn("status-ok-text", card)
         self.assertNotIn("status-warn-text", card)
 
+
+
+class PreviewBaseUrl(unittest.TestCase):
+    """The link preview's absolute URLs come from the configured public
+    address, else the Host header; never from X-Forwarded-Host, which
+    Cloudflare passes through from the client (security audit 2026-10-10, I5)."""
+
+    def request(self, **headers):
+        from starlette.requests import Request
+        raw = [(k.replace("_", "-").lower().encode(), v.encode()) for k, v in headers.items()]
+        return Request({"type": "http", "method": "GET", "path": "/login", "headers": raw,
+                        "scheme": "http", "server": ("127.0.0.1", 7979), "query_string": b""})
+
+    def unconfigured(self):
+        return mock.patch.multiple(pages.settings, app_domain="localhost", app_scheme="https")
+
+    def test_x_forwarded_host_is_ignored(self):
+        with self.unconfigured():
+            got = pages._base_url(self.request(host="dash.example.test", x_forwarded_host="evil.example",
+                                               x_forwarded_proto="https"))
+        self.assertEqual(got, "https://dash.example.test")
+
+    def test_the_configured_address_wins_over_every_header(self):
+        with mock.patch.multiple(pages.settings, app_domain="dash.example.test", app_scheme="https"):
+            got = pages._base_url(self.request(host="evil.example", x_forwarded_host="evil.example",
+                                               x_forwarded_proto="http"))
+        self.assertEqual(got, "https://dash.example.test")
+
+    def test_only_http_or_https_is_taken_from_x_forwarded_proto(self):
+        with self.unconfigured():
+            self.assertEqual(pages._base_url(self.request(host="dash.example.test", x_forwarded_proto="evil.example/x?")),
+                             "http://dash.example.test")
+            self.assertEqual(pages._base_url(self.request(host="dash.example.test", x_forwarded_proto="HTTPS")),
+                             "https://dash.example.test")
+
+    def test_a_spoofed_x_forwarded_host_never_reaches_the_login_page(self):
+        from fastapi.testclient import TestClient
+
+        from app.limiter import limiter
+        from app.main import app
+        from app.tests import helpers
+        b = branding(**{"branding.logo_url": "/static/uploads/logo.png"})
+        self.addCleanup(setattr, limiter, "enabled", limiter.enabled)
+        limiter.enabled = False
+        with self.unconfigured(), \
+             mock.patch("app.routers.setup.is_setup_completed", return_value=True), \
+             mock.patch.object(pages, "SessionLocal", helpers.make_sessionmaker()), \
+             mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})):
+            r = TestClient(app).get("/login", headers={"Host": "dash.example.test", "X-Forwarded-Host": "evil.example",
+                                                       "X-Forwarded-Proto": "https"})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("evil.example", r.text)
+        self.assertIn('property="og:url" content="https://dash.example.test/login"', r.text)
+        self.assertIn('property="og:image" content="https://dash.example.test/static/uploads/logo.png"', r.text)

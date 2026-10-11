@@ -816,17 +816,19 @@ _TITLE_SUFFIX_RE = re.compile(r"^\s*\S.*?\s+-\s+(?P<suffix>.+?)\s*$", re.DOTALL)
 
 
 def _base_url(request: Optional[Request]) -> str:
-    """Absolute scheme://host for this request, honouring a reverse proxy."""
+    """Absolute scheme://host for the link preview's URLs.
+
+    The configured public address (APP_DOMAIN) when there is one, else this
+    request's Host header. Never X-Forwarded-Host: Cloudflare passes a
+    client's own value through, which would put any host in the preview."""
+    if settings.app_domain and settings.app_domain != "localhost":
+        return settings.app_url
     if request is None:
         return ""
-    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    if not proto:
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if proto not in ("http", "https"):
         proto = request.url.scheme or "https"
-    host = (
-        request.headers.get("x-forwarded-host", "").split(",")[0].strip()
-        or request.headers.get("host", "").strip()
-        or request.url.netloc
-    )
+    host = request.headers.get("host", "").strip() or request.url.netloc
     if not host:
         return ""
     return f"{proto}://{host}"
