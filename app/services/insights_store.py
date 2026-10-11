@@ -130,6 +130,22 @@ def record_ebook_places(db: Session, identity: str, places, now: Optional[dateti
     return kept
 
 
+def ebook_place_times(db: Session, identity: str, book_ids) -> dict:
+    """{catalog book id: when this person last read it} for those of these
+    books with a kept place (Kavita's own time, else when WebServarr saw it).
+    Read only from what is kept here: no call to Kavita. Scoped by identity."""
+    wanted = [b for b in dict.fromkeys(book_ids or ()) if isinstance(b, int) and not isinstance(b, bool)]
+    if not identity or not wanted:
+        return {}
+    found = {}
+    for start in range(0, len(wanted), 400):
+        for book_id, read_at, seen_at in (db.query(EbookPlace.book_id, EbookPlace.read_at, EbookPlace.seen_at)
+                                          .filter(EbookPlace.identity == identity,
+                                                  EbookPlace.book_id.in_(wanted[start:start + 400]))):
+            found[book_id] = read_at or seen_at
+    return found
+
+
 def record_reading_minutes(db: Session, identity: str, minutes, now: Optional[datetime] = None) -> int:
     """Keep the minutes this person read on each UTC day as Kavita measured
     them ({date: whole minutes}, from the nightly sweep). A day's figure

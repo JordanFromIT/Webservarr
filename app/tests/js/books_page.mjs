@@ -374,13 +374,13 @@ await run('the chips filter the library and are remembered', async (make) => {
   } });
   await t.mount();
   const chips = t.qa('#formatChips button');
-  check('three chips: All, Ebooks, Audiobooks', chips.map((c) => c.textContent).join('|') === 'All|Ebooks|Audiobooks');
+  check('four chips: All, Ebooks, Audiobooks, Series', chips.map((c) => c.textContent).join('|') === 'All|Ebooks|Audiobooks|Series');
   check('All is pressed to begin with', chips[0].getAttribute('aria-pressed') === 'true' && chips[1].getAttribute('aria-pressed') === 'false');
   t.click('[data-format="ebook"]');
   check('the skeleton shows while the new list loads', !t.hidden('#gridSkeleton'));
   await t.clock.advance(50);
   check('Ebooks asks for ebooks', t.net.urls('/api/books?').pop() === '/api/books?format=ebook&sort=added&limit=36', t.net.urls('/api/books?'));
-  check('Ebooks is pressed and All is not', t.qa('#formatChips button').map((c) => c.getAttribute('aria-pressed')).join() === 'false,true,false');
+  check('Ebooks is pressed and All is not', t.qa('#formatChips button').map((c) => c.getAttribute('aria-pressed')).join() === 'false,true,false,false');
   check('and the grid is the ebooks', t.cards('libraryGrid').length === 1 && /Emma/.test(t.cards('libraryGrid')[0].textContent));
   check('the pressed chip is a primary fill, the others are not', /bg-primary/.test(t.q('[data-format="ebook"]').className) && !/bg-primary/.test(t.q('[data-format="all"]').className));
   t.click('[data-format="audio"]');
@@ -1130,7 +1130,7 @@ await run('a library that cannot be read shows an error with Try again', async (
   await t.mount();
   check('the error shows, not a blank page', !t.hidden('#errorState') && t.hidden('#gridSkeleton') && t.hidden('#libraryGrid'));
   check('in plain words, with nothing technical', /couldn't load the library/.test(t.text('#errorState')) && !/503|HTTP|api/i.test(t.text('#errorState')));
-  check('the search and the chips are still there', !!t.q('#booksSearch') && t.qa('#formatChips button').length === 3);
+  check('the search and the chips are still there', !!t.q('#booksSearch') && t.qa('#formatChips button').length === 4);
   down = false;
   t.click('#retryBtn');
   await t.clock.advance(50);
@@ -2083,7 +2083,7 @@ await run('Group series: a switch beside the sort; off lists every book with its
   const sw = t.q('#groupSwitch');
   check('a switch, labelled by its own words, on, just before the sort', sw.getAttribute('role') === 'switch' && sw.textContent.trim() === 'Group series'
     && sw.getAttribute('aria-checked') === 'true' && sw.nextElementSibling.id === 'sortLabel');
-  check('the format chips are still in the toolbar', t.qa('#formatChips [data-format]').length === 3 && t.qa('#filterButtons [data-filter]').length === 3);
+  check('the format chips are still in the toolbar', t.qa('#formatChips [data-format]').length === 4 && t.qa('#filterButtons [data-filter]').length === 3);
   check('grouped to begin with: two lines a card', !t.q('#libraryGrid [data-series-line]') && t.qa('#libraryGrid a').some((a) => /Harry Potter/.test(a.textContent)));
   t.click('#groupSwitch');
   check('the switch says off at once', sw.getAttribute('aria-checked') === 'false');
@@ -2108,6 +2108,198 @@ await run('Group series: a switch beside the sort; off lists every book with its
   check('and that is remembered too', JSON.parse(u.win.localStorage.getItem('webservarr_books_view:sam')).group === true);
   u.ctl.abort();
   check('leaving the page drops the flag', !u.doc.documentElement.hasAttribute('data-books-flat'));
+});
+
+// ---- The Series view: a fourth chip, one card per series, a series opened in place ----
+
+const fan = (name, count, extra) => Object.assign({
+  kind: 'series', series: name, count, cover_book_id: 1, cover_url: '/api/books/1/cover?v=1',
+  covers: ['/api/books/1/cover?v=1', '/api/books/2/cover?v=1', '/api/books/3/cover?v=1'].slice(0, Math.min(count, 3)),
+  author: 'Frank Herbert', formats: ['ebook', 'audio'], progress_label: null
+}, extra || {});
+const SERIES_LIST = [fan('Dune', 6, { progress_label: 'Book 2 of 6' }), fan('Discworld', 2, { author: '' }), fan('Solo', 1)];
+// The server's reading order: by number, the unnumbered last.
+const DUNE = { name: 'Dune', following: false, notes: [], items: [
+  ebook(11, 'Dune', 'Frank Herbert', { series_number: 1, progress: { ebook: null, audio: null } }),
+  ebook(12, 'Dune Messiah', 'Frank Herbert', { series_number: 2, progress: { ebook: null, audio: null } }),
+  ebook(13, 'Children of Dune', 'Frank Herbert', { series_number: 3, progress: { ebook: null, audio: null } }),
+  ebook(14, 'Tales of Dune', 'Frank Herbert', { series_number: null, progress: { ebook: null, audio: null } })] };
+
+function seriesRoutes(over = {}) {
+  return (net) => {
+    usual(over)(net);
+    net.on('/api/books?format=all&sort=added&limit=36&view=series', over.list || (() => ({ body: { items: SERIES_LIST, next_cursor: null, notes: [], building: false } })));
+    net.on('/api/books/series?name=', over.series || (() => ({ body: DUNE })));
+  };
+}
+const seriesCards = (t) => t.qa('#libraryGrid > li > button[data-series]');
+const SERIES_VIEW = { 'webservarr_books_view:sam': '{"format":"series","sort":"added","group":true}' };
+
+await run('Series: a fourth chip in the same group, one card per series, and remembered', async (make) => {
+  const t = make({ routes: seriesRoutes() });
+  pickerKit(t);
+  await t.mount();
+  const chip = t.q('#formatChips [data-format="series"]');
+  check('a button in the format group, after Audiobooks, unpressed', chip.tagName === 'BUTTON' && chip.type === 'button' && chip.textContent === 'Series' &&
+    chip.getAttribute('aria-pressed') === 'false' && chip.previousElementSibling.getAttribute('data-format') === 'audio');
+  check('the chips\' own look', chip.className === t.q('#formatChips [data-format="ebook"]').className);
+  t.click('#formatChips [data-format="series"]');
+  check('the skeleton holds the cards\' third line at once', t.doc.documentElement.hasAttribute('data-books-flat') && !t.hidden('#gridSkeleton'));
+  await t.clock.advance(50);
+  check('it asks for every format as series', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36&view=series', t.net.urls('/api/books?'));
+  check('Series is pressed, the others are not', t.qa('#formatChips button').map((c) => c.getAttribute('aria-pressed')).join() === 'false,false,false,true' && /bg-primary/.test(chip.className));
+  const cards = seriesCards(t);
+  check('one card per series, each a button', cards.length === 3 && cards.every((b) => b.type === 'button'), cards.length);
+  check('name, author and how many books', /Discworld/.test(cards[1].textContent) && /2 books/.test(cards[1].textContent) && /1 book(?!s)/.test(cards[2].textContent) &&
+    cards[0].children[2].textContent === 'Frank Herbert');
+  check('a series the person has started says where they are, in place of the count',
+    cards[0].querySelector('[data-series-count]').textContent === 'Book 2 of 6' && !/6 books/.test(cards[0].textContent) && /font-semibold/.test(cards[0].querySelector('[data-series-count]').className));
+  const covers = (b) => Array.from(b.querySelectorAll('img')).map((i) => i.getAttribute('src'));
+  check('a fan of the first covers, the first book drawn last (on top)', covers(cards[0]).join() === '/api/books/3/cover?v=1,/api/books/2/cover?v=1,/api/books/1/cover?v=1', covers(cards[0]));
+  check('only the front cover is read out and has the format marks', cards[0].querySelectorAll(':scope > span > span[aria-hidden="true"]').length === 2 &&
+    cards[0].querySelectorAll('[data-format]').length === 2 && covers(cards[2]).length === 1);
+  check('the fan stays in the card\'s 2:3 box', /\baspect-\[2\/3\]/.test(cards[0].children[0].className));
+  check('Group series has nothing to do here: disabled', t.q('#groupSwitch').disabled === true);
+  check('remembered with the view', JSON.parse(t.win.localStorage.getItem('webservarr_books_view:sam')).format === 'series');
+  check('kept apart from the books', t.WS.cache.has('books:list:series:added'));
+  // The filter pickers ask with every format.
+  t.click('#filterButtons [data-filter="author"]');
+  await t.clock.advance(50);
+  check('a picker asks with format=all', /format=all/.test(t.net.urls('/api/books/facets').pop() || ''), t.net.urls('/api/books/facets'));
+
+  const u = make({ storage: SERIES_VIEW, routes: seriesRoutes() });
+  await u.mount();
+  check('the next visit asks for the series at once', u.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&view=series' &&
+    u.q('#formatChips [data-format="series"]').getAttribute('aria-pressed') === 'true');
+  u.click('#formatChips [data-format="all"]');
+  await u.clock.advance(50);
+  check('All again: the books, Group series back', u.net.urls('/api/books?').pop() === '/api/books?format=all&sort=added&limit=36' && !u.q('#groupSwitch').disabled &&
+    u.cards('libraryGrid').length === 5);
+});
+
+await run('Series: the filters and the sort choose the series; a search still finds books', async (make) => {
+  const t = make({ url: 'https://ws.test/books?author=Frank%20Herbert', storage: SERIES_VIEW, routes: (net) => {
+    seriesRoutes()(net);
+    net.on('/api/books?format=all&sort=added&limit=36&view=series&author=', () => ({ body: { items: [SERIES_LIST[0]], next_cursor: null, notes: [] } }));
+    net.on('/api/books?format=all&sort=title&limit=36&view=series', () => ({ body: { items: [SERIES_LIST[1], SERIES_LIST[0]], next_cursor: null, notes: [] } }));
+    net.on('/api/books/search', () => ({ body: { items: [ebook(12, 'Dune Messiah', 'Frank Herbert')], request_url: '/requests?q=x', notes: [] } }));
+  } });
+  pickerKit(t);
+  await t.mount();
+  check('a filter in the address narrows the series', t.net.urls('/api/books?')[0] === '/api/books?format=all&sort=added&limit=36&view=series&author=Frank%20Herbert' &&
+    seriesCards(t).length === 1, t.net.urls('/api/books?'));
+  t.click('[data-remove="author"]');
+  await t.clock.advance(50);
+  t.click('#sortBtn');
+  sortOptions(t)[1].click();
+  await t.clock.advance(50);
+  check('the sort orders them', t.net.urls('/api/books?').pop() === '/api/books?format=all&sort=title&limit=36&view=series' &&
+    seriesCards(t).map((b) => b.getAttribute('data-series')).join() === 'Discworld,Dune');
+  t.type('messiah');
+  await t.clock.advance(400);
+  check('a search lists books, as anywhere else', !t.hidden('#searchSection') && t.qa('#searchGrid > li > a').length === 1 && !t.q('#searchGrid button[data-series]'));
+});
+
+await run('Series: a card opens its books in reading order, the heading takes the focus, All series goes back to the card', async (make) => {
+  const slow = deferred();
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes({ series: () => slow.promise.then(() => ({ body: DUNE })) }) });
+  await t.mount();
+  const dune = seriesCards(t)[0];
+  dune.focus();
+  dune.click();
+  check('its heading has the focus at once, named by the series', t.doc.activeElement === t.q('#seriesTitle') && t.text('#seriesTitle') === 'Dune' && t.q('#seriesTitle').tagName === 'H3');
+  check('the series takes the cards\' place', !t.hidden('#seriesOpen') && t.hidden('#libraryGrid') && t.hidden('#moreWrap'));
+  check('a section named by its heading', t.q('#seriesOpen').tagName === 'SECTION' && t.q('#seriesOpen').getAttribute('aria-labelledby') === 'seriesTitle');
+  check('what the card knew, before the answer', t.text('#seriesMeta') === '6 books by Frank Herbert, in reading order');
+  check('a skeleton of its books while they load', t.qa('#seriesGrid > li[aria-hidden="true"]').length === 6 && t.q('#seriesGrid').getAttribute('aria-busy') === 'true');
+  check('asked for by name', t.net.urls('/api/books/series').pop() === '/api/books/series?name=Dune');
+  slow.resolve();
+  await t.clock.advance(50);
+  const books = t.cards('seriesGrid');
+  check('its books, in the server\'s reading order, the unnumbered last', books.map((a) => a.getAttribute('href')).join() === '/books/11,/books/12,/books/13,/books/14', books.map((a) => a.getAttribute('href')));
+  check('the library\'s own cards: each opens the book pop-up at its address', books.every((a) => a.tagName === 'A' && /ws-lift/.test(a.className)));
+  check('each with its number', books.map((a) => (a.querySelector('[data-series-line] .tabular-nums') || { textContent: '' }).textContent).join() === '#1,#2,#3,', books.length);
+  check('the count is the books it has', t.text('#seriesMeta') === '4 books by Frank Herbert, in reading order' && t.q('#seriesGrid').getAttribute('aria-busy') === 'false');
+  t.click('#seriesBack');
+  check('All series: the cards again', t.hidden('#seriesOpen') && !t.hidden('#libraryGrid') && seriesCards(t).length === 3);
+  check('the focus back on the card that opened it', t.doc.activeElement === seriesCards(t)[0]);
+  // A name with a slash, quotes and accents goes out encoded and comes back to its card.
+  const odd = 'A/B "Brontë" & C';
+  const u = make({ storage: SERIES_VIEW, routes: seriesRoutes({ list: () => ({ body: { items: [fan(odd, 2)], next_cursor: null, notes: [] } }), series: () => ({ body: Object.assign({}, DUNE, { name: odd }) }) }) });
+  await u.mount();
+  seriesCards(u)[0].click();
+  await u.clock.advance(50);
+  check('the name is encoded', u.net.urls('/api/books/series').pop() === '/api/books/series?name=' + encodeURIComponent(odd));
+  u.click('#seriesBack');
+  check('and its card gets the focus back', u.doc.activeElement === seriesCards(u)[0]);
+  check('names are text, never markup', !u.q('#libraryGrid b') && seriesCards(u)[0].textContent.indexOf(odd) !== -1);
+});
+
+await run('Series: Series pressed again, or any change to the list, closes the open series', async (make) => {
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes() });
+  await t.mount();
+  seriesCards(t)[1].click();
+  await t.clock.advance(50);
+  const chip = t.q('#formatChips [data-format="series"]');
+  chip.focus();
+  chip.click();
+  check('Series again: back to every series, the focus stays on the chip', t.hidden('#seriesOpen') && !t.hidden('#libraryGrid') && t.doc.activeElement === chip);
+  check('without asking for the list again', t.net.urls('/api/books?').length === 1);
+  seriesCards(t)[0].click();
+  await t.clock.advance(50);
+  t.click('#formatChips [data-format="ebook"]');
+  check('a chip: the open series gives way to the new list', t.hidden('#seriesOpen') && !t.hidden('#gridSkeleton'));
+  await t.clock.advance(50);
+  check('and the list shows', !t.hidden('#libraryGrid') && t.hidden('#seriesOpen'));
+});
+
+await run('Series: a series that cannot be read says so, and Try again', async (make) => {
+  let down = true;
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes({ series: () => (down ? { status: 503, body: { detail: 'x' } } : { body: DUNE }) }) });
+  await t.mount();
+  seriesCards(t)[0].click();
+  await t.clock.advance(50);
+  check('one plain message with Try again, the heading still there', !t.hidden('#seriesError') && t.hidden('#seriesGrid') && /couldn't load this series/.test(t.text('#seriesError')) &&
+    !/503|HTTP/.test(t.text('#seriesError')) && t.text('#seriesTitle') === 'Dune');
+  down = false;
+  t.click('#seriesRetry');
+  await t.clock.advance(50);
+  check('Try again loads it, the focus on the heading', t.hidden('#seriesError') && t.cards('seriesGrid').length === 4 && t.doc.activeElement === t.q('#seriesTitle'));
+});
+
+await run('Series: no series is "No series yet", with the way back to every book', async (make) => {
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes({ list: () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }) }) });
+  await t.mount();
+  check('No series yet', !t.hidden('#emptyState') && t.text('#emptyTitle') === 'No series yet' && /one card for each series/.test(t.text('#emptyText')));
+  check('Show all books, not a request', !t.hidden('#emptyReset') && t.hidden('#emptyRequest'));
+  t.click('#emptyReset');
+  await t.clock.advance(50);
+  check('which shows every book', t.q('#formatChips [data-format="all"]').getAttribute('aria-pressed') === 'true' && t.cards('libraryGrid').length === 5);
+});
+
+await run('Series: soft navigation: leaving ends it, and the next visit starts on every series', async (make) => {
+  const slow = deferred();
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes({ series: () => slow.promise.then(() => ({ body: DUNE })) }) });
+  const unmount = await t.mount();
+  seriesCards(t)[0].click();
+  const before = t.net.calls.length;
+  // The router leaving the page: the visit's signal ends, then its own clean-up runs.
+  t.ctl.abort();
+  unmount();
+  slow.resolve();
+  await t.clock.advance(50);
+  check('an answer after leaving draws nothing', t.qa('#seriesGrid > li > a').length === 0);
+  t.click('#seriesBack');
+  t.click('#seriesRetry');
+  await t.clock.advance(50);
+  check('nothing is asked for after leaving', t.net.calls.length === before, t.net.calls.length - before);
+  check('the series request carried the visit\'s signal', t.net.calls.filter((c) => c.url.indexOf('/api/books/series') === 0).every((c) => c.init && c.init.signal === t.ctl.signal));
+  check('the page\'s flags go with it', !t.doc.documentElement.hasAttribute('data-books-flat'));
+  // A soft visit back (the router mounts the page again): the Series view, no series open.
+  const u = make({ storage: { 'webservarr_books_view:sam': t.win.localStorage.getItem('webservarr_books_view:sam') }, routes: seriesRoutes() });
+  await u.mount();
+  check('the view is remembered, the series is not', u.q('#formatChips [data-format="series"]').getAttribute('aria-pressed') === 'true' &&
+    u.hidden('#seriesOpen') && !u.hidden('#libraryGrid') && seriesCards(u).length === 3);
 });
 
 // ---- The sort menu ----
@@ -2522,6 +2714,27 @@ await run('CLS: every skeleton copies the sizes of what it holds room for', asyn
   check('grid: the same columns and gaps', skel.querySelector('#gridSkeleton').className.replace(/\s+/g, ' ') === skel.querySelector('#libraryGrid').className.replace(/\bhidden\s+/, '').replace(/\s+/g, ' '));
 });
 
+await run('Series: CLS: a series card has the lines the grid\'s skeleton holds for it', async (make) => {
+  const t = make({ storage: SERIES_VIEW, routes: seriesRoutes() });
+  const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
+  await t.mount();
+  check('the flag is on for the view', t.doc.documentElement.hasAttribute('data-books-flat'));
+  const card = seriesCards(t)[0];
+  const gridSkel = skel.querySelector('#gridSkeleton > div');
+  check('every line of the card', lines(Array.from(gridSkel.children)).join(' | ') === lines(Array.from(card.children)).join(' | '),
+    [lines(Array.from(gridSkel.children)), lines(Array.from(card.children))]);
+  card.click();
+  await t.clock.advance(50);
+  const held = t.qa('#seriesGrid > li');
+  check('its four books are drawn', held.length === 4);
+  const loading = make({ storage: SERIES_VIEW, routes: seriesRoutes({ series: () => new Promise(() => {}) }) });
+  await loading.mount();
+  seriesCards(loading)[0].click();
+  const s = loading.q('#seriesGrid > li > div');
+  const real = t.q('#seriesGrid > li > a');
+  check('skeleton and card lines match', lines(Array.from(s.children)).join(' | ') === lines(Array.from(real.children)).join(' | '), [lines(Array.from(s.children)), lines(Array.from(real.children))]);
+});
+
 await run('CLS: the toolbar\'s skeleton is its controls, word for word and size for size', async (make) => {
   const t = make({ routes: usual() });
   const skel = new t.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
@@ -2569,15 +2782,17 @@ await run('the toolbar on a phone: even rows of 44px controls, centred; from lg 
   const cls = (sel) => t.q(sel).className.split(/\s+/);
   const has = (sel, list) => list.filter((c) => cls(sel).indexOf(c) === -1);
   const EVEN = 'grid-cols-[repeat(3,minmax(max-content,1fr))]';
-  // Below lg: one row each, the three chips and the three filters in even columns across the width.
-  check('the format chips: three even columns across the width, a 28rem block on a tablet', has('#formatChips', ['grid', 'w-full', EVEN, 'gap-2', 'sm:max-w-md']).length === 0, has('#formatChips', ['grid', 'w-full', EVEN, 'gap-2', 'sm:max-w-md']));
+  const FOUR = 'grid-cols-[repeat(4,minmax(max-content,1fr))]';
+  // Below lg: one row each, the four chips and the three filters in even columns across the width.
+  check('the format chips: four even columns across the width (two by two under 360px), a 28rem block on a tablet',
+    has('#formatChips', ['grid', 'w-full', FOUR, 'max-[359px]:grid-cols-2', 'gap-2', 'sm:max-w-md']).length === 0, has('#formatChips', ['grid', 'w-full', FOUR, 'max-[359px]:grid-cols-2', 'gap-2', 'sm:max-w-md']));
   check('the filters: the same columns and width (their focus-ring margin aside), scrolling sideways only if a phone is too narrow',
     has('#filterButtons', ['grid', 'w-[calc(100%+0.5rem)]', '-m-1', 'p-1', EVEN, 'gap-2', 'sm:max-w-[calc(28rem+0.5rem)]', 'overflow-x-auto']).length === 0);
   check('Group series and the sort: a full row, the sort taking what Group series leaves',
     has('#groupSwitch', ['h-11']).length === 0 && t.q('#groupSwitch').parentElement.classList.contains('w-full') && t.q('#groupSwitch').parentElement.classList.contains('sm:max-w-md') &&
     has('#sortBtn', ['h-11', 'w-44', 'grow']).length === 0);
   const controls = t.qa('#formatChips [data-format], #filterButtons [data-filter]');
-  check('every chip and filter is 44px tall on a phone, its words centred', controls.length === 6 && controls.every((b) => /(?:^| )h-11(?: |$)/.test(b.className) && /\bjustify-center\b/.test(b.className)));
+  check('every chip and filter is 44px tall on a phone, its words centred', controls.length === 7 && controls.every((b) => /(?:^| )h-11(?: |$)/.test(b.className) && /\bjustify-center\b/.test(b.className)));
   // From lg up: what the desktop had.
   check('lg: the chips a wrapping flex row, auto width', has('#formatChips', ['lg:flex', 'lg:w-auto', 'lg:max-w-none', 'lg:flex-wrap', 'lg:items-center']).length === 0);
   check('lg: the filters a flex row within the toolbar', has('#filterButtons', ['lg:flex', 'lg:w-auto', 'lg:min-w-0', 'lg:max-w-full', 'lg:items-center']).length === 0);

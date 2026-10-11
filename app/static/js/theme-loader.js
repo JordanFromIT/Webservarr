@@ -426,8 +426,9 @@
   if (/[?&](author|series|narrator)=[^&]/.test(window.location.search)) {
     document.documentElement.setAttribute('data-books-filtered', '');
   }
-  // Every book its own card (Group series off, or a series filter): the grid's skeleton holds a third line.
-  if ((view && view.group === false) || /[?&]series=[^&]/.test(window.location.search)) {
+  // Every book its own card (Group series off, or a series filter), or the
+  // Series view's count line: the grid's skeleton holds a third line.
+  if ((view && (view.group === false || view.format === 'series')) || /[?&]series=[^&]/.test(window.location.search)) {
     document.documentElement.setAttribute('data-books-flat', '');
   }
 })();

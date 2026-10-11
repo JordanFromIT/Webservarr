@@ -296,6 +296,53 @@ def _cards(rows: List[CatalogRow], sort: str, collapse: bool = True) -> List[Tup
     return cards
 
 
+SERIES_COVERS = 3                # covers on a card of the Series view: the first books in reading order
+
+
+def _series_list(rows: List[CatalogRow], sort: str) -> List[Tuple[list, dict, List[CatalogRow]]]:
+    """(sort key, card, its books in reading order) for every series in
+    `rows`, one card each, a series of one book too; books in no series are
+    left out. The card is a series card with `covers`, its first
+    SERIES_COVERS books' covers."""
+    by_series: Dict[str, List[CatalogRow]] = {}
+    for row in rows:
+        key = book_catalog.name_key(row.series)
+        if key:
+            by_series.setdefault(key, []).append(row)
+    out = []
+    for key, members in by_series.items():
+        ordered = sorted(members, key=_reading_order)
+        card = _series_card(ordered)
+        card["covers"] = [_cover_url(m.id, m.updated_at) for m in ordered[:SERIES_COVERS]]
+        newest = max(_timestamp(m.added_at) for m in ordered)
+        out.append((_sort_key(sort, "s", key, ordered[0], newest, card["series"]), card, ordered))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def _series_progress(db: Session, who: Scope, series: List[List[CatalogRow]]) -> List[Optional[str]]:
+    """For each series (its books in reading order): "Book 2 of 5", the book
+    the caller touched last, or None when they have started none of them (or
+    it holds one book). Read only from what WebServarr keeps (the player's
+    places, and the ebook places kept for Insights), never from Kavita."""
+    books = [r for members in series for r in members]
+    touched: Dict[int, datetime] = {}
+    for book_id, (_key, place) in _newest_edition_place(db, who, [r.id for r in books if r.audio]).items():
+        touched[book_id] = place["updated_at"]
+    for book_id, at in insights_store.ebook_place_times(db, who.identity, [r.id for r in books if r.ebook]).items():
+        if at is not None and (book_id not in touched or at > touched[book_id]):
+            touched[book_id] = at
+    labels: List[Optional[str]] = []
+    for members in series:
+        started = [(touched[r.id], i) for i, r in enumerate(members) if r.id in touched]
+        if len(members) < 2 or not started:
+            labels.append(None)
+            continue
+        at_index = max(started)[1]
+        labels.append(f"Book {at_index + 1} of {len(members)}")
+    return labels
+
+
 _NUMBER_TEXT = re.compile(r"-?[0-9]{1,15}", re.ASCII)
 
 
@@ -409,6 +456,7 @@ async def library(request: Request,
                   series: Names = Query(None),
                   narrator: Names = Query(None),
                   group: bool = True,
+                  view: Literal["books", "series"] = "books",
                   who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """One page of the library the caller may see: {"items": [BookCard],
     "next_cursor", "notes", "building"}. A series of SERIES_MIN_BOOKS or more
@@ -422,6 +470,13 @@ async def library(request: Request,
     (and the format) applies. `group` false lists every book as a card of its
     own, with its `series` and `series_number`; so does a series filter.
 
+    `view` "series" (the Series view) lists only series, one card each
+    whatever its size, in the same order and pages, the format and filters
+    choosing which books count; each card also has `covers` (its first
+    SERIES_COVERS books' covers) and `progress_label` ("Book 2 of 5", the
+    book of it the caller touched last, from what WebServarr keeps; null
+    when they have started none). `group` does not apply to it.
+
     `building` is true only for an empty first page (whatever the format) while
     the catalog itself is empty and has never been built or is being built
     now: the page says it is being put together instead of "no books"."""
@@ -430,11 +485,21 @@ async def library(request: Request,
     rows = _kept_by_format(book_catalog.visible_rows(db, who.series, who.audio), format)
     if f.any():
         rows = _filtered(rows, f, _narrators_for(db, who, bool(f.narrator)))
-    cards = _cards(rows, sort, collapse=group and not f.series)
-    if after is not None:
-        cards = [c for c in cards if c[0] > after]
-    page = cards[:limit]
-    more = len(cards) > limit
+    if view == "series":
+        listed = _series_list(rows, sort)
+        if after is not None:
+            listed = [c for c in listed if c[0] > after]
+        more = len(listed) > limit
+        shown = listed[:limit]
+        # Progress only for the cards sent.
+        labels = _series_progress(db, who, [members for _key, _card, members in shown])
+        page = [(key, {**card, "progress_label": label}) for (key, card, _members), label in zip(shown, labels)]
+    else:
+        cards = _cards(rows, sort, collapse=group and not f.series)
+        if after is not None:
+            cards = [c for c in cards if c[0] > after]
+        page = cards[:limit]
+        more = len(cards) > limit
     building = False
     if not page and after is None:
         status_ = await book_catalog.catalog_status()

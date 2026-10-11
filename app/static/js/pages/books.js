@@ -20,6 +20,7 @@
  *
  * Also exports what the other Books pages draw with:
  *   renderBookCard(card, { signal })                   a cover card (an <a>)
+ *   renderSeriesCard(card, { signal })                 a card of the Series view (a <button>)
  *   renderContinueRow(items, { signal, failed, onChange })  the Continue section, always
  *                                                       (with nothing in progress, one quiet line);
  *                                                       each card's More menu takes it out of the row
@@ -58,6 +59,18 @@
  * Group series, a switch beside the sort: on, a series is one card; off,
  * every book is its own card with a "Dune #2" line. Remembered with the
  * format and the sort in the person's view (localStorage).
+ *
+ * Series, the fourth chip beside the formats (and remembered the same way):
+ * the library becomes one card per series (/api/books?view=series), each a
+ * fan of its first covers with its name, its author and "5 books", or "Book 2
+ * of 5" for a series the person has started. The filters and the sort choose
+ * and order the series; the search still finds books; Group series has
+ * nothing to do there and is disabled. A card is a button that opens the
+ * series in the grid's place (/api/books/series): its heading takes the
+ * focus, its books are the library's cards in reading order (each opens the
+ * book pop-up), and All series goes back to the cards, the focus to the one
+ * that opened it. Any change to the list (a chip, the sort, a filter) closes
+ * it. Not kept in the address: Back leaves Books as it does for the chips.
  *
  * The audiobook notice says where audiobooks are best heard, in a window
  * over the whole page on every visit to Books. Its Okay works after
@@ -128,7 +141,7 @@ const GUIDE_STEPS = [
     target: '#formatChips',
     icon: 'tune',
     title: 'Ebooks, audiobooks or both',
-    body: 'Show everything, only the books you can read, or only the ones you can listen to.'
+    body: 'Show everything, only the books you can read, only the ones you can listen to, or one card for each series.'
   },
   {
     target: '#libraryGrid > li:first-child',
@@ -139,7 +152,8 @@ const GUIDE_STEPS = [
   }
 ];
 
-const FORMATS = ['all', 'ebook', 'audio'];
+// 'series' is the Series view: every format, one card per series.
+const FORMATS = ['all', 'ebook', 'audio', 'series'];
 const SORTS = ['added', 'title', 'author'];
 const SORT_LABELS = { added: 'Recently added', title: 'Title', author: 'Author' };
 const TYPEAHEAD_MS = 500;          // letters typed within this of each other are one search
@@ -176,6 +190,20 @@ const FILTER_OFF = 'inline-flex h-11 shrink-0 items-center justify-center gap-1 
 const ACTIVE_CHIP = 'inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full pl-3 pr-2 text-[15px] bg-frosted-blue/10 text-frosted-blue hover:bg-frosted-blue/[0.15] transition-colors ' + LINK_FOCUS;
 const CLEAR_ALL = 'inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue transition-colors ' + LINK_FOCUS;
 const OPTION = 'flex min-h-12 sm:min-h-10 cursor-pointer items-center gap-3 rounded-[10px] px-3 text-[15px] text-frosted-blue hover:bg-frosted-blue/[0.07]';
+// A card of the Series view: a button laid out as a library card.
+const SERIES_CARD = 'group block w-full text-left ws-lift rounded-xl ' + LINK_FOCUS;
+// Its fan of covers, back to front by how many there are: the first book at the
+// front, bottom left; each one after it a step up and to the right, dimmer. All
+// inside the card's own 2:3 box, so a row of them is as tall as a row of books.
+const FAN = {
+  1: ['absolute inset-0'],
+  2: ['absolute bottom-0 left-0 w-[88%] rounded-xl bg-background-dark ring-2 ring-background-dark',
+    'absolute bottom-[12%] left-[12%] w-[88%] rounded-xl bg-background-dark brightness-[.7]'],
+  3: ['absolute bottom-0 left-0 w-[76%] rounded-xl bg-background-dark ring-2 ring-background-dark',
+    'absolute bottom-[12%] left-[12%] w-[76%] rounded-xl bg-background-dark ring-2 ring-background-dark brightness-[.8]',
+    'absolute bottom-[24%] left-[24%] w-[76%] rounded-xl bg-background-dark brightness-[.6]']
+};
+const SERIES_KEEP_MS = 2 * 60 * 1000;   // pages/books-list.js KEEP_MS: places move
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
@@ -453,6 +481,52 @@ export function renderBookCard(card, opts) {
     a.appendChild(line);
   }
   return a;
+}
+
+/** "5 books", "1 book". */
+function bookCount(n) {
+  const count = typeof n === 'number' && isFinite(n) ? n : 0;
+  return count + (count === 1 ? ' book' : ' books');
+}
+
+/**
+ * A card of the Series view: a button (it opens the series on the page) with
+ * a fan of the series' first covers (card.covers, else its one cover_url),
+ * the series' formats on the front one, the name (two lines of room, as a
+ * book's title), its author, and "5 books", or the person's place in it
+ * ("Book 2 of 5", card.progress_label) when they have started it. The same
+ * lines as a library card with a series line, so a skeleton holds either.
+ */
+export function renderSeriesCard(card, opts) {
+  const signal = opts && opts.signal;
+  const b = el('button', SERIES_CARD);
+  b.type = 'button';
+  // What the opened series shows before its answer is in.
+  b.setAttribute('data-series', card.series || '');
+  b.setAttribute('data-author', card.author || '');
+  b.setAttribute('data-count', String(typeof card.count === 'number' ? card.count : 0));
+  const given = Array.isArray(card.covers) && card.covers.length ? card.covers : [card.cover_url];
+  const covers = given.filter(function (u) { return typeof u === 'string' && u; }).slice(0, 3);
+  if (!covers.length) covers.push('');
+  const fan = el('span', 'relative block aspect-[2/3]');
+  const layers = FAN[covers.length];
+  // Back to front, so the first book is drawn last, on top.
+  for (let i = covers.length - 1; i >= 0; i--) {
+    const layer = el('span', 'block ' + layers[i]);
+    if (i > 0) layer.setAttribute('aria-hidden', 'true');
+    layer.appendChild(coverBox(covers[i], i === 0 ? card.formats : [], signal, { badges: i === 0 }));
+    fan.appendChild(layer);
+  }
+  b.appendChild(fan);
+  b.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', card.series || 'Untitled'));
+  b.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', card.author || ''));
+  const place = typeof card.progress_label === 'string' ? card.progress_label : '';
+  const line = el('span', 'flex min-h-5 min-w-0 items-center gap-1 text-[13px] leading-5 ' +
+    (place ? 'font-semibold text-frosted-blue' : 'text-frosted-blue/70'));
+  line.setAttribute('data-series-count', '');
+  line.appendChild(el('span', 'min-w-0 truncate', place || bookCount(card.count)));
+  b.appendChild(line);
+  return b;
 }
 
 function resumeAudio(key) {
@@ -927,6 +1001,9 @@ export async function mount(ctx) {
     queue: [], moving: 0, moveChain: null,
     // Counts every redraw of page 1, so a next page asked for before one is dropped.
     renderGen: 0, building: false, guideOffered: false,
+    // The library's body on show (showBody), and the series opened from the
+    // Series view ({ name, author, count }, or null) drawn in its place.
+    body: 'gridSkeleton', opened: null, seriesGen: 0,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
   };
 
@@ -1186,8 +1263,10 @@ export async function mount(ctx) {
 
   const BODIES = ['gridSkeleton', 'libraryGrid', 'errorState', 'buildingState', 'emptyState', 'filterEmpty'];
   function showBody(which) {
-    BODIES.forEach(function (id) { $(id).classList.toggle('hidden', id !== which); });
-    if (which !== 'libraryGrid') $('moreWrap').classList.add('hidden');
+    state.body = which;
+    // An open series keeps the place: the body changes under it, unseen.
+    BODIES.forEach(function (id) { $(id).classList.toggle('hidden', !!state.opened || id !== which); });
+    if (which !== 'libraryGrid' || state.opened) $('moreWrap').classList.add('hidden');
   }
 
   function quiet(err) { return signal.aborted || isAbort(err); }
@@ -1867,16 +1946,28 @@ export async function mount(ctx) {
     return !state.group || !!state.filters.series;
   }
 
-  /** The grid skeleton's room for a third line on every card (books.html; theme-loader.js on a full load). */
+  function seriesView() {
+    return state.format === 'series';
+  }
+
+  /** The format the APIs are asked for: the Series view has every format. */
+  function apiFormat() {
+    return seriesView() ? 'all' : state.format;
+  }
+
+  /** The grid skeleton's room for a third line on every card: every book its
+      own card, or the Series view's count line (books.html; theme-loader.js on a full load). */
   function syncFlat() {
-    if (flat()) html.setAttribute('data-books-flat', '');
+    if (flat() || seriesView()) html.setAttribute('data-books-flat', '');
     else html.removeAttribute('data-books-flat');
   }
 
-  function appendCards(grid, items, seriesLine) {
+  /** asSeries: the Series view's cards (renderSeriesCard). */
+  function appendCards(grid, items, seriesLine, asSeries) {
     items.forEach(function (card) {
       const li = el('li', '');
-      li.appendChild(renderBookCard(card, { signal: signal, seriesLine: !!seriesLine }));
+      li.appendChild(asSeries && card && card.kind === 'series' ? renderSeriesCard(card, { signal: signal })
+        : renderBookCard(card, { signal: signal, seriesLine: !!seriesLine }));
       grid.appendChild(li);
     });
   }
@@ -1889,6 +1980,8 @@ export async function mount(ctx) {
     });
     $('sortValue').textContent = SORT_LABELS[state.sort];
     $('groupSwitch').setAttribute('aria-checked', state.group ? 'true' : 'false');
+    // The Series view has no books to group.
+    $('groupSwitch').disabled = seriesView();
   }
 
   function setMore(cursor) {
@@ -1897,7 +1990,7 @@ export async function mount(ctx) {
     const btn = $('moreBtn');
     btn.disabled = false;
     btn.textContent = 'Show more';
-    $('moreWrap').classList.toggle('hidden', !state.cursor);
+    $('moreWrap').classList.toggle('hidden', !state.cursor || !!state.opened);
     // A watcher only reports a change; asking it again reports where the button
     // is now, so a page that was dropped (or one that left the button still in
     // reach) is followed by the next.
@@ -1914,7 +2007,10 @@ export async function mount(ctx) {
     const filtered = state.format !== 'all';
     let title = 'No books yet';
     let text = 'Books you request show up here once they’re ready.';
-    if (filtered) {
+    if (seriesView()) {
+      title = 'No series yet';
+      text = hasNotes ? 'Check back in a moment.' : 'Books that belong to a series show up here, one card for each series.';
+    } else if (filtered) {
       title = state.format === 'ebook' ? 'No ebooks to show' : 'No audiobooks to show';
       text = 'Try another filter to see the rest of the library.';
     } else if (hasNotes) {
@@ -1968,7 +2064,7 @@ export async function mount(ctx) {
     if (items.length) {
       stopBuildingPoll();
       saveView();
-      appendCards($('libraryGrid'), items, flat());
+      appendCards($('libraryGrid'), items, flat(), seriesView());
       showBody('libraryGrid');
       setMore(data.next_cursor);
       offerGuide();
@@ -1991,8 +2087,9 @@ export async function mount(ctx) {
   }
 
   function libraryUrl(cursor) {
-    return '/api/books?format=' + state.format + '&sort=' + state.sort + '&limit=' + PAGE_SIZE +
-      (state.group ? '' : '&group=false') + filterQuery('') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+    const view = seriesView() ? '&view=series' : state.group ? '' : '&group=false';
+    return '/api/books?format=' + apiFormat() + '&sort=' + state.sort + '&limit=' + PAGE_SIZE +
+      view + filterQuery('') + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
   }
 
   function failedLibrary(err) {
@@ -2014,9 +2111,12 @@ export async function mount(ctx) {
         failedLibrary(err);
       });
     }
+    // A new list: an open series gives way to it (the focus stays on the control used).
+    closeSeries(false);
     showBody('gridSkeleton');
     showSkeleton($('gridSkeleton'), SKELETON_CARDS);
-    return WS.swr('books:list:' + state.format + ':' + state.sort + (state.group ? '' : ':flat') + filterKey(), function () {
+    const kept = seriesView() ? 'series:' + state.sort : state.format + ':' + state.sort + (state.group ? '' : ':flat');
+    return WS.swr('books:list:' + kept + filterKey(), function () {
       return readLive(libraryUrl());
     }, function (data) {
       if (gen !== state.gen || signal.aborted) return;
@@ -2049,7 +2149,7 @@ export async function mount(ctx) {
       // Page 1 was drawn again meanwhile (a fresh answer over the kept copy):
       // this page followed the old one and would repeat or skip books.
       if (gen !== state.gen || page !== state.renderGen || signal.aborted) return;
-      appendCards($('libraryGrid'), (data && Array.isArray(data.items)) ? data.items : [], flat());
+      appendCards($('libraryGrid'), (data && Array.isArray(data.items)) ? data.items : [], flat(), seriesView());
       setMore(data && data.next_cursor);
     }, function (err) {
       if (gen !== state.gen || page !== state.renderGen || quiet(err)) return;
@@ -2061,23 +2161,132 @@ export async function mount(ctx) {
   }
 
   function choose(format, sort) {
-    if (format === state.format && sort === state.sort) return;
+    if (format === state.format && sort === state.sort) {
+      // Series pressed again with a series open: back to every series.
+      if (state.opened) closeSeries(true, true);
+      return;
+    }
     state.format = format;
     state.sort = sort;
     syncControls();
+    syncFlat();
     stopBuildingPoll();
     loadLibrary(false);
   }
 
   /** Group series on or off: the books again, every book its own card when off. Remembered at once. */
   function setGroup(on) {
-    if (on === state.group) return;
+    if (on === state.group || seriesView()) return;
     state.group = on;
     syncControls();
     saveView();
     syncFlat();
     stopBuildingPoll();
     loadLibrary(false);
+  }
+
+  // ---- One series, opened from the Series view ----
+
+  /** "6 books by Frank Herbert, in reading order". */
+  function seriesMeta(author, count) {
+    return bookCount(count) + (author ? ' by ' + author : '') + ', in reading order';
+  }
+
+  /** A card of the Series view pressed: the series takes the grid's place,
+      its heading the focus, and its books are asked for. */
+  function openSeries(card) {
+    const name = card.getAttribute('data-series') || '';
+    if (!name) return;
+    const count = parseInt(card.getAttribute('data-count') || '0', 10) || 0;
+    state.opened = { name: name, author: card.getAttribute('data-author') || '', count: count };
+    $('seriesTitle').textContent = name;
+    $('seriesMeta').textContent = seriesMeta(state.opened.author, count);
+    showBody(state.body);
+    $('seriesOpen').classList.remove('hidden');
+    $('seriesTitle').focus();
+    loadSeries();
+  }
+
+  function seriesSkeleton(count) {
+    const grid = $('seriesGrid');
+    grid.textContent = '';
+    for (let i = 0; i < Math.max(1, Math.min(count || SKELETON_CARDS, SKELETON_CARDS)); i++) {
+      const li = el('li', '');
+      li.setAttribute('aria-hidden', 'true');
+      li.appendChild(skeletonCard(true));
+      grid.appendChild(li);
+    }
+    grid.setAttribute('aria-busy', 'true');
+  }
+
+  /** Its books, in the server's reading order (numbered first, then by title),
+      as the library's cards with their series and number. */
+  function drawSeries(data) {
+    const items = data && Array.isArray(data.items) ? data.items : [];
+    const name = data && typeof data.name === 'string' && data.name ? data.name : state.opened.name;
+    if (!items.length) { showSeriesError(); return; }
+    $('seriesTitle').textContent = name;
+    $('seriesMeta').textContent = seriesMeta(state.opened.author, items.length);
+    const grid = $('seriesGrid');
+    grid.textContent = '';
+    items.forEach(function (item) {
+      const li = el('li', '');
+      li.appendChild(renderBookCard(Object.assign({}, item, { series: name }), { signal: signal, seriesLine: true }));
+      grid.appendChild(li);
+    });
+    grid.setAttribute('aria-busy', 'false');
+    $('seriesError').classList.add('hidden');
+    grid.classList.remove('hidden');
+  }
+
+  function showSeriesError() {
+    $('seriesGrid').classList.add('hidden');
+    $('seriesGrid').setAttribute('aria-busy', 'false');
+    $('seriesError').classList.remove('hidden');
+  }
+
+  function loadSeries() {
+    if (!state.opened) return null;
+    const gen = ++state.seriesGen;
+    const name = state.opened.name;
+    $('seriesError').classList.add('hidden');
+    $('seriesGrid').classList.remove('hidden');
+    seriesSkeleton(state.opened.count);
+    // The series page's own kept copy (pages/books-list.js): the same answer.
+    return WS.swr('books:series:' + name, function () {
+      return readLive('/api/books/series?name=' + encodeURIComponent(name));
+    }, function (data) {
+      if (gen !== state.seriesGen || signal.aborted) return;
+      drawSeries(data);
+    }, {
+      maxAge: SERIES_KEEP_MS,
+      onError: function (err) {
+        if (gen !== state.seriesGen || quiet(err)) return;
+        showSeriesError();
+      }
+    });
+  }
+
+  /** Back to the series' cards. back: All series (or Series again) was
+      pressed, so the focus goes to the card that opened it (onChip: stays on
+      the chip); otherwise a new list is on its way and the focus stays put. */
+  function closeSeries(back, onChip) {
+    if (!state.opened) return;
+    const name = state.opened.name;
+    state.opened = null;
+    state.seriesGen++;
+    $('seriesOpen').classList.add('hidden');
+    $('seriesGrid').textContent = '';
+    showBody(state.body);
+    if (state.body === 'libraryGrid') $('moreWrap').classList.toggle('hidden', !state.cursor);
+    if (!back || onChip) return;
+    const cards = root.querySelectorAll('#libraryGrid [data-series]');
+    let card = null;
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute('data-series') === name) { card = cards[i]; break; }
+    }
+    const to = card || root.querySelector('#formatChips [data-format="series"]');
+    if (to) to.focus();
   }
 
   // ---- Filters: Author, Series, Narrator ----
@@ -2215,7 +2424,7 @@ export async function mount(ctx) {
   let picker = null;
 
   function facetUrl(kind) {
-    return '/api/books/facets?facet=' + kind + '&format=' + state.format + filterQuery(kind);
+    return '/api/books/facets?facet=' + kind + '&format=' + apiFormat() + filterQuery(kind);
   }
 
   function loadFacet(kind) {
@@ -2817,6 +3026,16 @@ export async function mount(ctx) {
   $('moreBtn').addEventListener('click', loadMore, { signal: signal });
   $('retryBtn').addEventListener('click', function () { loadLibrary(false); loadContinue(); }, { signal: signal });
   $('emptyReset').addEventListener('click', function () { choose('all', state.sort); }, { signal: signal });
+  // A card of the Series view opens its series; All series and Try again.
+  $('libraryGrid').addEventListener('click', function (e) {
+    const card = e.target && e.target.closest ? e.target.closest('button[data-series]') : null;
+    if (card && seriesView()) openSeries(card);
+  }, { signal: signal });
+  $('seriesBack').addEventListener('click', function () { closeSeries(true); }, { signal: signal });
+  $('seriesRetry').addEventListener('click', function () {
+    loadSeries();
+    $('seriesTitle').focus();
+  }, { signal: signal });
   $('connectRetry').addEventListener('click', retryConnect, { signal: signal });
 
   root.querySelectorAll('#filterButtons [data-filter]').forEach(function (b) {

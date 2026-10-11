@@ -34,7 +34,7 @@ if HAVE_APP:
     from app.main import app
     from app.models import Book, BookAudioEdition, BookPairOverride, ListeningLog, ListeningPosition
     from app.routers import books
-    from app.services import book_catalog, listening
+    from app.services import book_catalog, insights_store, listening
 
 ORIGIN = "https://localhost"
 KAVITA = "http://kavita.test:5000"
@@ -989,6 +989,87 @@ class PeopleAndSeries(BooksBase):
         body = self.ok("/api/books/series", name="Dune")
         self.assertEqual([i["id"] for i in body["items"]], [1, 2, 3])
         self.assertEqual([n["source"] for n in body["notes"]], ["kavita"])
+
+
+class SeriesView(BooksBase):
+    """The Series view (GET /api/books?view=series): one card per series, in
+    the library's order and pages, with the first covers and "Book 2 of 5"
+    from what WebServarr keeps, never a call to Kavita."""
+
+    def series_of(self, **params):
+        return self.ok("/api/books", view="series", **params)
+
+    def test_signed_out_is_refused_and_a_member_is_answered(self):
+        self.assertEqual(self.get("/api/books", view="series").status_code, 200)
+        app.dependency_overrides.pop(get_current_user)
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get("/api/books?view=series").status_code, 401)
+
+    def test_one_card_per_series_with_its_first_covers_and_no_loose_books(self):
+        make_book(self.db, 20, "Lonely One", "Ann Author", "Solo Series", 1, 120, added=20)
+        body = self.series_of(sort="title")
+        self.assertEqual([(i["kind"], i["series"]) for i in body["items"]], [("series", "Dune"), ("series", "Solo Series")])
+        dune, solo = body["items"]
+        self.assertEqual(dune["count"], 3)
+        self.assertEqual(dune["author"], "Frank Herbert")
+        self.assertEqual(dune["formats"], ["ebook", "audio"])
+        # The first books in reading order: 1, 2, then the one without a number.
+        self.assertEqual([c.split("?")[0] for c in dune["covers"]],
+                         ["/api/books/1/cover", "/api/books/2/cover", "/api/books/3/cover"])
+        self.assertEqual(dune["cover_url"], dune["covers"][0])
+        self.assertIsNone(dune["progress_label"])
+        # A series of one book is still a series here (the grouped library shows it as the book).
+        self.assertEqual((solo["count"], len(solo["covers"])), (1, 1))
+        self.assertEqual(body["next_cursor"], None)
+
+    def test_at_most_three_covers(self):
+        for n in range(4):
+            make_book(self.db, 30 + n, f"Saga {n}", "Sam Saga", "Saga", n + 1, 130 + n)
+        saga = next(i for i in self.series_of()["items"] if i["series"] == "Saga")
+        self.assertEqual(saga["count"], 4)
+        self.assertEqual([c.split("?")[0] for c in saga["covers"]],
+                         ["/api/books/30/cover", "/api/books/31/cover", "/api/books/32/cover"])
+
+    def test_book_n_of_m_is_the_book_touched_last_from_kept_places_only(self):
+        place(self.db, "plex:1001", "12:1", when(30), book_ms=1_000_000, duration=4_000_000)
+        self.assertEqual(self.series_of()["items"][0]["progress_label"], "Book 3 of 3")
+        # A newer ebook place kept for Insights (Dune Messiah, the second in reading order) wins.
+        insights_store.record_ebook_places(self.db, "plex:1001", {2: {"page": 3, "pages": 10, "at": when(40)}})
+        self.assertEqual(self.series_of()["items"][0]["progress_label"], "Book 2 of 3")
+        self.places.assert_not_awaited()
+        self.in_progress.assert_not_awaited()
+        # Another member's places are theirs.
+        self.as_user(B)
+        self.assertIsNone(self.series_of()["items"][0]["progress_label"])
+
+    def test_the_count_follows_the_format_and_the_filters(self):
+        ebooks = self.series_of(format="ebook")["items"]
+        self.assertEqual([(i["series"], i["count"]) for i in ebooks], [("Dune", 2)])
+        place(self.db, "plex:1001", "12:1", when(30))
+        # Children of Dune is audio only: not among the ebooks, so no place to show.
+        self.assertIsNone(self.series_of(format="ebook")["items"][0]["progress_label"])
+        self.assertEqual(self.series_of(format="audio")["items"][0]["progress_label"], "Book 2 of 2")
+        self.assertEqual([i["count"] for i in self.series_of(narrator="Simon Vance")["items"]], [2])
+        self.assertEqual(self.series_of(author="Jane Austen")["items"], [])
+        self.assertEqual([i["series"] for i in self.series_of(series="dune")["items"]], ["Dune"])
+
+    def test_pages_by_cursor_in_the_sort(self):
+        for n, name in enumerate(["Alpha", "Beta"]):
+            make_book(self.db, 40 + n, f"{name} One", "Pat Page", name, 1, 140 + n)
+        seen, cursor = [], None
+        for _round in range(5):
+            params = {"sort": "title", "limit": 1}
+            if cursor:
+                params["cursor"] = cursor
+            body = self.series_of(**params)
+            seen += [i["series"] for i in body["items"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        self.assertEqual(seen, ["Alpha", "Beta", "Dune"])
+
+    def test_an_unknown_view_is_refused(self):
+        self.assertEqual(self.get("/api/books", view="shelves").status_code, 422)
 
 
 class Continue(BooksBase):
