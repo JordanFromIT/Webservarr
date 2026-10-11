@@ -378,6 +378,30 @@ async def _series_ids_as_user(client: httpx.AsyncClient, base: str, token: str, 
     raise KavitaUnavailable("Kavita's list is too long to read")
 
 
+async def person_token(base: str, api_key: str) -> str:
+    """The person's own token again, from their own API key: the exchange
+    /signin-oidc makes when they connect (Plugin/authenticate, as WebServarr),
+    so a token Kavita has let lapse is renewed without a trip through the
+    sign-in. KavitaTokenRefused when Kavita will not take the key (they have
+    to connect again); KavitaUnavailable when it does not answer. No error
+    carries the key or the token."""
+    async with _user_client() as client:
+        try:
+            response = await client.post(f"{base}/api/Plugin/authenticate",
+                                         params={"apiKey": api_key, "pluginName": PLUGIN_NAME})
+        except httpx.HTTPError:
+            raise KavitaUnavailable("Kavita did not answer") from None
+    if response.status_code != 200:
+        raise KavitaTokenRefused("Kavita refused the person's key")
+    try:
+        token = (response.json() or {}).get("token")
+    except (ValueError, AttributeError):
+        raise KavitaTokenRefused("Kavita's answer could not be read") from None
+    if not isinstance(token, str) or not token:
+        raise KavitaTokenRefused("Kavita refused the person's key")
+    return token
+
+
 async def user_series_ids(base: str, token: str) -> set:
     """The ids of the Kavita series this person's own account may see: the
     libraries it reaches, less what its age restriction hides."""

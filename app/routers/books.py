@@ -44,6 +44,7 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.auth import session_manager
 from app.config import settings
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user, require_admin
@@ -148,9 +149,31 @@ def _blocked_answer(who: "Scope", rows) -> Optional[JSONResponse]:
     return None
 
 
-async def _kavita_reach(user: dict) -> Tuple[set, Optional[Tuple[str, str]], Optional[dict]]:
+async def _renewed_token(user: dict, base: str, session_id: Optional[str]) -> Optional[str]:
+    """A new token for the one Kavita refused, from the person's own API key
+    (kept in their session at connect, kavita.person_token), saved in the
+    session. None when there is no key, or Kavita will not take it or does not
+    answer: then they connect again, through the page's hand-off."""
+    api_key = user.get("kavita_api_key") or ""
+    if not api_key or not session_id:
+        return None
+    try:
+        token = await kavita.person_token(base, api_key)
+    except kavita.KavitaUnavailable:
+        return None
+    try:
+        await session_manager.update_session(session_id, {"kavita_token": token})
+    except RedisError:
+        logger.warning("A renewed Kavita token could not be saved")
+    return token
+
+
+async def _kavita_reach(user: dict, session_id: Optional[str] = None
+                        ) -> Tuple[set, Optional[Tuple[str, str]], Optional[dict]]:
     """(series ids, (address, token), note) for this person's own Kavita account.
-    Nothing readable is no series, never all of them."""
+    Nothing readable is no series, never all of them. A token Kavita refuses
+    is renewed once from their own key (_renewed_token) before they are told
+    to connect again."""
     try:
         base = kavita_proxy.kavita_url_for(user)
     except HTTPException:
@@ -163,7 +186,15 @@ async def _kavita_reach(user: dict) -> Tuple[set, Optional[Tuple[str, str]], Opt
     try:
         series_ids = await kavita.user_series_ids(base, token)
     except kavita.KavitaTokenRefused:
-        return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
+        token = await _renewed_token(user, base, session_id)
+        if not token:
+            return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
+        try:
+            series_ids = await kavita.user_series_ids(base, token)
+        except kavita.KavitaTokenRefused:
+            return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
+        except kavita.KavitaUnavailable:
+            return set(), None, _note("kavita", "unavailable", EBOOKS_DOWN)
     except kavita.KavitaUnavailable:
         return set(), None, _note("kavita", "unavailable", EBOOKS_DOWN)
     return series_ids, (base, token), None
@@ -187,7 +218,7 @@ async def _audio_reach(user: dict, identity: str, session_id: Optional[str]) -> 
 async def scope_of(user: dict, session_id: Optional[str]) -> Scope:
     identity = account_identity(user)
     (series_ids, reach, kavita_note), (audio, plex_note) = await asyncio.gather(
-        _kavita_reach(user), _audio_reach(user, identity, session_id))
+        _kavita_reach(user, session_id), _audio_reach(user, identity, session_id))
     notes = [n for n in (kavita_note, plex_note) if n]
     return Scope(identity=identity, series=series_ids, kavita=reach, audio=audio, notes=notes)
 
