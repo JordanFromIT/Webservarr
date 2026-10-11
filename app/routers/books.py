@@ -152,14 +152,15 @@ def _blocked_answer(who: "Scope", rows) -> Optional[JSONResponse]:
 async def _renewed_token(user: dict, base: str, session_id: Optional[str]) -> Optional[str]:
     """A new token for the one Kavita refused, from the person's own API key
     (kept in their session at connect, kavita.person_token), saved in the
-    session. None when there is no key, or Kavita will not take it or does not
-    answer: then they connect again, through the page's hand-off."""
+    session. None when there is no key, or Kavita will not take it: then they
+    connect again, through the page's hand-off. KavitaUnavailable when Kavita
+    does not answer: a trip would not help, so that is not a reason to go."""
     api_key = user.get("kavita_api_key") or ""
     if not api_key or not session_id:
         return None
     try:
         token = await kavita.person_token(base, api_key)
-    except kavita.KavitaUnavailable:
+    except kavita.KavitaTokenRefused:
         return None
     try:
         await session_manager.update_session(session_id, {"kavita_token": token})
@@ -186,7 +187,10 @@ async def _kavita_reach(user: dict, session_id: Optional[str] = None
     try:
         series_ids = await kavita.user_series_ids(base, token)
     except kavita.KavitaTokenRefused:
-        token = await _renewed_token(user, base, session_id)
+        try:
+            token = await _renewed_token(user, base, session_id)
+        except kavita.KavitaUnavailable:
+            return set(), None, _note("kavita", "unavailable", EBOOKS_DOWN)
         if not token:
             return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
         try:

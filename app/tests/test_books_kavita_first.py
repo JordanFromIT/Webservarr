@@ -156,12 +156,19 @@ class RenewedToken(unittest.TestCase):
 
     def test_a_key_kavita_refuses_falls_through_to_the_hand_off(self):
         self.series.side_effect = kavita.KavitaTokenRefused("expired")
-        for failure in (kavita.KavitaTokenRefused("refused"), kavita.KavitaUnavailable("down")):
-            with self.subTest(failure=type(failure).__name__):
-                self.renew.side_effect = failure
-                _series, reach, note = self.run_async(books._kavita_reach(self.user, "sid-1"))
-                self.assertIsNone(reach)
-                self.assertEqual(note["reason"], "not_connected")
+        self.renew.side_effect = kavita.KavitaTokenRefused("refused")
+        _series, reach, note = self.run_async(books._kavita_reach(self.user, "sid-1"))
+        self.assertIsNone(reach)
+        self.assertEqual(note["reason"], "not_connected")
+        self.update.assert_not_awaited()
+
+    def test_a_renewal_kavita_does_not_answer_is_unavailable_not_a_trip(self):
+        # The token refused, then Plugin/authenticate times out: a sign-in
+        # trip would not help, so the page says Kavita isn't answering.
+        self.series.side_effect = kavita.KavitaTokenRefused("expired")
+        self.renew.side_effect = kavita.KavitaUnavailable("Kavita did not answer")
+        _series, reach, note = self.run_async(books._kavita_reach(self.user, "sid-1"))
+        self.assertEqual((reach, note["reason"], note["text"]), (None, "unavailable", books.EBOOKS_DOWN))
         self.update.assert_not_awaited()
 
     def test_a_renewed_token_kavita_still_refuses_is_not_connected(self):
