@@ -209,6 +209,106 @@ class SharedCopyOfRecentBooks(unittest.TestCase):
         self.assertEqual(asyncio.run(integrations._recent_books(10)), [])
 
 
+class _DownChaptarr(_Chaptarr):
+    """Answers the author list with `status`, or refuses the connection."""
+
+    def __init__(self, status=None):
+        super().__init__([1], {1: [_file(10, "2026-10-01T00:00:00Z")]})
+        self.status = status
+
+    def client(self, **kw):
+        fake = self
+
+        class Down(_Client):
+            async def get(self, url, params=None, headers=None):
+                if url.endswith("/api/v1/author"):
+                    if fake.status is None:
+                        raise httpx.ConnectError("refused")
+                    return _Resp(fake.status, {"message": "nope"})
+                return await super().get(url, params, headers)
+
+        return Down(self)
+
+
+class _UntitledChaptarr(_Chaptarr):
+    """Lists the files, then fails the titles lookup."""
+
+    def client(self, **kw):
+        class NoTitles(_Client):
+            async def get(self, url, params=None, headers=None):
+                if url.endswith("/api/v1/book"):
+                    return _Resp(503, {})
+                return await super().get(url, params, headers)
+
+        return NoTitles(self)
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class AnOutageKeepsTheLastCopy(unittest.TestCase):
+    """Chaptarr failing must not blank the shared copy: recent_requests says
+    it failed (ChaptarrUnavailable) and refresh_recent_books keeps the last
+    good list. A Chaptarr that answers with nothing still empties it."""
+
+    KEY = "SYNTH-CHAPTARR-KEY-7c1e"
+
+    def setUp(self):
+        self.store = {}
+
+        async def cache_get(key):
+            return self.store.get(key)
+
+        async def cache_set(key, value, ttl):
+            self.store[key] = value
+
+        for p in (mock.patch.object(integrations, "_cache_get", cache_get),
+                  mock.patch.object(integrations, "_cache_set", cache_set),
+                  mock.patch.object(chaptarr, "_get_config", return_value={"url": CFG["url"], "api_key": self.KEY})):
+            p.start()
+            self.addCleanup(p.stop)
+        self.good = {"at": time.time() - 3600, "items": _books(3)}
+
+    def refresh_with(self, fake):
+        with mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
+            return asyncio.run(integrations.refresh_recent_books())
+
+    def test_chaptarr_failing_is_raised_not_an_empty_list(self):
+        for fake in (_DownChaptarr(), _DownChaptarr(500), _DownChaptarr(401),
+                     _Chaptarr([1, 2], {1: [_file(10, "2026-10-01")]}, fail_author=2),
+                     _UntitledChaptarr([1], {1: [_file(10, "2026-10-01")]})):
+            with self.subTest(fake=type(fake).__name__, status=getattr(fake, "status", None)), \
+                 mock.patch.object(chaptarr.httpx, "AsyncClient", fake.client):
+                with self.assertRaises(chaptarr.ChaptarrUnavailable) as caught:
+                    asyncio.run(chaptarr.recent_requests(limit=10))
+                self.assertNotIn(self.KEY, str(caught.exception))
+
+    def test_an_outage_keeps_the_last_good_copy(self):
+        for fake in (_DownChaptarr(), _DownChaptarr(500),
+                     _UntitledChaptarr([1], {1: [_file(10, "2026-10-01")]})):
+            with self.subTest(fake=type(fake).__name__):
+                self.store["recent-books"] = dict(self.good)
+                with self.assertLogs(integrations.logger, "WARNING") as logs:
+                    out = self.refresh_with(fake)
+                self.assertEqual(out, _books(3))
+                self.assertEqual(self.store["recent-books"], self.good)
+                self.assertNotIn(self.KEY, "\n".join(logs.output))
+
+    def test_an_outage_with_no_copy_keeps_an_empty_one(self):
+        self.assertEqual(self.refresh_with(_DownChaptarr()), [])
+        self.assertEqual(self.store["recent-books"]["items"], [])
+
+    def test_chaptarr_answering_with_nothing_empties_the_copy(self):
+        for fake in (_Chaptarr([], {}), _Chaptarr([1], {1: []})):
+            with self.subTest(authors=fake.authors):
+                self.store["recent-books"] = dict(self.good)
+                self.assertEqual(self.refresh_with(fake), [])
+                self.assertEqual(self.store["recent-books"]["items"], [])
+                self.assertGreater(self.store["recent-books"]["at"], self.good["at"])
+
+    def test_chaptarr_not_configured_is_empty_not_a_failure(self):
+        with mock.patch.object(chaptarr, "_get_config", return_value={"url": "", "api_key": ""}):
+            self.assertEqual(asyncio.run(chaptarr.recent_requests(limit=10)), [])
+
+
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
 class RecentRequestsEndpoint(unittest.TestCase):
     def setUp(self):

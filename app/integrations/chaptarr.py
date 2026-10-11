@@ -1030,6 +1030,16 @@ async def wanted_books() -> Optional[Dict[str, Any]]:
 
 
 async def _book_files() -> List[Dict[str, Any]]:
+    """Every book file Chaptarr holds (_read_book_files), or none when
+    Chaptarr can't be read."""
+    try:
+        return await _read_book_files()
+    except ChaptarrUnavailable as exc:
+        logger.warning("Chaptarr book files failed: %s", exc)
+        return []
+
+
+async def _read_book_files() -> List[Dict[str, Any]]:
     """
     Every book file Chaptarr holds, with its book id, path and date.
 
@@ -1038,6 +1048,9 @@ async def _book_files() -> List[Dict[str, Any]]:
     author and stitched back together: one call per author, a few at a time
     (_BOOK_FILES_CONCURRENCY), kept in author order. Any author failing fails
     the whole listing, as it did when they were read one by one.
+
+    Empty when Chaptarr is not configured. ChaptarrUnavailable when it can't
+    be read, so a caller can tell that from a genuinely empty library.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
@@ -1049,7 +1062,7 @@ async def _book_files() -> List[Dict[str, Any]]:
         async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
             authors = await client.get(f"{cfg['url']}/api/v1/author", headers=headers)
             if authors.status_code != 200:
-                return []
+                raise ChaptarrUnavailable(f"author list returned HTTP {authors.status_code}")
 
             async def files_of(author: Dict[str, Any]) -> List[Dict[str, Any]]:
                 async with gate:
@@ -1068,8 +1081,7 @@ async def _book_files() -> List[Dict[str, Any]]:
                 if isinstance(result, BaseException):
                     raise result
     except (httpx.RequestError, ValueError) as exc:
-        logger.warning("Chaptarr book files failed: %s", exc)
-        return []
+        raise ChaptarrUnavailable(f"book files could not be read ({type(exc).__name__}: {exc})") from None
     return [entry for files in per_author for entry in files]
 
 
@@ -1149,8 +1161,12 @@ async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
     Dated from the file rather than the book: Chaptarr book records carry only
     a releaseDate, which is when the book was published, not when anyone here
     asked for it. The file's dateAdded is when it actually arrived.
+
+    Empty when Chaptarr is not configured or holds no files. Raises
+    ChaptarrUnavailable when it can't be read, so a list that is only empty
+    because Chaptarr failed never replaces a good one.
     """
-    files = await _book_files()
+    files = await _read_book_files()
     if not files:
         return []
 
@@ -1180,13 +1196,11 @@ async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
                     params={"bookIds": [book_id for book_id, _ in newest]},
                     headers={"X-Api-Key": cfg["api_key"]},
                 )
-            titles = {
-                b.get("id"): b
-                for b in (resp.json() if resp.status_code == 200 else [])
-                if isinstance(b, dict)
-            }
-        except (httpx.RequestError, ValueError):
-            titles = {}
+            if resp.status_code != 200:
+                raise ChaptarrUnavailable(f"book titles returned HTTP {resp.status_code}")
+            titles = {b.get("id"): b for b in resp.json() if isinstance(b, dict)}
+        except (httpx.RequestError, ValueError, TypeError) as exc:
+            raise ChaptarrUnavailable(f"book titles could not be read ({type(exc).__name__}: {exc})") from None
 
     out = []
     for book_id, info in newest:

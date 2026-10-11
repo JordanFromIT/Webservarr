@@ -247,12 +247,20 @@ _recent_books_build = None  # the build in flight in this worker, if any
 
 
 async def refresh_recent_books() -> list:
-    """Rebuild the shared copy of recent book arrivals. Never raises."""
+    """Rebuild the shared copy of recent book arrivals. Never raises.
+
+    When Chaptarr can't be read the last good copy is kept as it is and
+    returned, so an outage never blanks the panel; only a successful answer,
+    empty or not, replaces it. With no copy at all an empty one is kept, so
+    viewers are not each left waiting on a Chaptarr that is down."""
     try:
         books = await chaptarr.recent_requests(limit=_RECENT_BOOKS_MAX)
     except Exception as exc:  # noqa: BLE001 - the panel's film rows must still answer
-        logger.warning("Recent books failed: %s", exc)
-        return []
+        logger.warning("Recent books failed, keeping the last copy: %s", exc)
+        cached = await _cache_get(_RECENT_BOOKS_KEY)
+        if isinstance(cached, dict) and isinstance(cached.get("items"), list):
+            return cached["items"]
+        books = []
     await _cache_set(_RECENT_BOOKS_KEY, {"at": time.time(), "items": books}, _RECENT_BOOKS_TTL)
     return books
 
