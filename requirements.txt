@@ -91,8 +91,9 @@ limits==5.8.0
     # via slowapi
 markdown==3.10.2
     # via -r /w/requirements.in
-multidict==6.8.0
+multidict==6.9.1
     # via
+    #   -r /w/requirements.in
     #   aiohttp
     #   yarl
 packaging==26.3

@@ -70,6 +70,7 @@ cryptography>=50.0.0
 urllib3>=2.8.0
 idna>=3.15
 aiohttp>=3.14.3
+multidict>=6.9.1  # GHSA-54p9-h82j-f925
 
 # Date/time utilities
 python-dateutil==2.8.2
