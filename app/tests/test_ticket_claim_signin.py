@@ -74,6 +74,18 @@ class FakeRedis:
     async def hgetall(self, key):
         return dict(self.hashes.get(key, {}))
 
+    async def eval(self, script, numkeys, key, *args):
+        """session_manager.update_session's script (auth.UPDATE_SESSION_SCRIPT):
+        the fields are merged only into a session that still exists."""
+        from app.auth import UPDATE_SESSION_SCRIPT
+        if script != UPDATE_SESSION_SCRIPT:
+            raise AssertionError("unexpected script")
+        if key not in self.hashes:
+            return 0
+        pairs = args[1:]
+        await self.hset(key, dict(zip(pairs[0::2], pairs[1::2])))
+        return 1
+
 
 class _SignInHarness(unittest.TestCase):
     """The sign-in routers and the tickets router, one in-memory database,

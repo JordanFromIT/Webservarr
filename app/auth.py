@@ -141,6 +141,17 @@ class OIDCClient:
 # The session fields that hold a member's Kavita sign-in (kavita_proxy.py).
 KAVITA_SESSION_FIELDS = ("kavita_token", "kavita_api_key", "kavita_base")
 
+# update_session's write as one step on the Redis side: merge the fields and
+# renew the TTL only while the session still exists. Checked and written
+# separately, a logout landing between the two recreated a partial session.
+# KEYS[1] is the session hash; ARGV[1] the TTL, then field, value pairs.
+UPDATE_SESSION_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('HSET', KEYS[1], unpack(ARGV, 2))
+redis.call('EXPIRE', KEYS[1], ARGV[1])
+return 1
+"""
+
 
 class SessionManager:
     """Manage user sessions in Redis."""
@@ -247,23 +258,20 @@ class SessionManager:
 
         Used to attach the user's Kavita JWT after the OIDC handoff, so the
         ebook proxy can act on their behalf. No-ops when the session has already
-        expired, so a late callback cannot resurrect one.
+        expired or been deleted, so a late callback cannot resurrect one: the
+        check and the write are one script (UPDATE_SESSION_SCRIPT).
 
         Args:
             session_id: Session identifier
             fields: Field names and values to merge in
         """
-        redis = await self.get_redis()
-        session_key = f"session:{session_id}"
-
-        if not await redis.exists(session_key):
+        if not fields:
             return
-
-        await redis.hset(
-            session_key,
-            mapping={k: "" if v is None else str(v) for k, v in fields.items()},
-        )
-        await redis.expire(session_key, self.max_age)
+        redis = await self.get_redis()
+        pairs = []
+        for k, v in fields.items():
+            pairs += [k, "" if v is None else str(v)]
+        await redis.eval(UPDATE_SESSION_SCRIPT, 1, f"session:{session_id}", self.max_age, *pairs)
 
     async def clear_kavita_connections(self) -> int:
         """Drop every session's Kavita sign-in (token, key and the address it
