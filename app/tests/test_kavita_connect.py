@@ -261,6 +261,10 @@ def check_failed_arrival(t, src):
     t.assertTrue(live_matches(body, r"\bhistory\.replaceState\("))
     t.assertTrue(live_matches(body, r"\bblocked\s*=\s*true\b"),
                  "after a reported failure no automatic attempt may follow")
+    # The failed trip may have been the server's (connect_first), which never
+    # writes sessionStorage: it counts as this minute's attempt, or the next
+    # Books page of the visit goes again (app/tests/js/kavita_connect.mjs).
+    t.assertTrue(live_matches(body, r"\bmarkTry\(\s*\)"), "a failed trip is not recorded as the last attempt")
 
 
 def check_retry(t, src):
@@ -578,6 +582,9 @@ MUTATIONS = [
     ("an extra markTry before the guard", "helper",
      "    if (blocked || triedRecently() || !markTry()) {",
      "    markTry();\n    if (blocked || triedRecently() || !markTry()) {", check_reconnect),
+    ("a failed trip not recorded", "helper",
+     "    markTry();\n    blocked = true;\n    return true;", "    blocked = true;\n    return true;",
+     check_failed_arrival),
     ("no guard", "helper",
      "if (blocked || triedRecently() || !markTry()) {", "if (blocked) {", check_reconnect),
     ("storage error means go again", "helper",

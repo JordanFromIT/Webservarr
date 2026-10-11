@@ -137,6 +137,7 @@ jobs:
           node app/tests/js/login_request.mjs
           node app/tests/js/settings_access.mjs
           node app/tests/js/insights_page.mjs
+          node app/tests/js/kavita_connect.mjs
 
   build-and-push:
     needs: [test, js-checks]

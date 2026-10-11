@@ -12,7 +12,10 @@
  * So the pages ask here instead:
  *   - at most one automatic attempt a minute (the time is kept in
  *     sessionStorage, so it survives the round trip);
- *   - none at all after a sign-in reported failure (/books?kavita=error);
+ *   - none at all after a sign-in reported failure (/books?kavita=error),
+ *     which also counts as this minute's attempt: the server may have started
+ *     that trip itself (a Books page's own address), and the next Books page
+ *     of the visit must not go again;
  *   - otherwise the page shows a plain message with a "Try again" button.
  * If storage can't be read, the answer is the message: never a loop.
  *
@@ -77,8 +80,10 @@
 
   /**
    * Read once, as the page mounts: did the sign-in just fail? If so, drop the
-   * flag from the address (a reload or a shared link should not repeat it)
-   * and make no automatic attempt on this visit.
+   * flag from the address (a reload or a shared link should not repeat it),
+   * make no automatic attempt on this visit, and record the failed trip as
+   * the last attempt, so a soft navigation to another Books page within the
+   * minute does not go again (the server keeps the same minute).
    */
   function arrivedFromFailedConnect() {
     var params;
@@ -89,6 +94,7 @@
     try {
       history.replaceState(history.state, '', location.pathname + (query ? '?' + query : '') + location.hash);
     } catch (e) { /* the message still shows; only the address keeps the flag */ }
+    markTry();
     blocked = true;
     return true;
   }

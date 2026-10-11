@@ -652,8 +652,10 @@ def _connect_failed(return_to: str = "/books") -> RedirectResponse:
     return RedirectResponse(_with_error_flag(return_to), status_code=302)
 
 
-# When the Books pages last sent this session on the hand-off (epoch seconds),
-# kept in the session: they send it again only after CONNECT_AGAIN_AFTER_S.
+# When this session last started the hand-off (epoch seconds), kept in the
+# session by /kavita/connect itself, whoever sent it there: a Books page's
+# address (connect_first), a page's script or the reader (kavita-connect.js).
+# connect_first sends it again only after CONNECT_AGAIN_AFTER_S.
 CONNECT_AT_FIELD = "kavita_connect_at"
 CONNECT_AGAIN_AFTER_S = 60
 
@@ -683,8 +685,8 @@ async def connect_first(request: Request, user: Dict[str, str], session_id: Opti
     ago, so this can never loop; the page's own script then decides, as it
     always did). The router's fetch (X-WS-Nav) is answered 204, which it loads
     in full: a redirect would be followed by the fetch itself, into Authentik's
-    origin, and fail. A full load is sent to /kavita/connect, which comes back
-    to this address."""
+    origin, and fail. A full load is sent to /kavita/connect, which records the
+    time (this only reads it) and comes back to this address."""
     if request.query_params.get("kavita") == "error" or not session_id:
         return None
     try:
@@ -702,11 +704,6 @@ async def connect_first(request: Request, user: Dict[str, str], session_id: Opti
         return None
     if request.headers.get("x-ws-nav") == "1":
         return Response(status_code=204)
-    try:
-        await session_manager.update_session(session_id, {CONNECT_AT_FIELD: str(int(now))})
-    except Exception:  # noqa: BLE001 - unrecorded, the trip could repeat: serve the page instead
-        logger.warning("Could not record the Kavita hand-off", exc_info=True)
-        return None
     here = request.url.path + ("?" + request.url.query if request.url.query else "")
     return RedirectResponse("/kavita/connect?return=" + quote(here, safe=""), status_code=302)
 
@@ -728,6 +725,10 @@ async def kavita_connect(
     ?return=<path> says which page to come back to (safe_return_path: a path
     under /books or /reader, else /books). It is kept in the session across the
     trip, because Authentik's redirect carries nothing of ours.
+
+    The trip's time is kept with it (CONNECT_AT_FIELD), so every trip, however
+    it was started, holds connect_first off for a minute. A trip that can't be
+    recorded doesn't start: it goes back to the page with the failure flag.
     """
     base = kavita_url_for(current_user)
     if not base:
@@ -735,7 +736,12 @@ async def kavita_connect(
 
     return_to = safe_return_path(request.query_params.get("return"))
     if session_id:
-        await session_manager.update_session(session_id, {"kavita_return": return_to})
+        try:
+            await session_manager.update_session(
+                session_id, {"kavita_return": return_to, CONNECT_AT_FIELD: str(int(time.time()))})
+        except Exception as exc:  # noqa: BLE001 - unrecorded, the trip could repeat: back to the page
+            logger.warning("Could not record the Kavita hand-off: %s", type(exc).__name__)
+            return _connect_failed(return_to)
 
     host = request.headers.get("host", "")
 

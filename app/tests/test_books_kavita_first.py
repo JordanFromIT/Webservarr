@@ -6,8 +6,9 @@ audiobook notice open, the books coming in) and then left for /kavita/connect
 by the page's own script, coming back to a second load of it: the page
 "loads, then reloads". Now the page's own address answers first:
 
-- a full load is sent to /kavita/connect?return=<this address>, and the time
-  is kept in the session (kavita_connect_at);
+- a full load is sent to /kavita/connect?return=<this address>, which keeps
+  the time in the session (kavita_connect_at), so a trip started by a page's
+  script or the reader holds the pages off just the same;
 - the router's fetch (X-WS-Nav: 1) gets a 204, which it loads in full;
 - it can never loop: not after a failed sign-in (?kavita=error), not within a
   minute of the last trip;
@@ -28,7 +29,7 @@ try:
 
     from app.auth import session_manager
     from app.integrations import kavita
-    from app.routers import books
+    from app.routers import books, kavita_proxy
     from app.tests import helpers
     from app.tests.test_settings_gate import MEMBER_SID, ADMIN_SID, SettingsGateBase
     HAVE_APP = True
@@ -50,7 +51,11 @@ class HandOffFirst(SettingsGateBase):
         async def get_session(session_id):
             return self.sessions.get(session_id)
 
-        self.update = mock.AsyncMock()
+        async def update(session_id, fields):
+            if session_id in self.sessions:
+                self.sessions[session_id].update(fields)
+
+        self.update = mock.AsyncMock(side_effect=update)
         for patch in (mock.patch.object(session_manager, "get_session", side_effect=get_session),
                       mock.patch.object(session_manager, "update_session", self.update)):
             patch.start()
@@ -72,9 +77,28 @@ class HandOffFirst(SettingsGateBase):
                 r = self.member().get(path)
                 self.assertEqual(r.status_code, 302, path)
                 self.assertEqual(r.headers["location"], "/kavita/connect?return=" + quote(path, safe=""))
-                (sid, fields), _ = self.update.await_args
-                self.assertEqual(sid, MEMBER_SID)
-                self.assertAlmostEqual(int(fields["kavita_connect_at"]), time.time(), delta=5)
+                self.update.assert_not_awaited()          # /kavita/connect records the trip
+
+    def connect(self, query):
+        """The trip itself, with Kavita not answering (it comes back flagged)."""
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA):
+            return self.member().get("/kavita/connect" + query)
+
+    def test_the_trip_records_its_own_time(self):
+        r = self.connect("?return=" + quote("/books/7", safe=""))
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books/7?kavita=error"))
+        self.assertAlmostEqual(int(self.sessions[MEMBER_SID]["kavita_connect_at"]), time.time(), delta=5)
+
+    def test_a_trip_the_pages_script_started_holds_the_pages_off(self):
+        # The page's script (or the reader) went to /kavita/connect itself and
+        # it failed. Within the minute, a soft navigation to another Books
+        # page is answered with the page (no 204, so no second trip), and so
+        # is a full load.
+        self.sessions[MEMBER_SID].pop("kavita_connect_at", None)
+        self.connect("?return=" + quote("/books", safe=""))
+        c = self.member()
+        self.assert_page(c.get("/books/person?role=author&name=X", headers={"X-WS-Nav": "1"}), "soft nav")
+        self.assert_page(c.get("/books/7"), "full load")
 
     def test_the_admin_is_sent_too(self):
         r = self.client(ADMIN_SID).get("/books")
@@ -122,9 +146,14 @@ class HandOffFirst(SettingsGateBase):
     def test_your_stats_never_sends_anyone(self):
         self.assert_page(self.member().get("/books/stats"), "/books/stats")
 
-    def test_a_session_store_that_fails_serves_the_page(self):
+    def test_a_trip_that_cannot_be_recorded_does_not_start(self):
+        # Unrecorded, it could repeat: back to the page, flagged, which
+        # makes no automatic attempt.
         self.update.side_effect = RuntimeError("redis down")
-        self.assert_page(self.member().get("/books"), "/books")
+        with self.assertLogs(kavita_proxy.logger, "WARNING") as logs:
+            r = self.connect("?return=" + quote("/books/7", safe=""))
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books/7?kavita=error"))
+        self.assertNotIn(MEMBER_SID, "\n".join(logs.output))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

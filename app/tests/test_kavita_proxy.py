@@ -7,6 +7,7 @@ the settings table, not the AUTHENTIK_URL env var, so an allow-list built from
 the env var alone refused every legitimate redirect. These tests pin DB-first,
 env-fallback resolution and that foreign origins stay refused.
 """
+import time
 import unittest
 from unittest import mock
 
@@ -324,15 +325,22 @@ class HandOffReturns(unittest.TestCase):
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _FakeKavita):
             return self.callback_client.post("/signin-oidc", data={"code": "c"}, follow_redirects=False)
 
+    def kept(self):
+        """The fields the trip kept in the session (one write, with its time)."""
+        (sid, fields), _ = self.update.await_args
+        self.assertEqual(sid, "sid-1")
+        self.assertAlmostEqual(int(fields.pop(kavita_proxy.CONNECT_AT_FIELD)), time.time(), delta=5)
+        return fields
+
     def test_the_page_it_started_from_is_kept_in_the_session(self):
         self.start(_ElsewhereKavita, "?return=/books/4")
-        self.update.assert_any_await("sid-1", {"kavita_return": "/books/4"})
+        self.assertEqual(self.kept(), {"kavita_return": "/books/4"})
 
     def test_no_return_or_a_bad_one_keeps_books(self):
         for query in ("", "?return=", "?return=https://evil.example/", "?return=//evil.example", "?return=/settings"):
             with self.subTest(query=query):
                 self.start(_ElsewhereKavita, query)
-                self.update.assert_any_await("sid-1", {"kavita_return": "/books"})
+                self.assertEqual(self.kept(), {"kavita_return": "/books"})
 
     def test_a_hand_off_that_cannot_start_goes_back_to_the_page_with_the_flag(self):
         for fake in (_DownKavita, _SilentKavita, _ElsewhereKavita):
