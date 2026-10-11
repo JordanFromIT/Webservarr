@@ -159,15 +159,15 @@
     .bn-count.bn-count-quiet { transition: none; }
   }
 
-  /* Recently added beside the Continue row on a wide screen, in the column
-     the audiobook notice's card used to have (the row keeps the rest and
-     scrolls as before), when both have books; otherwise, and on narrower
-     screens, under it. Held from the first paint by the same <html> flags
-     that hold each row's room (theme-loader.js, pages/books.js markRow). */
+  /* Recently added beside the Continue row on a wide screen, the row shared
+     half and half (each scrolls sideways as before), when both have books;
+     otherwise, and on narrower screens, under it. Held from the first paint
+     by the same <html> flags that hold each row's room (theme-loader.js,
+     pages/books.js markRow). */
   .books-top-area { container-type: inline-size; }
   @container (min-width: 912px) {
     html[data-books-continue][data-books-recent] .books-top {
-      display: grid; grid-template-columns: minmax(0, 1fr) 26rem; column-gap: 32px; align-items: start;
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 32px; align-items: start;
     }
   }
 

@@ -3318,8 +3318,8 @@ current = 'the inline card is gone, and Recently added sits beside Continue';
     /\.bn-okay > span \{ grid-area: 1 \/ 1;/.test(BOOKS_HTML));
   check('Okay\'s sweep runs 30 seconds, and Don\'t show again\'s 45', /\.bn-overlay \{\s*--bn-veil: [^;]+;\s*--bn-wait: 30s;/.test(BOOKS_HTML) &&
     /\.bn-count\.bn-count-quiet \{\s*--bn-wait: 45s;/.test(BOOKS_HTML));
-  check('wide, with books in both: Recently added in a column of its own beside Continue, held from the first paint by the rows\' own flags',
-    /@container \(min-width: 912px\) \{\s*html\[data-books-continue\]\[data-books-recent\] \.books-top \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) 26rem;/.test(BOOKS_HTML) &&
+  check('wide, with books in both: Continue and Recently added share the row half and half, held from the first paint by the rows\' own flags',
+    /@container \(min-width: 912px\) \{\s*html\[data-books-continue\]\[data-books-recent\] \.books-top \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/.test(BOOKS_HTML) &&
     /\.books-top-area \{ container-type: inline-size; \}/.test(BOOKS_HTML));
   const win = new Window({ url: 'https://ws.test/books' });
   win.document.write(BOOKS_HTML);
