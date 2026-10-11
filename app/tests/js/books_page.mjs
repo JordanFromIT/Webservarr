@@ -2205,8 +2205,12 @@ await run('Series: a card opens its books in reading order, the heading takes th
   const t = make({ storage: SERIES_VIEW, routes: seriesRoutes({ series: () => slow.promise.then(() => ({ body: DUNE })) }) });
   await t.mount();
   const dune = seriesCards(t)[0];
+  const scrolled = [];
+  t.q('#seriesOpen').scrollIntoView = (o) => scrolled.push(['section', o && o.block]);
+  dune.scrollIntoView = (o) => scrolled.push(['card', o && o.block]);
   dune.focus();
   dune.click();
+  check('its top is brought to the top of the screen', JSON.stringify(scrolled) === '[["section","start"]]', scrolled);
   check('its heading has the focus at once, named by the series', t.doc.activeElement === t.q('#seriesTitle') && t.text('#seriesTitle') === 'Dune' && t.q('#seriesTitle').tagName === 'H3');
   check('the series takes the cards\' place', !t.hidden('#seriesOpen') && t.hidden('#libraryGrid') && t.hidden('#moreWrap'));
   check('a section named by its heading', t.q('#seriesOpen').tagName === 'SECTION' && t.q('#seriesOpen').getAttribute('aria-labelledby') === 'seriesTitle');
@@ -2222,7 +2226,7 @@ await run('Series: a card opens its books in reading order, the heading takes th
   check('the count is the books it has', t.text('#seriesMeta') === '4 books by Frank Herbert, in reading order' && t.q('#seriesGrid').getAttribute('aria-busy') === 'false');
   t.click('#seriesBack');
   check('All series: the cards again', t.hidden('#seriesOpen') && !t.hidden('#libraryGrid') && seriesCards(t).length === 3);
-  check('the focus back on the card that opened it', t.doc.activeElement === seriesCards(t)[0]);
+  check('the focus back on the card that opened it, in the middle of the screen', t.doc.activeElement === seriesCards(t)[0] && JSON.stringify(scrolled[1]) === '["card","center"]', scrolled);
   // A name with a slash, quotes and accents goes out encoded and comes back to its card.
   const odd = 'A/B "Brontë" & C';
   const u = make({ storage: SERIES_VIEW, routes: seriesRoutes({ list: () => ({ body: { items: [fan(odd, 2)], next_cursor: null, notes: [] } }), series: () => ({ body: Object.assign({}, DUNE, { name: odd }) }) }) });

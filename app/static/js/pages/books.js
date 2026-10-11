@@ -2203,7 +2203,10 @@ export async function mount(ctx) {
     $('seriesMeta').textContent = seriesMeta(state.opened.author, count);
     showBody(state.body);
     $('seriesOpen').classList.remove('hidden');
-    $('seriesTitle').focus();
+    // Its top (All series, the heading) at the top of the screen, clear of the
+    // phone's header (the section's scroll margin), so its books are in view.
+    $('seriesTitle').focus({ preventScroll: true });
+    if (typeof $('seriesOpen').scrollIntoView === 'function') $('seriesOpen').scrollIntoView({ block: 'start' });
     loadSeries();
   }
 
@@ -2286,7 +2289,10 @@ export async function mount(ctx) {
       if (cards[i].getAttribute('data-series') === name) { card = cards[i]; break; }
     }
     const to = card || root.querySelector('#formatChips [data-format="series"]');
-    if (to) to.focus();
+    if (!to) return;
+    // In the middle of the screen, never under the phone's header or tab bar.
+    to.focus({ preventScroll: true });
+    if (typeof to.scrollIntoView === 'function') to.scrollIntoView({ block: 'center' });
   }
 
   // ---- Filters: Author, Series, Narrator ----
