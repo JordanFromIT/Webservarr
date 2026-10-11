@@ -53,8 +53,10 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 # Kometa's webhook carries its secret in the address; the access log shows
-# it as ".../kometa/…" (app/routers/activity_webhooks.py).
+# it as ".../kometa/…" (app/routers/activity_webhooks.py). slowapi's warning
+# names the route function, not the path, but gets the filter as well.
 logging.getLogger("uvicorn.access").addFilter(activity_webhooks.HideWebhookTokens())
+logging.getLogger("slowapi").addFilter(activity_webhooks.HideWebhookTokens())
 
 
 @asynccontextmanager

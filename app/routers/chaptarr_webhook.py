@@ -47,7 +47,7 @@ from app.config import settings
 from app.database import get_db
 from app.integrations import config as integration_config
 from app.integrations import kavita
-from app.limiter import _get_client_ip, limiter
+from app.limiter import limiter, rate_limit_key
 from app.services import book_catalog, library_lines, status_feed
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def secret_key(app: str) -> str:
 
 def _rate_key(request: Request) -> str:
     """The rate-limit key: the app named in the address, and the caller."""
-    return f"webhook:{str(request.path_params.get('app', ''))[:10]}:{_get_client_ip(request)}"
+    return f"webhook:{str(request.path_params.get('app', ''))[:10]}:{rate_limit_key(request)}"
 
 
 def _authorised(request: Request, app: str) -> bool:

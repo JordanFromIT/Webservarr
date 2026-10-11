@@ -58,8 +58,30 @@ def _get_client_ip(request: Request) -> str:
     return peer or "unknown"
 
 
+def rate_limit_key(request: Request) -> str:
+    """The client's rate-limit bucket: its IPv4 address, or its IPv6 /64.
+
+    One IPv6 subscriber usually holds a whole /64, so keying the full address
+    would hand them a fresh budget for every address they rotate through."""
+    ip = _get_client_ip(request)
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.IPv6Network((int(addr), 64), strict=False))
+    return ip
+
+
+# key_style="endpoint": one budget per route function, whatever its path
+# parameters carry. The default ("url") gave every concrete path its own
+# budget, so /kometa/<token> guesses or /kavita/<path> traffic were never
+# throttled, and slowapi's warning line printed the full path.
 limiter = Limiter(
-    key_func=_get_client_ip,
+    key_func=rate_limit_key,
     storage_uri=settings.redis_url,
     default_limits=["120/minute"],
+    key_style="endpoint",
 )

@@ -38,7 +38,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_same_origin
 from app.integrations import plex_player as pp
-from app.limiter import _get_client_ip, limiter
+from app.limiter import limiter, rate_limit_key
 from app.routers.tickets import account_identity
 from app.services import listening
 from app.utils import utc_iso
@@ -54,8 +54,8 @@ COVER_LIMIT = "240/minute"
 
 def _limit(rate: str, route: str):
     """One budget per session for the route, whatever book key the URL
-    carries. The app limiter keys by URL path, so a plain limit would give
-    every /position/<key> a fresh budget of its own."""
+    carries. The app limiter keys by client address, so a plain limit would
+    share one budget between everyone behind that address."""
     return limiter.shared_limit(rate, scope=f"player:{route}", key_func=session_rate_key)
 
 # Cover URLs carry the thumbnail's version stamp, so a changed cover gets a
@@ -157,11 +157,11 @@ NEEDS_PLEX = "The audiobook player needs a Plex account"
 
 def session_rate_key(request: Request) -> str:
     """The rate-limit key: this session (a hash of its cookie, so the cookie
-    itself never reaches Redis as a key), else the client IP."""
+    itself never reaches Redis as a key), else the client's address bucket."""
     sid = request.cookies.get(settings.session_cookie_name)
     if sid:
         return "player-session:" + hashlib.sha256(sid.encode("utf-8", "replace")).hexdigest()[:32]
-    return _get_client_ip(request)
+    return rate_limit_key(request)
 
 
 # --- The listener -------------------------------------------------------------------

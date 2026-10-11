@@ -55,7 +55,8 @@ def redact_path(path: str) -> str:
 
 
 class HideWebhookTokens(logging.Filter):
-    """For uvicorn's access log: its record's third argument is the path."""
+    """For uvicorn's access log, whose record's third argument is the path,
+    and slowapi's "exceeded at endpoint" warning, whose third is the scope."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
