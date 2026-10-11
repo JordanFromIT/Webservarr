@@ -140,7 +140,7 @@ class AdminRoutes(SettingsGateBase):
         r = self.approve(rid, ("2", "1"))
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual((r.json()["status"], r.json()["share_state"]), ("approved", "shared"))
-        self.share.assert_awaited_once_with({"plex_account_id": "5551", "plex_username": "user5551"}, ["2", "1"])
+        self.share.assert_awaited_once_with({"plex_account_id": "5551"}, ["2", "1"])
         row = self.row(rid)
         self.assertEqual((row.status, row.decided_by, json.loads(row.library_keys), row.share_state),
                          ("approved", "plex:7", ["2", "1"], "shared"))
