@@ -12,7 +12,7 @@ try:
     from app.main import app
     from app.auth import session_manager
     from app.config import settings
-    from app import pages
+    from app import main, pages
     from app.routers.branding import EMPTY_WIKI_HOOKS, build_branding
     from app.tests import helpers
     HAVE_APP = True
@@ -34,13 +34,18 @@ class PageRoutesBase(unittest.TestCase):
         # Anything a page render still reads straight from the database (the
         # Settings page's setup flags) reads an empty in-memory one, never the
         # dev instance's real settings, and works the same in CI.
-        self.db_patch = mock.patch.object(pages, "SessionLocal", helpers.make_sessionmaker())
+        empty = helpers.make_sessionmaker()
+        self.db_patch = mock.patch.object(pages, "SessionLocal", empty)
         self.db_patch.start()
+        # The routes' own reads too (the Books notice, the Kavita hand-off).
+        self.main_db_patch = mock.patch.object(main, "SessionLocal", empty)
+        self.main_db_patch.start()
         helpers.set_rate_limits(False)
         self.client = TestClient(app)
         self.client.cookies.set(settings.session_cookie_name, "test-session")
 
     def tearDown(self):
+        self.main_db_patch.stop()
         self.db_patch.stop()
         self.setup_patch.stop()
         helpers.set_rate_limits(True)

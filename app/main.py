@@ -479,6 +479,21 @@ async def root(
     return await shell_page("index", request, user, extra_flags={"home_news": _home_news})
 
 
+async def kavita_first(request: Request, user: dict, session_id: Optional[str]):
+    """A Books page's Kavita hand-off before it is drawn (kavita_proxy.connect_first),
+    the settings read in this module's database session."""
+    db = None
+    try:
+        db = SessionLocal()
+        return await kavita_proxy.connect_first(request, user, session_id, db)
+    except Exception:  # noqa: BLE001 - the page loads, and its script asks as it always did
+        logger.warning("Could not check the Books page's Kavita sign-in", exc_info=True)
+        return None
+    finally:
+        if db is not None:
+            db.close()
+
+
 async def shell_page(name: str, request: Request, user: dict, **kwargs):
     """render_page for a page with the shell: with the event log's first
     paint (partials/shell-event-log.html), which every shell page but the
@@ -696,6 +711,9 @@ async def books_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    trip = await kavita_first(request, user, session_id)
+    if trip is not None:
+        return trip
     return await shell_page("books", request, user, gate="library",
                             extra_flags={"books_notice": books_notice(user)})
 
@@ -712,6 +730,9 @@ async def books_person_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    trip = await kavita_first(request, user, session_id)
+    if trip is not None:
+        return trip
     return await shell_page("books-person", request, user, gate="library")
 
 
@@ -724,6 +745,9 @@ async def books_series_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    trip = await kavita_first(request, user, session_id)
+    if trip is not None:
+        return trip
     return await shell_page("books-series", request, user, gate="library")
 
 
@@ -753,6 +777,9 @@ async def book_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    trip = await kavita_first(request, user, session_id)
+    if trip is not None:
+        return trip
     return await shell_page("books", request, user, gate="library",
                             extra_flags={"book_open": True, "books_notice": books_notice(user)})
 

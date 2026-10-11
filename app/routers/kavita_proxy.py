@@ -19,8 +19,9 @@ import hashlib
 import json
 import logging
 import re
+import time
 from typing import Dict, Optional
-from urllib.parse import parse_qsl, unquote, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse
 
 import bleach
 import httpx
@@ -451,11 +452,16 @@ def _read_settings(*keys: str) -> Dict[str, str]:
     Every requested key is present in the result; "" when unset."""
     db = SessionLocal()
     try:
-        rows = db.query(Setting).filter(Setting.key.in_(keys)).all()
-        found = {row.key: (row.value or "").strip() for row in rows}
-        return {key: found.get(key, "") for key in keys}
+        return _settings_in(db, *keys)
     finally:
         db.close()
+
+
+def _settings_in(db, *keys: str) -> Dict[str, str]:
+    """_read_settings, in the caller's own database session."""
+    rows = db.query(Setting).filter(Setting.key.in_(keys)).all()
+    found = {row.key: (row.value or "").strip() for row in rows}
+    return {key: found.get(key, "") for key in keys}
 
 
 def _read_setting(key: str) -> str:
@@ -468,16 +474,20 @@ def get_kavita_url() -> Optional[str]:
     return _read_setting("integration.kavita.url").rstrip("/") or None
 
 
-def kavita_url_for(user: Dict[str, str]) -> Optional[str]:
+def kavita_url_for(user: Dict[str, str], db=None) -> Optional[str]:
     """The Kavita base URL for this caller, after the eBooks page switch.
 
     Raises 403 for a non-admin while eBooks is switched off (Settings > Pages);
     admins keep access so they can check the page while it is hidden. The switch
     is read in the same query as the URL because the reader sends every page,
-    image and progress call through the proxy."""
+    image and progress call through the proxy. `db`: read in that session
+    instead of a short-lived one of its own."""
+    keys = ("integration.kavita.url", "sidebar.enabled_library")
     if user.get("is_admin") == "true":
-        return get_kavita_url()
-    values = _read_settings("integration.kavita.url", "sidebar.enabled_library")
+        if db is None:
+            return get_kavita_url()
+        return _settings_in(db, keys[0])[keys[0]].rstrip("/") or None
+    values = _read_settings(*keys) if db is None else _settings_in(db, *keys)
     if switch_is_off(values["sidebar.enabled_library"]):
         raise HTTPException(status_code=403, detail="eBooks is turned off")
     return values["integration.kavita.url"].rstrip("/") or None
@@ -640,6 +650,65 @@ def _connect_failed(return_to: str = "/books") -> RedirectResponse:
     leaving them on a raw JSON error. The failure flag also stops the page
     asking again (kavita-connect.js)."""
     return RedirectResponse(_with_error_flag(return_to), status_code=302)
+
+
+# When the Books pages last sent this session on the hand-off (epoch seconds),
+# kept in the session: they send it again only after CONNECT_AGAIN_AFTER_S.
+CONNECT_AT_FIELD = "kavita_connect_at"
+CONNECT_AGAIN_AFTER_S = 60
+
+
+def connect_needed(user: Dict[str, str], db=None) -> bool:
+    """True when this session has no Kavita sign-in for the address eBooks
+    uses now: Kavita is set up, this person may reach it, and the session holds
+    no token, or one from another address. Kavita not set up, or eBooks off
+    for a member, is never a reason to connect."""
+    try:
+        base = kavita_url_for(user, db=db)
+    except HTTPException:
+        return False
+    if not base:
+        return False
+    return not (user.get("kavita_token") and same_address(user.get("kavita_base"), base))
+
+
+async def connect_first(request: Request, user: Dict[str, str], session_id: Optional[str],
+                        db=None) -> Optional[Response]:
+    """For a Books page's own address: the Kavita hand-off before anything is
+    drawn, so the page is never drawn and then left (the "loads, then
+    reloads" a person used to see on their first visit in a session).
+
+    None: serve the page (no hand-off needed, the last one failed, which the
+    address says with ?kavita=error, or one was started less than a minute
+    ago, so this can never loop; the page's own script then decides, as it
+    always did). The router's fetch (X-WS-Nav) is answered 204, which it loads
+    in full: a redirect would be followed by the fetch itself, into Authentik's
+    origin, and fail. A full load is sent to /kavita/connect, which comes back
+    to this address."""
+    if request.query_params.get("kavita") == "error" or not session_id:
+        return None
+    try:
+        if not connect_needed(user, db):
+            return None
+    except Exception:  # noqa: BLE001 - the page loads, and its script asks as it always did
+        logger.warning("Could not read whether Books needs a Kavita sign-in", exc_info=True)
+        return None
+    try:
+        last = float(user.get(CONNECT_AT_FIELD) or 0)
+    except (TypeError, ValueError):
+        last = 0.0
+    now = time.time()
+    if 0 <= now - last < CONNECT_AGAIN_AFTER_S:
+        return None
+    if request.headers.get("x-ws-nav") == "1":
+        return Response(status_code=204)
+    try:
+        await session_manager.update_session(session_id, {CONNECT_AT_FIELD: str(int(now))})
+    except Exception:  # noqa: BLE001 - unrecorded, the trip could repeat: serve the page instead
+        logger.warning("Could not record the Kavita hand-off", exc_info=True)
+        return None
+    here = request.url.path + ("?" + request.url.query if request.url.query else "")
+    return RedirectResponse("/kavita/connect?return=" + quote(here, safe=""), status_code=302)
 
 
 @router.get("/kavita/connect", include_in_schema=False)
