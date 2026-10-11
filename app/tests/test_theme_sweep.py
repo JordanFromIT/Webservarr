@@ -511,7 +511,7 @@ class BrightTextOnlyOnPrimary(unittest.TestCase):
         for page, call in ((ISSUES, 'data-action="close-modal" class="absolute top-3 right-3 ' + quiet),
                            (tickets, 'data-action="close-create" class="absolute top-3 right-3 ' + quiet),
                            (tickets, 'data-action="close-detail" class="absolute top-3 right-3 ' + quiet),
-                           (calendar, 'id="closePanelBtn" class="absolute top-2 right-2 ' + quiet)):
+                           (calendar, 'id="closePanelBtn" class="' + quiet)):
             self.assertIn(call, page)
 
 

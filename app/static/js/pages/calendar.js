@@ -490,6 +490,21 @@ export async function mount(ctx) {
     closeDetailPanel();
   }, { signal: signal });
 
+  // A click or tap outside the panel closes it, as the header's popovers do.
+  // Another day is not outside (it opens that day instead), and neither is a
+  // day the grid rebuilt under the click (no longer in the document). Focus
+  // goes back to the day unless the click put it on a control of its own.
+  document.addEventListener('click', function (e) {
+    if (!WS.popIsOpen(panel)) return;
+    const t = e.target;
+    if (!t || !t.closest || !document.contains(t) || panel.contains(t)) return;
+    if (t.closest('[data-action="day"]')) return;
+    if (window.WSUI && WSUI.isDialogOpen()) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !panel.contains(active)) panelOpener = false;
+    closeDetailPanel();
+  }, { signal: signal });
+
   // error does not bubble: caught on the way down, for every poster.
   root.addEventListener('error', function (e) {
     const t = e.target;

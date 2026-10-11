@@ -95,13 +95,17 @@ Today
 
 <!-- Day detail: overlays the bottom of the viewport, so the grid keeps its
      size. A real overlay, so it keeps the blur. Not modal: the grid stays
-     usable beside it, Escape closes it and focus goes back to the day. -->
-<section id="dayDetailPanel" aria-labelledby="detailDateLabel" class="ws-pop hidden absolute bottom-0 left-0 right-0 mx-4 lg:mx-8 mb-4 lg:mb-8 ws-frost border rounded-card p-4 lg:p-5 max-h-[40vh] overflow-y-auto custom-scrollbar z-20">
-<button type="button" id="closePanelBtn" class="absolute top-2 right-2 grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors z-10" data-action="close-panel" aria-label="Close this day">
+     usable beside it. Close, Escape or a click outside it closes it, and focus
+     goes back to the day. The heading row holds still while the list under it
+     scrolls, so Close is always in view. -->
+<section id="dayDetailPanel" aria-labelledby="detailDateLabel" class="ws-pop hidden absolute bottom-0 left-0 right-0 mx-4 lg:mx-8 mb-4 lg:mb-8 ws-frost border rounded-card max-h-[40vh] flex flex-col z-20">
+<div class="flex items-center gap-2 shrink-0 pl-4 lg:pl-5 pr-2 py-2">
+<h3 id="detailDateLabel" tabindex="-1" class="flex-1 min-w-0 text-lead font-bold text-frosted-blue focus:outline-none"></h3>
+<button type="button" id="closePanelBtn" class="grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors shrink-0" data-action="close-panel" aria-label="Close">
 <span class="material-symbols-outlined" aria-hidden="true">close</span>
 </button>
-<h3 id="detailDateLabel" tabindex="-1" class="text-lead font-bold text-frosted-blue mb-4 pr-10 focus:outline-none"></h3>
-<div id="detailReleasesList" class="space-y-3"></div>
+</div>
+<div id="detailReleasesList" class="min-h-0 overflow-y-auto custom-scrollbar space-y-3 px-4 lg:px-5 pb-4 lg:pb-5"></div>
 </section>
 
 </div>
