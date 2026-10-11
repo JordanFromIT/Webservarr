@@ -148,12 +148,17 @@ async def lifespan(app: FastAPI):
     logger.info("WebServarr shut down")
 
 
-# Create FastAPI app
+# Create FastAPI app. The interactive docs and the schema they read are
+# served in debug only: elsewhere they would hand anyone the full route map.
+# app.openapi() still builds the schema for code that needs it.
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     debug=settings.app_debug,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if settings.app_debug else None,
+    redoc_url="/redoc" if settings.app_debug else None,
+    openapi_url="/openapi.json" if settings.app_debug else None,
 )
 
 # Rate limiting via slowapi (backed by Redis)
