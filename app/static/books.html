@@ -55,7 +55,7 @@
      veil would blur only the veil's own colour and not the page. */
   .bn-overlay {
     --bn-veil: rgb(var(--color-background) / .45);
-    --bn-wait: 15s;
+    --bn-wait: 30s;
     position: fixed; inset: 0; z-index: 90;
     display: flex; align-items: center; justify-content: center;
     padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
@@ -84,10 +84,12 @@
     /* A phone: the pair spans the foot, Okay at its own width. */
     .bn-window-foot .bn-count { flex: 0 0 auto; min-width: 7.5rem; }
     .bn-window-foot .bn-count.bn-count-quiet { flex: 1 1 auto; min-width: 0; padding-inline: 8px; }
+    /* Okay's width holds its nudge, so Don't show again keeps room for its count. */
+    .bn-window-foot .bn-okay { padding-inline: 8px; }
   }
   /* Each button is its own timer. aria-disabled, not disabled, so both stay
      in the Tab order. Okay: a solid primary fill grows across a dim primary
-     track over its wait (transform only). Its width holds "Okay (15)", so it
+     track over its wait (transform only). Its width holds "Okay (30)", so it
      never jumps. */
   .bn-count {
     position: relative; isolation: isolate; overflow: hidden;
@@ -107,12 +109,30 @@
   .bn-count.is-running::before { animation: bn-fill var(--bn-wait) linear both; }
   .bn-count:focus-visible { outline: 2px solid rgb(var(--ws-focus)); outline-offset: 2px; }
   @keyframes bn-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  /* Okay's two labels share one cell, so its width holds the wider one (the
+     nudge, on two lines) and nothing in the row moves when they trade. While
+     Okay waits, the nudge shows when the words are scrolled to their end
+     (pages/books.js marks data-books-notice-nudge), under a pointer that can
+     hover (no sticky hover on touch), and on keyboard focus. Once Okay works
+     it always says Okay. The nudge is aria-hidden: the name stays "Okay", and
+     the nudge is said once in the live region. */
+  .bn-okay { display: inline-grid; place-items: center; }
+  .bn-okay > span { grid-area: 1 / 1; transition: opacity 120ms ease-out; }
+  .bn-nudge { max-width: 9em; font-size: 13px; line-height: 1.15; text-align: center; text-wrap: balance; opacity: 0; }
+  .bn-okay[aria-disabled="true"][data-books-notice-nudge] .bn-okay-say,
+  .bn-okay[aria-disabled="true"]:focus-visible .bn-okay-say { opacity: 0; }
+  .bn-okay[aria-disabled="true"][data-books-notice-nudge] .bn-nudge,
+  .bn-okay[aria-disabled="true"]:focus-visible .bn-nudge { opacity: 1; }
+  @media (hover: hover) {
+    .bn-okay[aria-disabled="true"]:hover .bn-okay-say { opacity: 0; }
+    .bn-okay[aria-disabled="true"]:hover .bn-nudge { opacity: 1; }
+  }
   /* Don't show again: the quiet button, with a thin line under its words
      that grows over its own, longer wait and is gone once it works. Its
-     width holds "Don't show again (30)" (12em of the button's 15px type,
+     width holds "Don't show again (45)" (12em of the button's 15px type,
      its padding included), so it never jumps either. */
   .bn-count.bn-count-quiet {
-    --bn-wait: 30s;
+    --bn-wait: 45s;
     min-width: 12em; padding-inline: 12px;
     background: transparent; box-shadow: none;
     color: rgb(var(--color-text) / .75);
@@ -406,8 +426,8 @@
 </div>
 <!-- The audiobook notice: a window over the whole page, shell included, with
      everything behind it blurred, dimmed and inert, on every visit to Books
-     until Don't show again. Okay works after 15 seconds and closes it for this
-     visit; Don't show again works after 30 and turns it off for the account
+     until Don't show again. Okay works after 30 seconds and closes it for this
+     visit; Don't show again works after 45 and turns it off for the account
      (POST /api/books/me/notice). Nothing closes it before Okay works.
      pages/books.js runs it (WSUI.modal with its hold). Outside the page's
      scroll box, so nothing behind it scrolls. The site's name is written in
@@ -420,6 +440,7 @@
       <h2 id="booksNoticeWindowTitle" tabindex="-1">Before you start listening</h2>
     </div>
     <div id="booksNoticeWindowWords" class="bn-window-body">
+      <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, a custom ebook reader, and n8n, Kavita and Plex connected behind the scenes so book requests just work. Much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
       <p class="bn-lead">For the best audiobook experience, I <em>highly</em> recommend listening right here on <span data-books-notice-site>this site</span>.</p>
       <p>Audiobooks also show up in Plex and Plexamp, and your place should sync between them. Getting that sync right took a lot of work on its own. But those apps are built for music, and some of their problems are outside my control:</p>
       <ul class="bn-list">
@@ -427,14 +448,12 @@
         <li>Books show up as albums of tracks, with no series or reading order</li>
         <li>They have fewer features than you get here</li>
       </ul>
-      <p>This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, and much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.</p>
-      <p>I also built a custom ebook reader, and connected n8n, Kavita and Plex behind the scenes so book requests just work.</p>
-      <p>So I can keep improving it, I can see what's read and listened to here.</p>
       <p>If something isn't right, please open a ticket on the Tickets page with as much detail as you can.</p>
+      <p>Thanks for reading, and enjoy!</p>
     </div>
     <div class="bn-window-foot">
       <button id="booksNoticeWindowOff" type="button" class="bn-count bn-count-quiet" aria-disabled="true">Don't show again<span data-books-notice-count aria-hidden="true"></span></button>
-      <button id="booksNoticeWindowOkay" type="button" class="bn-count ws-lift" aria-disabled="true">Okay<span data-books-notice-count aria-hidden="true"></span></button>
+      <button id="booksNoticeWindowOkay" type="button" class="bn-count bn-okay ws-lift" aria-disabled="true"><span class="bn-okay-say" data-books-notice-label>Okay<span data-books-notice-count aria-hidden="true"></span></span><span class="bn-nudge" aria-hidden="true">Go back up and read the message!</span></button>
     </div>
     <p id="booksNoticeSay" class="sr-only" aria-live="polite"></p>
   </div>

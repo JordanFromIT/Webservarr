@@ -2691,6 +2691,15 @@ const NOTICE_URL = '/api/books/me/notice';
 const SESSION_KEY = 'webservarr_books_notice_session:sam';
 const LEAD = 'For the best audiobook experience, I highly recommend listening right here on ';
 const SYNC = 'Audiobooks also show up in Plex and Plexamp, and your place should sync between them.';
+// The window opens with the work behind the page, then the recommendation,
+// then the Plex caveat and its list, then where to report a problem and a thank-you.
+const NOTICE_ORDER = [
+  'This Books page took many hours to build. Behind it is custom logic for the new ebook and audiobook library, a custom ebook reader, and n8n, Kavita and Plex connected behind the scenes so book requests just work. Much of that time went into one goal: you should never lose your place in a book. There are several failsafes, a saved listening history, and alerts if anything goes wrong.',
+  LEAD,
+  SYNC,
+  'If something isn\'t right, please open a ticket on the Tickets page with as much detail as you can.',
+  'Thanks for reading, and enjoy!',
+];
 
 // The real ui.js in the visit's window (its toast still recorded), this
 // window's sessionStorage as the page's, and a motion setting.
@@ -2741,6 +2750,9 @@ const posts = (t) => t.net.calls.filter((c) => c.url === NOTICE_URL).map((c) => 
 const windowOn = (t) => !t.q('#booksNoticeWindow').hidden;
 const okayBtn = (t) => t.q('#booksNoticeWindowOkay');
 const offBtn = (t) => t.q('#booksNoticeWindowOff');
+// Okay's own label (its nudge sits beside it, aria-hidden, shown by the CSS).
+const okayText = (t) => t.q('#booksNoticeWindowOkay [data-books-notice-label]').textContent;
+const NUDGE = 'Go back up and read the message!';
 const escape = (t) => t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 const visitWith = (make, o = {}) => withNotice(make({ data: Object.assign({ books_notice: o.notice || 'window' }, o.data || {}), routes: noticeRoutes(o.statuses), branding: o.branding }), o);
 
@@ -2758,32 +2770,37 @@ await run('the window: every visit opens it over the whole page, a modal named b
   check('the window itself is not', !t.q('#booksNoticeWindow').inert);
   const words = t.q('#booksNoticeWindowWords');
   const paras = Array.from(words.querySelectorAll('p')).map((p) => p.textContent);
-  check('the lead names the site', paras[0] === LEAD + 'Riverbend.', paras[0]);
-  check('the second paragraph starts with the approved words', paras[1].indexOf(SYNC) === 0 && !/Your audiobooks/.test(words.textContent), paras[1]);
+  check('five paragraphs in the approved order, opening with the work behind the page', paras.length === NOTICE_ORDER.length &&
+    NOTICE_ORDER.every((start, i) => paras[i].indexOf(start) === 0) && paras[4] === 'Thanks for reading, and enjoy!', paras);
+  check('the lead (second) names the site, "highly" stressed', paras[1] === LEAD + 'Riverbend.' &&
+    words.querySelectorAll('p')[1].classList.contains('bn-lead') && words.querySelector('p.bn-lead em').textContent === 'highly', paras[1]);
+  check('the third paragraph starts with the approved words, the list right after it', paras[2].indexOf(SYNC) === 0 && !/Your audiobooks/.test(words.textContent) &&
+    words.querySelectorAll('p')[2].nextElementSibling === words.querySelector('ul.bn-list'), paras[2]);
   check('the three problems as a list', words.querySelectorAll('ul.bn-list > li').length === 3);
+  check('no line about what is seen here', !/So I can keep improving it/.test(words.textContent));
   check('the Tickets page is words here, not a link: the window has no way out but its buttons', !words.querySelector('a') && /on the Tickets page with/.test(words.textContent));
   const [off, okay] = t.qa('#booksNoticeBox .bn-window-foot button');
   check('two buttons side by side at its foot: Don\'t show again (quiet), then Okay (the one blue primary)', off === offBtn(t) && okay === okayBtn(t) &&
     off.type === 'button' && okay.type === 'button' && off.classList.contains('bn-count-quiet') && !okay.classList.contains('bn-count-quiet'));
   check('Okay is dimmed but focusable (aria-disabled, not disabled), the count unread', okay.getAttribute('aria-disabled') === 'true' &&
-    !okay.disabled && okay.textContent === 'Okay\u00a0(15)' && okay.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
+    !okay.disabled && okayText(t) === 'Okay\u00a0(30)' && okay.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
   check('Don\'t show again too, with its own, longer count', off.getAttribute('aria-disabled') === 'true' &&
-    !off.disabled && off.textContent === 'Don\'t show again\u00a0(30)' && off.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
+    !off.disabled && off.textContent === 'Don\'t show again\u00a0(45)' && off.querySelector('[data-books-notice-count]').getAttribute('aria-hidden') === 'true');
   check('both fills sweep', okay.classList.contains('is-running') && off.classList.contains('is-running'));
   check('nothing is kept on opening', posts(t).length === 0 && t.win.sessionStorage.getItem(SESSION_KEY) === null);
   await t.clock.advance(400);
-  check('the counts are said once', t.text('#booksNoticeSay') === 'Okay will work in 15 seconds, and Don\u2019t show again in 30.', t.text('#booksNoticeSay'));
+  check('the counts are said once', t.text('#booksNoticeSay') === 'Okay will work in 30 seconds, and Don\u2019t show again in 45.', t.text('#booksNoticeSay'));
   await t.clock.advance(1600);
   await m;
-  check('and the numbers count down', okay.textContent === 'Okay\u00a0(13)' && off.textContent === 'Don\'t show again\u00a0(28)', [okay.textContent, off.textContent]);
+  check('and the numbers count down', okayText(t) === 'Okay\u00a0(28)' && off.textContent === 'Don\'t show again\u00a0(43)', [okayText(t), off.textContent]);
   await finish(t);
 });
 
-await run('the window: nothing closes it for 15 seconds, then Okay closes it for this visit only', async (make) => {
+await run('the window: nothing closes it for 30 seconds, then Okay closes it for this visit only', async (make) => {
   const t = visitWith(make);
   t.mount();
   await t.clock.advance(6000);
-  check('six seconds in: "Okay\u00a0(9)"', okayBtn(t).textContent === 'Okay\u00a0(9)', okayBtn(t).textContent);
+  check('six seconds in: "Okay\u00a0(24)"', okayText(t) === 'Okay\u00a0(24)', okayText(t));
   escape(t);
   check('Escape does nothing', windowOn(t));
   t.click('[data-books-notice-veil]');
@@ -2796,9 +2813,13 @@ await run('the window: nothing closes it for 15 seconds, then Okay closes it for
   okayBtn(t).focus();
   t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
   check('focus is trapped in the window', t.q('#booksNoticeBox').contains(t.doc.activeElement));
-  await t.clock.advance(9000);
-  check('after 15 seconds Okay works: no count, not dimmed, the fill done', !okayBtn(t).hasAttribute('aria-disabled') &&
-    okayBtn(t).textContent === 'Okay' && !okayBtn(t).classList.contains('is-running'));
+  await t.clock.advance(23000);
+  check('29 seconds in, still nothing', okayText(t) === 'Okay\u00a0(1)' && okayBtn(t).getAttribute('aria-disabled') === 'true');
+  escape(t);
+  check('and Escape still does nothing', windowOn(t));
+  await t.clock.advance(1000);
+  check('after 30 seconds Okay works: no count, not dimmed, the fill done', !okayBtn(t).hasAttribute('aria-disabled') &&
+    okayText(t) === 'Okay' && !okayBtn(t).classList.contains('is-running'));
   check('Don\'t show again still counts', offBtn(t).getAttribute('aria-disabled') === 'true' && offBtn(t).textContent === 'Don\'t show again\u00a0(15)', offBtn(t).textContent);
   t.click('#booksNoticeWindowOff');
   check('and still does nothing', windowOn(t) && posts(t).length === 0);
@@ -2817,7 +2838,7 @@ await run('the window: nothing closes it for 15 seconds, then Okay closes it for
 await run('the window: Escape or a click outside close it like Okay, once Okay works', async (make) => {
   const esc = visitWith(make);
   esc.mount();
-  await esc.clock.advance(14000);
+  await esc.clock.advance(29000);
   escape(esc);
   check('not before the count is done', windowOn(esc));
   await esc.clock.advance(1000);
@@ -2826,23 +2847,23 @@ await run('the window: Escape or a click outside close it like Okay, once Okay w
   check('Escape closes it once Okay works, and keeps nothing', !windowOn(esc) && posts(esc).length === 0 && esc.win.sessionStorage.getItem(SESSION_KEY) === null);
   const out = visitWith(make);
   out.mount();
-  await out.clock.advance(15000);
+  await out.clock.advance(30000);
   out.click('[data-books-notice-veil]');
   await out.clock.advance(50);
   check('a click outside closes it too, and keeps nothing', !windowOn(out) && posts(out).length === 0);
   await finish(esc, out);
 });
 
-await run('the window: Don\'t show again works after 30 seconds, closes it and turns it off for the account', async (make) => {
+await run('the window: Don\'t show again works after 45 seconds, closes it and turns it off for the account', async (make) => {
   const t = visitWith(make);
   const m = t.mount();
-  await t.clock.advance(29000);
-  check('29 seconds in: "Don\'t show again\u00a0(1)"', offBtn(t).textContent === 'Don\'t show again\u00a0(1)' && offBtn(t).getAttribute('aria-disabled') === 'true', offBtn(t).textContent);
+  await t.clock.advance(44000);
+  check('44 seconds in: "Don\'t show again\u00a0(1)"', offBtn(t).textContent === 'Don\'t show again\u00a0(1)' && offBtn(t).getAttribute('aria-disabled') === 'true', offBtn(t).textContent);
   await t.clock.advance(1000);
   check('then it works: no count, not dimmed, its line gone', !offBtn(t).hasAttribute('aria-disabled') && offBtn(t).textContent === 'Don\'t show again' &&
     !offBtn(t).classList.contains('is-running'));
   await t.clock.advance(5000);
-  check('the counting stops there', offBtn(t).textContent === 'Don\'t show again' && okayBtn(t).textContent === 'Okay' && windowOn(t));
+  check('the counting stops there', offBtn(t).textContent === 'Don\'t show again' && okayText(t) === 'Okay' && windowOn(t));
   t.click('#booksNoticeWindowOff');
   await t.clock.advance(50);
   await m;
@@ -2867,7 +2888,7 @@ await run('the window: Don\'t show again that fails (signed out, the server down
   for (const status of [401, 503]) {
     const t = visitWith(make, { statuses: [status] });
     t.mount();
-    await t.clock.advance(30000);
+    await t.clock.advance(45000);
     t.click('#booksNoticeWindowOff');
     await t.clock.advance(50);
     check(`${status}: closed, and held for this session all the same`, !windowOn(t) && t.win.sessionStorage.getItem(SESSION_KEY) === 'off');
@@ -2881,7 +2902,7 @@ await run('the window: session storage blocked still shows it, and both buttons 
   let err = null;
   try { t.mount(); } catch (e) { err = e; }
   check('shown, no error', !err && windowOn(t), err && String(err));
-  await t.clock.advance(30000);
+  await t.clock.advance(45000);
   t.click('#booksNoticeWindowOff');
   await t.clock.advance(50);
   check('Don\'t show again closes it and is sent', !windowOn(t) && posts(t).length === 1);
@@ -2893,8 +2914,81 @@ await run('the window: reduced motion has no sweep, and the numbers still count'
   t.mount();
   check('no sweep on either', !okayBtn(t).classList.contains('is-running') && !offBtn(t).classList.contains('is-running'));
   await t.clock.advance(1000);
-  check('the counts are text, so they still count', okayBtn(t).textContent === 'Okay\u00a0(14)' && offBtn(t).textContent === 'Don\'t show again\u00a0(29)');
+  check('the counts are text, so they still count', okayText(t) === 'Okay\u00a0(29)' && offBtn(t).textContent === 'Don\'t show again\u00a0(44)');
   await finish(t);
+});
+
+// The words' scroll box, sized by hand (no layout here): height of the words, of the box, and where it is.
+function scrollBox(t, full, box) {
+  const words = t.q('#booksNoticeWindowWords');
+  let top = 0;
+  Object.defineProperty(words, 'scrollHeight', { configurable: true, get: () => full });
+  Object.defineProperty(words, 'clientHeight', { configurable: true, get: () => box });
+  Object.defineProperty(words, 'scrollTop', { configurable: true, get: () => top, set: (v) => { top = v; } });
+  return (y) => { top = y; words.dispatchEvent(new t.win.Event('scroll')); };
+}
+const nudged = (t) => okayBtn(t).hasAttribute('data-books-notice-nudge');
+
+await run('the window: scrolled to the end of the words while Okay waits, Okay says to go back up and read it', async (make) => {
+  const t = visitWith(make);
+  t.mount();
+  const nudge = okayBtn(t).querySelector('.bn-nudge');
+  check('the nudge sits in Okay, hidden from its name, which stays "Okay"', nudge.textContent === NUDGE && nudge.getAttribute('aria-hidden') === 'true' &&
+    okayText(t) === 'Okay (30)' && !nudged(t));
+  await t.clock.advance(1000);
+  const scrollTo = scrollBox(t, 800, 600);
+  scrollTo(100);
+  check('part way down: still Okay', !nudged(t));
+  scrollTo(195);
+  check('at the end (the buttons right under the last line): the nudge, the count and the sweep still running behind it', nudged(t) &&
+    okayText(t) === 'Okay (29)' && okayBtn(t).classList.contains('is-running') && okayBtn(t).getAttribute('aria-disabled') === 'true');
+  check('and it is said, politely', t.text('#booksNoticeSay') === NUDGE && t.q('#booksNoticeSay').getAttribute('aria-live') === 'polite');
+  scrollTo(50);
+  check('back up: Okay again', !nudged(t));
+  t.q('#booksNoticeSay').textContent = '';
+  scrollTo(200);
+  check('down again: the nudge, but said only the once', nudged(t) && t.text('#booksNoticeSay') === '');
+  check('Okay still does nothing while it shows', (t.click('#booksNoticeWindowOkay'), windowOn(t)));
+  await t.clock.advance(29000);
+  check('once Okay works it says Okay, even at the end', !nudged(t) && okayText(t) === 'Okay' && !okayBtn(t).hasAttribute('aria-disabled'));
+  scrollTo(0);
+  scrollTo(200);
+  check('and scrolling again does not bring the nudge back', !nudged(t));
+  t.click('#booksNoticeWindowOkay');
+  await t.clock.advance(50);
+  check('Okay closes it as before', !windowOn(t));
+  await finish(t);
+});
+
+await run('the window: words that fit never scroll, so never nudge', async (make) => {
+  const t = visitWith(make);
+  t.mount();
+  const scrollTo = scrollBox(t, 520, 520);
+  scrollTo(0);
+  check('no nudge, nothing said about it', !nudged(t) && t.text('#booksNoticeSay') !== NUDGE);
+  await t.clock.advance(1000);
+  check('the counts are said as usual', /^Okay will work in 30 seconds/.test(t.text('#booksNoticeSay')));
+  await finish(t);
+});
+
+await run('the window: keyboard focus on Okay while it waits says the nudge once; after, it does not', async (make) => {
+  const t = visitWith(make);
+  t.mount();
+  await t.clock.advance(1000);
+  okayBtn(t).focus();
+  check('focused while it waits: said', t.text('#booksNoticeSay') === NUDGE);
+  t.q('#booksNoticeWindowTitle').focus();
+  t.q('#booksNoticeSay').textContent = '';
+  okayBtn(t).focus();
+  check('focused again: not said again', t.text('#booksNoticeSay') === '');
+  await finish(t);
+  const late = visitWith(make);
+  late.mount();
+  await late.clock.advance(30000);
+  late.q('#booksNoticeSay').textContent = '';
+  okayBtn(late).focus();
+  check('focused once Okay works: nothing said', late.text('#booksNoticeSay') === '');
+  await finish(late);
 });
 
 await run('the window and the first-visit guide never run at once: the guide waits for it', async (make) => {
@@ -2903,7 +2997,7 @@ await run('the window and the first-visit guide never run at once: the guide wai
   await t.clock.advance(3000);
   await m;
   check('the books are drawn, the guide holds back while the window is open', !t.hidden('#libraryGrid') && !tourOn(t) && windowOn(t));
-  await t.clock.advance(12000);
+  await t.clock.advance(27000);
   check('Okay works, the guide still waits for the window to close', !tourOn(t));
   t.click('#booksNoticeWindowOkay');
   await t.clock.advance(400);
@@ -2912,7 +3006,7 @@ await run('the window and the first-visit guide never run at once: the guide wai
   await finish(t);
   const off = withTour(visitWith(make));
   off.mount();
-  await off.clock.advance(30000);
+  await off.clock.advance(45000);
   off.click('#booksNoticeWindowOff');
   await off.clock.advance(400);
   check('closed by Don\'t show again: the guide runs too', !windowOn(off) && tourOn(off));
@@ -2920,13 +3014,13 @@ await run('the window and the first-visit guide never run at once: the guide wai
   const later = withTour(visitWith(make));
   later.win.localStorage.setItem(GUIDE_FLAG, '1');
   later.mount();
-  await later.clock.advance(15000);
+  await later.clock.advance(30000);
   later.click('#booksNoticeWindowOkay');
   await later.clock.advance(1000);
   check('a later visit: the window again, but the guide only ever the first time', !windowOn(later) && !tourOn(later));
   const left = withTour(visitWith(make));
   left.mount();
-  await left.clock.advance(15000);
+  await left.clock.advance(30000);
   left.ctl.abort();
   await left.clock.advance(400);
   check('a visit that ended starts nothing', !tourOn(left));
@@ -2967,7 +3061,7 @@ await run('the window: what the page says', async (make) => {
   }
   const blank = visitWith(make, { branding: { app_name: '   ' } });
   blank.mount();
-  check('a site with no name says "this site"', blank.q('#booksNoticeWindowWords p').textContent === LEAD + 'this site.', blank.q('#booksNoticeWindowWords p').textContent);
+  check('a site with no name says "this site"', blank.q('#booksNoticeWindowWords p.bn-lead').textContent === LEAD + 'this site.', blank.q('#booksNoticeWindowWords p.bn-lead').textContent);
   await finish(blank);
 });
 
@@ -2997,7 +3091,14 @@ current = 'the inline card is gone, and Recently added sits beside Continue';
     !/data-books-notice\]/.test(BOOKS_HTML) && !/books_notice|data-books-notice/.test(LOADER));
   check('the window is hidden until opened, and its own display rule gives way to hidden', /<div id="booksNoticeWindow" class="bn-overlay" hidden>/.test(BOOKS_HTML) &&
     /\.bn-overlay\[hidden\] \{ display: none; \}/.test(BOOKS_HTML));
-  check('Don\'t show again waits 30 seconds in its sweep too', /\.bn-count\.bn-count-quiet \{\s*--bn-wait: 30s;/.test(BOOKS_HTML));
+  check('the nudge shows only while Okay waits: scrolled to the end, on keyboard focus, and under a pointer that can hover (none on touch)',
+    /\.bn-okay\[aria-disabled="true"\]\[data-books-notice-nudge\] \.bn-nudge,\s*\.bn-okay\[aria-disabled="true"\]:focus-visible \.bn-nudge \{ opacity: 1; \}/.test(BOOKS_HTML) &&
+    /@media \(hover: hover\) \{\s*\.bn-okay\[aria-disabled="true"\]:hover \.bn-okay-say \{ opacity: 0; \}\s*\.bn-okay\[aria-disabled="true"\]:hover \.bn-nudge \{ opacity: 1; \}\s*\}/.test(BOOKS_HTML) &&
+    BOOKS_HTML.split(':hover .bn-nudge').length === 2);
+  check('Okay\'s two labels share one cell, so its width never changes when they trade', /\.bn-okay \{ display: inline-grid; place-items: center; \}/.test(BOOKS_HTML) &&
+    /\.bn-okay > span \{ grid-area: 1 \/ 1;/.test(BOOKS_HTML));
+  check('Okay\'s sweep runs 30 seconds, and Don\'t show again\'s 45', /\.bn-overlay \{\s*--bn-veil: [^;]+;\s*--bn-wait: 30s;/.test(BOOKS_HTML) &&
+    /\.bn-count\.bn-count-quiet \{\s*--bn-wait: 45s;/.test(BOOKS_HTML));
   check('wide, with books in both: Recently added in a column of its own beside Continue, held from the first paint by the rows\' own flags',
     /@container \(min-width: 912px\) \{\s*html\[data-books-continue\]\[data-books-recent\] \.books-top \{\s*display: grid; grid-template-columns: minmax\(0, 1fr\) 26rem;/.test(BOOKS_HTML) &&
     /\.books-top-area \{ container-type: inline-size; \}/.test(BOOKS_HTML));

@@ -63,8 +63,10 @@
  * over the whole page on every visit to Books. Its Okay works after
  * NOTICE_WAIT_S seconds and closes it for this visit; its Don't show again
  * works after NOTICE_OFF_WAIT_S seconds and turns it off for the account
- * (kept on the server, so on every device). The first-visit guide waits for
- * it to close.
+ * (kept on the server, so on every device). Scrolled to the end of the words
+ * while Okay still waits, Okay says "Go back up and read the message!" (as it
+ * does under a pointer or keyboard focus, in the page's CSS). The first-visit
+ * guide waits for it to close.
  */
 
 const PAGE_SIZE = 36;
@@ -99,8 +101,10 @@ const GUIDE_KEY = 'webservarr_books_guide_seen:';
 const NOTICE_URL = '/api/books/me/notice';
 const NOTICE_SESSION_KEY = 'webservarr_books_notice_session:';
 // Seconds the window's Okay, and its Don't show again, wait before they work.
-const NOTICE_WAIT_S = 15;
-const NOTICE_OFF_WAIT_S = 30;
+const NOTICE_WAIT_S = 30;
+const NOTICE_OFF_WAIT_S = 45;
+// The words count as read to the end within this many pixels of their bottom.
+const NOTICE_END_PX = 8;
 // The cards have their covers by then, so the first spotlight sits on something drawn.
 const GUIDE_WAIT_MS = 900;
 
@@ -974,7 +978,7 @@ export async function mount(ctx) {
   const account = ((ctx.data || {}).user || {}).identity_key || user;
   const noticeKey = NOTICE_SESSION_KEY + account;
   // The window: open, each button's seconds to go, and the guide waiting for it to close.
-  const win = { modal: null, left: 0, offLeft: 0, guideWaiting: false, inerted: [] };
+  const win = { modal: null, left: 0, offLeft: 0, guideWaiting: false, inerted: [], nudgeSaid: false };
 
   function sessionGet(key) {
     try { return sessionStorage.getItem(key); } catch (e) { return null; }
@@ -1020,13 +1024,40 @@ export async function mount(ctx) {
     }
   }
 
+  /** Okay's nudge, "Go back up and read the message!", while it still
+      waits: on (the words scrolled to their end) or off. Said once a visit. */
+  function setNudge(on) {
+    const okay = $('booksNoticeWindowOkay');
+    if (on && win.modal && win.left > 0) {
+      okay.setAttribute('data-books-notice-nudge', '');
+      sayNudge();
+    } else okay.removeAttribute('data-books-notice-nudge');
+  }
+  function sayNudge() {
+    if (win.nudgeSaid || !win.modal || win.left <= 0) return;
+    win.nudgeSaid = true;
+    $('booksNoticeSay').textContent = 'Go back up and read the message!';
+  }
+
+  /** The words were scrolled: at their end (the buttons right under them)
+      while Okay waits, the nudge; back up, Okay again. Words that fit
+      never scroll, so never nudge. */
+  function wordsScrolled() {
+    const words = $('booksNoticeWindowWords');
+    const rest = words.scrollHeight - words.clientHeight - words.scrollTop;
+    setNudge(words.scrollHeight > words.clientHeight && rest <= NOTICE_END_PX);
+  }
+
   function tick() {
     if (!win.modal || signal.aborted) return;
     if (win.left > 0) {
       win.left -= 1;
       setCount($('booksNoticeWindowOkay'), win.left);
-      // From here Escape and a click outside close it, as Okay does.
-      if (win.left === 0) win.modal.release();
+      // From here Escape and a click outside close it, as Okay does, and it says Okay.
+      if (win.left === 0) {
+        setNudge(false);
+        win.modal.release();
+      }
     }
     if (win.offLeft > 0) {
       win.offLeft -= 1;
@@ -1045,6 +1076,8 @@ export async function mount(ctx) {
     const off = $('booksNoticeWindowOff');
     win.left = NOTICE_WAIT_S;
     win.offLeft = NOTICE_OFF_WAIT_S;
+    win.nudgeSaid = false;
+    okay.removeAttribute('data-books-notice-nudge');
     setCount(okay, win.left);
     setCount(off, win.offLeft);
     if (!motionOff()) {
@@ -1069,7 +1102,7 @@ export async function mount(ctx) {
       onClose: windowClosed
     });
     ctx.setTimeout(function () {
-      if (win.modal) {
+      if (win.modal && !win.nudgeSaid) {
         $('booksNoticeSay').textContent = 'Okay will work in ' + NOTICE_WAIT_S + ' seconds, and Don\u2019t show again in ' + NOTICE_OFF_WAIT_S + '.';
       }
     }, 400);
@@ -1082,6 +1115,7 @@ export async function mount(ctx) {
   function windowClosed() {
     const finished = win.left <= 0;
     win.modal = null;
+    $('booksNoticeWindowOkay').removeAttribute('data-books-notice-nudge');
     noticeWin.hidden = true;
     noticeWin.classList.remove('is-opening');
     $('booksNoticeSay').textContent = '';
@@ -1128,6 +1162,15 @@ export async function mount(ctx) {
       $('booksNoticeWindowOkay').addEventListener('click', closeWindow, { signal: signal });
       $('booksNoticeWindowOff').addEventListener('click', turnOff, { signal: signal });
       noticeWin.querySelector('[data-books-notice-veil]').addEventListener('click', closeWindow, { signal: signal });
+      $('booksNoticeWindowWords').addEventListener('scroll', wordsScrolled, { passive: true, signal: signal });
+      // Keyboard focus on Okay while it waits shows the nudge (the CSS); a
+      // screen reader hears it said, once.
+      $('booksNoticeWindowOkay').addEventListener('focus', function () {
+        const okay = $('booksNoticeWindowOkay');
+        let keyboard = true;
+        try { keyboard = okay.matches(':focus-visible'); } catch (e) { /* older engine: treat as keyboard */ }
+        if (keyboard) sayNudge();
+      }, { signal: signal });
       // Leaving the page: the window goes with it, and nothing is kept (the
       // router closes it first; this is for any other way the visit ends).
       const leaving = new AbortController();
