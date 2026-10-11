@@ -26,18 +26,21 @@ MID = "machine-1"
 ACCOUNT = {"plex_account_id": "5551", "plex_username": "newperson"}
 SECTIONS = {"librarySections": [{"id": 901, "key": "1", "title": "Movies", "type": "movie"},
                                 {"id": 902, "key": "2", "title": "TV", "type": "show"}]}
-CREATE = f"https://plex.tv/api/servers/{MID}/shared_servers"
+CREATE = "https://clients.plex.tv/api/v2/shared_servers"
 
 
 class FakePlex:
-    """plex.tv as far as the client uses it. A POST that succeeds adds the
-    share to the pending list (unless confirm is False)."""
+    """plex.tv as far as the client uses it. A POST that succeeds files the
+    share under lands_in, "pending" or "accepted" (unless confirm is False),
+    and answers 201 with the share as JSON, the way route B did live
+    (reply="json"), or with a body that isn't JSON."""
 
     def __init__(self, accepted=(), pending=(), post_status=201, confirm=True, post_error=None, listing_status=200,
-                 invited_id=5551):
+                 invited_id=5551, lands_in="pending", reply="json"):
         self.accepted, self.pending = list(accepted), list(pending)
         self.post_status, self.confirm, self.post_error = post_status, confirm, post_error
-        self.invited_id = invited_id   # the account Plex gives the invite to
+        self.invited_id = invited_id   # the account Plex gives the share to
+        self.lands_in, self.reply = lands_in, reply
         self.listing_status = listing_status
         self.calls, self.posted = [], []
 
@@ -54,13 +57,17 @@ class FakePlex:
             self.posted.append(json.loads(request.content))
             if self.post_error:
                 raise self.post_error
+            share = {"id": 700 + len(self.posted), "invitedId": self.invited_id,
+                     "invited": {"id": self.invited_id, "username": "someone", "title": "Someone"},
+                     "invitedEmail": "whoever@example.com", "machineIdentifier": MID,
+                     "inviteToken": "INVITE-SECRET", "accepted": self.lands_in == "accepted"}
             if self.post_status in (200, 201) and self.confirm:
-                sent = self.posted[-1]["shared_server"]["invited_email"]
-                self.pending.append({"id": 700 + len(self.posted), "invitedId": self.invited_id,
-                                     "invited": {"id": self.invited_id, "username": sent, "title": sent},
-                                     "invitedEmail": "whoever@example.com", "machineIdentifier": MID,
-                                     "inviteToken": "INVITE-SECRET"})
-            return httpx.Response(self.post_status, json={"inviteToken": "INVITE-SECRET", "id": 1})
+                getattr(self, self.lands_in).append(share)
+            if self.post_status not in (200, 201):
+                return httpx.Response(self.post_status, json={"errors": [{"message": "no"}]})
+            if self.reply == "json":
+                return httpx.Response(self.post_status, json=share)
+            return httpx.Response(self.post_status, text=self.reply)
         raise AssertionError(f"unexpected Plex call: {request.method} {url}")
 
 
@@ -96,18 +103,43 @@ class ShareClient(unittest.TestCase):
         self.assertEqual(self.share(), ("shared", None))
         self.assertEqual(len(self.posts()), 1)
 
-    def test_shared_sends_what_python_plexapi_sends_and_is_confirmed(self):
+    def test_shared_sends_route_b_by_account_id_and_is_confirmed(self):
         self.use(FakePlex())
         self.assertEqual(self.share(("1", "2")), ("shared", None))
         self.assertEqual(self.plex.posted, [{
-            "server_id": MID,
-            "shared_server": {"library_section_ids": [901, 902], "invited_email": "newperson"},
-            "sharing_settings": {"allowSync": "0", "allowCameraUpload": "0", "allowChannels": "0",
-                                 "filterMovies": "", "filterTelevision": "", "filterMusic": ""},
+            "machineIdentifier": MID,
+            "invitedId": 5551,
+            "librarySectionIds": [901, 902],
+            "settings": {"allowSync": False, "allowCameraUpload": False, "allowChannels": False,
+                         "filterMovies": "", "filterTelevision": "", "filterMusic": ""},
         }])
+        self.assertNotIn("newperson", json.dumps(self.plex.posted))   # never a username
         for method, url, token in self.plex.calls:
             self.assertEqual(token, ADMIN_TOKEN, url)
             self.assertNotIn(ADMIN_TOKEN, url)
+
+    def test_a_share_plex_files_as_accepted_straight_away_is_confirmed(self):
+        self.use(FakePlex(lands_in="accepted"))
+        self.assertEqual(self.share(), ("shared", None))
+        self.assertEqual(self.plex.pending, [])
+        self.assertEqual(len(self.posts()), 1)
+
+    def test_a_reply_that_is_not_json_is_confirmed_from_the_listing(self):
+        for reply in ("", "true", "<MediaContainer/>"):
+            with self.subTest(reply=reply):
+                self.use(FakePlex(reply=reply))
+                self.assertEqual(self.share(), ("shared", None))
+                self.use(FakePlex(reply=reply, confirm=False))
+                self.assertEqual(self.share(), ("failed", "Plex didn't confirm the share"))
+
+    def test_without_a_usable_account_id_nothing_is_sent(self):
+        for bad in ("", None, "abc", "55 51", "-5551", "\u00b2"):
+            with self.subTest(account_id=bad):
+                self.use(FakePlex())
+                state = asyncio.run(plex_share.share_server({"plex_account_id": bad, "plex_username": "newperson"},
+                                                            ["1"]))
+                self.assertEqual(state, ("failed", plex_share.NO_ACCOUNT_ID))
+                self.assertEqual(self.plex.calls, [])
 
     def test_a_refusal_is_failed_with_the_status_and_never_retried(self):
         for status in (400, 401, 422, 500, 503):
@@ -145,30 +177,25 @@ class ShareClient(unittest.TestCase):
             self.assertNotIn("INVITE-SECRET", reason)
             self.assertLessEqual(len(reason), 200)
 
-    def test_no_username_means_no_post(self):
+    def test_a_request_without_a_username_is_shared_by_its_id(self):
         self.use(FakePlex())
-        state = asyncio.run(plex_share.share_server({"plex_account_id": "5551", "plex_username": ""}, ["1"]))
-        self.assertEqual(state, ("failed", plex_share.NO_USERNAME))
-        self.assertEqual(self.posts(), [])
-        # A share Plex already has is still found.
-        self.use(FakePlex(pending=[{"invitedId": 5551, "machineIdentifier": MID}]))
-        state = asyncio.run(plex_share.share_server({"plex_account_id": "5551", "plex_username": ""}, ["1"]))
-        self.assertEqual(state, ("existing", None))
-        self.assertEqual(self.posts(), [])
+        state = asyncio.run(plex_share.share_server({"plex_account_id": "5551"}, ["1"]))
+        self.assertEqual(state, ("shared", None))
+        self.assertEqual(self.plex.posted[0]["invitedId"], 5551)
+        self.use(FakePlex())   # an id with a leading zero is the same account to Plex
+        self.assertEqual(asyncio.run(plex_share.share_server({"plex_account_id": "05551"}, ["1"])), ("shared", None))
 
-    def test_an_invite_that_lands_on_another_account_is_reported_and_left_alone(self):
+    def test_a_share_plex_says_is_for_another_account_is_reported_and_left_alone(self):
         self.use(FakePlex(invited_id=6662))
         self.assertEqual(self.share(), ("failed", plex_share.WRONG_ACCOUNT))
         self.assertEqual(len(self.posts()), 1)
         self.assertEqual({c[0] for c in self.plex.calls}, {"GET", "POST"})   # never a DELETE
         self.assertNotIn("INVITE-SECRET", plex_share.WRONG_ACCOUNT)
 
-    def test_an_older_share_for_another_account_with_that_name_is_not_blamed(self):
-        older = {"id": 5, "invitedId": 6662, "invited": {"username": "NewPerson"}, "machineIdentifier": MID}
-        self.use(FakePlex(pending=[older], confirm=False))
+    def test_only_an_entry_for_this_account_id_confirms(self):
+        # Plex's reply says nothing useful and the only new entry is someone else's.
+        self.use(FakePlex(invited_id=6662, reply=""))
         self.assertEqual(self.share(), ("failed", "Plex didn't confirm the share"))
-        self.use(FakePlex(pending=[older]))
-        self.assertEqual(self.share(), ("shared", None))
 
     def test_list_libraries(self):
         self.use(FakePlex())

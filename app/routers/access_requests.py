@@ -335,9 +335,7 @@ async def approve_access_request(request_id: int, body: ApproveBody, current_use
         if row.status != "pending":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ANSWERED)
         svc.mark_approved(db, row, keys, account_identity(current_user), svc.now_utc())
-        state, error = await plex_share.share_server(
-            {"plex_account_id": row.plex_account_id,
-             "plex_username": row.plex_username if row.has_plex_username else ""}, keys)
+        state, error = await plex_share.share_server({"plex_account_id": row.plex_account_id}, keys)
         svc.record_share(db, row, state, error)
     finally:
         await r.delete(claim)

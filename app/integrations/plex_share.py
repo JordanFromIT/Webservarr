@@ -16,8 +16,9 @@ falls back to plex.tv when that server doesn't answer. Plex's answers carry invi
 access tokens: only the fields named here are read out of them, and nothing
 from them is logged or stored.
 
-The create call is the one build task 1 proved (route A, the v1 invite that
-python-plexapi's inviteFriend sends).
+The create call is route B, proved live on 2026-10-10: the v2 share that
+names the account by its plex.tv id (invitedId), never by a username, which
+can change hands.
 """
 import logging
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -34,7 +35,7 @@ PLEX_TV = "https://plex.tv"
 CLIENTS = "https://clients.plex.tv"
 
 # share_server's reasons that need more of the admin than a share by hand.
-NO_USERNAME = "This Plex account has no username, so nothing was sent. Invite it in Plex by its email"
+NO_ACCOUNT_ID = "This request has no Plex account id, so nothing was sent"
 WRONG_ACCOUNT = "Plex sent the invite to a different Plex account. Remove that invite in Plex"
 
 
@@ -104,9 +105,7 @@ async def _sections(client: httpx.AsyncClient, server: PlexServer) -> List[Dict[
 class Entry(NamedTuple):
     """One share of our server, as far as this module reads it."""
     state: str          # "accepted" or "pending"
-    share_id: str       # Plex's id for the share
     invited_id: str     # the plex.tv account id the share is for
-    names: frozenset    # the invited account's username, title and email, casefolded
 
 
 async def _entries(client: httpx.AsyncClient, server: PlexServer) -> List[Entry]:
@@ -117,10 +116,7 @@ async def _entries(client: httpx.AsyncClient, server: PlexServer) -> List[Entry]
         for entry in data if isinstance(data, list) else []:
             if not isinstance(entry, dict) or str(entry.get("machineIdentifier") or "") != server.machine_id:
                 continue
-            invited = entry.get("invited") if isinstance(entry.get("invited"), dict) else {}
-            names = (entry.get("invitedEmail"), invited.get("username"), invited.get("title"), invited.get("email"))
-            out.append(Entry(state, str(entry.get("id") or ""), str(entry.get("invitedId") or ""),
-                             frozenset(str(n).casefold() for n in names if isinstance(n, str) and n)))
+            out.append(Entry(state, str(entry.get("invitedId") or "")))
     return out
 
 
@@ -250,57 +246,67 @@ async def avatar_image(url: str) -> Tuple[bytes, str]:
     raise PlexShareUnavailable("Too many redirects")
 
 
-async def _create(client: httpx.AsyncClient, server: PlexServer, username: str, ids: List[str]) -> httpx.Response:
-    """Route A: the v1 invite, with the body python-plexapi's inviteFriend sends."""
+async def _create(client: httpx.AsyncClient, server: PlexServer, account_id: str, ids: List[str]) -> httpx.Response:
+    """Route B: the v2 share, addressed by the plex.tv account id. Plex
+    answers 201 with the new share as JSON, and may file it as accepted
+    straight away rather than pending."""
     body = {
-        "server_id": server.machine_id,
-        "shared_server": {"library_section_ids": [int(i) for i in ids], "invited_email": username},
-        "sharing_settings": {"allowSync": "0", "allowCameraUpload": "0", "allowChannels": "0",
-                             "filterMovies": "", "filterTelevision": "", "filterMusic": ""},
+        "machineIdentifier": server.machine_id,
+        "invitedId": int(account_id),
+        "librarySectionIds": [int(i) for i in ids],
+        "settings": {"allowSync": False, "allowCameraUpload": False, "allowChannels": False,
+                     "filterMovies": "", "filterTelevision": "", "filterMusic": ""},
     }
-    return await client.post(f"{PLEX_TV}/api/servers/{server.machine_id}/shared_servers",
-                             json=body, headers=server.headers)
+    return await client.post(f"{CLIENTS}/api/v2/shared_servers", json=body, headers=server.headers)
+
+
+def _invited_id(resp: httpx.Response) -> Optional[str]:
+    """The account id Plex says the new share is for, or None when the
+    answer doesn't say (only invitedId is read out of it)."""
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    found = data.get("invitedId") if isinstance(data, dict) else None
+    return None if found is None else str(found)
 
 
 async def share_server(account: Dict[str, str], section_keys: List[str]) -> Tuple[str, Optional[str]]:
-    """Share the server with account (plex_account_id, plex_username) and the
-    libraries whose section keys are given. ("existing", None) when Plex
-    already has a share for the account (no POST); ("shared", None) when
-    Plex lists the new share for exactly this account; else ("failed",
-    a short reason). Never raises for Plex trouble, and never deletes a
-    share: a stray invite is reported, for the admin to remove in Plex.
+    """Share the server with account (its plex_account_id, the plex.tv id
+    identify verified) and the libraries whose section keys are given.
+    ("existing", None) when Plex already has a share for the account (no
+    POST); ("shared", None) when Plex lists the new share, pending or
+    accepted, for exactly this account id; else ("failed", a short reason).
+    Never raises for Plex trouble, and never deletes a share: a stray invite
+    is reported, for the admin to remove in Plex.
 
-    Route A invites by username, so an empty username (the account has none;
-    a display name is not one) is never sent. And since a username can
-    change hands, a new share that names the username but is for a
-    different plex.tv account is WRONG_ACCOUNT, not a missing confirmation."""
-    account_id = str(account["plex_account_id"])
-    username = str(account.get("plex_username") or "")
+    Route B invites by account id only, so a request without a usable id is
+    never sent, and there is no fallback to a username. A new share that Plex
+    says is for a different account is WRONG_ACCOUNT."""
+    account_id = str(account.get("plex_account_id") or "")
+    if not (account_id.isascii() and account_id.isdigit()):
+        return "failed", NO_ACCOUNT_ID
+    account_id = str(int(account_id))   # as Plex writes it, with no leading zeros
     try:
         server = await _server()
         async with _client() as client:
-            before = await _entries(client, server)
-            if _state_for(before, account_id):
+            if _state_for(await _entries(client, server), account_id):
                 return "existing", None
-            if not username:
-                return "failed", NO_USERNAME
             by_key = {s["key"]: s["id"] for s in await _sections(client, server)}
             ids = [by_key[k] for k in section_keys if k in by_key]
             if not ids or len(ids) != len(section_keys):
                 return "failed", "Those libraries aren't on the server any more"
             try:
-                resp = await _create(client, server, username, ids)
+                resp = await _create(client, server, account_id, ids)
             except httpx.HTTPError:
                 return "failed", "Plex didn't answer the share"
             if resp.status_code not in (200, 201):
                 return "failed", f"Plex refused the share (HTTP {resp.status_code})"
-            after = await _entries(client, server)
-            seen = {(e.share_id, e.invited_id) for e in before}
-            if any((e.share_id, e.invited_id) not in seen and e.invited_id != account_id
-                   and username.casefold() in e.names for e in after):
+            invited = _invited_id(resp)
+            if invited is not None and invited != account_id:
                 logger.warning("Plex share: the invite went to a different Plex account")
                 return "failed", WRONG_ACCOUNT
-            if _state_for(after, account_id) is None:
+            if _state_for(await _entries(client, server), account_id) is None:
                 return "failed", "Plex didn't confirm the share"
             return "shared", None
     except PlexShareUnavailable as exc:

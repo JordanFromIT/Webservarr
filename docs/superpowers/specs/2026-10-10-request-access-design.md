@@ -1,7 +1,7 @@
 # Request access from the sign-in page
 
 Status: designed 2026-10-10; decisions approved by Jordan in chat. Amended 2026-10-10: the admin's
-notifications find the admin by Plex account id, not by email (section 8). Built and live-checked on dev 2026-10-10 (390 and 1440, all three card positions, keyboard, admin and member; one end-to-end request with Jordan's test account). The build plan is
+notifications find the admin by Plex account id, not by email (section 8). Built and live-checked on dev 2026-10-10 (390 and 1440, all three card positions, keyboard, admin and member; one end-to-end request with Jordan's test account). Amended 2026-10-10: the share now goes by Plex account id (route B, proved live, section 3), with no fallback to a username. This fixes v2.0 audit finding F2 (approve invited by a username that can change hands); see sections 7, 11 and 13. The build plan is
 `docs/superpowers/plans/2026-10-10-request-access.md`. This feature adds public
 routes, so it joins the v2.0 security audit scope (roadmap step 6). The audit stays on hold until Jordan
 says it is ready.
@@ -83,13 +83,25 @@ right libraries, so build task 1 proves it once, against a test Plex account tha
 
 | What | Result |
 |---|---|
-| Create route that worked | A (v1 POST `plex.tv/api/servers/{mid}/shared_servers`), HTTP 200. The response body is XML, not JSON, so the share client confirms the share from `owned/pending` rather than parsing the reply. Route B (v2 POST `clients.plex.tv/api/v2/shared_servers`) was not needed and is untested |
+| Create route that worked | A (v1 POST `plex.tv/api/servers/{mid}/shared_servers`), HTTP 200. The response body is XML, not JSON, so the share client confirms the share from `owned/pending` rather than parsing the reply. Route B was proved separately afterwards (below) and is what the client now uses |
 | Confirmed in `owned/pending` | Yes. Both `owned/pending` and `owned/accepted` are JSON lists of entries with the same fields: `accepted`, `acceptedAt`, `allLibraries`, `deletedAt`, `id`, `inviteToken`, `invited`, `invitedEmail`, `invitedId`, `lastSeenAt`, `leftAt`, `libraries`, `machineIdentifier`, `name`, `numLibraries`, `owned`, `owner`, `ownerId`, `searchEnabled`, `serverId`, `sharingSettings`. The account is named in `invitedEmail` and the `invited` object; `invitedId` equals `invited.id`, the account's plex.tv id (the same id its earlier share carried). `inviteToken` must never be logged |
 | Libraries on the entry | Exactly the one shared (`numLibraries` 1, `allLibraries` false) |
 | After acceptance | Moved to `owned/accepted`: yes, same share id, `acceptedAt` set |
 | Plex friend | Yes: `plex.tv/api/users` lists the account, and Jordan saw it in Plex Web as a friend with only the shared library. The account had an earlier share (since 2025-01), so this does not show whether a share alone creates a friend |
 | Sign-in with the test account | WebServarr let it in (callback 302, not admin). Authentik: sign-in succeeded; the account had existed since 2025-01, so this proves the share and WebServarr's membership gate, not brand-new enrollment (that stays with Task 2's screen check) |
 | Removed | Pending: Jordan removes it in Plex |
+
+**Route B proof (2026-10-10).** A second live share from dev with the admin token, to the same test
+account only, after Jordan removed its access entirely (the account was in neither listing, nor in
+`plex.tv/api/users`):
+
+| What | Result |
+|---|---|
+| Request | JSON `POST clients.plex.tv/api/v2/shared_servers` with `machineIdentifier`, `invitedId` (the account's plex.tv id, an integer), `librarySectionIds` (plex.tv's section ids, the `id` in `plex.tv/api/v2/servers/{mid}` `librarySections`, not the server's keys) and `settings` (sync, camera upload and channels off, empty filters). The shape VODUM and harbor-gate send; python-plexapi has no v2 create, and Wizarr uses v2 only to update a share |
+| Answer | HTTP 201 with the new share as JSON: the same fields as the listings, without `owner`. It carries `inviteToken`, which must never be logged. The client reads only `invitedId` from it |
+| Confirmed | One new entry, for exactly that `invitedId`, with Movies only (`numLibraries` 1, `allLibraries` false). Jordan saw Movies only in Plex Web |
+| Pending or accepted | **Accepted straight away** (`owned/accepted`, `acceptedAt` set), not pending. One test can't say whether a v2 share by id always skips the invite or whether Plex accepted it because the account had accepted a share of this server earlier that day. The client confirms against both listings |
+| Removed | Jordan removed it in Plex. No DELETE was sent |
 
 Found on the way, for later: a 401 from `plex.tv/api/v2/user` during Authentik sign-in (a token
 plex.tv rejects) is answered as 503 "Plex didn't respond. Please try again." (`_fetch_plex_account`
@@ -113,7 +125,7 @@ creates it on existing databases, so no migration is needed.
 | `id` | Integer PK | |
 | `plex_account_id` | String(32), unique, not null | The immutable plex.tv account id. This is the key for "one open request" and for the cooldown |
 | `plex_username` | String(100), not null | As Plex reported it when the request was made; the `title` when the account has no username |
-| `has_plex_username` | Boolean, not null, default true | False when `plex_username` is a display name. Approve then sends no invite (section 7). Added by `migrate_access_request_username_flag` on databases that already had the table |
+| `has_plex_username` | Boolean, not null, default true | False when `plex_username` is a display name. Display only since route B: approve shares by account id either way (section 7). Added by `migrate_access_request_username_flag` on databases that already had the table |
 | `plex_email` | String(254), not null, default "" | |
 | `plex_avatar_url` | String(500), not null, default "" | Stored only if it is `https://` on `plex.tv` or a subdomain of it; otherwise "" |
 | `name` | String(80), not null | From the form |
@@ -261,28 +273,27 @@ The module rules:
   retries on POST.
 - `share_server` calls `find_share` first. If a share already exists for this account on our server,
   it makes no POST and returns `existing`.
-- The create call is the one task 1 proves:
-  - **Route A** is the v1 `POST plex.tv/api/servers/{machineId}/shared_servers`, with the body
-    python-plexapi's `inviteFriend` sends: `invited_email` set to the account's username, library ids
-    mapped from the keys through the server listing, and sync, camera upload and channels off.
-  - If A fails in task 1, task 1 proves **route B**, the v2 `POST clients.plex.tv/api/v2/shared_servers`
-    with `machineIdentifier`, `librarySectionIds` and `invitedId` (or `invitedEmail`), and the client
-    uses B.
-  - The function's contract is the same either way.
-- After the POST, it calls `find_share` again. The share counts as `shared` only if Plex lists an entry
-  whose `invitedId` equals the row's `plex_account_id`. Anything else is `failed` with a short reason,
-  for example "Plex refused the share (HTTP 400)" or "Plex didn't confirm the share".
+- The create call is **route B** (proved 2026-10-10, section 3): the v2
+  `POST clients.plex.tv/api/v2/shared_servers` with `machineIdentifier`, `invitedId` set to the row's
+  `plex_account_id` (the id identify verified through the requester's own Plex sign-in),
+  `librarySectionIds` mapped from the keys through the server listing, and sync, camera upload and
+  channels off. It never sends a username or email, and there is no fallback to route A (the v1
+  invite by username): a failed route B share is `failed`, and the admin shares by hand.
+- A row without a usable account id (not all digits) sends nothing: the share is `failed` with "This
+  request has no Plex account id, so nothing was sent".
+- After the POST, it lists the shares again. The share counts as `shared` only if Plex lists an entry,
+  in `owned/pending` or `owned/accepted` (route B's share landed straight in accepted), whose
+  `invitedId` equals the row's `plex_account_id`. Anything else is `failed` with a short reason, for
+  example "Plex refused the share (HTTP 400)" or "Plex didn't confirm the share".
 - Fields such as `inviteToken` and `accessToken` in Plex responses are never read into memory past the
   parse, and never logged or saved.
-- Route A addresses the invite by username, so two guards sit around it (final fix wave, 2026-10-10):
-  - Identify stores the Plex `title` when the account has no `username`, for display, and marks the
-    row (`has_plex_username` false). Approving such a row sends no POST: the share is `failed` with
-    "This Plex account has no username, so nothing was sent. Invite it in Plex by its email".
-  - The client lists our server's shares before and after the POST. A new entry that names the
-    username but carries a different `invitedId` means the invite went to another account (the
-    username changed hands, say). The share is `failed` with "Plex sent the invite to a different Plex
-    account. Remove that invite in Plex", and every admin gets an `access` bell and push saying so.
-    WebServarr never deletes it: the admin removes it in Plex.
+- Identify stores the Plex `title` when the account has no `username`, for display, and marks the
+  row (`has_plex_username` false). Since route B that only affects what the card shows: such a row is
+  shared by its account id like any other.
+- If Plex's answer to the POST names a different `invitedId`, the share is `failed` with "Plex sent the
+  invite to a different Plex account. Remove that invite in Plex", and every admin gets an `access`
+  bell and push saying so. WebServarr never deletes it: the admin removes it in Plex. (Route A's
+  username guards, from the final fix wave, went with route A.)
 
 ## 8. Notifications
 
@@ -435,11 +446,12 @@ tab's visible text, so the two match). The panel, top to bottom:
   sends the token to the configured Plex server's `/identity` (the admin-set `integration.plex.url`,
   TLS not verified on that LAN hop), as sign-in already does. There are no user-supplied URLs, so
   there is no SSRF surface.
-- **Share by username:** route A's invite names a username, which can change hands, so the share
-  could reach a different account. The guards in section 7 stop a display name being sent and catch
-  an invite that lands on another `invitedId`, but only after it is sent. Route B (v2, addressed by
-  `invitedId`) would remove the risk at the source; it is the stronger fix, pending a live proof
-  (section 13, risk 5).
+- **Share by account id (audit F2, fixed 2026-10-10):** the share is addressed by the plex.tv account
+  id that identify verified (route B), never by a username, which can change hands between the
+  request and approval. There is no username fallback. A share Plex says is for another account is
+  still reported (section 7). The Settings copy button for a failed share still copies
+  `plex_username`, which is the display name on a no-username row; that is the admin's manual path,
+  not the client's.
 - **Audit scope:** the three public routes, the identify flow and the callback page's `for=access`
   branch go on the v2.0 audit list.
 
@@ -479,7 +491,8 @@ tab's visible text, so the two match). The panel, top to bottom:
 
 ## 13. Open risks
 
-1. **The Plex create call is unproven** (section 3). Task 1 proves it.
+1. **The Plex create call is unproven** (section 3). Task 1 proved route A, and a later live run on
+   2026-10-10 proved route B, which the client uses. Closed.
 2. **Authentik account creation for newly shared users.** Authentik's Plex source must enroll a new
    user on their first sign-in, and its server check must pass once the invite is accepted (friends
    checking is off since the August 2026 friends retirement). Before the build, confirm this
@@ -496,15 +509,15 @@ tab's visible text, so the two match). The panel, top to bottom:
    Plex token. Review: Dropbox notes, authentik-allowed-servers-review.md. Do not save the source form
    while the list looks empty. WebServarr's membership gate is what keeps strangers out.
 3. **Invite acceptance.** Until the person accepts the invite, both Authentik and WebServarr refuse
-   them. The S4 and S5 wording covers this. Plex's own email is the only reminder.
+   them. The S4 and S5 wording covers this. Plex's own email is the only reminder. Route B's live
+   share landed already accepted, so a person may not need to accept anything; the proof account had
+   accepted a share earlier that day, so this is not settled, and the wording stays.
 4. **Plex friendship.** Plex Web asks whether a share should also add the person as a friend. Route A
    sends what python-plexapi sends. Task 1 records whether the test account ends up as a Plex friend,
    so Jordan can decide whether that matters.
-5. **Route A invites by username.** If a username has changed hands since the request, the invite
-   reaches someone else. The share client now detects that after the POST and tells the admin (section
-   7), but cannot prevent it. Route B, the v2 `POST clients.plex.tv/api/v2/shared_servers` with
-   `invitedId`, addresses the verified account id directly and is the stronger fix. It needs one live
-   proof against the test account, with Jordan present, before the client switches to it.
+5. **Route A invites by username.** Fixed 2026-10-10 (audit F2): route B was proved live against the
+   test account with Jordan present (section 3), and the client now shares by `invitedId` only, with
+   no fallback to a username.
 
 ## 14. Build order
 

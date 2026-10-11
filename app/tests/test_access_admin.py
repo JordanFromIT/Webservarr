@@ -161,10 +161,13 @@ class AdminRoutes(SettingsGateBase):
         self.assertEqual((r.status_code, r.json()["status"], r.json()["share_state"], r.json()["share_error"]),
                          (200, "approved", "failed", "Plex refused the share (HTTP 400)"))
 
-    def test_a_display_name_is_never_sent_as_the_username(self):
-        rid = self.add("5551", "pending", has_plex_username=False)
-        self.assertEqual(self.approve(rid).status_code, 200)
-        self.share.assert_awaited_once_with({"plex_account_id": "5551", "plex_username": ""}, ["1"])
+    def test_the_share_is_sent_by_account_id_only(self):
+        for has_username in (True, False):
+            with self.subTest(has_plex_username=has_username):
+                self.share.reset_mock()
+                rid = self.add(f"555{int(has_username)}", "pending", has_plex_username=has_username)
+                self.assertEqual(self.approve(rid).status_code, 200)
+                self.share.assert_awaited_once_with({"plex_account_id": f"555{int(has_username)}"}, ["1"])
 
     def test_an_invite_to_another_account_tells_the_admins(self):
         rid = self.add("5551", "pending")
