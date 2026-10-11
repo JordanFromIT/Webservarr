@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -659,7 +659,8 @@ async def book_cover(
 
 class BookRequestCreate(BaseModel):
     # A Chaptarr foreign id such as "gr:3634639" - a string, not an int.
-    bookId: str
+    # Bounded: it is logged and sent to Chaptarr as a search term.
+    bookId: str = Field(min_length=1, max_length=64)
     # "ebook" or "audiobook" picks which Chaptarr root folder and profiles the
     # request lands in; "both" (the Requests page's one Request button) asks
     # for every format the server takes. Anything else is treated as an ebook
@@ -726,7 +727,7 @@ async def create_chaptarr_request(
     # Attribute the request: it spends the operator's Chaptarr key and starts a
     # download, so who asked for what is worth having in the logs (L3).
     logger.info(
-        "Book request by %s (user=%s): bookId=%s format=%s",
+        "Book request by %s (user=%s): bookId=%r format=%s",
         current_user.get("username") or current_user.get("display_name") or "?",
         _user_key(current_user),
         body.bookId.strip(),

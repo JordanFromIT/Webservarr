@@ -574,6 +574,25 @@ class Routes(unittest.TestCase):
         r = self.ask({"ok": False, "message": ALREADY})
         self.assertEqual((r.status_code, r.json()["detail"]), (400, ALREADY))
 
+    def test_the_book_id_is_one_to_64_characters(self):
+        answer = {"ok": True, "message": "Book requested", "state": "requested"}
+        for book_id, code in (("", 422), ("g" * 65, 422), ("g" * 64, 200), ("gr:1", 200)):
+            with self.subTest(length=len(book_id)), \
+                 mock.patch("app.integrations.chaptarr.request_book", mock.AsyncMock(return_value=dict(answer))) as asked:
+                r = self.client.post("/api/integrations/chaptarr-request", json={"bookId": book_id, "format": "ebook"})
+                self.assertEqual(r.status_code, code)
+                self.assertEqual(asked.await_count, 1 if code == 200 else 0)
+
+    def test_the_book_id_is_logged_quoted_so_it_cannot_forge_a_line(self):
+        answer = {"ok": True, "message": "Book requested", "state": "requested"}
+        forged = "gr:1\nINFO forged line"
+        with mock.patch("app.integrations.chaptarr.request_book", mock.AsyncMock(return_value=dict(answer))), \
+             self.assertLogs("app.routers.integrations", "INFO") as logged:
+            self.client.post("/api/integrations/chaptarr-request", json={"bookId": forged, "format": "ebook"})
+        line = next(m for m in logged.output if "Book request by" in m)
+        self.assertNotIn("\n", line)
+        self.assertIn("bookId='gr:1\\nINFO forged line'", line)
+
     def _row(self, book_id, title, author, ebook=True):
         from datetime import datetime
         from app.services.book_catalog import CatalogRow
