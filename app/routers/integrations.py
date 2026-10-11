@@ -232,6 +232,50 @@ async def get_status_summary(request: Request, db: Session = Depends(get_db)):
 
 # --- Seerr Endpoints ---
 
+# Recent book arrivals for the Recent Requests panel. Working them out lists
+# every author's files from Chaptarr (over a hundred calls, a second or more),
+# where Seerr's half is one quick call, so the books are kept in one shared
+# copy: built at the largest page the endpoint serves and sliced per call.
+# A copy older than _RECENT_BOOKS_FRESH is still served at once and rebuilt
+# behind it, so nobody waits on Chaptarr unless there is no copy at all; the
+# request-status warmer also rebuilds it on its timer.
+_RECENT_BOOKS_KEY = "recent-books"
+_RECENT_BOOKS_MAX = 50
+_RECENT_BOOKS_FRESH = 60.0
+_RECENT_BOOKS_TTL = 6 * 3600
+_recent_books_build = None  # the build in flight in this worker, if any
+
+
+async def refresh_recent_books() -> list:
+    """Rebuild the shared copy of recent book arrivals. Never raises."""
+    try:
+        books = await chaptarr.recent_requests(limit=_RECENT_BOOKS_MAX)
+    except Exception as exc:  # noqa: BLE001 - the panel's film rows must still answer
+        logger.warning("Recent books failed: %s", exc)
+        return []
+    await _cache_set(_RECENT_BOOKS_KEY, {"at": time.time(), "items": books}, _RECENT_BOOKS_TTL)
+    return books
+
+
+def _rebuild_recent_books() -> asyncio.Task:
+    """Start a rebuild, or join the one this worker already has running."""
+    global _recent_books_build
+    build = _recent_books_build
+    if build is None or build.done() or build.get_loop() is not asyncio.get_running_loop():
+        build = _recent_books_build = asyncio.create_task(refresh_recent_books())
+    return build
+
+
+async def _recent_books(limit: int) -> list:
+    cached = await _cache_get(_RECENT_BOOKS_KEY)
+    if isinstance(cached, dict) and isinstance(cached.get("items"), list):
+        if time.time() - (cached.get("at") or 0) > _RECENT_BOOKS_FRESH:
+            _rebuild_recent_books()
+        return cached["items"][:limit]
+    # Shielded: a viewer who gives up must not cancel the build others share.
+    return (await asyncio.shield(_rebuild_recent_books()))[:limit]
+
+
 @router.get("/recent-requests")
 async def get_recent_requests(
     limit: int = Query(10, ge=1, le=50),
@@ -244,10 +288,13 @@ async def get_recent_requests(
     dropped every ebook and audiobook request that was ever made. Both sources
     are merged and re-sorted by date so the panel shows what was actually
     requested most recently, whatever kind of thing it was.
+
+    Seerr is read live, so a film or show just asked for appears at once; the
+    books come from the shared copy above.
     """
     screen, books = await asyncio.gather(
         seerr.get_recent_requests(limit=limit),
-        chaptarr.recent_requests(limit=limit),
+        _recent_books(limit),
         return_exceptions=True,
     )
     merged = (screen if isinstance(screen, list) else []) + (books if isinstance(books, list) else [])

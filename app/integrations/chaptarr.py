@@ -52,6 +52,11 @@ SEARCH_PROVIDER = "goodreads"
 # made on Chaptarr's behalf, and it degrades badly under a full shelf at once.
 _RESOLVE_CONCURRENCY = 5
 
+# How many authors' book files to list at once (_book_files). Each is a quick
+# read for Chaptarr, but there are over a hundred authors: one at a time took
+# over five seconds, eight at a time about one.
+_BOOK_FILES_CONCURRENCY = 8
+
 
 def _get_config() -> dict:
     """Read Chaptarr config from the settings table (short-lived session)."""
@@ -1030,31 +1035,42 @@ async def _book_files() -> List[Dict[str, Any]]:
 
     The bookfile endpoint refuses an unfiltered listing ("authorId, bookId,
     bookFileIds or unmapped must be provided"), so files are gathered per
-    author and stitched back together. One call per author, twelve authors.
+    author and stitched back together: one call per author, a few at a time
+    (_BOOK_FILES_CONCURRENCY), kept in author order. Any author failing fails
+    the whole listing, as it did when they were read one by one.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
         return []
 
     headers = {"X-Api-Key": cfg["api_key"]}
-    files: List[Dict[str, Any]] = []
+    gate = asyncio.Semaphore(_BOOK_FILES_CONCURRENCY)
     try:
         async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
             authors = await client.get(f"{cfg['url']}/api/v1/author", headers=headers)
             if authors.status_code != 200:
                 return []
-            for author in authors.json():
-                resp = await client.get(
-                    f"{cfg['url']}/api/v1/bookfile",
-                    params={"authorId": author.get("id")},
-                    headers=headers,
-                )
-                if resp.status_code == 200:
-                    files.extend(resp.json())
+
+            async def files_of(author: Dict[str, Any]) -> List[Dict[str, Any]]:
+                async with gate:
+                    resp = await client.get(
+                        f"{cfg['url']}/api/v1/bookfile",
+                        params={"authorId": author.get("id")},
+                        headers=headers,
+                    )
+                return resp.json() if resp.status_code == 200 else []
+
+            # return_exceptions so every call has finished before the client
+            # closes; the first failure is then raised as before.
+            per_author = await asyncio.gather(*(files_of(a) for a in authors.json()),
+                                              return_exceptions=True)
+            for result in per_author:
+                if isinstance(result, BaseException):
+                    raise result
     except (httpx.RequestError, ValueError) as exc:
         logger.warning("Chaptarr book files failed: %s", exc)
         return []
-    return files
+    return [entry for files in per_author for entry in files]
 
 
 # Ratings barely move and a detail sheet is opened repeatedly, so they are held
@@ -1138,20 +1154,6 @@ async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
     if not files:
         return []
 
-    cfg = _get_config()
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-            resp = await client.get(
-                f"{cfg['url']}/api/v1/book", headers={"X-Api-Key": cfg["api_key"]}
-            )
-        titles = {
-            b.get("id"): b
-            for b in (resp.json() if resp.status_code == 200 else [])
-            if isinstance(b, dict)
-        }
-    except (httpx.RequestError, ValueError):
-        titles = {}
-
     # One entry per book, dated by its earliest file - an audiobook arrives as
     # hundreds of chapter files and would otherwise flood the panel.
     first_seen: Dict[Any, Dict[str, Any]] = {}
@@ -1163,10 +1165,31 @@ async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
         if not current or added < current["added"]:
             first_seen[book_id] = {"added": added, "path": entry.get("path") or ""}
 
-    ordered = sorted(first_seen.items(), key=lambda kv: kv[1]["added"], reverse=True)
+    newest = sorted(first_seen.items(), key=lambda kv: kv[1]["added"], reverse=True)[:limit]
+
+    # Titles for just these books. The unfiltered book list is every book of
+    # every author (tens of thousands, about seven seconds); bookIds asks for
+    # the handful shown.
+    titles: Dict[Any, Dict[str, Any]] = {}
+    if newest:
+        cfg = _get_config()
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+                resp = await client.get(
+                    f"{cfg['url']}/api/v1/book",
+                    params={"bookIds": [book_id for book_id, _ in newest]},
+                    headers={"X-Api-Key": cfg["api_key"]},
+                )
+            titles = {
+                b.get("id"): b
+                for b in (resp.json() if resp.status_code == 200 else [])
+                if isinstance(b, dict)
+            }
+        except (httpx.RequestError, ValueError):
+            titles = {}
 
     out = []
-    for book_id, info in ordered[:limit]:
+    for book_id, info in newest:
         book = titles.get(book_id) or {}
         author = book.get("author") or {}
         out.append({

@@ -8,6 +8,9 @@ the snapshot is rebuilt on a schedule and every request is served from cache.
 
 The first build after a restart still costs what it costs, but the page renders
 the previous snapshot while it happens rather than blocking.
+
+The same turn also rebuilds the books half of Home's Recent Requests panel
+(integrations.refresh_recent_books), so a quiet spell never leaves it cold.
 """
 
 import asyncio
@@ -51,12 +54,16 @@ async def start_warmer() -> None:
     global _running
     _running = True
 
+    from app.routers import integrations
     from app.services import book_requests, request_status
 
     try:
         await asyncio.sleep(STARTUP_DELAY)
         while _running:
             if await _claim_turn():
+                # Home's Recent Requests books first: the quickest to build
+                # and on the page everyone lands on. It never raises.
+                await integrations.refresh_recent_books()
                 try:
                     await request_status.refresh()
                 except Exception as exc:  # noqa: BLE001 - warming never takes the app down
