@@ -5,7 +5,7 @@
 //  * the steps, in order, on a desktop and on a phone, and where each points;
 //    the home screen is a phone's only (never a desktop's, nor its prompt), and
 //    its words never say install
-//  * shown once per account on a device (webservarr_welcome_v2_seen:<username>),
+//  * shown once per account on a device (webservarr_welcome_v3_seen:<username>),
 //    by itself on a first visit to Home (no ?welcome=1); another account's
 //    tour in the same browser does not count; "Welcome tour" runs it again
 //  * the two offers: Not now asks again on the next load (a notice in the
@@ -72,7 +72,7 @@ const UA = {
   desktop: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36'
 };
 // The mark for the account the harness signs in as (user sam, below).
-const SEEN_BASE = 'webservarr_welcome_v2_seen';
+const SEEN_BASE = 'webservarr_welcome_v3_seen';
 const SEEN = SEEN_BASE + ':sam';
 const VAPID = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
 

@@ -698,7 +698,7 @@ export async function mount(ctx) {
     }
 
     // The welcome tour (js/welcome.js, on js/tour.js): once per device after
-    // version 2, again from "Welcome tour" in the account menu and More.
+    // the tour changed (seen key v3), again from "Welcome tour" in the account menu and More.
     if (window.WSWelcome && typeof window.WSWelcome.mount === 'function') window.WSWelcome.mount(ctx);
 
     // Apply configurable section icons from branding

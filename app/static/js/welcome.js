@@ -2,9 +2,10 @@
  * WebServarr: Home's welcome tour (page helper, data-ws-page-script)
  *
  * Shown once to everyone, new or not, the first time Home is opened on this
- * device after version 2: once per account, so a second person signing in on
- * the same browser still gets it (theme-loader.js WSAsk.welcomeKey,
- * localStorage webservarr_welcome_v2_seen:<username>). It runs on
+ * device after the tour changed (seen key v3): once per account, so a
+ * second person signing in on the same browser still gets it
+ * (theme-loader.js WSAsk.welcomeKey, localStorage
+ * webservarr_welcome_v3_seen:<username>). It runs on
  * the shared engine (js/tour.js) and walks the shell: the event log, the
  * service status, the bell (and an offer to turn on notifications), on a
  * phone adding the site to the home screen, Home's news, the calendar, Books

@@ -198,7 +198,7 @@
  * WSAsk.welcomeSeen(): the welcome tour has been shown to this account on
  * this device (unreadable storage counts as seen, so a browser that cannot
  * remember is not toured on every visit). The mark is kept per account
- * (WSAsk.welcomeKey(): webservarr_welcome_v2_seen:<username>, as the Books
+ * (WSAsk.welcomeKey(): webservarr_welcome_v3_seen:<username>, as the Books
  * guide keeps its own), so a browser someone else has had the tour in, a
  * shared computer or a private window an admin tried it in first, still
  * tours the next person who signs in there. WSAsk.asked() / markAsked(by):
@@ -216,7 +216,7 @@
 (function () {
   'use strict';
   var KEYS = { push: 'ws-push-ask', install: 'ws-install-ask', blocked: 'ws-push-blocked-seen' };
-  var WELCOME_SEEN = 'webservarr_welcome_v2_seen';
+  var WELCOME_SEEN = 'webservarr_welcome_v3_seen';
   var askedBy = '';
 
   // The welcome tour's mark for the account signed in on this page (#ws-data).
