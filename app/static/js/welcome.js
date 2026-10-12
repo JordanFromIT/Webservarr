@@ -333,7 +333,7 @@
     var Tour = window.WebServarrTour;
     if (!Tour || typeof Tour.init !== 'function' || !ask() || (ctx.signal && ctx.signal.aborted)) return;
     var replay = !!(ctx.url && ctx.url.searchParams && ctx.url.searchParams.get(REPLAY) === '1');
-    var tour = Tour.init({ seenKey: ask().welcomeKey(), steps: steps, signal: ctx.signal });
+    var tour = Tour.init({ seenKey: ask().welcomeKey(), steps: steps, signal: ctx.signal, noSkip: true, nextDelay: 5 });
 
     if (replay) {
       dropReplayMark();

@@ -3108,6 +3108,8 @@ export async function mount(ctx) {
       seenKey: GUIDE_KEY + user,
       steps: GUIDE_STEPS,
       helpBtn: $('helpBtn'),
+      noSkip: true,
+      nextDelay: 5,
       // Started by offerGuide, once the books are drawn.
       autoStart: false,
       signal: signal

@@ -41,6 +41,9 @@
  *                       (a confirmation), or update(null) to put it back
  * The steps option may itself be a function, called each time the tour starts.
  *
+ * noSkip: true hides the Skip button (Escape still ends the tour).
+ * nextDelay: seconds the Continue / Got it button stays disabled on each step.
+ *
  * quiet: true is a single prompt rather than a tour: no fog, no Skip, no dots,
  * no Back. Escape still closes it.
  *
@@ -164,6 +167,7 @@
     var step = 0;
     var active = false;
     var placeTimer = 0;      // render's wait for the scroll to settle
+    var nextTimer = 0;       // the countdown on the Next button (opts.nextDelay)
     var startTimer = 0;      // autoStart's delay, and the wait for a dialog to close
     // False until this run's first placement: the layer stays invisible and
     // untransitioned until then, so the bubble never shows at a stale spot
@@ -397,6 +401,26 @@
       return wanted;
     }
 
+    /* opts.nextDelay (seconds): the step's Next button waits, showing the
+       count, so each step gets read. Steps with buttons of their own are not held. */
+    function holdNext(s) {
+      clearInterval(nextTimer);
+      var btn = q('tourNext');
+      var label = step === STEPS.length - 1 ? 'Got it' : 'Continue';
+      var left = Math.ceil(Number(opts.nextDelay) || 0);
+      btn.disabled = false;
+      if (left <= 0 || (s.actions && s.actions.length)) return;
+      btn.disabled = true;
+      btn.textContent = label + ' (' + left + ')';
+      nextTimer = setInterval(function () {
+        left -= 1;
+        if (left > 0) { btn.textContent = label + ' (' + left + ')'; return; }
+        clearInterval(nextTimer);
+        btn.disabled = false;
+        btn.textContent = label;
+      }, 1000);
+    }
+
     /* Writes the step into the bubble. inPlace: an update of the step on
        screen (a confirmation), said aloud since the words changed under the
        person's focus. */
@@ -426,7 +450,8 @@
       q('tourNext').textContent = step === STEPS.length - 1 ? 'Got it' : 'Continue';
       q('tourNext').style.display = own ? 'none' : '';
       q('tourFoot').style.display = QUIET ? 'none' : '';
-      q('tourSkip').hidden = QUIET;
+      q('tourSkip').hidden = QUIET || !!opts.noSkip;
+      if (!inPlace) holdNext(s);
 
       // Where focus goes once the bubble is placed: the step's chosen button,
       // else its first, else Continue. The first step lands on the bubble
@@ -543,6 +568,8 @@
       active = false;
       clearTimeout(placeTimer);
       clearTimeout(startTimer);
+      clearInterval(nextTimer);
+      if (q('tourNext')) q('tourNext').disabled = false;
       focusAfter = null;
       var layer = q('tourLayer');
       var inLayer = !!(layer && layer.contains(document.activeElement));
@@ -570,6 +597,7 @@
     }
 
     function next() {
+      if (q('tourNext').disabled && opts.nextDelay) return;
       if (step < STEPS.length - 1) { step++; render(); } else { finish('done'); }
     }
     function back() {

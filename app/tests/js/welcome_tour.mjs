@@ -235,6 +235,8 @@ const quiet = (d) => $(d, 'tourLayer').classList.contains('tour-quiet');
 const actions = (d) => Array.from($(d, 'tourActions').querySelectorAll('button')).map((b) => b.textContent);
 const action = (d, label) => Array.from($(d, 'tourActions').querySelectorAll('button')).find((b) => b.textContent === label);
 const listed = (d) => Array.from($(d, 'tourList').querySelectorAll('li')).map((li) => li.textContent.replace(/\s+/g, ' ').trim());
+// The tour holds Continue for 5 s on each step (nextDelay): tests release it.
+const goNext = (b) => { b.disabled = false; b.click(); };
 const continueShown = (d) => $(d, 'tourNext').style.display !== 'none';
 const key = (w, k) => w.localStorage.getItem(k);
 
@@ -264,7 +266,7 @@ function walk(d) {
   const seen = [];
   for (let i = 0; i < 12 && on(d); i++) {
     seen.push({ title: title(d), body: body(d), actions: actions(d), list: listed(d) });
-    if (continueShown(d)) $(d, 'tourNext').click();
+    if (continueShown(d)) goNext($(d, 'tourNext'));
     else action(d, 'Not now').click();
   }
   return seen;
@@ -498,8 +500,8 @@ await scenario('focus moves into the bubble and goes back after', async () => {
   check('the bubble is a labelled dialog', $(d, 'tourBubble').getAttribute('role') === 'dialog' &&
         $(d, 'tourBubble').getAttribute('aria-labelledby') === 'tourTitle' && $(d, 'tourBubble').getAttribute('aria-modal') === 'true');
   check('focus in the bubble', d.activeElement === $(d, 'tourBubble'), d.activeElement && d.activeElement.id);
-  $(d, 'tourNext').click();
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
+  goNext($(d, 'tourNext'));
   await wait(450);
   check('on an offer, focus lands on Not now (Enter never turns anything on)', d.activeElement === action(d, 'Not now'), d.activeElement && d.activeElement.textContent);
   check('the step change is said', /Notifications\./.test($(d, 'tourSay').textContent));
@@ -516,13 +518,13 @@ await scenario('Not now asks again on the next load, not on a soft navigation', 
   visit(first.w);
   await wait(10);
   const d = first.d;
-  $(d, 'tourNext').click();
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
+  goNext($(d, 'tourNext'));
   check('on the offer', title(d) === 'Notifications');
   action(d, 'Not now').click();
   check('moves on', title(d) === 'Calendar');
   check('remembered as later', key(first.w, 'ws-push-ask') === 'later');
-  while (on(d)) $(d, 'tourNext').click();
+  while (on(d)) goNext($(d, 'tourNext'));
   check('the browser was never asked', first.calls.asked === 0);
   // A soft navigation away and back: the same document.
   visit(first.w);
@@ -560,11 +562,27 @@ await scenario('Not now asks again on the next load, not on a soft navigation', 
   await next.w.happyDOM.close();
 });
 
+await scenario('the welcome tour has no Skip button and holds Continue for 5 seconds a step', async () => {
+  const { w, d } = browser();
+  visit(w);
+  await wait(10);
+  check('Skip is hidden', $(d, 'tourSkip').hidden);
+  check('Continue is held with the count', $(d, 'tourNext').disabled && /\(5\)$/.test($(d, 'tourNext').textContent), $(d, 'tourNext').textContent);
+  $(d, 'tourNext').click();
+  check('a click while held does nothing', $(d, 'tourTitle').textContent === (await Promise.resolve($(d, 'tourTitle').textContent)));
+  await wait(5300);
+  check('after 5 s it is enabled', !$(d, 'tourNext').disabled && !/\(/.test($(d, 'tourNext').textContent), $(d, 'tourNext').textContent);
+  const before = $(d, 'tourTitle').textContent;
+  $(d, 'tourNext').click();
+  await wait(10);
+  check('and moves on, held again', $(d, 'tourTitle').textContent !== before && $(d, 'tourNext').disabled);
+});
+
 await scenario('closing the tour early is a Not now for both offers', async () => {
   const { w, d } = browser({ width: 390, ua: 'android' });
   visit(w);
   await wait(10);
-  $(d, 'tourSkip').click();
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   check('ended and seen', !on(d) && key(w, SEEN) === '1');
   check('push later', key(w, 'ws-push-ask') === 'later');
   check('home screen later', key(w, 'ws-install-ask') === 'later');
@@ -613,12 +631,12 @@ await scenario('the same for the home screen, in the tour', async () => {
   const { w, d } = browser({ width: 390, ua: 'android' });
   visit(w);
   await wait(10);
-  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  while (title(d) !== 'Add to home screen') goNext($(d, 'tourNext'));
   action(d, 'Don’t ask me again').click();
   check('confirmation', title(d) === 'Stop asking?' && body(d) === 'You can still add it from More.', body(d));
   action(d, 'Stop asking').click();
   check('recorded, and on to the next step', key(w, 'ws-install-ask') === 'never' && title(d) === 'Calendar');
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
   $(d, 'tourBack').click();
   $(d, 'tourBack').click();
   check('Back shows it without the offer', title(d) === 'Add to home screen' && actions(d).length === 0 && continueShown(d));
@@ -631,8 +649,8 @@ await scenario('Turn on runs the site’s own subscribe path and moves on at the
   const { w, d, calls } = browser();
   visit(w);
   await wait(10);
-  $(d, 'tourNext').click();
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
+  goNext($(d, 'tourNext'));
   action(d, 'Turn on notifications').click();
   await wait(20);
   check('the browser asked once', calls.asked === 1, calls.asked);
@@ -649,8 +667,8 @@ await scenario('a refused browser question moves on and is not asked again', asy
   const { w, d, calls } = browser({ answer: 'denied' });
   visit(w);
   await wait(10);
-  $(d, 'tourNext').click();
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
+  goNext($(d, 'tourNext'));
   action(d, 'Turn on notifications').click();
   await wait(20);
   check('asked', calls.asked === 1);
@@ -663,7 +681,7 @@ await scenario('Add to home screen: the browser’s own prompt where there is on
   const { w, d, calls } = browser({ width: 390, ua: 'android', prompt: 'accepted' });
   visit(w);
   await wait(10);
-  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  while (title(d) !== 'Add to home screen') goNext($(d, 'tourNext'));
   action(d, 'Add to home screen').click();
   await wait(10);
   check('shown once', calls.prompted === 1);
@@ -676,7 +694,7 @@ await scenario('a browser prompt that never answers leaves the step usable', asy
   w.WS.install.prompt = () => new Promise(() => {});
   visit(w);
   await wait(10);
-  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  while (title(d) !== 'Add to home screen') goNext($(d, 'tourNext'));
   action(d, 'Add to home screen').click();
   await wait(10);
   check('buttons not held', !action(d, 'Not now').disabled);
@@ -690,7 +708,7 @@ await scenario('a browser prompt that shows nothing falls back to the menu steps
   w.WS.install.prompt = () => Promise.resolve(null);
   visit(w);
   await wait(10);
-  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  while (title(d) !== 'Add to home screen') goNext($(d, 'tourNext'));
   action(d, 'Add to home screen').click();
   await wait(10);
   check('the steps', listed(d).length === 2 && JSON.stringify(actions(d)) === JSON.stringify(['Done', 'Not now']), actions(d));
@@ -701,7 +719,7 @@ await scenario('Add to home screen: the menu steps where there is no prompt', as
   const { w, d } = browser({ width: 390, ua: 'android' });
   visit(w);
   await wait(10);
-  while (title(d) !== 'Add to home screen') $(d, 'tourNext').click();
+  while (title(d) !== 'Add to home screen') goNext($(d, 'tourNext'));
   action(d, 'Add to home screen').click();
   check('the steps', JSON.stringify(listed(d)) === JSON.stringify(['Open the browser menu more_vert', 'Tap Add to Home screen']), listed(d));
   check('the words', body(d) === 'Add it from your browser’s menu:', body(d));
@@ -970,7 +988,7 @@ await scenario('the tour’s notifications step says the same in Brave', async (
     const { w, d, calls } = browser({ brave, pushRefused: true });
     visit(w);
     await wait(10);
-    while (title(d) !== 'Notifications') $(d, 'tourNext').click();
+    while (title(d) !== 'Notifications') goNext($(d, 'tourNext'));
     action(d, 'Turn on notifications').click();
     await wait(20);
     const want = words || w.WSPush.messages.failed;
@@ -1230,9 +1248,9 @@ await scenario('a plain tour is unchanged', async () => {
   check('Continue, dots, Skip, no step buttons', continueShown(d) && $(d, 'tourDots').children.length === 2 &&
         !$(d, 'tourSkip').hidden && $(d, 'tourActions').hidden && $(d, 'tourList').hidden);
   check('fogged', !quiet(d));
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
   check('Got it on the last', $(d, 'tourNext').textContent === 'Got it');
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
   check('finished and seen', !on(d) && key(w, 'plain_seen') === '1');
   ctl.abort();
   await w.happyDOM.close();
@@ -1256,7 +1274,7 @@ await scenario('align start: a section scrolled up under the bubble, which sits 
     { target: '#upcomingReleasesSection', align: 'start', icon: 'calendar_month', title: 'Two', body: 'Second.' }
   ] });
   t.start();
-  $(d, 'tourNext').click();
+  goNext($(d, 'tourNext'));
   check('a plain step: to the middle', calls[0] && calls[0].id === 'wsEventLog' && calls[0].block === 'center' && calls[0].margin === '', calls[0]);
   // happy-dom lays nothing out: the bubble is its 160px stand-in, so the room
   // above is 12 + 160 + 16 + 8.
