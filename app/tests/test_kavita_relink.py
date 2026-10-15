@@ -38,6 +38,7 @@ try:
     from app.tests import helpers
     from app.tests.test_kavita_proxy import _FakeKavita, _FakeResponse
     from app.tests.test_settings_gate import MEMBER_SID, SettingsGateBase
+    REAL_PERSON_TOKEN = kavita.person_token
     HAVE_APP = True
 except Exception:  # pragma: no cover - the laptop has no app dependencies
     HAVE_APP = False
@@ -163,6 +164,99 @@ class Relink(KeysBase):
         session = mock.MagicMock()
         session.query.side_effect = OperationalError("select", {}, Exception("no such table"))
         return session
+
+
+def _transport_client(handler):
+    """kavita._user_client with Kavita's answer to Plugin/authenticate decided by `handler`."""
+    real = httpx.AsyncClient
+    return lambda: real(timeout=8.0, follow_redirects=False, transport=httpx.MockTransport(handler))
+
+
+def _answers(result):
+    def handler(request):
+        if isinstance(result, Exception):
+            raise result
+        return result
+    return handler
+
+
+TRANSIENT = [
+    ("500", httpx.Response(500, text="boom")), ("502", httpx.Response(502, text="bad gateway")),
+    ("503", httpx.Response(503, text="busy")), ("429", httpx.Response(429, text="slow down")),
+    ("200 not JSON", httpx.Response(200, text="<html>proxy page</html>")),
+    ("200 no token", httpx.Response(200, json={})),
+    ("timeout", httpx.ConnectTimeout("slow")),
+]
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class RealExchange(KeysBase):
+    """The real kavita.person_token against Kavita's answers (the other classes
+    mock it, which hid that a 5xx read as a refused key): only a 401 deletes
+    the kept key; every other failure keeps it and says Kavita is unavailable."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(kavita, "person_token", REAL_PERSON_TOKEN)      # undoes KeysBase's mock
+        patch.start()
+        self.addCleanup(patch.stop)
+        helpers.set_rate_limits(False)
+        self.addCleanup(helpers.set_rate_limits, True)
+        patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        helpers.put(self.db, "integration.kavita.url", KAVITA)
+        self.store()
+
+    def relink(self, answer):
+        with mock.patch.object(kavita, "_user_client", _transport_client(_answers(answer))):
+            return asyncio.run(kavita_keys.relink(person(), KAVITA, "sid-1"))
+
+    def test_a_401_is_a_refused_key_and_it_is_deleted(self):
+        self.assertIsNone(self.relink(httpx.Response(401)))
+        self.assertIsNone(self.row())
+
+    def test_a_good_answer_gives_the_token(self):
+        self.assertEqual(self.relink(httpx.Response(200, json={"token": FRESH})).token, FRESH)
+        self.assertIsNotNone(self.row())
+
+    def test_anything_else_keeps_the_key_and_is_unavailable(self):
+        for label, answer in TRANSIENT:
+            with self.subTest(answer=label), self.assertRaises(kavita.KavitaUnavailable):
+                self.relink(answer)
+            self.assertEqual(self.row().api_key, KEY, label)
+
+    def test_the_proxy_answers_503_not_a_401_for_a_transient_failure(self):
+        for label, answer in TRANSIENT:
+            with self.subTest(answer=label):
+                upstream = _Upstream(good=())
+                r = self.fetch(person(kavita_token="expired", kavita_base=KAVITA), upstream, answer)
+                self.assertEqual(r.status_code, 503, label)
+                self.assertEqual(self.row().api_key, KEY, label)
+
+    def test_a_401_from_kavita_in_the_proxy_deletes_the_key_and_is_a_401(self):
+        r = self.fetch(person(kavita_token="expired", kavita_base=KAVITA), _Upstream(good=()), httpx.Response(401))
+        self.assertEqual(r.status_code, 401)
+        self.assertIsNone(self.row())
+
+    def test_the_books_api_says_unavailable_not_not_connected(self):
+        with mock.patch.object(books.kavita_proxy, "kavita_url_for", return_value=KAVITA):
+            for label, answer in TRANSIENT:
+                with self.subTest(answer=label), \
+                     mock.patch.object(kavita, "_user_client", _transport_client(_answers(answer))):
+                    _series, reach, note = asyncio.run(books._kavita_reach(person(), "sid-1"))
+                    self.assertEqual((reach, note["reason"]), (None, "unavailable"), label)
+                    self.assertEqual(self.row().api_key, KEY, label)
+
+    def fetch(self, user, upstream, exchange):
+        client = helpers.api_client(self.Session, user, headers=helpers.SAME_ORIGIN)
+        self.addCleanup(helpers.reset_overrides)
+        client.cookies.set(settings.session_cookie_name, "sid-1")
+        real = httpx.AsyncClient
+        with mock.patch.object(kavita, "_user_client", _transport_client(_answers(exchange))), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient",
+                               lambda **kw: real(transport=httpx.MockTransport(upstream), **kw)):
+            return client.get("/kavita/api/series/all")
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -354,6 +448,34 @@ class ProxyRenews(KeysBase):
         r = self.fetch(person(kavita_token="expired", kavita_base=KAVITA))
         self.assertEqual(r.status_code, 503)
         self.assertIsNotNone(self.row())
+
+    def test_nothing_is_left_open_when_the_renewal_fails(self):
+        for label, effect in (("unavailable", kavita.KavitaUnavailable("down")),
+                              ("refused", kavita.KavitaTokenRefused("rotated"))):
+            with self.subTest(renewal=label):
+                self.store()
+                self.upstream.good = set()
+                self.mint.side_effect = effect
+                client = helpers.api_client(self.Session, person(kavita_token="expired", kavita_base=KAVITA),
+                                            headers=helpers.SAME_ORIGIN)
+                self.addCleanup(helpers.reset_overrides)
+                client.cookies.set(settings.session_cookie_name, "sid-1")
+                real, made, upstream = httpx.AsyncClient, [], self.upstream
+
+                class Tracked(real):
+                    def __init__(self, **kw):
+                        super().__init__(transport=httpx.MockTransport(upstream), **kw)
+                        self.closed_by_app = False
+                        made.append(self)
+
+                    async def aclose(self):
+                        self.closed_by_app = True
+                        await super().aclose()
+
+                with mock.patch.object(kavita_proxy.httpx, "AsyncClient", Tracked):
+                    r = client.get("/kavita/api/series/all")
+                self.assertEqual(r.status_code, 503 if label == "unavailable" else 401)
+                self.assertTrue(made and all(c.closed_by_app for c in made), [c.closed_by_app for c in made])
 
     def test_ebooks_off_for_a_member_mints_nothing(self):
         self.store()

@@ -252,9 +252,15 @@ class PersonToken(unittest.TestCase):
         self.assertEqual(dict(request.url.params), {"apiKey": self.KEY, "pluginName": "WebServarr"})
 
     def test_refusals_and_failures_carry_no_secret(self):
+        # Only a 401 is Kavita saying no to the key; everything else may leave the key good.
         for answer, kind in ((httpx.Response(401), kavita.KavitaTokenRefused),
-                             (httpx.Response(200, json={}), kavita.KavitaTokenRefused),
-                             (httpx.Response(200, text="nope"), kavita.KavitaTokenRefused),
+                             (httpx.Response(200, json={}), kavita.KavitaUnavailable),
+                             (httpx.Response(200, text="nope"), kavita.KavitaUnavailable),
+                             (httpx.Response(500), kavita.KavitaUnavailable),
+                             (httpx.Response(502), kavita.KavitaUnavailable),
+                             (httpx.Response(503), kavita.KavitaUnavailable),
+                             (httpx.Response(429), kavita.KavitaUnavailable),
+                             (httpx.ConnectTimeout(f"slow {KAVITA}/?apiKey={self.KEY}"), kavita.KavitaUnavailable),
                              (httpx.ConnectError(f"failed {KAVITA}/?apiKey={self.KEY}"), kavita.KavitaUnavailable)):
             with self.subTest(answer=repr(answer)):
                 exc, _seen = self.call(answer)

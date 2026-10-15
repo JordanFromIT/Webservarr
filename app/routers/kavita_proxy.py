@@ -1137,12 +1137,14 @@ async def kavita_proxy(
             raise HTTPException(status_code=503, detail="Kavita is unavailable")
 
     client, upstream = await send()
-    if upstream.status_code == 401 and not renewed and await renew():
+    if upstream.status_code == 401 and not renewed:
         # The token expired: a new one from the person's own key, and the
-        # request sent once more (its body is already read).
+        # request sent once more (its body is already read). The first answer
+        # is closed before renewing, which may raise (Kavita not answering).
         await upstream.aclose()
         await client.aclose()
-        client, upstream = await send()
+        if await renew():
+            client, upstream = await send()
     if upstream.status_code == 401:
         # No key to renew from, or Kavita refused it too. The frontend re-runs
         # the handshake at /kavita/connect and retries once.
