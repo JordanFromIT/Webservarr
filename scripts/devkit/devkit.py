@@ -49,7 +49,7 @@ IDENTITY_TABLES = ("listening_positions", "listening_log", "listening_claims",
                    "listening_dismissals", "player_prefs", "book_continue_hidden", "book_notice",
                    "listening_hourly", "book_requesters", "kavita_links", "reading_totals", "ebook_places",
                    "reading_minutes", "book_visits", "book_list", "book_queue", "book_ratings",
-                   "listening_daily", "book_follows")
+                   "listening_daily", "book_follows", "kavita_keys")
 # What snapshot saves unless told otherwise: the identity tables plus the
 # settings and the pairing choices that the Books checks change.
 DEFAULT_SNAPSHOT_TABLES = IDENTITY_TABLES + ("settings", "book_pair_overrides")

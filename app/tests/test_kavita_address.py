@@ -27,7 +27,9 @@ try:
 
     from app.auth import KAVITA_SESSION_FIELDS, session_manager
     from app.config import settings
+    from app.models import KavitaKey
     from app.routers import kavita_proxy
+    from app.services import kavita_keys
     from app.tests import helpers, is_test_redis
     HAVE_APP = True
 except Exception:  # pragma: no cover
@@ -67,7 +69,8 @@ class KavitaAddressBase(unittest.TestCase):
         # them at the in-memory database too.
         self.patches = [mock.patch("app.routers.setup.is_setup_completed", return_value=True),
                         mock.patch.object(session_manager, "get_redis", _fresh_redis),
-                        mock.patch.object(kavita_proxy, "SessionLocal", self.Session)]
+                        mock.patch.object(kavita_proxy, "SessionLocal", self.Session),
+                        mock.patch.object(kavita_keys, "SessionLocal", self.Session)]
         for p in self.patches:
             p.start()
         self.client = helpers.api_client(self.Session, headers=helpers.SAME_ORIGIN)
@@ -106,6 +109,15 @@ class KavitaAddressBase(unittest.TestCase):
         s = self.session(sid)
         self.assertTrue(s.get("kavita_token"), sid)
         self.assertTrue(s.get("kavita_api_key"), sid)
+
+    def keep_key(self, identity, base=KAVITA_A):
+        from app.services.insights_store import now_utc
+        self.db.merge(KavitaKey(identity=identity, base=base, api_key=API_KEY, stored_at=now_utc()))
+        self.db.commit()
+
+    def kept_keys(self):
+        self.db.expire_all()
+        return sorted(k.identity for k in self.db.query(KavitaKey).all())
 
     def assertReset(self, sid):
         s = self.session(sid)
@@ -169,11 +181,41 @@ class SaveMovesKavita(KavitaAddressBase):
         self.assertTrue(all("authorization" not in q.headers for q in after))
 
     def test_the_same_address_written_differently_keeps_the_connections(self):
+        self.keep_key("plex:1")
         for same in (KAVITA_A + "/", "HTTP://192.168.1.20:5000"):
             r = self.save(("integration.kavita.url", same))
             self.assertEqual(r.status_code, 200, r.text)
             self.assertConnected(self.sam)
             self.assertConnected(self.kim)
+            self.assertEqual(self.kept_keys(), ["plex:1"])
+
+    def test_a_new_address_drops_the_kept_keys_too(self):
+        self.keep_key("plex:1")
+        self.keep_key("plex:2", base=KAVITA_B)
+        self.assertEqual(self.save(("integration.kavita.url", KAVITA_B)).status_code, 200)
+        self.assertEqual(self.kept_keys(), [])
+
+    def test_an_unrelated_save_and_a_cleared_address_keep_the_keys(self):
+        self.keep_key("plex:1")
+        self.assertEqual(self.save(("branding.app_name", "Cinema")).status_code, 200)
+        self.assertEqual(self.save(("integration.kavita.url", "")).status_code, 200)
+        self.assertEqual(self.kept_keys(), ["plex:1"])
+
+    def test_the_keys_go_even_when_the_sessions_could_not_be_reset(self):
+        self.keep_key("plex:1")
+        broken = mock.AsyncMock(side_effect=ConnectionError("redis down"))
+        with mock.patch.object(session_manager, "clear_kavita_connections", broken):
+            self.assertEqual(self.save(("integration.kavita.url", KAVITA_B)).status_code, 200)
+        self.assertEqual(self.kept_keys(), [])
+
+    def test_a_failed_key_delete_does_not_fail_the_save_or_the_session_reset(self):
+        self.keep_key("plex:1")
+        with mock.patch.object(kavita_keys, "forget_all", side_effect=RuntimeError("locked")), \
+             self.assertLogs("app.routers.admin_settings", level="WARNING") as logs:
+            r = self.save(("integration.kavita.url", KAVITA_B))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("keys weren't deleted", logs.output[0])
+        self.assertReset(self.sam)
 
     def test_clearing_the_address_keeps_the_connections(self):
         self.assertEqual(self.save(("integration.kavita.url", "")).status_code, 200)

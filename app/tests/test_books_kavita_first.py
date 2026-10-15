@@ -181,7 +181,8 @@ class RenewedToken(unittest.TestCase):
         series, reach, note = self.run_async(books._kavita_reach(self.user, "sid-1"))
         self.assertEqual((series, reach, note), ({1, 2}, (KAVITA, "fresh-jwt"), None))
         self.renew.assert_awaited_once_with(KAVITA, "person-key")
-        self.update.assert_awaited_once_with("sid-1", {"kavita_token": "fresh-jwt"})
+        self.update.assert_awaited_once_with(
+            "sid-1", {"kavita_token": "fresh-jwt", "kavita_api_key": "person-key", "kavita_base": KAVITA})
 
     def test_a_key_kavita_refuses_falls_through_to_the_hand_off(self):
         self.series.side_effect = kavita.KavitaTokenRefused("expired")
