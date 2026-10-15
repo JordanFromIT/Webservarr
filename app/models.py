@@ -836,6 +836,24 @@ class BookNotice(Base):
         return f"<BookNotice(identity='{self.identity}', state='{self.state}')>"
 
 
+class KavitaKey(Base):
+    """A person's own Kavita API key with the Kavita address it came from, kept
+    after they connect so a new session can sign them in to Kavita again
+    without the browser trip (services/kavita_keys.py). It belongs to the
+    person, not to a session: logging out leaves it. One row each, keyed by
+    account identity; only ever used at `base`. Stored as plain text, the way
+    the settings table keeps its secrets (those are only masked on screen)."""
+    __tablename__ = "kavita_keys"
+
+    identity = Column(String(255), primary_key=True)
+    base = Column(String(500), nullable=False)
+    api_key = Column(String(200), nullable=False)
+    stored_at = Column(DateTime, nullable=False)                   # naive UTC
+
+    def __repr__(self):
+        return f"<KavitaKey(identity='{self.identity}')>"
+
+
 # ---- Insights (app/services/insights_store.py) ----
 # Recorded as things happen, so the admin's Insights page has their history
 # (docs/superpowers/specs/2026-10-10-insights-design.md, section 5). Keyed by

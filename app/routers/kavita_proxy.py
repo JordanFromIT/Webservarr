@@ -36,6 +36,7 @@ from app.integrations.config import same_address
 from app.limiter import limiter, rate_limit_key
 from app.integrations import kavita as kavita_api
 from app.models import Book, Setting
+from app.services import kavita_keys
 from app.settings_registry import switch_is_off
 
 logger = logging.getLogger(__name__)
@@ -608,6 +609,19 @@ def force_query_response_mode(location: str) -> str:
     return parsed._replace(query=urlencode(params)).geturl()
 
 
+def with_prompt_none(location: str) -> str:
+    """Add prompt=none to an Authentik authorize URL: with no Authentik session
+    it answers error=login_required to the callback at once, instead of
+    showing its interactive login page. For the hand-offs nobody asked for (a
+    page or the reader starting one by itself); the Connect button's trip
+    leaves it off, since someone with no Authentik session could never
+    connect otherwise."""
+    parsed = urlparse(location)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    params["prompt"] = "none"
+    return parsed._replace(query=urlencode(params)).geturl()
+
+
 # Where a hand-off may send the person back to: the Books pages (a book, an
 # author, a series) and the reader. Anything else is /books.
 _RETURN_ROOTS = ("/books", "/reader")
@@ -660,18 +674,26 @@ CONNECT_AT_FIELD = "kavita_connect_at"
 CONNECT_AGAIN_AFTER_S = 60
 
 
-def connect_needed(user: Dict[str, str], db=None) -> bool:
-    """True when this session has no Kavita sign-in for the address eBooks
-    uses now: Kavita is set up, this person may reach it, and the session holds
-    no token, or one from another address. Kavita not set up, or eBooks off
-    for a member, is never a reason to connect."""
+def _unconnected_base(user: Dict[str, str], db=None) -> Optional[str]:
+    """The Kavita address eBooks uses now when this session has no sign-in for
+    it, else None: Kavita is set up, this person may reach it, and the session
+    holds no token, or one from another address. Kavita not set up, or eBooks
+    off for a member, is never a reason to connect."""
     try:
         base = kavita_url_for(user, db=db)
     except HTTPException:
-        return False
+        return None
     if not base:
-        return False
-    return not (user.get("kavita_token") and same_address(user.get("kavita_base"), base))
+        return None
+    if user.get("kavita_token") and same_address(user.get("kavita_base"), base):
+        return None
+    return base
+
+
+def connect_needed(user: Dict[str, str], db=None) -> bool:
+    """True when this session has no Kavita sign-in for the address eBooks
+    uses now (_unconnected_base)."""
+    return _unconnected_base(user, db) is not None
 
 
 async def connect_first(request: Request, user: Dict[str, str], session_id: Optional[str],
@@ -686,15 +708,26 @@ async def connect_first(request: Request, user: Dict[str, str], session_id: Opti
     always did). The router's fetch (X-WS-Nav) is answered 204, which it loads
     in full: a redirect would be followed by the fetch itself, into Authentik's
     origin, and fail. A full load is sent to /kavita/connect, which records the
-    time (this only reads it) and comes back to this address."""
+    time (this only reads it) and comes back to this address. A person with a
+    key on file is signed in here instead, and served the page."""
     if request.query_params.get("kavita") == "error" or not session_id:
         return None
     try:
-        if not connect_needed(user, db):
-            return None
+        base = _unconnected_base(user, db)
     except Exception:  # noqa: BLE001 - the page loads, and its script asks as it always did
         logger.warning("Could not read whether Books needs a Kavita sign-in", exc_info=True)
         return None
+    if base is None:
+        return None
+    # The person's own key, kept at their last connect, signs them in here with
+    # no trip, so Authentik is not asked about a session it may have let lapse.
+    try:
+        if await kavita_keys.relink(user, base, session_id):
+            return None
+    except kavita_api.KavitaUnavailable:
+        return None       # Kavita is not answering: a trip would not help, and the page says so
+    except Exception:  # noqa: BLE001 - no key to use: the trip below, as it always was
+        logger.warning("Could not sign in to Kavita from the kept key", exc_info=True)
     try:
         last = float(user.get(CONNECT_AT_FIELD) or 0)
     except (TypeError, ValueError):
@@ -725,6 +758,12 @@ async def kavita_connect(
     ?return=<path> says which page to come back to (safe_return_path: a path
     under /books or /reader, else /books). It is kept in the session across the
     trip, because Authentik's redirect carries nothing of ours.
+
+    An automatic trip (a page's address or script sent the browser here) asks
+    Authentik with prompt=none, so a lapsed Authentik session ends at
+    /signin-oidc with login_required and the page's own connect box, never
+    Authentik's login page. The person's click on Connect or Try again adds
+    ?interactive=1, which leaves it off so they can sign in there.
 
     The trip's time is kept with it (CONNECT_AT_FIELD), so every trip, however
     it was started, holds connect_first off for a minute. A trip that can't be
@@ -764,6 +803,8 @@ async def kavita_connect(
         return _connect_failed(return_to)
 
     location = force_query_response_mode(location)
+    if request.query_params.get("interactive") != "1":
+        location = with_prompt_none(location)
     response = RedirectResponse(location, status_code=302)
 
     # Kavita sets its OIDC nonce and correlation cookies here, scoped to
@@ -801,6 +842,14 @@ async def signin_oidc(
     session = await session_manager.get_session(session_id) if session_id else None
     if not session:
         return RedirectResponse("/login", status_code=302)
+
+    if request.query_params.get("error"):
+        # Authentik refused to sign them in (login_required from an automatic
+        # trip with no Authentik session, or access_denied): nothing to hand to
+        # Kavita, so no token, and the page shows its connect box.
+        logger.info("Kavita hand-off ended at the identity provider: %s",
+                    re.sub(r"[^a-z_]", "", request.query_params["error"].lower())[:40])
+        return await _handoff_failed(session_id, session)
 
     try:
         base = kavita_url_for(session)
@@ -889,17 +938,14 @@ async def signin_oidc(
         logger.warning("Kavita callback failed: %s", exc)
         raise HTTPException(status_code=503, detail="Kavita is unavailable")
 
-    # The page the hand-off was started from, checked again here (a session
-    # field is ours, but it is cheap to be sure), and forgotten.
-    return_to = safe_return_path(session.get("kavita_return"))
-    if session.get("kavita_return"):
-        await session_manager.update_session(session_id, {"kavita_return": ""})
-
     if not token:
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
-        return RedirectResponse(_with_error_flag(return_to), status_code=302)
+        return await _handoff_failed(session_id, session)
 
+    return_to = await _take_return_path(session_id, session)
     _remember_kavita_account(session, kavita_account)
+    if kavita_api_key:
+        kavita_keys.remember(session, base, kavita_api_key)
     # The address is stored with the token: the proxy sends the token only to
     # the address it came from, so one obtained just before the Kavita address
     # moved (or missed by the reset) never reaches the new one.
@@ -908,6 +954,20 @@ async def signin_oidc(
         {"kavita_token": token, "kavita_api_key": kavita_api_key or "", "kavita_base": base},
     )
     return RedirectResponse(return_to, status_code=302)
+
+
+async def _take_return_path(session_id: str, session: dict) -> str:
+    """The page the hand-off was started from, checked again here (a session
+    field is ours, but it is cheap to be sure), and forgotten."""
+    return_to = safe_return_path(session.get("kavita_return"))
+    if session.get("kavita_return"):
+        await session_manager.update_session(session_id, {"kavita_return": ""})
+    return return_to
+
+
+async def _handoff_failed(session_id: str, session: dict) -> RedirectResponse:
+    """Back to the page that started the hand-off, flagged as failed."""
+    return RedirectResponse(_with_error_flag(await _take_return_path(session_id, session)), status_code=302)
 
 
 def _remember_kavita_account(session: dict, account) -> None:
@@ -1008,10 +1068,29 @@ async def kavita_proxy(
     api_key = current_user.get("kavita_api_key") or None
     if not same_address(current_user.get("kavita_base"), base):
         # Obtained from another Kavita address (or before the address was
-        # recorded with it): never sent here. Kavita answers 401 and the page
-        # reconnects, which stores a token for this address.
+        # recorded with it): never sent here. A key kept for this person at
+        # this address signs them in again below; with none, Kavita answers 401
+        # and the page reconnects, which stores a token for this address.
         token = api_key = None
     body = await request.body()
+    renewed = False                  # a new token is minted at most once a request
+
+    async def renew() -> bool:
+        """Mint a token from the person's own key (kavita_keys.relink) and use it
+        from here on. False when there is no key, or Kavita refuses it."""
+        nonlocal token, api_key, renewed
+        renewed = True
+        try:
+            relinked = await kavita_keys.relink(current_user, base, session_id)
+        except kavita_api.KavitaUnavailable:
+            raise HTTPException(status_code=503, detail="Kavita is unavailable")
+        if not relinked:
+            return False
+        token, api_key = relinked.token, relinked.api_key
+        return True
+
+    if not token:
+        await renew()
     if token:
         # Without a token Kavita answers 401 itself. With one, whatever the
         # request names (a chapter, a volume, a series) must be this person's to see.
@@ -1019,39 +1098,55 @@ async def kavita_proxy(
         if items is None:
             raise HTTPException(status_code=404, detail="Not found")
         if items:
-            await _require_visible_items(sorted(items), base, token, session_id)
-    headers = build_forward_headers(request, token)
+            try:
+                await _require_visible_items(sorted(items), base, token, session_id)
+            except HTTPException as refused:
+                # Kavita refused the token: a new one from their key, once, then asked again.
+                if refused.status_code != 401 or renewed or not await renew():
+                    raise
+                await _require_visible_items(sorted(items), base, token, session_id)
 
-    params = dict(request.query_params)
-    # Kavita's asset endpoints reject the Bearer token and require an apiKey
-    # query parameter, because they are designed for <img src> and CSS url()
-    # references that cannot send headers. Inject it here so the key stays
-    # server-side and never appears in markup the browser can read — book HTML
-    # arrives with the key stripped by rewrite_book_html for exactly that reason.
-    lowered = path.lower()
-    if ("apiKey" not in params) and (
-        lowered.startswith("api/image/") or "book-resources" in lowered
-    ):
-        if api_key:
-            params["apiKey"] = api_key
+    async def send():
+        """(client, upstream response) for this request with the token held now."""
+        headers = build_forward_headers(request, token)
+        params = dict(request.query_params)
+        # Kavita's asset endpoints reject the Bearer token and require an apiKey
+        # query parameter, because they are designed for <img src> and CSS url()
+        # references that cannot send headers. Inject it here so the key stays
+        # server-side and never appears in markup the browser can read (book HTML
+        # arrives with the key stripped by rewrite_book_html for exactly that reason).
+        lowered = path.lower()
+        if ("apiKey" not in params) and (
+            lowered.startswith("api/image/") or "book-resources" in lowered
+        ):
+            if api_key:
+                params["apiKey"] = api_key
+        client = httpx.AsyncClient(timeout=PROXY_TIMEOUT)
+        try:
+            upstream_request = client.build_request(
+                request.method,
+                target,
+                headers=headers,
+                content=body,
+                params=params,
+            )
+            return client, await client.send(upstream_request, stream=True)
+        except httpx.RequestError as exc:
+            await client.aclose()
+            logger.warning("Kavita proxy request failed for %s: %s", path, exc)
+            raise HTTPException(status_code=503, detail="Kavita is unavailable")
 
-    client = httpx.AsyncClient(timeout=PROXY_TIMEOUT)
-    try:
-        upstream_request = client.build_request(
-            request.method,
-            target,
-            headers=headers,
-            content=body,
-            params=params,
-        )
-        upstream = await client.send(upstream_request, stream=True)
-    except httpx.RequestError as exc:
+    client, upstream = await send()
+    if upstream.status_code == 401 and not renewed:
+        # The token expired: a new one from the person's own key, and the
+        # request sent once more (its body is already read). The first answer
+        # is closed before renewing, which may raise (Kavita not answering).
+        await upstream.aclose()
         await client.aclose()
-        logger.warning("Kavita proxy request failed for %s: %s", path, exc)
-        raise HTTPException(status_code=503, detail="Kavita is unavailable")
-
+        if await renew():
+            client, upstream = await send()
     if upstream.status_code == 401:
-        # The stored Kavita token is missing or expired. The frontend re-runs
+        # No key to renew from, or Kavita refused it too. The frontend re-runs
         # the handshake at /kavita/connect and retries once.
         await upstream.aclose()
         await client.aclose()

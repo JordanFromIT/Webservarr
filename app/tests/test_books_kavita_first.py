@@ -181,7 +181,8 @@ class RenewedToken(unittest.TestCase):
         series, reach, note = self.run_async(books._kavita_reach(self.user, "sid-1"))
         self.assertEqual((series, reach, note), ({1, 2}, (KAVITA, "fresh-jwt"), None))
         self.renew.assert_awaited_once_with(KAVITA, "person-key")
-        self.update.assert_awaited_once_with("sid-1", {"kavita_token": "fresh-jwt"})
+        self.update.assert_awaited_once_with(
+            "sid-1", {"kavita_token": "fresh-jwt", "kavita_api_key": "person-key", "kavita_base": KAVITA})
 
     def test_a_key_kavita_refuses_falls_through_to_the_hand_off(self):
         self.series.side_effect = kavita.KavitaTokenRefused("expired")
@@ -251,9 +252,15 @@ class PersonToken(unittest.TestCase):
         self.assertEqual(dict(request.url.params), {"apiKey": self.KEY, "pluginName": "WebServarr"})
 
     def test_refusals_and_failures_carry_no_secret(self):
+        # Only a 401 is Kavita saying no to the key; everything else may leave the key good.
         for answer, kind in ((httpx.Response(401), kavita.KavitaTokenRefused),
-                             (httpx.Response(200, json={}), kavita.KavitaTokenRefused),
-                             (httpx.Response(200, text="nope"), kavita.KavitaTokenRefused),
+                             (httpx.Response(200, json={}), kavita.KavitaUnavailable),
+                             (httpx.Response(200, text="nope"), kavita.KavitaUnavailable),
+                             (httpx.Response(500), kavita.KavitaUnavailable),
+                             (httpx.Response(502), kavita.KavitaUnavailable),
+                             (httpx.Response(503), kavita.KavitaUnavailable),
+                             (httpx.Response(429), kavita.KavitaUnavailable),
+                             (httpx.ConnectTimeout(f"slow {KAVITA}/?apiKey={self.KEY}"), kavita.KavitaUnavailable),
                              (httpx.ConnectError(f"failed {KAVITA}/?apiKey={self.KEY}"), kavita.KavitaUnavailable)):
             with self.subTest(answer=repr(answer)):
                 exc, _seen = self.call(answer)

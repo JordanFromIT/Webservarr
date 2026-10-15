@@ -27,6 +27,7 @@ from app.integrations import config as integration_config
 from app.dependencies import require_admin, require_same_origin
 from app.limiter import limiter
 from app.models import Setting
+from app.services import kavita_keys
 from app.settings_registry import (
     MASK, PAGE_ADDRESSES, PATTERN_DEFS, REGISTRY, USER_DATA_MESSAGE, active_defs, get_def, is_user_data, mask,
     meta_for, normalize_page_order, validate_value,
@@ -47,8 +48,9 @@ SAVE_FAILED_MESSAGE = "Couldn't save the settings right now. Nothing was changed
 
 
 # Kavita keeps no saved secret, but each member's own Kavita sign-in (held in
-# their session) is sent to its address. A save or import that moves the
-# address to a different place resets them all, so none follows it there.
+# their session, and their API key kept on the server) is sent to its
+# address. A save or import that moves the address to a different place
+# resets them all, so none follows it there.
 KAVITA_URL_KEY = "integration.kavita.url"
 KAVITA_RESET = "reset_ebooks_connections"
 KAVITA_RESET_LABEL = "eBooks connections"
@@ -63,9 +65,16 @@ def kavita_moves(current: Dict[str, str], writes: Dict[str, str]) -> bool:
 
 
 async def reset_kavita_connections() -> None:
-    """Drop every member's Kavita sign-in after the address moved. A failure
-    is logged, not raised: the save has landed, and the proxy sends a token
-    only to the address it was obtained from, so none reaches the new one."""
+    """Drop every member's Kavita sign-in after the address moved: the one in
+    each session and the API key kept for each person (services/kavita_keys).
+    A failure is logged, not raised: the save has landed, and the proxy sends
+    a token or key only to the address it was obtained from, so none reaches
+    the new one."""
+    try:
+        kavita_keys.forget_all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Kavita address changed but the kept Kavita keys weren't deleted (%s)",
+                       type(exc).__name__)
     try:
         cleared = await session_manager.clear_kavita_connections()
         logger.info("Kavita address changed: reset %d eBooks connection(s)", cleared)

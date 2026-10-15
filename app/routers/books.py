@@ -55,7 +55,7 @@ from app.limiter import limiter
 from app.routers import kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import book_catalog, book_discovery, book_personal, insights_store, listening
+from app.services import book_catalog, book_discovery, book_personal, insights_store, kavita_keys, listening
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -150,31 +150,21 @@ def _blocked_answer(who: "Scope", rows) -> Optional[JSONResponse]:
 
 
 async def _renewed_token(user: dict, base: str, session_id: Optional[str]) -> Optional[str]:
-    """A new token for the one Kavita refused, from the person's own API key
-    (kept in their session at connect, kavita.person_token), saved in the
-    session. None when there is no key, or Kavita will not take it: then they
-    connect again, through the page's hand-off. KavitaUnavailable when Kavita
-    does not answer: a trip would not help, so that is not a reason to go."""
-    api_key = user.get("kavita_api_key") or ""
-    if not api_key or not session_id:
-        return None
-    try:
-        token = await kavita.person_token(base, api_key)
-    except kavita.KavitaTokenRefused:
-        return None
-    try:
-        await session_manager.update_session(session_id, {"kavita_token": token})
-    except RedisError:
-        logger.warning("A renewed Kavita token could not be saved")
-    return token
+    """A new token for this person, from their own Kavita API key (the one kept
+    for them, else the one their session holds: kavita_keys.relink), saved in
+    the session. None when there is no key, or Kavita will not take it: then
+    they connect again, through the page's hand-off. KavitaUnavailable when
+    Kavita does not answer: a trip would not help, so that is not a reason to go."""
+    relinked = await kavita_keys.relink(user, base, session_id)
+    return relinked.token if relinked else None
 
 
 async def _kavita_reach(user: dict, session_id: Optional[str] = None
                         ) -> Tuple[set, Optional[Tuple[str, str]], Optional[dict]]:
     """(series ids, (address, token), note) for this person's own Kavita account.
-    Nothing readable is no series, never all of them. A token Kavita refuses
-    is renewed once from their own key (_renewed_token) before they are told
-    to connect again."""
+    Nothing readable is no series, never all of them. A session with no token
+    for this address, or one Kavita refuses, is given a new one from their own
+    key (_renewed_token) once, before they are told to connect again."""
     try:
         base = kavita_proxy.kavita_url_for(user)
     except HTTPException:
@@ -182,11 +172,20 @@ async def _kavita_reach(user: dict, session_id: Optional[str] = None
     if not base:
         return set(), None, None
     token = user.get("kavita_token") or ""
+    renewed = False
     if not token or not same_address(user.get("kavita_base"), base):
-        return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
+        try:
+            token = await _renewed_token(user, base, session_id)
+        except kavita.KavitaUnavailable:
+            return set(), None, _note("kavita", "unavailable", EBOOKS_DOWN)
+        if not token:
+            return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
+        renewed = True
     try:
         series_ids = await kavita.user_series_ids(base, token)
     except kavita.KavitaTokenRefused:
+        if renewed:
+            return set(), None, _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
         try:
             token = await _renewed_token(user, base, session_id)
         except kavita.KavitaUnavailable:

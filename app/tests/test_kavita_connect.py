@@ -271,8 +271,10 @@ def check_retry(t, src):
     # "Try again" counts as an attempt: if it comes back still broken, the
     # next 401 shows the message instead of going round again.
     body = body_of(t, src, "retry")
+    # Only the person's click is interactive (the identity provider may show its
+    # login page); reconnect's automatic trip leaves with no argument.
     t.assertLess(first(t, body, r"\bmarkTry\(\s*\)", "retry is not recorded"),
-                 first(t, body, r"\bleave\(\s*\)", "retry goes nowhere"))
+                 first(t, body, r"\bleave\(\s*true\s*\)", "retry goes nowhere, or not interactively"))
     for name in ("init", "reconnect", "retry", "arrivedFromFailedConnect"):
         t.assertTrue(live_matches(src, rf"\bwindow\.WSKavita\s*=\s*\{{[^}}]*\b{name}\s*:"), name)
 

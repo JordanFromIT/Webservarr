@@ -5,6 +5,9 @@
 // that arrival must count as this minute's attempt, so a soft navigation to
 // another Books page within the minute makes no second trip and shows the
 // problem note instead. Outside the minute, or with no failure, one trip.
+// Only the person's own click (Connect / Try again) makes an interactive trip
+// (interactive=1: the identity provider may show its login page); the
+// automatic one never does (the server adds prompt=none to it).
 // Run: node app/tests/js/kavita_connect.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -89,6 +92,23 @@ function visit(K, problems) {
   const problems = [];
   visit(K, problems);
   check('after the minute: one trip again', trips.length === 1 && problems.length === 0, { trips, problems });
+  await w.happyDOM.close();
+}
+
+// 5. The click on Connect / Try again is interactive; the automatic trip is not.
+{
+  const { w, K, trips } = load('https://ws.test/books/7');
+  K.init();
+  K.retry();
+  check('the button: one interactive trip to this page', trips.length === 1 &&
+    trips[0] === '/kavita/connect?return=' + encodeURIComponent('/books/7') + '&interactive=1', trips);
+  await w.happyDOM.close();
+}
+{
+  const { w, K, trips } = load('https://ws.test/books/7');
+  K.init();
+  K.reconnect(() => {});
+  check('the automatic trip is not interactive', trips.length === 1 && !/interactive/.test(trips[0]), trips);
   await w.happyDOM.close();
 }
 

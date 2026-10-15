@@ -9,6 +9,12 @@
  * that "works" but still leaves Kavita saying no - becomes a loop: the page
  * flashes until the rate limit answers with raw JSON.
  *
+ * The trip itself is automatic (the server asks the identity provider with
+ * prompt=none, so a lapsed provider session ends at the page's own connect
+ * box and never at the provider's login page), except when the person
+ * pressed Connect or Try again: that trip adds interactive=1 so they can sign
+ * in there. Without it someone with no provider session could never connect.
+ *
  * So the pages ask here instead:
  *   - at most one automatic attempt a minute (the time is kept in
  *     sessionStorage, so it survives the round trip);
@@ -30,6 +36,7 @@
   'use strict';
 
   var CONNECT_URL = '/kavita/connect';
+  var INTERACTIVE = 'interactive=1';
   var LAST_TRY_KEY = 'ws:kavita-connect-at';
   var RETRY_WINDOW_MS = 60 * 1000;
 
@@ -43,17 +50,21 @@
   }
 
   /** The sign-in's address, asking to come back to this very page (the server
-      only takes a page under /books or /reader, and falls back to /books). */
-  function connectUrl() {
+      only takes a page under /books or /reader, and falls back to /books).
+      interactive: the person asked for it, so the provider may show its login page. */
+  function connectUrl(interactive) {
     var here = '';
     try { here = location.pathname + location.search; } catch (e) { here = ''; }
-    return CONNECT_URL + (here ? '?return=' + encodeURIComponent(here) : '');
+    var query = [];
+    if (here) query.push('return=' + encodeURIComponent(here));
+    if (interactive) query.push(INTERACTIVE);
+    return CONNECT_URL + (query.length ? '?' + query.join('&') : '');
   }
 
   /** Off to the sign-in: a full navigation, never a soft one (it leaves the site). */
-  function leave() {
+  function leave(interactive) {
     leaving = true;
-    var url = connectUrl();
+    var url = connectUrl(interactive);
     var router = window.WS && window.WS.router;
     if (router && typeof router.hardNavigate === 'function') router.hardNavigate(url);
     else window.location.href = url;
@@ -113,10 +124,11 @@
     leave();
   }
 
-  /** The "Try again" button. Counts as an attempt, so a still-broken sign-in shows the message again. */
+  /** The "Connect" / "Try again" button. Counts as an attempt, so a still-broken sign-in shows the message again.
+      The only trip that is interactive: the person asked for it. */
   function retry() {
     markTry();
-    leave();
+    leave(true);
   }
 
   window.WSKavita = { init: init, reconnect: reconnect, retry: retry, arrivedFromFailedConnect: arrivedFromFailedConnect,

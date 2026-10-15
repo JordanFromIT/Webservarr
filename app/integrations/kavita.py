@@ -382,23 +382,27 @@ async def person_token(base: str, api_key: str) -> str:
     """The person's own token again, from their own API key: the exchange
     /signin-oidc makes when they connect (Plugin/authenticate, as WebServarr),
     so a token Kavita has let lapse is renewed without a trip through the
-    sign-in. KavitaTokenRefused when Kavita will not take the key (they have
-    to connect again); KavitaUnavailable when it does not answer. No error
-    carries the key or the token."""
+    sign-in. KavitaTokenRefused only when Kavita says no to the key (401: it
+    was rotated, so they have to connect again). Anything else, a 5xx, a 429,
+    an answer that is not the expected JSON, is KavitaUnavailable: the key
+    may be fine, and nobody should lose it or be sent on a trip for that. No
+    error carries the key or the token."""
     async with _user_client() as client:
         try:
             response = await client.post(f"{base}/api/Plugin/authenticate",
                                          params={"apiKey": api_key, "pluginName": PLUGIN_NAME})
         except httpx.HTTPError:
             raise KavitaUnavailable("Kavita did not answer") from None
-    if response.status_code != 200:
+    if response.status_code == 401:
         raise KavitaTokenRefused("Kavita refused the person's key")
+    if response.status_code != 200:
+        raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
     try:
         token = (response.json() or {}).get("token")
     except (ValueError, AttributeError):
-        raise KavitaTokenRefused("Kavita's answer could not be read") from None
+        raise KavitaUnavailable("Kavita's answer could not be read") from None
     if not isinstance(token, str) or not token:
-        raise KavitaTokenRefused("Kavita refused the person's key")
+        raise KavitaUnavailable("Kavita's answer held no token")
     return token
 
 
