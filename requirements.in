@@ -69,7 +69,7 @@ requests==2.33.0  # CVE-2024-47081 / CVE-2026-25645
 cryptography>=50.0.0
 urllib3>=2.8.0
 idna>=3.15
-aiohttp>=3.14.3
+aiohttp>=3.14.4
 multidict>=6.9.1  # GHSA-54p9-h82j-f925
 
 # Date/time utilities
