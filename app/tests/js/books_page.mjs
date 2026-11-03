@@ -301,6 +301,9 @@ async function run(name, fn) {
 
 // ---------------------------------------------------------------------------
 
+// The tour holds Continue for 5 s on each step (nextDelay): tests release it.
+const goNext = (b) => { b.disabled = false; b.click(); };
+
 await run('the skeleton holds the grid, then the books replace it', async (make) => {
   const slow = deferred();
   const t = make({ routes: (net) => {
@@ -2473,7 +2476,7 @@ await run('the guide: four short steps, in the order a person meets them, each o
   for (let i = 0; i < 4; i++) {
     titles.push(tourTitle(t));
     asked.push(t.doc.getElementById('tourBody').textContent);
-    t.doc.getElementById('tourNext').click();
+    goNext(t.doc.getElementById('tourNext'));
     await t.clock.advance(10);
   }
   check('search, Continue, the chips, then opening a book', titles.join('|') === 'Find a book|Pick up where you left off|Ebooks, audiobooks or both|Open a book', titles);
@@ -2486,14 +2489,14 @@ await run('the guide: four short steps, in the order a person meets them, each o
   }
 });
 
-await run('the guide: Skip and Escape end it, and it stays seen', async (make) => {
+await run('the guide: Escape ends it (no Skip button), and it stays seen', async (make) => {
   const t = withTour(make({ routes: usual() }));
   const mounted = t.mount();
   await t.clock.advance(2600);
   await mounted;
   check('running', tourOn(t));
-  t.doc.getElementById('tourSkip').click();
-  check('Skip ends it', !tourOn(t));
+  t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check('Escape ends it', !tourOn(t));
   t.help = t.q('#helpBtn');
   t.help.click();
   check('the help button runs it again', tourOn(t) && tourTitle(t) === 'Find a book');
@@ -2577,7 +2580,7 @@ await run('the guide: with nothing in progress the Continue step still points at
   // A box with a size, so the step has something to point at (the test window lays nothing out).
   sec.getBoundingClientRect = () => ({ left: 0, top: 200, right: 600, bottom: 260, width: 600, height: 60, x: 0, y: 200 });
   sec.scrollIntoView = () => {};
-  t.doc.getElementById('tourNext').click();
+  goNext(t.doc.getElementById('tourNext'));
   await new Promise((r) => setTimeout(r, 450));   // the engine places the bubble after the scroll settles (a real timer)
   check('step two is the Continue step', tourTitle(t) === 'Pick up where you left off');
   check('so the spotlight is on the section, not the middle of the page', !t.doc.getElementById('tourSpotlight').classList.contains('tour-spotlight-empty'));
@@ -2596,7 +2599,7 @@ await run('the guide: reduced motion jumps to each step instead of gliding', asy
   await mounted;
   t.q('#helpBtn').click();
   check('with less motion asked for, the scroll to the first step is instant', behaviours.join() === 'auto', behaviours);
-  t.doc.getElementById('tourSkip').click();
+  t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   t.win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   t.q('#helpBtn').click();
   check('with motion allowed it glides', behaviours.join() === 'auto,smooth', behaviours);
@@ -2628,6 +2631,7 @@ await run('T5H2: typing in the search box during the guide is the person\'s: the
   editable.dispatchEvent(e3);
   check('an editable box too', e3.defaultPrevented === false && tourTitle(t) === 'Find a book');
   // Everywhere else the arrows still turn the guide (the reader's guide works the same).
+  t.doc.getElementById('tourNext').disabled = false;   // past the 5 s hold
   const e4 = new t.win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
   t.doc.body.dispatchEvent(e4);
   check('on the page the right arrow goes on a step and is taken', e4.defaultPrevented === true && tourTitle(t) === 'Pick up where you left off', tourTitle(t));
