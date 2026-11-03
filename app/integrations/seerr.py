@@ -186,39 +186,69 @@ async def get_recent_requests(limit: int = 10) -> list:
         return []
 
 
+# Seerr checks the Plex token against plex.tv inside this one call, so it takes
+# as long as plex.tv does. Only the read wait is long; an unreachable Seerr
+# still fails fast.
+PLEX_AUTH_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+PLEX_AUTH_ATTEMPTS = 2
+PLEX_AUTH_RETRY_DELAY = 0.5
+
+
 async def authenticate_with_plex_token(plex_token: str) -> str | None:
     """
     Authenticate with Seerr using a Plex token.
     Calls POST /api/v1/auth/plex and returns the connect.sid cookie value on success.
-    Returns None on failure.
+    Returns None on failure. A timeout, a connection failure or an HTTP 5xx is
+    tried once more; a 401/403 is Seerr refusing the token, so it is not.
     """
     config = _get_config()
     if not config["url"]:
         return None
 
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-            resp = await client.post(
-                f"{config['url']}/api/v1/auth/plex",
-                json={"authToken": plex_token},
-            )
-            if resp.status_code != 200:
-                logger.warning("Seerr Plex auth returned HTTP %d", resp.status_code)
+    for attempt in range(1, PLEX_AUTH_ATTEMPTS + 1):
+        started = time.monotonic()
+        last = attempt == PLEX_AUTH_ATTEMPTS
+        try:
+            async with httpx.AsyncClient(timeout=PLEX_AUTH_TIMEOUT, verify=False) as client:
+                resp = await client.post(
+                    f"{config['url']}/api/v1/auth/plex",
+                    json={"authToken": plex_token},
+                )
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            # str() of a timeout is empty, so name the class and repr it.
+            logger.warning("Seerr Plex auth error after %.1fs (attempt %d/%d): %s: %r",
+                           time.monotonic() - started, attempt, PLEX_AUTH_ATTEMPTS,
+                           type(e).__name__, e)
+            if last:
                 return None
-
-            # Extract connect.sid from Set-Cookie header
-            for cookie_header in resp.headers.get_list("set-cookie"):
-                if "connect.sid" in cookie_header:
-                    # Parse "connect.sid=s%3A....; Path=/; ..."
-                    sid_value = cookie_header.split("connect.sid=")[1].split(";")[0]
-                    return sid_value
-
-            logger.warning("Seerr Plex auth succeeded but no connect.sid cookie in response")
+            await asyncio.sleep(PLEX_AUTH_RETRY_DELAY)
+            continue
+        except Exception as e:
+            logger.warning("Seerr Plex auth error after %.1fs: %s: %r",
+                           time.monotonic() - started, type(e).__name__, e)
             return None
 
-    except Exception as e:
-        logger.warning("Seerr Plex auth error: %s", str(e))
+        if resp.status_code >= 500 and not last:
+            logger.warning("Seerr Plex auth returned HTTP %d after %.1fs (attempt %d/%d)",
+                           resp.status_code, time.monotonic() - started, attempt, PLEX_AUTH_ATTEMPTS)
+            await asyncio.sleep(PLEX_AUTH_RETRY_DELAY)
+            continue
+        if resp.status_code != 200:
+            logger.warning("Seerr Plex auth returned HTTP %d after %.1fs",
+                           resp.status_code, time.monotonic() - started)
+            return None
+
+        # Extract connect.sid from Set-Cookie header
+        for cookie_header in resp.headers.get_list("set-cookie"):
+            if "connect.sid" in cookie_header:
+                # Parse "connect.sid=s%3A....; Path=/; ..."
+                sid_value = cookie_header.split("connect.sid=")[1].split(";")[0]
+                return sid_value
+
+        logger.warning("Seerr Plex auth succeeded but no connect.sid cookie in response")
         return None
+
+    return None
 
 
 async def search_media(query: str, page: int = 1) -> dict:
