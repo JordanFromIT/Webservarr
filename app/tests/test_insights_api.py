@@ -295,7 +295,9 @@ class OwnerWhilePlexTvIsDown(Base):
                   {"account": "2002", "book_key": "5:1", "track_key": "11", "viewed_at": NOW - timedelta(hours=2)}]
         for p in (mock.patch.object(plex_share, "server_people", self.people),
                   mock.patch.object(pp, "play_events", mock.AsyncMock(return_value=events)),
-                  mock.patch.object(pp, "track_durations", mock.AsyncMock(return_value={"11": 1800000}))):
+                  mock.patch.object(pp, "track_durations", mock.AsyncMock(return_value={"11": 1800000})),
+                  # The plays are dated from NOW; the 30-day counts must not age out with the real clock.
+                  mock.patch.object(insights, "now_utc", return_value=NOW)):
             p.start()
             self.addCleanup(p.stop)
 
