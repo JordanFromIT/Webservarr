@@ -5,6 +5,7 @@ Every write is validated against the registry before anything is stored; a
 single bad value rejects the whole save with per-key messages (422). The 422
 body also carries `detail`, a copy of the first message.
 """
+import json
 import os
 import unittest
 from unittest import mock
@@ -36,8 +37,10 @@ class SettingsApiBase(unittest.TestCase):
         self.db.close()
 
     def save(self, *pairs):
+        # ASCII JSON, so a lone surrogate goes out as its escape text.
         return self.client.put("/api/admin/settings/bulk",
-                               json={"settings": [{"key": k, "value": v} for k, v in pairs]})
+                               content=json.dumps({"settings": [{"key": k, "value": v} for k, v in pairs]}),
+                               headers={"Content-Type": "application/json"})
 
     def assertRejected(self, r):
         """422 with per-key errors and a string detail equal to the first one."""

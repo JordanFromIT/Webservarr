@@ -30,6 +30,10 @@ python-multipart==0.0.32  # <0.0.30 carries a chain of parser advisories
 
 # OIDC Authentication
 authlib==1.9.5  # 1.9.x clears a critical and two highs against 1.8.0
+# authlib's OIDC client (AsyncOAuth2Client) runs on httpx2; without it authlib
+# falls back to plain httpx and warns that the backend is deprecated. Plain
+# httpx stays for the rest of the app.
+httpx2==2.16.0
 httpx==0.26.0
 itsdangerous==2.2.0
 
