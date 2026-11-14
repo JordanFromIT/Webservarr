@@ -238,7 +238,7 @@ async def submit(request: Request, body: SubmitBody, response: Response, db: Ses
     try:
         name, note = svc.clean_form(body.name, body.note)
     except svc.FormProblem as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from None
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
     ticket = request.cookies.get(TICKET_COOKIE) or ""
     if not ticket:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=TIMED_OUT)
@@ -319,13 +319,13 @@ async def approve_access_request(request_id: int, body: ApproveBody, current_use
     row = _row_in(db, request_id, "pending")
     keys = list(dict.fromkeys(body.library_keys))
     if not all(_LIBRARY_KEY.fullmatch(k) for k in keys):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=PICK_LIBRARIES)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=PICK_LIBRARIES)
     try:
         on_server = {lib["key"] for lib in await plex_share.list_libraries()}
     except plex_share.PlexShareUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from None
     if not set(keys) <= on_server:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=PICK_LIBRARIES)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=PICK_LIBRARIES)
     r = await session_manager.get_redis()
     claim = f"access_approve:{request_id}"
     if not await r.set(claim, "1", nx=True, ex=APPROVE_CLAIM_TTL):
