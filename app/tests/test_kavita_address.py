@@ -54,7 +54,7 @@ def run(coro_fn, *args):
         try:
             return await coro_fn(r, *args)
         finally:
-            await r.close()
+            await r.aclose()
     return asyncio.run(go())
 
 

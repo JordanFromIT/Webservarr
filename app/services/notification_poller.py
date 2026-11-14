@@ -1259,5 +1259,5 @@ async def stop_poller() -> None:
         await _lease.release()
         _lease = None
     if _redis:
-        await _redis.close()
+        await _redis.aclose()
         _redis = None
