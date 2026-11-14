@@ -183,7 +183,7 @@ class SessionManager:
     async def close(self):
         """Close Redis connection."""
         if self._redis:
-            await self._redis.close()
+            await self._redis.aclose()
 
     def generate_session_id(self) -> str:
         """Generate a secure random session ID."""

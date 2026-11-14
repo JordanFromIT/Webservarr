@@ -91,7 +91,7 @@ class UpdateSessionOverRealRedis(unittest.TestCase):
                     return await coro_fn(r)
             finally:
                 await r.delete(self.key)
-                await r.close()
+                await r.aclose()
         return asyncio.run(go())
 
     def test_a_live_session_is_merged_and_its_ttl_renewed(self):
