@@ -1,7 +1,8 @@
 """
 The app's own code raises none of the dependency deprecations it used to.
 
-Each import check runs in a fresh interpreter, so a module another test
+authlib's OIDC client runs on httpx2 (with only plain httpx installed, authlib
+falls back to it and warns that the backend is deprecated). Each import check runs in a fresh interpreter, so a module another test
 already imported cannot hide the warning.
 """
 import asyncio
@@ -13,12 +14,18 @@ import unittest
 import warnings
 from pathlib import Path
 from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
 try:
     from app import auth
     HAVE_APP = True
 except Exception:  # pragma: no cover - the laptop has no app dependencies
     HAVE_APP = False
+
+try:
+    import httpx2
+except ImportError:  # failed in AuthlibOnHttpx2.setUp, never skipped
+    httpx2 = None
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,6 +84,78 @@ class RedisClosedWithAclose(unittest.TestCase):
                 mock.patch.object(poller, "_lease", None):
             self.assertEqual(self.closing_warnings(poller.stop_poller), [])
             self.assertIsNone(poller._redis)
+
+
+@unittest.skipUnless(HAVE_APP, "app dependencies not installed")
+class AuthlibOnHttpx2(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(httpx2, "httpx2 is not installed (requirements.txt)")
+        self.client = auth.OIDCClient(
+            authentik_url="https://sso.example.test",
+            client_id="cid",
+            client_secret="secret",
+            redirect_uri="https://app.example.test/auth/callback",
+        )
+
+    def test_importing_auth_raises_no_authlib_deprecation(self):
+        caught = warnings_on_import("app.auth")
+        self.assertEqual([w for w in caught if w[0] == "AuthlibDeprecationWarning"], [])
+
+    def test_the_oauth_client_is_an_httpx2_client(self):
+        self.assertTrue(issubclass(auth.AsyncOAuth2Client, httpx2.AsyncClient))
+
+    def test_the_authorization_url_carries_pkce_state_and_nonce(self):
+        url = asyncio.run(self.client.get_authorization_url(
+            "the-state", code_challenge="the-challenge", nonce="the-nonce",
+        ))
+        parts = urlsplit(url)
+        query = parse_qs(parts.query)
+        self.assertEqual(f"{parts.scheme}://{parts.netloc}{parts.path}", self.client.authorize_url)
+        self.assertEqual(query["state"], ["the-state"])
+        self.assertEqual(query["code_challenge"], ["the-challenge"])
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertEqual(query["nonce"], ["the-nonce"])
+        self.assertEqual(query["client_id"], ["cid"])
+
+    def test_the_token_exchange_posts_through_httpx2(self):
+        seen = []
+
+        def token_endpoint(request):
+            seen.append(request)
+            return httpx2.Response(200, json={
+                "access_token": "at", "token_type": "Bearer", "id_token": "it",
+            })
+
+        real_client = auth.AsyncOAuth2Client
+
+        def offline_client(**kwargs):
+            return real_client(transport=httpx2.MockTransport(token_endpoint), **kwargs)
+
+        with mock.patch.object(auth, "AsyncOAuth2Client", offline_client):
+            token = asyncio.run(self.client.exchange_code_for_token("the-code", code_verifier="the-verifier"))
+
+        self.assertEqual(token["access_token"], "at")
+        self.assertEqual(token["id_token"], "it")
+        self.assertEqual(len(seen), 1)
+        request = seen[0]
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(str(request.url), self.client.token_url)
+        form = parse_qs(request.content.decode())
+        self.assertEqual(form["grant_type"], ["authorization_code"])
+        self.assertEqual(form["code"], ["the-code"])
+        self.assertEqual(form["code_verifier"], ["the-verifier"])
+        self.assertEqual(form["redirect_uri"], [self.client.redirect_uri])
+        # client_secret_basic: the client authenticates with an Authorization header.
+        self.assertTrue(request.headers["authorization"].startswith("Basic "))
+
+    def test_httpx2_request_lines_stay_out_of_the_log(self):
+        # M7: request URLs can carry secrets, so the request loggers sit at WARNING.
+        import logging
+
+        import app.main  # noqa: F401 - sets the logger levels
+
+        for name in ("httpx", "httpcore", "httpx2", "httpcore2"):
+            self.assertEqual(logging.getLogger(name).level, logging.WARNING, name)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ annotated-types==0.8.0
 anyio==4.16.0
     # via
     #   httpx
+    #   httpx2
     #   starlette
     #   watchfiles
 attrs==26.1.0
@@ -66,6 +67,7 @@ greenlet==3.5.6
 h11==0.16.0
     # via
     #   httpcore
+    #   httpcore2
     #   uvicorn
 hiredis==2.4.0
     # via -r /w/requirements.in
@@ -73,15 +75,20 @@ http-ece==1.2.1
     # via pywebpush
 httpcore==1.0.9
     # via httpx
+httpcore2==2.16.0
+    # via httpx2
 httptools==0.8.0
     # via uvicorn
 httpx==0.26.0
+    # via -r /w/requirements.in
+httpx2==2.16.0
     # via -r /w/requirements.in
 idna==3.20
     # via
     #   -r /w/requirements.in
     #   anyio
     #   httpx
+    #   httpx2
     #   requests
     #   yarl
 itsdangerous==2.2.0
@@ -153,12 +160,17 @@ starlette==1.10.0
     # via
     #   -r /w/requirements.in
     #   fastapi
+truststore==0.10.5
+    # via
+    #   httpcore2
+    #   httpx2
 typing-extensions==4.16.0
     # via
     #   aiohttp
     #   aiosignal
     #   anyio
     #   fastapi
+    #   httpx2
     #   limits
     #   pydantic
     #   pydantic-core

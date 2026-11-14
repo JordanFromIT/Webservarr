@@ -52,6 +52,9 @@ logger = logging.getLogger(__name__)
 # logged, without silencing the app's own INFO logging (M7).
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+# authlib's OIDC client runs on httpx2, which logs the same line under its own name.
+logging.getLogger("httpx2").setLevel(logging.WARNING)
+logging.getLogger("httpcore2").setLevel(logging.WARNING)
 # Kometa's webhook carries its secret in the address; the access log shows
 # it as ".../kometa/…" (app/routers/activity_webhooks.py). slowapi's warning
 # names the route function, not the path, but gets the filter as well.
