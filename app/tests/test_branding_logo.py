@@ -117,10 +117,15 @@ class LogoWriteValidationTests(unittest.TestCase):
         app.dependency_overrides.clear()
         limiter.enabled = self._limiter_was
 
+    def _save(self, *items):
+        """A BulkSave of ``items``, sent as ASCII JSON so a lone surrogate goes
+        out as its escape text instead of failing to encode in the client."""
+        return self.client.put("/api/admin/settings/bulk", content=json.dumps({"settings": list(items)}),
+                               headers={"Content-Type": "application/json"})
+
     def _save_one(self, key, value):
         """A one-item BulkSave, which is what the Settings page sends."""
-        return self.client.put("/api/admin/settings/bulk",
-                               json={"settings": [{"key": key, "value": value}]})
+        return self._save({"key": key, "value": value})
 
     def _stored(self, key):
         db = self.Session()
@@ -152,10 +157,8 @@ class LogoWriteValidationTests(unittest.TestCase):
                 self.assertEqual(r.json()["errors"][key], "Contains characters that can't be stored")
                 self.assertEqual(r.json()["detail"], "Contains characters that can't be stored")
                 self.assertIsNone(self._stored(key))
-        r = self.client.put("/api/admin/settings/bulk", json={"settings": [
-            {"key": "branding.tagline", "value": "fine"},
-            {"key": "branding.logo_url", "value": "https://example.com/\ud800.png"},
-        ]})
+        r = self._save({"key": "branding.tagline", "value": "fine"},
+                       {"key": "branding.logo_url", "value": "https://example.com/\ud800.png"})
         self.assertEqual(r.status_code, 422, r.text)
         self.assertEqual(list(r.json()["errors"]), ["branding.logo_url"])
         self.assertIsNone(self._stored("branding.tagline"))

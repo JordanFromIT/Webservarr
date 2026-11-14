@@ -167,7 +167,9 @@ class PlayerApiBase(unittest.TestCase):
         body = {"book": "200:1", "track": "202", "offset_ms": 5_000, "duration_ms": 200_000,
                 "event": "checkin", "device": "Chrome on Linux", "psid": "psid-a", "seq": 1}
         body.update(fields)
-        return self.client.post("/api/player/checkin", json=body, headers={"Origin": ORIGIN})
+        # ASCII JSON, so a lone surrogate goes out as its escape text.
+        return self.client.post("/api/player/checkin", content=json.dumps(body),
+                                headers={"Origin": ORIGIN, "Content-Type": "application/json"})
 
     def position(self, key="200:1"):
         r = self.client.get(f"/api/player/position/{key}")

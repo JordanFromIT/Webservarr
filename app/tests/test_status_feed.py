@@ -15,6 +15,7 @@ FakeRedis and pushes at send_push_to_users. The two-worker cases run on a real
 SQLite file with two connections, or as two real processes for the migration.
 """
 import asyncio
+import json
 import logging
 import os
 import tempfile
@@ -559,7 +560,12 @@ class FeedApi(unittest.TestCase):
         db.close()
 
     def send(self, method, path, body=None, origin=ORIGIN):
-        return self.client.request(method, path, json=body, headers={"Origin": origin} if origin else {})
+        # A body goes as ASCII JSON, so a lone surrogate goes out as its escape text.
+        headers = {"Origin": origin} if origin else {}
+        if body is None:
+            return self.client.request(method, path, headers=headers)
+        return self.client.request(method, path, content=json.dumps(body),
+                                   headers={**headers, "Content-Type": "application/json"})
 
     def feed(self, days=None):
         r = self.client.get("/api/status/feed" + (f"?days={days}" if days else ""))

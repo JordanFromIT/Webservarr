@@ -84,6 +84,11 @@ class NoticeRoute(unittest.TestCase):
     def client(self, user):
         return helpers.api_client(self.Session, user, headers=helpers.SAME_ORIGIN)
 
+    def post_json(self, c, body):
+        """POST ``body`` as ASCII JSON, so a lone surrogate goes out as its
+        escape text instead of failing to encode in the client."""
+        return c.post(URL, content=json.dumps(body), headers={"Content-Type": "application/json"})
+
     def state(self, identity):
         db = self.Session()
         try:
@@ -133,7 +138,7 @@ class NoticeRoute(unittest.TestCase):
         c = self.client(MEMBER)
         for body in ({"state": "inline"}, {"state": "window"}, {"state": 1}, {}, {"state": "\ud800"}):
             with self.subTest(body=body):
-                self.assertEqual(c.post(URL, json=body).status_code, 422)
+                self.assertEqual(self.post_json(c, body).status_code, 422)
         self.assertEqual(self.state("plex:1001"), "window")
 
 
