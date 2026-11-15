@@ -75,6 +75,10 @@ def rate_limit_key(request: Request) -> str:
     return ip
 
 
+# swallow_errors + in_memory_fallback_enabled: when Redis refuses writes (a
+# full data disk makes a persisting Redis answer MISCONF) or is unreachable,
+# requests are counted per worker in memory instead of every page failing.
+#
 # key_style="endpoint": one budget per route function, whatever its path
 # parameters carry. The default ("url") gave every concrete path its own
 # budget, so /kometa/<token> guesses or /kavita/<path> traffic were never
@@ -84,4 +88,6 @@ limiter = Limiter(
     storage_uri=settings.redis_url,
     default_limits=["120/minute"],
     key_style="endpoint",
+    swallow_errors=True,
+    in_memory_fallback_enabled=True,
 )

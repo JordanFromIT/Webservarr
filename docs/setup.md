@@ -133,10 +133,10 @@ Back up these directories regularly:
 
 ```bash
 # Example backup
-tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
+tar czf webservarr-backup-$(date +%Y%m%d).tar.gz --exclude=data/redis data/ uploads/ .env
 ```
 
-`data/redis` holds the signed-in sessions, so sign-ins survive container restarts and updates. Sessions include users' service tokens: keep `data/` private (`data/redis` itself is readable only by the container's app user). You can leave `data/redis` out of backups; without it, users simply sign in again after a restore.
+`data/redis` holds the signed-in sessions, so sign-ins survive container restarts and updates. Sessions include users' service tokens: keep `data/` private (`data/redis` itself is readable only by the container's app user). You can leave `data/redis` out of backups (the example above does); without it, users simply sign in again after a restore.
 
 Backing up settings: Settings > General > Backup exports every setting except passwords, tokens and API keys to a JSON file, and imports one after showing exactly what will change.
 

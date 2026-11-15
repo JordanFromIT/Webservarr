@@ -304,9 +304,9 @@ def _collect_push_emails(db: Session) -> Set[str]:
 async def _collect_recipient_emails(r: aioredis.Redis, db: Session) -> Set[str]:
     """Everyone a broadcast should reach: live sessions plus push subscribers.
 
-    Sessions alone are not enough: Redis is emptied on every restart, so right
-    after a deploy nobody has a session and a user who is not on the site
-    (the whole point of push) would never be targeted.
+    Sessions alone are not enough: a user who is not on the site (the whole
+    point of push) may hold no live session at all (signed out, expired, or
+    a Redis that lost its data), and would never be targeted.
     """
     return await _collect_session_emails(r) | _collect_push_emails(db)
 
@@ -480,7 +480,7 @@ async def _poll_seerr_requests(r: aioredis.Redis) -> None:
 
 # The highest Seerr request id the event log has dealt with (spec section
 # 11.1). Seerr's ids only grow, so a request above it is new; kept in the
-# database, so a restart (which empties Redis) announces nothing again.
+# database, so a Redis that loses its data announces nothing again.
 SEERR_REQUESTS_SEEN_KEY = "status_feed.seerr_requests_seen"
 SEERR_DECLINED = 3
 
@@ -1057,8 +1057,12 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
     # holds a baseline for it, never by a flag in this process: Redis outlives
     # a uvicorn restart (supervisord restarts it alone) and a lease handover,
     # and a fresh leader must alert on the first change it sees against the
-    # baseline its predecessor left. A full restart empties Redis, so that
-    # still seeds silently.
+    # baseline its predecessor left. Redis keeps its data across a full
+    # restart too (data/redis), so after downtime each item that changed
+    # meanwhile alerts once against its old baseline, as it would have live
+    # (bounded: Seerr's newest 50 requests, its open issues, news posted
+    # since the last check); unchanged items stay silent. A Redis with no
+    # data seeds silently.
 
     # Track when each poller last ran (epoch seconds)
     last_seerr = 0.0

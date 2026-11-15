@@ -470,7 +470,7 @@ def seed_reading(conn: sqlite3.Connection, identity: str, pages_read: int, days_
 
 async def mint_session(role: str, identity: str, kavita_link: bool) -> str:
     require_reserved(identity)
-    from app.auth import session_manager
+    from app.auth import session_key, session_manager
     from app.integrations import plex_player
 
     account_id = identity.split(":", 1)[1]
@@ -486,12 +486,12 @@ async def mint_session(role: str, identity: str, kavita_link: bool) -> str:
         "plex_account_id": account_id, "plex_token": plex_token, "avatar_url": "", "id_token": "",
     })
     redis = await session_manager.get_redis()
-    await redis.expire(f"session:{session_id}", SESSION_TTL_SECONDS)
+    await redis.expire(session_key(session_id), SESSION_TTL_SECONDS)
     if kavita_link:
         try:
             await attach_kavita(session_id)
         except BaseException:
-            await redis.delete(f"session:{session_id}")
+            await session_manager.delete_session(session_id)
             raise
     return session_id
 
@@ -522,8 +522,9 @@ async def purge_sessions() -> int:
         method, user_id = [(f or b"").decode() for f in await redis.hmget(key, "auth_method", "user_id")]
         if method != "plex" or not is_reserved(f"plex:{user_id}"):
             continue
-        session_id = key.decode().split(":", 1)[1]
-        async for shortcut in redis.scan_iter(match=f"kavita_chapter_ok:{session_id}:*", count=500):
+        # The key names the session by its digest, as kavita_ok:* does.
+        digest = key.decode().split(":", 1)[1]
+        async for shortcut in redis.scan_iter(match=f"kavita_ok:{digest}:*", count=500):
             await redis.delete(shortcut)
         await redis.delete(key)
         removed += 1
