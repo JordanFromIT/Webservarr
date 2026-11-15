@@ -7,6 +7,7 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
+import hashlib
 import httpx
 import logging
 import secrets
@@ -153,6 +154,18 @@ return 1
 """
 
 
+def session_digest(session_id: str) -> str:
+    """The session id as Redis stores it: its SHA-256 hex. Redis persists to
+    disk, so no key or index there may hold a cookie value someone could
+    sign in with."""
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def session_key(session_id: str) -> str:
+    """The Redis hash holding one session."""
+    return f"session:{session_digest(session_id)}"
+
+
 class SessionManager:
     """Manage user sessions in Redis."""
 
@@ -167,7 +180,8 @@ class SessionManager:
 
     @staticmethod
     def _user_sessions_key(auth_method: str, user_id: str) -> str:
-        """Redis set key indexing all live session ids for a given identity.
+        """Redis set key indexing all live sessions (their session_digest) for
+        a given identity.
 
         Keyed on (auth_method, user_id) so identities in different auth realms
         that share a numeric/string id never collide.
@@ -200,7 +214,7 @@ class SessionManager:
                        simple auth fields (user_id, username) transparently.
         """
         redis = await self.get_redis()
-        session_key = f"session:{session_id}"
+        redis_key = session_key(session_id)
 
         def field(*keys: str, default: str = "") -> str:
             # First key holding a real value. dict.get's default only applies
@@ -238,8 +252,8 @@ class SessionManager:
             "created_at": str(int(time.time())),
         }
 
-        await redis.hset(session_key, mapping=mapping)
-        await redis.expire(session_key, self.max_age)
+        await redis.hset(redis_key, mapping=mapping)
+        await redis.expire(redis_key, self.max_age)
 
         # Index the session under its identity so credential changes can revoke
         # a user's other sessions (L10). The set self-expires at the absolute
@@ -249,7 +263,7 @@ class SessionManager:
         auth_method = mapping["auth_method"]
         if user_id:
             index_key = self._user_sessions_key(auth_method, user_id)
-            await redis.sadd(index_key, session_id)
+            await redis.sadd(index_key, session_digest(session_id))
             await redis.expire(index_key, self.absolute_max_age)
 
     async def update_session(self, session_id: str, fields: Dict[str, Any]) -> None:
@@ -271,7 +285,7 @@ class SessionManager:
         pairs = []
         for k, v in fields.items():
             pairs += [k, "" if v is None else str(v)]
-        await redis.eval(UPDATE_SESSION_SCRIPT, 1, f"session:{session_id}", self.max_age, *pairs)
+        await redis.eval(UPDATE_SESSION_SCRIPT, 1, session_key(session_id), self.max_age, *pairs)
 
     async def clear_kavita_connections(self) -> int:
         """Drop every session's Kavita sign-in (token, key and the address it
@@ -297,9 +311,9 @@ class SessionManager:
             Session data or None if not found/expired
         """
         redis = await self.get_redis()
-        session_key = f"session:{session_id}"
+        redis_key = session_key(session_id)
 
-        session_data = await redis.hgetall(session_key)
+        session_data = await redis.hgetall(redis_key)
 
         if not session_data:
             return None
@@ -309,18 +323,18 @@ class SessionManager:
 
         # Enforce the absolute lifetime ceiling (L10). Sessions created before
         # this field existed lack created_at and are grandfathered (no ceiling);
-        # they drain out via the rolling TTL / restart-driven Redis flush.
+        # they drain out via the rolling TTL.
         created_at = decoded.get("created_at")
         if created_at:
             try:
                 if int(time.time()) - int(created_at) > self.absolute_max_age:
-                    await redis.delete(session_key)
+                    await redis.delete(redis_key)
                     return None
             except ValueError:
                 pass  # malformed created_at — treat as grandfathered
 
         # Refresh the rolling expiration on access
-        await redis.expire(session_key, self.max_age)
+        await redis.expire(redis_key, self.max_age)
 
         return decoded
 
@@ -332,8 +346,7 @@ class SessionManager:
             session_id: Session identifier
         """
         redis = await self.get_redis()
-        session_key = f"session:{session_id}"
-        await redis.delete(session_key)
+        await redis.delete(session_key(session_id))
 
     async def delete_user_sessions(
         self,
@@ -351,13 +364,14 @@ class SessionManager:
         redis = await self.get_redis()
         index_key = self._user_sessions_key(auth_method, str(user_id))
         members = await redis.smembers(index_key)
+        spared = session_digest(exclude_session_id) if exclude_session_id else None
         deleted = 0
         for member in members:
-            sid = member.decode() if isinstance(member, (bytes, bytearray)) else str(member)
-            if exclude_session_id and sid == exclude_session_id:
+            digest = member.decode() if isinstance(member, (bytes, bytearray)) else str(member)
+            if digest == spared:
                 continue
-            await redis.delete(f"session:{sid}")
-            await redis.srem(index_key, sid)
+            await redis.delete(f"session:{digest}")
+            await redis.srem(index_key, digest)
             deleted += 1
         return deleted
 

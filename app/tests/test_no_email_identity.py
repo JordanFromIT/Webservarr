@@ -17,7 +17,7 @@ try:
     from fastapi.testclient import TestClient
     from app.tests.helpers import SAME_ORIGIN
 
-    from app.auth import SessionManager
+    from app.auth import SessionManager, session_key
     from app.database import get_db
     from app.dependencies import get_current_user
     from app.limiter import limiter
@@ -81,20 +81,20 @@ class CreateSessionTests(unittest.TestCase):
     def test_explicit_null_email_is_stored_empty(self):
         r = self._create({"user_id": "7", "email": None, "username": "kid",
                           "auth_method": "plex", "avatar_url": None})
-        stored = r.hashes["session:sid"]
+        stored = r.hashes[session_key("sid")]
         self.assertEqual(stored["email"], "")
         self.assertEqual(stored["avatar_url"], "")
         self.assertNotIn("None", stored.values())
 
     def test_null_user_id_is_not_indexed_as_none(self):
         r = self._create({"user_id": None, "sub": None, "email": None, "auth_method": "oidc"})
-        self.assertEqual(r.hashes["session:sid"]["user_id"], "")
+        self.assertEqual(r.hashes[session_key("sid")]["user_id"], "")
         self.assertEqual(r.sets, {})
 
     def test_present_values_are_kept(self):
         r = self._create({"sub": "abc", "email": "A@Example.com", "preferred_username": "a",
                           "is_admin": "true", "auth_method": "oidc"})
-        stored = r.hashes["session:sid"]
+        stored = r.hashes[session_key("sid")]
         self.assertEqual((stored["user_id"], stored["email"], stored["username"], stored["is_admin"]),
                          ("abc", "A@Example.com", "a", "true"))
 

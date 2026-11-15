@@ -28,7 +28,7 @@ import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 
-from app.auth import session_manager
+from app.auth import session_digest, session_manager
 from app.config import settings
 from app.database import SessionLocal
 from app.dependencies import get_current_user, require_same_origin
@@ -157,9 +157,10 @@ ITEM_OK_TTL = 600
 
 def _item_ok_key(session_id: str, token: str, kind: str, item_id: int) -> str:
     """One session's own entry for one item. The token's hash is in it, so a
-    new sign-in (a changed Kavita account or access) starts afresh."""
+    new sign-in (a changed Kavita account or access) starts afresh. The
+    session is named by its digest: Redis persists, the cookie value must not."""
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
-    return f"kavita_ok:{session_id}:{digest}:{kind}:{item_id}"
+    return f"kavita_ok:{session_digest(session_id)}:{digest}:{kind}:{item_id}"
 
 
 async def _require_visible_items(items, base: str, token: str, session_id: Optional[str] = None) -> None:

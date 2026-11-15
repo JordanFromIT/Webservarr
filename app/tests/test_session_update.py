@@ -18,7 +18,7 @@ from unittest import mock
 try:
     import redis.asyncio as aioredis
 
-    from app.auth import session_manager
+    from app.auth import session_key, session_manager
     from app.config import settings
     from app.tests import is_test_redis
     from app.tests.test_ticket_claim_signin import FakeRedis
@@ -46,28 +46,28 @@ class UpdateSessionOverFakeRedis(unittest.TestCase):
 
     def test_a_live_session_gets_the_fields(self):
         r = FakeRedis()
-        r.hashes["session:sid-1"] = {b"username": b"sam"}
+        r.hashes[session_key("sid-1")] = {b"username": b"sam"}
         self.run_with(r, lambda: session_manager.update_session("sid-1", {"kavita_return": "/books", "x": None}))
-        self.assertEqual(r.hashes["session:sid-1"],
+        self.assertEqual(r.hashes[session_key("sid-1")],
                          {b"username": b"sam", b"kavita_return": b"/books", b"x": b""})
 
     def test_a_write_after_the_session_was_deleted_creates_nothing(self):
         r = FakeRedis()
-        r.hashes["session:sid-1"] = {b"username": b"sam"}
+        r.hashes[session_key("sid-1")] = {b"username": b"sam"}
 
         async def logout_then_write():
             await session_manager.delete_session("sid-1")
             await session_manager.update_session("sid-1", {"kavita_token": "jwt"})
 
         self.run_with(r, logout_then_write)
-        self.assertNotIn("session:sid-1", r.hashes)
+        self.assertNotIn(session_key("sid-1"), r.hashes)
 
     def test_a_logout_between_check_and_write_leaves_no_partial_session(self):
         # Whole (the logout found no gap) or gone, never just the written fields.
         r = _LogoutAfterRead()
-        r.hashes["session:sid-1"] = {b"username": b"sam"}
+        r.hashes[session_key("sid-1")] = {b"username": b"sam"}
         self.run_with(r, lambda: session_manager.update_session("sid-1", {"kavita_token": "jwt"}))
-        self.assertIn(r.hashes.get("session:sid-1"), (None, {b"username": b"sam", b"kavita_token": b"jwt"}))
+        self.assertIn(r.hashes.get(session_key("sid-1")), (None, {b"username": b"sam", b"kavita_token": b"jwt"}))
 
     def test_no_fields_is_no_write(self):
         r = mock.AsyncMock()
@@ -81,7 +81,8 @@ class UpdateSessionOverRealRedis(unittest.TestCase):
 
     def setUp(self):
         self.assertTrue(is_test_redis(settings.redis_url), settings.redis_url)   # never the live db
-        self.key = f"session:test-update-{uuid.uuid4().hex[:8]}"
+        self.sid = f"test-update-{uuid.uuid4().hex[:8]}"
+        self.key = session_key(self.sid)
 
     def run_redis(self, coro_fn):
         async def go():
@@ -95,7 +96,7 @@ class UpdateSessionOverRealRedis(unittest.TestCase):
         return asyncio.run(go())
 
     def test_a_live_session_is_merged_and_its_ttl_renewed(self):
-        sid = self.key.split(":", 1)[1]
+        sid = self.sid
 
         async def go(r):
             await r.hset(self.key, mapping={"username": "sam"})
@@ -108,7 +109,7 @@ class UpdateSessionOverRealRedis(unittest.TestCase):
         self.assertGreater(ttl, settings.session_max_age - 10)
 
     def test_a_missing_session_is_not_created(self):
-        sid = self.key.split(":", 1)[1]
+        sid = self.sid
 
         async def go(r):
             await session_manager.update_session(sid, {"kavita_token": "jwt"})
