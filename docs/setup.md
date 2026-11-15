@@ -136,6 +136,8 @@ Back up these directories regularly:
 tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
 ```
 
+`data/redis` holds the signed-in sessions, so sign-ins survive container restarts and updates. Sessions include users' service tokens: keep `data/` private (`data/redis` itself is readable only by the container's app user). You can leave `data/redis` out of backups; without it, users simply sign in again after a restore.
+
 Backing up settings: Settings > General > Backup exports every setting except passwords, tokens and API keys to a JSON file, and imports one after showing exactly what will change.
 
 ## Advanced: Authentik OIDC Setup
@@ -216,7 +218,8 @@ Rate limits are enforced per client IP. When behind a reverse proxy (Cloudflare,
 
 ### Session Security
 
-- Sessions stored in Redis with configurable expiry (default: 7 days)
+- Sessions stored in Redis with configurable expiry (default: 7 days), persisted in `data/redis` so they survive restarts
+- Redis keys hold a SHA-256 of the session ID, never the cookie value itself
 - Cookies set with `HttpOnly` (no JS access), `Secure` (HTTPS-only in production), `SameSite=Lax`
 - Session IDs generated with `secrets.token_urlsafe(32)` (256-bit entropy)
 

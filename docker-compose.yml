@@ -17,5 +17,7 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/data/webservarr.db
     volumes:
+      # data/ also holds data/redis (signed-in sessions, kept across restarts):
+      # keep it private. data/redis can be left out of backups.
       - ./data:/app/data
       - ./uploads:/app/app/static/uploads
