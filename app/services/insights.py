@@ -579,7 +579,7 @@ def audio_places(db: Session, identity: Optional[str] = None, keys: Optional[Ite
     for batch in batches:
         for who, key, at, ms, total, chapter, device, was_ended in batch:
             known = ms is not None and total is not None and total > 0
-            finished = bool(was_ended) or (known and ms * 100 >= total * listening.FINISHED_PERCENT)
+            finished = bool(was_ended) or listening.reached_end(ms, total)
             percent = 100 if finished else (min(99, _percent(ms, total)) if known else None)
             out.append(Place(who, key, at, percent, finished, ms or 0, chapter or "", device or ""))
     return out

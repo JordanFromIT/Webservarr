@@ -530,9 +530,9 @@ async def orphans(request: Request, key: str, who: Listener = Depends(listener),
     same author as `key` first, then the most recently listened to.
 
     A place is one of their own position rows whose book is gone from the
-    library, unfinished (no `end` mark in the log, and under 97% of the
-    book when its length is known), and carried forward by no copy still in
-    the library, pending claims included (the same successor rule as
+    library, unfinished (no `end` mark in the log, and 30 seconds or more of
+    the book left when its length is known), and carried forward by no copy
+    still in the library, pending claims included (the same successor rule as
     /position). Of the newest listening.ORPHAN_CANDIDATES unfinished rows,
     the gone ones are found with one listing of the audiobook library, read
     for this request alone (nothing is cached: two workers), and every

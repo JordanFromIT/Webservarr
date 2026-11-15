@@ -1589,7 +1589,7 @@ class OrphanCandidates(StoreBase):
     """Spec 2.6 s3: the listener's newest 10 unfinished rows, other than the
     book opened, for the router to check against the library."""
 
-    def row(self, book, identity=ME, day=1, book_ms=100, duration=1000, end=False):
+    def row(self, book, identity=ME, day=1, book_ms=100_000, duration=1_000_000, end=False):
         from app.models import ListeningLog, ListeningPosition
         at = datetime(2026, 9, 1) + timedelta(days=day)
         self.db.add(ListeningPosition(identity=identity, book_key=book, track_key="1", offset_ms=5, duration_ms=9,
@@ -1613,8 +1613,8 @@ class OrphanCandidates(StoreBase):
         for n in range(12):
             self.row(f"{300 + n}:1", day=n + 1, end=n >= 2)
         self.assertEqual(sorted(self.keys()), ["300:1", "301:1"])
-        self.row("400:1", book_ms=970, duration=1000)
-        self.row("401:1", book_ms=969, duration=1000)
+        self.row("400:1", book_ms=971_000, duration=1_000_000)     # 29 s left: finished
+        self.row("401:1", book_ms=970_000, duration=1_000_000)     # 30 s left: not yet
         self.row("402:1", book_ms=None)
         self.row("403:1", book_ms=5000, duration=None)
         self.assertEqual(sorted(self.keys()), ["300:1", "301:1", "401:1", "402:1", "403:1"])

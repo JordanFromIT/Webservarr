@@ -88,10 +88,11 @@ SERVER_FIELDS = ("book_duration_ms", "work_key", "narrator")
 # "Were you listening to one of these?" (spec 2.6 s3): how many places are
 # offered, how many of the listener's newest unfinished rows are looked at
 # (a bound on the query; the library listing the router reads settles which
-# are gone), and the share of a book from which it counts as finished.
+# are gone), and how little of a book may be left for it to count as finished
+# (a share would finish a long book with most of an hour still to hear).
 ORPHAN_ROWS = 10
 ORPHAN_CANDIDATES = 200
-FINISHED_PERCENT = 97
+FINISHED_REMAINING_MS = 30_000
 # How many earlier copies a history follows through their own links.
 LINK_HOPS = 5
 
@@ -579,13 +580,21 @@ def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key
     return q.order_by(P.updated_at.desc(), P.book_key).first()
 
 
+def reached_end(book_ms: Optional[int], book_duration_ms: Optional[int]) -> bool:
+    """Whether a place is at the end of its book by time alone: both known and
+    less than FINISHED_REMAINING_MS left."""
+    known = book_ms is not None and book_duration_ms is not None and book_duration_ms > 0
+    return known and book_duration_ms - book_ms < FINISHED_REMAINING_MS
+
+
 def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     """This listener's position rows that might be places in books that left
     the library (spec 2.6 s3): the newest ORPHAN_CANDIDATES by updated_at, none
     of them `exclude_key`, all unfinished. A row is finished when the latest
-    event of its log is an `end` mark that saved the row, or its book_ms is FINISHED_PERCENT or more of its
-    book_duration_ms (both known: an unknown book_ms, or an unknown length,
-    still counts as unfinished).
+    event of its log is an `end` mark that saved the row, or less than
+    FINISHED_REMAINING_MS of its book_duration_ms is left after its book_ms
+    (both known: an unknown book_ms, or an unknown length, still counts as
+    unfinished).
 
     The router tells which of them are gone (one library listing) and which a
     copy still in the library carried forward (a successor, pending claims
@@ -599,7 +608,7 @@ def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end",
                            L.at == P.updated_at)
     unfinished = or_(P.book_ms.is_(None), P.book_duration_ms.is_(None), P.book_duration_ms <= 0,
-                     P.book_ms * 100 < P.book_duration_ms * FINISHED_PERCENT)
+                     P.book_duration_ms - P.book_ms >= FINISHED_REMAINING_MS)
     return (db.query(P).filter(P.identity == identity, P.book_key != exclude_key, ~ended, unfinished)
             .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_CANDIDATES).all())
 
@@ -615,9 +624,9 @@ def get_places(db: Session, identity: str, keys=None, limit: int = PLACES_MAX) -
     pages): {book key: {"updated_at" (naive UTC), "book_ms", "book_duration_ms",
     "finished"}}. `keys` limits it to those books; with none it is their
     `limit` newest places. A place is finished by the same rule as an orphan
-    candidate: the latest event of its log is an `end` that saved the row, or its
-    book_ms is FINISHED_PERCENT or more of a known book_duration_ms. Scoped by
-    identity."""
+    candidate: the latest event of its log is an `end` that saved the row, or
+    less than FINISHED_REMAINING_MS of a known book_duration_ms is left after
+    its book_ms (reached_end). Scoped by identity."""
     P, L = ListeningPosition, ListeningLog
     ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end",
                            L.at == P.updated_at)
@@ -627,9 +636,8 @@ def get_places(db: Session, identity: str, keys=None, limit: int = PLACES_MAX) -
         q = db.query(P.book_key, P.updated_at, P.book_ms, P.book_duration_ms, ended.label("ended")).filter(
             P.identity == identity, *extra)
         for key, at, ms, total, was_ended in q.order_by(P.updated_at.desc(), P.book_key).limit(limit):
-            known = ms is not None and total is not None and total > 0
             places[key] = {"updated_at": at, "book_ms": ms, "book_duration_ms": total,
-                           "finished": bool(was_ended) or (known and ms * 100 >= total * FINISHED_PERCENT)}
+                           "finished": bool(was_ended) or reached_end(ms, total)}
 
     if keys is None:
         read(())

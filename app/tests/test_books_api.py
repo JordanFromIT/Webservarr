@@ -577,10 +577,10 @@ class BookPage(BooksBase):
         self.assertEqual(first["progress"]["label"], "2h 30m left")
 
     def test_a_finished_edition_is_not_in_progress_but_can_still_be_preferred(self):
-        place(self.db, "plex:1001", "10:1", when(20), book_ms=9_900_000, duration=10_000_000)
+        place(self.db, "plex:1001", "10:1", when(20), book_ms=9_990_000, duration=10_000_000)
         place(self.db, "plex:1001", "11:1", when(19), book_ms=0, duration=10_000_000, end=True)
         audio = self.ok("/api/books/1")["formats"]["audio"]
-        self.assertEqual(audio["preferred"], "10:1")                     # the newest place, finished (99%) or not
+        self.assertEqual(audio["preferred"], "10:1")                     # the newest place, finished (10 s left) or not
         self.assertEqual([e["in_progress"] for e in audio["editions"]], [False, False])
         self.assertEqual(audio["editions"][0]["progress"]["label"], "Finished")
         self.assertEqual(audio["editions"][1]["progress"]["percent"], 100)
@@ -1092,6 +1092,12 @@ class Continue(BooksBase):
         place(self.db, "plex:1001", "13:1", when(40), book_ms=0, duration=4_100_000, end=True)
         self.assertEqual(self.ok("/api/books/continue")["items"], [])
 
+    def test_a_long_book_with_minutes_left_stays_in_the_row(self):
+        long = 103_320_000                                                       # a 28.7 h book
+        place(self.db, "plex:1001", "14:1", when(41), book_ms=long - 684_000, duration=long)   # 99.3%, 11m24s left
+        items = self.ok("/api/books/continue")["items"]
+        self.assertEqual([(i["book_id"], i["progress_label"], i["percent"]) for i in items], [(7, "11m left", 99)])
+
     def test_a_book_in_several_editions_is_one_item_under_the_newest(self):
         place(self.db, "plex:1001", "10:1", when(50), book_ms=1_000_000, duration=10_000_000)
         place(self.db, "plex:1001", "11:1", when(52), book_ms=2_200_000, duration=10_000_000)
@@ -1427,12 +1433,12 @@ class FixRoundOne(BooksBase):
     # T2H4: preferred
     def test_preferred_is_the_newest_unfinished_edition_then_the_newest_place_then_the_primary(self):
         place(self.db, "plex:1001", "10:1", when(20), book_ms=3_000_000, duration=10_000_000)           # in progress
-        place(self.db, "plex:1001", "11:1", when(25), book_ms=9_900_000, duration=10_000_000)           # finished, newer
+        place(self.db, "plex:1001", "11:1", when(25), book_ms=9_990_000, duration=10_000_000)           # finished, newer
         audio = self.ok("/api/books/1")["formats"]["audio"]
         self.assertEqual(audio["preferred"], "10:1")
         self.assertEqual(self.ok("/api/books/continue")["items"][0]["resume"], {"plex_book_key": "10:1"})
         self.db.query(ListeningPosition).filter(ListeningPosition.book_key == "10:1").update(
-            {"book_ms": 9_800_000})
+            {"book_ms": 9_980_000})
         self.db.commit()
         self.assertEqual(self.ok("/api/books/1")["formats"]["audio"]["preferred"], "11:1")   # all finished: the newest
         self.db.query(ListeningPosition).delete()
@@ -1580,8 +1586,9 @@ class Places(unittest.TestCase):
         self.assertEqual(listening.get_places(self.db, "plex:1", keys=[]), {})
 
     def test_finished_rules(self):
-        place(self.db, "plex:1", "a:1", when(1), 97_000, 100_000)                 # 97 percent: finished
-        place(self.db, "plex:1", "b:1", when(1), 96_000, 100_000)
+        long = 103_320_000                                                        # a 28.7 h book
+        place(self.db, "plex:1", "a:1", when(1), long - 29_000, long)             # 29 s left: finished
+        place(self.db, "plex:1", "b:1", when(1), long - 684_000, long)            # 99.3%, 11m24s left: unfinished
         place(self.db, "plex:1", "c:1", when(1), 10, 100_000, end=True)           # an end that saved the row
         place(self.db, "plex:1", "d:1", when(1), None, None)                      # unknown: unfinished
         place(self.db, "plex:1", "e:1", when(1), 5, 0)                            # a zero length: unfinished

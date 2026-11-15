@@ -1758,16 +1758,18 @@ class Orphans(OrphanBase):
         body = self.get().json()
         self.assertEqual((body["orphans"], body["dismissed"]), ([], False))
 
-    def test_finished_means_97_percent_or_an_end_mark(self):
-        self.row("301:1", book_ms=969, duration=1000)          # 96.9%: not finished
-        self.row("302:1", book_ms=970, duration=1000)          # 97%: finished
-        self.row("303:1", book_ms=1000, duration=1000)
-        self.row("304:1", book_ms=10, duration=1000, end=True)  # an end mark wins over the time
-        self.row("305:1", book_ms=None, duration=1000)         # no book time: still listed
-        self.row("306:1", book_ms=999, duration=None)          # no length: still listed
-        self.row("307:1", book_ms=999, duration=0)             # a zero length is no length
-        self.row("308:1", book_ms=10, duration=1000, event="leave")   # other events are not an end
-        self.assertEqual(sorted(self.listed()), ["301:1", "305:1", "306:1", "307:1", "308:1"])
+    def test_finished_means_under_30_seconds_left_or_an_end_mark(self):
+        long = 103_320_000                                        # a 28.7 h book
+        self.row("301:1", book_ms=long - 684_000, duration=long)  # 99.3%, 11m24s left: not finished
+        self.row("302:1", book_ms=long - 29_000, duration=long)   # 29 s left: finished
+        self.row("303:1", book_ms=long, duration=long)
+        self.row("304:1", book_ms=10, duration=long, end=True)    # an end mark wins over the time
+        self.row("305:1", book_ms=None, duration=long)            # no book time: still listed
+        self.row("306:1", book_ms=999, duration=None)             # no length: still listed
+        self.row("307:1", book_ms=999, duration=0)                # a zero length is no length
+        self.row("308:1", book_ms=10, duration=long, event="leave")   # other events are not an end
+        self.row("309:1", book_ms=long - 30_000, duration=long)   # exactly 30 s left: not finished
+        self.assertEqual(sorted(self.listed()), ["301:1", "305:1", "306:1", "307:1", "308:1", "309:1"])
 
     def test_an_end_mark_is_the_books_own_and_the_listeners_own(self):
         self.row("300:1")
