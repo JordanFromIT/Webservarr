@@ -57,6 +57,7 @@
  */
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
+const STEP_ASIDE_MS = 1000;         // the pop-up's step back to the page, at most, before the full player opens anyway
 const FOLD_AT = 400;                // a description longer than this folds behind "Show more"
 const MAX_ID = 2147483647;          // a database id; anything larger cannot be one
 
@@ -284,14 +285,18 @@ export async function mount(ctx) {
       // the pop-up steps aside as for a start.
       const resuming = !st.playing;
       p.toggle();
-      if (resuming) stepAside();
+      if (resuming) {
+        stepAside();
+        showPlayer();
+      }
       return;
     }
     // Where the listener left off. A failure is the player's to show (its
     // notices); open() rejects only when the saved place is not in the book.
     const key = edition.plex_book_key;
     state.opening = key;
-    Promise.resolve(p.open(key, { autoplay: true })).then(function () {
+    const opened = p.open(key, { autoplay: true });
+    Promise.resolve(opened).then(function () {
       // A place now exists, so the next Books visit has cards in Continue: it is told now.
       rememberContinue(who);
       told('listen');
@@ -309,6 +314,26 @@ export async function mount(ctx) {
     // steps aside. Its closing ends this visit, never the player's start;
     // what is left of the chain above tells the page itself.
     stepAside();
+    showPlayer();
+  }
+
+  /** A start the person tapped for: on a phone the full player opens with it
+      (ui.js openOnStart). In the pop-up, its step back to the page under it
+      is a navigation, and the full player makes way for a navigation, so it
+      opens once the router has claimed that step (or, should none come, a
+      moment later). */
+  function showPlayer() {
+    const ui = window.WS && window.WS.playerUI;
+    if (!ui || typeof ui.openOnStart !== 'function') return;
+    if (!closeForPlay) { ui.openOnStart(); return; }
+    let timer = 0;
+    function show() {
+      window.removeEventListener('ws:page-claimed', show);
+      window.clearTimeout(timer);
+      ui.openOnStart();
+    }
+    window.addEventListener('ws:page-claimed', show);
+    timer = window.setTimeout(show, STEP_ASIDE_MS);
   }
 
   /** In the pop-up, the player starting closes it, by the same way out as

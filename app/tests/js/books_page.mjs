@@ -671,8 +671,11 @@ await run('the Continue row: cover, format badge, progress, and a way back in', 
 await run('tapping an audiobook in Continue resumes it in the player', async (make) => {
   const t = make({ routes: usual({ continue: { items: CONT, notes: [] } }) });
   await t.mount();
+  const shown = [];
+  t.win.WS.playerUI = { openOnStart() { shown.push(t.win.WS.player.opened.length); return true; } };
   t.q('#continueHost [data-resume-audio="14:1"]').click();
   check('the player opens that book, playing, to resume where it was', JSON.stringify(t.win.WS.player.opened) === JSON.stringify([['14:1', { autoplay: true }]]), t.win.WS.player.opened);
+  check('a tapped start: the full player on a phone, asked once the book is opening', JSON.stringify(shown) === '[1]', shown);
   const u = make({ player: false, routes: usual({ continue: { items: CONT, notes: [] } }) });
   await u.mount();
   u.q('#continueHost [data-resume-audio="14:1"]').click();

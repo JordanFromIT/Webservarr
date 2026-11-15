@@ -617,6 +617,33 @@ await run('the pill\'s Stop: right of Play, playing or paused; the book closes, 
   check('held: no claim that anything was saved', h.q('.wsp-notice').textContent.indexOf('Your place is as it was.') !== -1);
 });
 
+await run('a tapped start opens the full player on a phone, never the desktop drop-down', async () => {
+  const d = setup({ state: BOOK });
+  check('desktop: nothing opens', d.ui.openOnStart() === false && !d.ui.isOpen());
+  d.q('.wsp-pill-stop').click();
+  Array.from(d.q('.wsp-notice').querySelectorAll('button')).find((b) => b.textContent === 'Resume').click();
+  await flush();
+  check('desktop: Resume plays on in the pill', d.engine.calls.some((c) => c[0] === 'open') && !d.ui.isOpen());
+
+  const p = setup({ state: BOOK, wide: false });
+  check('a phone: the full-screen player opens', p.ui.openOnStart() === true && p.ui.isOpen() && !p.ui.isWindow());
+  p.ui.close();
+  await p.clock.advance(400);
+  p.q('.wsp-bar-stop').click();
+  // As the real engine does: open() says it is loading before it first waits.
+  p.engine.open = (key, o) => { p.engine.calls.push(['open', key, o]); p.engine.set({ loading: true }, 'loading'); return Promise.resolve(); };
+  Array.from(p.q('.wsp-notice').querySelectorAll('button')).find((b) => b.textContent === 'Resume').click();
+  await flush();
+  check('a phone: Resume opens the full player with the book', p.engine.calls.some((c) => c[0] === 'open') &&
+    p.ui.isOpen() && !p.ui.isWindow());
+
+  const r = setup({ state: BOOK, shellHidden: true });
+  check('a full-screen view on a desktop (the reader) has the sheet', r.ui.openOnStart() === true && !r.ui.isWindow());
+
+  const e = setup({ wide: false });
+  check('no book loaded: nothing to open', e.ui.openOnStart() === false && !e.ui.isOpen());
+});
+
 const roomOf = (t) => t.doc.documentElement.style.getPropertyValue('--ws-player-h');
 
 await run('desktop: the pill only, no bar, no handle, no room kept at the bottom', () => {

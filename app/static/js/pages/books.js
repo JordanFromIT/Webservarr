@@ -538,9 +538,18 @@ function resumeAudio(key) {
     return;
   }
   // Where the listener left off. A failure is the player's to show.
-  Promise.resolve(p.open(key, { autoplay: true })).catch(function (e) {
+  const opened = p.open(key, { autoplay: true });
+  showPlayer();
+  Promise.resolve(opened).catch(function (e) {
     console.warn('The player could not open ' + key, e);
   });
+}
+
+// A start the person tapped for: on a phone the full player opens with it
+// (ui.js openOnStart); on a desktop the pill stays as it was.
+function showPlayer() {
+  const ui = window.WS && window.WS.playerUI;
+  if (ui && typeof ui.openOnStart === 'function') ui.openOnStart();
 }
 
 // The round button on a Continue cover. Shown on hover or focus where there is
@@ -1844,7 +1853,9 @@ export async function mount(ctx) {
       dequeueWhenPlaying(String(card.id), String(key));
       rememberContinue(user);
       // Where the listener left off; a failure is the player's to show.
-      return Promise.resolve(p.open(key, { autoplay: true })).catch(function (e) {
+      const opened = p.open(key, { autoplay: true });
+      showPlayer();
+      return Promise.resolve(opened).catch(function (e) {
         console.warn('The player could not open ' + key, e);
       });
     }).catch(function (e) {

@@ -90,6 +90,13 @@
  *                     the player's), it gets none. Shown any other way, Escape
  *                     still closes it first, but Back closes the player.
  *   open(), close(), isOpen()        the full player
+ *   openOnStart()     a start of listening the listener tapped for outside
+ *                     the player (a Continue cover's play, the book page's
+ *                     Listen, Up next's Play): called right after
+ *                     WS.player.open(), it opens the full player where that
+ *                     is the full-screen sheet (a phone or tablet); on a
+ *                     desktop page the pill stays as it was. Never for a
+ *                     start nobody tapped for (a remote handoff).
  *   on('open' | 'close', fn) -> unsubscribe
  *   onKey(fn) -> unsubscribe
  *                     fn(event) for each key pressed inside the full player
@@ -1576,7 +1583,11 @@ export function createUI(env) {
     const msg = held ? 'Stopped. Your place is as it was.' : 'Stopped at ' + formatClock(s.bookMs) + '. Your place is saved.';
     notify(msg, {
       id: 'stopped',
-      action: { label: 'Resume', run: guarded(function () { return player.open(key, { autoplay: true }); }) }
+      action: { label: 'Resume', run: guarded(function () {
+        const opened = player.open(key, { autoplay: true });
+        openOnStart();
+        return opened;
+      }) }
     });
     const stopped = notices.get('stopped');
     player.close();
@@ -1754,6 +1765,12 @@ export function createUI(env) {
       watcherTap = false;
     }
     return true;
+  }
+
+  // The engine's 'loading' change has shown the bar by the time this runs
+  // (open() needs it); where the drop-down would open, nothing changes.
+  function openOnStart() {
+    return windowable() ? false : open();
   }
 
   function close() {
@@ -2009,6 +2026,7 @@ export function createUI(env) {
 
   return {
     open: open,
+    openOnStart: openOnStart,
     close: close,
     isOpen: function () { return isOpen; },
     // The open player is the drop-down (desktop), not a modal sheet:
