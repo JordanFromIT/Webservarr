@@ -189,6 +189,46 @@ class RequestMissingFormat(unittest.TestCase):
         self.assertTrue(result.get("not_found"), result)                  # only the omnibus has that title
         self.assertEqual(fake.writes, [])
 
+    def test_a_subtitle_on_one_side_maps_to_the_book_it_names(self):
+        fake = FakeChaptarr(jurassic())
+        self.assertEqual(self.ask(fake, title="Jurassic Park: A Novel")["book_ids"], [8882])
+
+    def test_a_subtitle_fallback_never_takes_a_sibling(self):
+        # The bug-hunter's cases: each would have monitored and searched another book.
+        cases = {
+            "A Halo, two short forms": ("Halo: The Fall of Reach", "Eric Nylund", [
+                row(1, "The Fall of Reach", "gr:1", "ebook"), row(2, "The Fall of Reach", "gr:1", "audiobook"),
+                row(3, "Halo: First Strike", "gr:2", "ebook"), row(4, "Halo: First Strike", "gr:2", "audiobook")]),
+            "B Jurassic Park without the novel's rows": ("Jurassic Park", "Michael Crichton",
+                                                         [r for r in jurassic(audio_row=False) if r["id"] != 8844]),
+            "C Thrawn, the owned sibling": ("Star Wars: Thrawn", "Timothy Zahn", [
+                row(1, "Thrawn", "gr:1", "ebook"), row(2, "Thrawn", "gr:1", "audiobook"),
+                row(3, "Star Wars: Heir to the Empire", "gr:2", "ebook", True, True),
+                row(4, "Star Wars: Heir to the Empire", "gr:2", "audiobook"),
+                row(5, "Star Wars: Dark Force Rising", "gr:3", "ebook"),
+                row(6, "Star Wars: Dark Force Rising", "gr:3", "audiobook")]),
+            "D Thrawn, an unflagged omnibus": ("Star Wars: Thrawn", "Timothy Zahn", [
+                row(1, "Thrawn", "gr:1", "ebook"), row(2, "Thrawn", "gr:1", "audiobook"),
+                row(3, "Star Wars: The Thrawn Trilogy", "gr:2", "ebook"),
+                row(4, "Star Wars: The Thrawn Trilogy", "gr:2", "audiobook")]),
+        }
+        for name, (title, author, books) in cases.items():
+            with self.subTest(case=name):
+                fake = FakeChaptarr(books, search=[], authors=[{"id": 27, "authorName": author}])
+                result = self.ask(fake, title=title, author=author)
+                self.assertFalse(result["ok"], result)
+                self.assertTrue(result.get("not_found"), result)
+                self.assertEqual(fake.writes, [])
+                self.request_book.assert_not_awaited()
+
+    def test_a_subtitle_fallback_needs_the_format_here_with_its_file(self):
+        books = jurassic()
+        books[0] = row(8844, "Jurassic Park", "hc:9724", "ebook")          # no file: not shown to be this book
+        fake = FakeChaptarr(books)
+        result = self.ask(fake, title="Jurassic Park: A Novel")
+        self.assertTrue(result.get("not_found"), result)
+        self.assertEqual(fake.writes, [])
+
     def test_two_works_of_one_title_are_told_apart_by_the_format_that_is_here(self):
         books = jurassic() + [row(9100, "Jurassic Park", "gr:999", "ebook"),
                               row(9101, "Jurassic Park", "gr:999", "audiobook")]

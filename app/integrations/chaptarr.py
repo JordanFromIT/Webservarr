@@ -914,12 +914,14 @@ async def _library_work(cfg: dict, client: httpx.AsyncClient, title: str, author
     when the library holds no such work, None when it cannot tell which.
 
     The author is matched by name (the closest, and only one), then their
-    books by title: the whole title, else the title before its subtitle. A
-    row Chaptarr marks as an omnibus never counts ("Jurassic Park & The Lost
-    World" is not Jurassic Park), nor does a title that only starts the same.
-    Two works with the same title (two editions as two works) are told apart
-    by the format `have`: the work whose row of it has a file is the one this
-    book came from. Raises ChaptarrUnavailable when Chaptarr cannot be read.
+    books by title: the whole title, else one side's title before its
+    subtitle against the other side's whole title, and then only a work
+    whose row in the format `have` has its file. A row Chaptarr marks as an
+    omnibus never counts ("Jurassic Park & The Lost World" is not Jurassic
+    Park), nor do two titles that only start the same. Two works with the
+    same title (two editions as two works) are told apart by `have` the same
+    way: the work whose row of it has a file is the one this book came from.
+    Raises ChaptarrUnavailable when Chaptarr cannot be read.
     """
     headers = {"X-Api-Key": cfg["api_key"]}
     try:
@@ -942,20 +944,35 @@ async def _library_work(cfg: dict, client: httpx.AsyncClient, title: str, author
 
     rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), int)
             and r.get("mediaType") in BOOK_FORMATS and not r.get("isOmnibus")]
-    for key_of in (_title_key, _main_title_key):
-        wanted = key_of(title)
-        same = [r for r in rows if wanted and key_of(r.get("title") or "") == wanted]
-        if same:
-            break
-    works: Dict[Any, List[Dict[str, Any]]] = {}
-    for row in same:
-        works.setdefault(row.get("foreignBookId") or row["id"], []).append(row)
+    def owned(work: List[Dict[str, Any]]) -> bool:
+        return any(r.get("mediaType") == have and _row_has_file(r) for r in work)
+
+    def by_work(same: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
+        works: Dict[Any, List[Dict[str, Any]]] = {}
+        for row in same:
+            works.setdefault(row.get("foreignBookId") or row["id"], []).append(row)
+        return works
+
+    whole = _title_key(title)
+    works = by_work([r for r in rows if whole and _title_key(r.get("title") or "") == whole])
     if len(works) > 1:
-        works = {k: v for k, v in works.items()
-                 if any(r.get("mediaType") == have and _row_has_file(r) for r in v)}
-        if len(works) != 1:
-            return None
-    return next(iter(works.values()), [])
+        works = {k: v for k, v in works.items() if owned(v)}
+        return next(iter(works.values())) if len(works) == 1 else None
+    if works:
+        return next(iter(works.values()))
+
+    # A subtitle on one side only: one side's title before its subtitle is the
+    # other side's whole title ("Jurassic Park: A Novel" is "Jurassic Park").
+    # Never the two short forms against each other: "Halo: The Fall of Reach"
+    # and "Halo: First Strike" are two books. And only a work that holds the
+    # format `have` with its file counts, so it is shown to be this book.
+    main = _main_title_key(title)
+    works = by_work([r for r in rows if (main and _title_key(r.get("title") or "") == main)
+                     or (whole and _main_title_key(r.get("title") or "") == whole)])
+    if not works:
+        return []
+    works = {k: v for k, v in works.items() if owned(v)}
+    return next(iter(works.values())) if len(works) == 1 else None
 
 
 async def _search_foreign_id(cfg: dict, title: str, author: str, row_ids: set) -> Optional[str]:
