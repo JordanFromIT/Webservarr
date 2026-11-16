@@ -696,6 +696,102 @@ class ScopedPaths(unittest.TestCase):
         self.check.assert_not_awaited()
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class PdfFile(unittest.TestCase):
+    """A PDF book's file for the reader's PDF.js: Kavita takes only an apiKey
+    on it, so the proxy adds the person's own and passes the chapterId alone
+    (extractPdf has Kavita turn every page into an image), the byte ranges
+    PDF.js asks for go through with the headers that describe them, and no
+    shared cache may keep it. Kavita is stubbed at the HTTP layer."""
+
+    PDF = b"%PDF-1.4\n" + b"x" * 90
+
+    def setUp(self):
+        from app.tests import helpers
+        self.helpers = helpers
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+        self.seen = []
+
+    def tearDown(self):
+        self.helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def kavita(self, request):
+        import httpx
+        self.seen.append(request)
+        if request.url.path != "/api/Reader/pdf":
+            return httpx.Response(404)
+        if "apiKey" not in request.url.params:
+            return httpx.Response(400, json={"errors": {"apiKey": ["The apiKey field is required."]}})
+        headers = {"Content-Type": "application/pdf", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600",
+                   "Content-Disposition": 'attachment; filename="Book.pdf"', "ETag": '"abc"'}
+        wanted = request.headers.get("range", "")
+        if wanted.startswith("bytes="):
+            start, _, end = wanted[6:].partition("-")
+            start, end = int(start), int(end or len(self.PDF) - 1)
+            part = self.PDF[start:end + 1]
+            headers["Content-Range"] = f"bytes {start}-{end}/{len(self.PDF)}"
+            return httpx.Response(206, content=part, headers=headers)
+        return httpx.Response(200, content=self.PDF, headers=headers)
+
+    def fetch(self, query, key="key-sam", visible=True, headers=None):
+        import httpx
+        real_client = httpx.AsyncClient
+        transport = httpx.MockTransport(self.kavita)
+        user = dict(self.helpers.MEMBER, kavita_token="jwt-sam", kavita_api_key=key, kavita_base=KAVITA)
+        client = self.helpers.api_client(self.Session, user)
+        self.check = mock.AsyncMock(return_value=visible)
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+             mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", self.check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=130), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient",
+                               lambda *a, **k: real_client(*a, transport=transport, **k)):
+            return client.get("/kavita/api/Reader/pdf?" + query, headers=headers or {})
+
+    def test_a_range_is_served_with_the_persons_key_and_the_chapter_alone(self):
+        r = self.fetch("chapterId=198&extractPdf=true&apiKey=someone-elses", headers={"Range": "bytes=0-9"})
+        self.assertEqual(r.status_code, 206)
+        self.assertEqual(r.content, self.PDF[:10])
+        (sent,) = self.seen
+        self.assertEqual(sorted(sent.url.params.multi_items()), [("apiKey", "key-sam"), ("chapterId", "198")])
+        self.assertEqual(sent.headers["range"], "bytes=0-9")
+        self.assertNotIn("cookie", sent.headers)
+        self.assertEqual(r.headers["content-range"], f"bytes 0-9/{len(self.PDF)}")
+        self.assertEqual(r.headers["content-length"], "10")
+        self.assertEqual(r.headers["accept-ranges"], "bytes")
+        self.assertEqual(r.headers["content-type"], "application/pdf")
+        self.check.assert_awaited_once_with(KAVITA, "jwt-sam", [("chapter", 198, 130)])
+
+    def test_the_whole_file_and_no_shared_cache(self):
+        r = self.fetch("chapterId=198")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.content, self.PDF)
+        self.assertEqual(r.headers["content-length"], str(len(self.PDF)))
+        self.assertEqual(r.headers["cache-control"], "private, max-age=3600")
+        self.assertNotIn("key-sam", r.headers.get("content-disposition", ""))
+
+    def test_a_hidden_chapter_is_404_and_kavita_is_never_asked(self):
+        r = self.fetch("chapterId=198", visible=False, headers={"Range": "bytes=0-9"})
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(self.seen, [])
+
+    def test_a_request_naming_no_plain_chapter_is_refused(self):
+        for query in ("chapterId=abc", "chapterId=198&chapterId=x", "chapterId=0"):
+            with self.subTest(query=query):
+                self.seen = []
+                self.assertEqual(self.fetch(query).status_code, 404)
+                self.assertEqual(self.seen, [])
+
+    def test_its_ranges_draw_on_the_page_budget(self):
+        for path in ("api/Reader/pdf", "api/reader/PDF"):
+            self.assertTrue(kavita_proxy._PAGE_LOAD_PATH.match(path), path)
+        self.assertFalse(kavita_proxy._PAGE_LOAD_PATH.match("api/Reader/progress"))
+
+
 def _literal_path_client(app):
     """A TestClient whose request path reaches the app exactly as the
     X-Literal-Path header spells it. httpx collapses a literal `..` before

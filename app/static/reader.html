@@ -184,6 +184,23 @@
     #tocPanel, #readerSurface { transition: none; }
   }
   .toc-link.active { font-weight: 700; }
+
+  /* A PDF book (pages/reader-pdf.js): each page is drawn to a canvas as the
+     file has it, never recoloured, on the reading surface's colour. The
+     reader sizes the canvas (the whole page on a wide screen, the width on a
+     phone); this only centres it and lifts it off the surface. The bottom
+     clears the page counter (with the surface's own pb-6), so on a wide
+     screen the whole page fits without the document scrolling. */
+  #pdfContent { padding: .75rem 1.5rem calc(2rem + env(safe-area-inset-bottom, 0px)); }
+  #pdfContent canvas {
+    display: block;
+    margin-inline: auto;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / .35), 0 8px 24px rgb(0 0 0 / .22);
+  }
+  @media (max-width: 640px) {
+    #pdfContent { padding-left: 0; padding-right: 0; }
+  }
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
@@ -192,6 +209,11 @@
 <!-- ws:header -->
 <!-- The page (spec 4.1), swapped by the router -->
 <div id="wsPage" data-ws-module="/static/js/pages/reader.js?v=1" class="flex-1 flex flex-col">
+<!-- Loaded only when the book is a PDF (pages/reader.js openPdfBook): the
+     reader's PDF helper and PDF.js, each stamped with its own content hash. -->
+<span id="readerPdfJs" hidden data-ws-dep="/static/js/pages/reader-pdf.js?v=1"></span>
+<span id="pdfjsLib" hidden data-ws-dep="/static/vendor/pdfjs/pdf.min.mjs?v=1"></span>
+<span id="pdfjsWorker" hidden data-ws-dep="/static/vendor/pdfjs/pdf.worker.min.mjs?v=1"></span>
 
 <!-- Top bar -->
 <header id="readerBar" class="fixed top-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-b border-steel-blue/25 flex items-center gap-2 px-3">
@@ -231,6 +253,8 @@
       <button type="button" data-theme="black" aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Black</button>
     </div>
   </div>
+  <!-- Off for a PDF, whose pages are drawn as the file has them. -->
+  <div id="textSettings" class="space-y-4">
   <div>
     <label for="fontSize" class="flex justify-between text-label font-semibold text-frosted-blue/70 mb-1">Text size <span id="fsVal" class="text-frosted-blue font-normal"></span></label>
     <input id="fontSize" type="range" min="14" max="28" step="1" class="wsp-range"/>
@@ -246,6 +270,7 @@
   <div class="flex items-center justify-between">
     <span id="columnsLabel" class="text-label font-semibold text-frosted-blue/70">Two columns</span>
     <button id="columns" type="button" role="switch" aria-checked="false" aria-labelledby="columnsLabel" class="ws-switch"></button>
+  </div>
   </div>
 </div>
 
@@ -280,6 +305,8 @@
   </div>
   <!-- Kavita's HTML goes in here VERBATIM (annotation xPaths are relative to it) -->
   <div id="bookContent" class="book-content hidden"></div>
+  <!-- A PDF book's page, drawn by pages/reader-pdf.js -->
+  <div id="pdfContent" class="hidden"></div>
 </div>
 
 <!-- Page turning: full-height edge targets, chevron centred vertically -->

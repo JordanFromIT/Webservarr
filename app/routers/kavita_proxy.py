@@ -50,6 +50,16 @@ PROXY_TIMEOUT = 60.0
 # rewrite_book_html), so they are buffered rather than streamed.
 _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 
+# A PDF book's file, which the reader renders itself (pdf.js) because Kavita's
+# page API reads only EPUBs. Kavita takes nothing but an apiKey on it (no
+# Bearer token), so the proxy adds the person's own key and passes only the
+# chapterId through: extractPdf, which has Kavita turn every page into an
+# image, is the work of Kavita's own apps, never this reader's. The file is
+# fetched in byte ranges (Kavita answers them), so the headers that describe a
+# range come back with it.
+_PDF_PATH = re.compile(r"^api/reader/pdf$", re.IGNORECASE)
+_PDF_RANGE_HEADERS = {"content-length", "content-range", "accept-ranges"}
+
 # What a proxied request can name, so the proxy can ask whether this person may
 # see it (Kavita does not check library access on its book, chapter, volume,
 # image or download endpoints): a chapterId, volumeId or seriesId in the query
@@ -1012,7 +1022,9 @@ async def _note_reading(user: Dict[str, str], body: bytes) -> None:
 # for image-heavy pages; the values here are doubled again per the operator.
 PAGE_LIMIT = "1200/minute"
 API_LIMIT = "240/minute"
-_PAGE_LOAD_PATH = re.compile(r"^api/(image/.+|book/\d+/(book-page|book-resources))$", re.IGNORECASE)
+# A PDF's byte ranges count as page loads: the reader fetches the parts of the
+# file the pages near the one on screen need, in 1 MB pieces.
+_PAGE_LOAD_PATH = re.compile(r"^api/(image/.+|book/\d+/(book-page|book-resources)|reader/pdf)$", re.IGNORECASE)
 
 
 def _kavita_rate_key(request: Request) -> str:
@@ -1117,7 +1129,11 @@ async def kavita_proxy(
         # server-side and never appears in markup the browser can read (book HTML
         # arrives with the key stripped by rewrite_book_html for exactly that reason).
         lowered = path.lower()
-        if ("apiKey" not in params) and (
+        if _PDF_PATH.match(path):
+            params = {k: v for k, v in params.items() if k.lower() == "chapterid"}
+            if api_key:
+                params["apiKey"] = api_key
+        elif ("apiKey" not in params) and (
             lowered.startswith("api/image/") or "book-resources" in lowered
         ):
             if api_key:
@@ -1186,6 +1202,12 @@ async def kavita_proxy(
             headers=response_headers,
             media_type=upstream.headers.get("content-type", "text/html; charset=utf-8"),
         )
+
+    if _PDF_PATH.match(path):
+        response_headers.update(
+            (k, v) for k, v in upstream.headers.items() if k.lower() in _PDF_RANGE_HEADERS)
+        # The URL carries no key and no person, so no shared cache may keep it.
+        response_headers["cache-control"] = "private, max-age=3600"
 
     async def stream_body():
         try:

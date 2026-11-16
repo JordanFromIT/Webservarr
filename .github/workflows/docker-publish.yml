@@ -141,6 +141,7 @@ jobs:
           node app/tests/js/insights_page.mjs
           node app/tests/js/kavita_connect.mjs
           node app/tests/js/play_history.mjs
+          node app/tests/js/reader_pdf.mjs
 
   build-and-push:
     needs: [test, js-checks]

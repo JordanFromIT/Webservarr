@@ -6,6 +6,15 @@
  * The reading position lives in Kavita: saved a few seconds after each turn,
  * and once more when the reader is left.
  *
+ * A PDF book (Kavita's format 4 in book-info) is the same reader with its
+ * pages drawn in the browser by PDF.js (pages/reader-pdf.js, loaded only
+ * then), from the file Kavita serves through the proxy: Kavita's page API
+ * reads only EPUBs. Its pages are numbered as the EPUB path numbers them
+ * (from 0 to Kavita, from 1 on screen and in page=), its place is saved the
+ * same way, and the contents are the PDF's own outline. Text settings and
+ * bookmarks are off for it: its pages are drawn as the file has them, and a
+ * Kavita bookmark is a picture of a page Kavita would have to cut out.
+ *
  * A full-screen view inside the site's one document: the server marks the
  * page <html data-shell="hidden"> (the sidebar, header and phone bar hidden,
  * #wsPlayer left on screen), and the router brings that in step on every
@@ -52,7 +61,10 @@ const THEMES = {
 };
 
 // One of these at a time, so a stale error never sits above a working page.
-const PANELS = ['loading', 'errorState', 'bookContent'];
+// A book's page shows in bookContent (an EPUB's HTML) or pdfContent (a PDF's
+// drawn page).
+const PANELS = ['loading', 'errorState', 'bookContent', 'pdfContent'];
+const PAGE_PANELS = ['bookContent', 'pdfContent'];
 
 /* The reading position's writes to Kavita (run by
  * app/tests/js/reader_progress.mjs).
@@ -256,14 +268,16 @@ export function progressWriter(send, key, clock) {
  * that do not settle until the first page is on screen. openSettings and
  * closeSettings are the visit's (steps() below).
  */
-function guideSteps(openSettings, closeSettings) {
+function guideSteps(openSettings, closeSettings, pdf) {
   return [
     {
       target: '#navNext',
-      fallback: '#bookContent',
+      fallback: pdf ? '#pdfContent' : '#bookContent',
       icon: 'auto_stories',
       title: 'Turning pages',
-      body: 'Tap or click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
+      body: pdf
+        ? 'Tap or click either edge of the page to move forward or back, swipe on a phone, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
+        : 'Tap or click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
     },
     {
       target: '#pageInfo',
@@ -277,7 +291,7 @@ function guideSteps(openSettings, closeSettings) {
       title: 'Chapters',
       body: 'Opens the table of contents. The chapter you are in is highlighted, and picking any other one takes you to it.'
     },
-    {
+    pdf ? null : {
       target: '#bookmarkBtn',
       icon: 'bookmark_add',
       title: 'Bookmarks',
@@ -288,7 +302,9 @@ function guideSteps(openSettings, closeSettings) {
       fallback: '#settingsBtn',
       icon: 'text_fields',
       title: 'Make it comfortable',
-      body: 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five page colours run from black through to paper white. Your choices carry to every book you open.',
+      body: pdf
+        ? 'The five page colours, from black through to paper white, set the colour around the page. The page itself shows just as it was printed. Your choice carries to every book you open.'
+        : 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five page colours run from black through to paper white. Your choices carry to every book you open.',
       before: openSettings
     },
     {
@@ -298,7 +314,7 @@ function guideSteps(openSettings, closeSettings) {
       body: 'The arrow at the top left goes back to your books. Nothing needs saving first, and the book reappears under Continue.',
       before: closeSettings
     }
-  ];
+  ].filter(Boolean);
 }
 
 /**
@@ -328,6 +344,16 @@ export function readerPage(params) {
   return n > 0 ? n : null;
 }
 
+/**
+ * True when Kavita's book-info names a PDF (its seriesFormat, Kavita's
+ * MangaFormat: 3 is an EPUB, 4 a PDF). Read from what the reader already has,
+ * so a PDF is never first asked for as an EPUB page.
+ */
+export const PDF_FORMAT = 4;
+export function isPdfBook(info) {
+  return !!info && info.seriesFormat === PDF_FORMAT;
+}
+
 export async function mount(ctx) {
   var root = ctx.root;
   var signal = ctx.signal;
@@ -335,7 +361,8 @@ export async function mount(ctx) {
   function el(id) { return root.querySelector('#' + id); }
 
   // This visit's state: every mount starts its own.
-  var book = { seriesId: null, chapterId: null, volumeId: null, libraryId: null, pages: 0, title: '' };
+  // pdf: the open PDF (reader-pdf.js openPdf) when the book is one, else null.
+  var book = { seriesId: null, chapterId: null, volumeId: null, libraryId: null, pages: 0, title: '', pdf: null };
   var current = { page: 0 };
   var saveTimer = 0;
   var lastSaved = -1;
@@ -352,6 +379,8 @@ export async function mount(ctx) {
   // at the start, would overwrite their real place when they leave the page.
   var positionKnown = false;
   var guide = null;
+  // Page loads started, so only the newest one puts its page up (loadPage).
+  var turns = 0;
   // Sample mode (see the top): nothing about this visit is ever saved.
   var sample = ctx.url.searchParams.get('sample') === '1';
 
@@ -495,7 +524,7 @@ export async function mount(ctx) {
    * It also keeps one turn from starting on top of another.
    */
   function canTurnPage() {
-    return book.chapterId != null && activePanel === 'bookContent';
+    return book.chapterId != null && PAGE_PANELS.indexOf(activePanel) !== -1;
   }
 
   var retryAction = null;
@@ -539,8 +568,12 @@ export async function mount(ctx) {
   }
 
   function loadTOC() {
-    return kavita('/api/Book/' + book.chapterId + '/chapters', null, true)
-      .then(function (r) { return r.ok ? r.json() : []; })
+    // A PDF's contents are its own outline, read by PDF.js.
+    var listed = book.pdf
+      ? book.pdf.contents()
+      : kavita('/api/Book/' + book.chapterId + '/chapters', null, true)
+        .then(function (r) { return r.ok ? r.json() : []; });
+    return listed
       .then(function (nodes) {
         if (signal.aborted) return;
         var list = el('tocList');
@@ -600,18 +633,37 @@ export async function mount(ctx) {
     if (book.pages && page > book.pages - 1) page = book.pages - 1;
     current.page = page;
     updateChrome();
+    // A PDF page drawn already (a neighbour of the last) goes up at once,
+    // with no spinner between; so a turn can come before it answers, and
+    // only the newest turn's page is put on screen.
+    var turn = ++turns;
+    var room = book.pdf ? pdfRoom() : null;
 
-    showPanel('loading');
-    el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
+    if (!room || !book.pdf.drawn(page, room)) {
+      showPanel('loading');
+      el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
+    }
 
-    return kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
-      .then(function (r) {
-        if (!r.ok) throw new Error('page HTTP ' + r.status);
-        return r.text();
+    var shown = room
+      ? book.pdf.draw(page, room).then(function (canvas) {
+        if (signal.aborted || turn !== turns) return false;
+        renderPdfPage(canvas);
+        return true;
       })
-      .then(function (html) {
-        if (signal.aborted) return;
-        renderPage(html);
+      : kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
+        .then(function (r) {
+          if (!r.ok) throw new Error('page HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (html) {
+          if (signal.aborted) return false;
+          renderPage(html);
+          return true;
+        });
+
+    return shown
+      .then(function (rendered) {
+        if (!rendered) return;
         if (!skipSave) {
           // The reader chose this page: from here it is theirs to save
           // (never in a sample, where nothing is saved).
@@ -621,13 +673,36 @@ export async function mount(ctx) {
         }
       })
       .catch(function (err) {
-        if (quiet(err)) return;
+        if (quiet(err) || turn !== turns) return;
         // The arrows are off under an error, so Try again reloads this page
         // (with the same skipSave: a retry never confirms an unknown position).
         showError('Couldn’t load this page', String(err.message || err), function () {
           loadPage(page, skipSave);
         });
       });
+  }
+
+  /**
+   * The room a PDF page is drawn for: the width of the reading surface (all
+   * of it on a phone), and on wider screens the height between the top bar
+   * and the page counter, less the player and a sample's banner, so the whole
+   * page shows. ratio: the screen's pixels per CSS pixel, for sharp pages.
+   */
+  function pdfRoom() {
+    var phone = window.innerWidth <= 640;
+    var width = document.documentElement.clientWidth - (phone ? 0 : 48);
+    var player = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ws-player-h')) || 0;
+    var banner = el('sampleBanner').hidden ? 0 : el('sampleBanner').offsetHeight;
+    // 56 the top bar, 12 the space above the page, 56 the page counter.
+    var height = window.innerHeight - 56 - 12 - 56 - player - banner;
+    return { width: Math.max(width, 120), height: Math.max(height, 160), phone: phone, ratio: window.devicePixelRatio || 1 };
+  }
+
+  function renderPdfPage(canvas) {
+    var container = el('pdfContent');
+    if (canvas.parentNode !== container || container.childNodes.length !== 1) container.replaceChildren(canvas);
+    showPanel('pdfContent');
+    scrollToTop();
   }
 
   function updateChrome() {
@@ -859,6 +934,47 @@ export async function mount(ctx) {
   }, { signal: signal });
   window.addEventListener('pagehide', function () { saveProgress(true); }, { signal: signal });
 
+  // A PDF is drawn for the room it has: a new size (a phone turned, a window
+  // resized) or a new pixel ratio (the window moved to another screen, which
+  // fires no resize) draws the page on screen again, once that settles.
+  var resizeTimer = 0;
+  function redrawSoon() {
+    if (!book.pdf) return;
+    ctx.clearTimeout(resizeTimer);
+    resizeTimer = ctx.setTimeout(function () {
+      if (canTurnPage()) loadPage(current.page, true);
+    }, 200);
+  }
+  window.addEventListener('resize', redrawSoon, { signal: signal });
+  function watchPixelRatio() {
+    if (signal.aborted || typeof window.matchMedia !== 'function') return;
+    var now = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+    if (!now || typeof now.addEventListener !== 'function') return;
+    now.addEventListener('change', function () { redrawSoon(); watchPixelRatio(); }, { once: true, signal: signal });
+  }
+
+  // A PDF's page turns with a sideways swipe too (reader-pdf.js swipeTurn):
+  // drawn to the screen's width on a phone, nothing else moves sideways.
+  // Never while zoomed in (that swipe pans), with two fingers, or over the
+  // reader's own controls.
+  var swipe = null;
+  root.addEventListener('touchstart', function (e) {
+    swipe = null;
+    if (!book.pdf || !pdfHelper || e.touches.length !== 1) return;
+    if (e.target.closest && e.target.closest('#readerBar, #tocPanel, #settingsPanel, #readerFooter, #sampleBanner')) return;
+    if (window.visualViewport && window.visualViewport.scale > 1.01) return;
+    swipe = { x: e.touches[0].clientX, y: e.touches[0].clientY, at: Date.now() };
+  }, { signal: signal, passive: true });
+  root.addEventListener('touchend', function (e) {
+    var from = swipe;
+    swipe = null;
+    if (!from || e.touches.length || !e.changedTouches.length || !canTurnPage()) return;
+    var t = e.changedTouches[0];
+    var step = pdfHelper.swipeTurn(t.clientX - from.x, t.clientY - from.y, Date.now() - from.at);
+    if (step) goToPage(current.page + step);
+  }, { signal: signal, passive: true });
+  root.addEventListener('touchcancel', function () { swipe = null; }, { signal: signal, passive: true });
+
   /* The Sample banner: Start reading is this book read normally (the same
      chapter, its place restored and saved); Close goes back where the
      sample was opened from, or to Books on a first page. */
@@ -873,6 +989,47 @@ export async function mount(ctx) {
     el('sampleBanner').hidden = false;
   }
 
+  // ---- PDF books ----
+
+  // reader-pdf.js, once a PDF is opened.
+  var pdfHelper = null;
+
+  // A file this page loads as a helper, at the address the server stamped.
+  function dep(id) { return el(id).getAttribute('data-ws-dep'); }
+
+  /**
+   * Open the book's PDF and switch the reader to it: no text settings and no
+   * bookmarks (see the top). A refused sign-in (401) goes round the Kavita
+   * hand-off as a page load does.
+   */
+  function openPdfBook() {
+    el('textSettings').hidden = true;
+    el('bookmarkBtn').hidden = true;
+    return Promise.all([import(dep('readerPdfJs')), import(dep('pdfjsLib'))]).then(function (mods) {
+      if (signal.aborted) throw new Error('reconnecting');
+      pdfHelper = mods[0];
+      return pdfHelper.openPdf(mods[1], {
+        url: '/kavita/api/Reader/pdf?chapterId=' + book.chapterId,
+        workerSrc: dep('pdfjsWorker'),
+        assets: '/static/vendor/pdfjs/',
+        signal: signal,
+        document: document
+      });
+    }).then(function (pdf) {
+      book.pdf = pdf;
+      // The file's own count: every page in it can be drawn. Kavita counted
+      // the same file.
+      book.pages = pdf.pages || book.pages;
+      watchPixelRatio();
+    }, function (err) {
+      if (err && err.status === 401) {
+        if (!signal.aborted) reconnectKavita();
+        throw new Error('reconnecting');
+      }
+      throw err;
+    });
+  }
+
   // ---- Boot ----
 
   loadPrefs();
@@ -881,7 +1038,8 @@ export async function mount(ctx) {
   if (window.WebServarrTour) {
     guide = window.WebServarrTour.init({
       seenKey: 'webservarr_reader_guide_seen',
-      steps: guideSteps(openSettings, closeSettings),
+      // Asked when the guide starts, by then the book's format is known.
+      steps: function () { return guideSteps(openSettings, closeSettings, !!book.pdf); },
       helpBtn: el('helpBtn'),
       // Started from the boot chain instead, once a page has rendered.
       autoStart: false,
@@ -939,6 +1097,10 @@ export async function mount(ctx) {
     book.title = info.bookTitle || info.seriesName || 'Reader';
     el('bookTitle').textContent = book.title;
     ctx.setTitle(book.title);
+    // Kavita's page API reads EPUBs only: a PDF is opened here instead.
+    return isPdfBook(info) ? openPdfBook() : null;
+  }).then(function () {
+    if (signal.aborted) throw new Error('reconnecting');
     loadTOC();
     // A sample opens at the start and never asks where the reader is. A page
     // named in the address (Play history) is opened instead of Kavita's place,
