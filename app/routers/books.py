@@ -1174,7 +1174,9 @@ async def request_format(request: Request, book_id: BookId, body: FormatRequestI
 async def cover(request: Request, book_id: BookId, who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """The book's cover, served from this origin (never hotlinked), from a
     format the caller can see: the book's own cover source first, then the
-    other. Only a raster image of bounded size is passed on. 404 when the book
+    other. An audiobook with no Plex cover shows its paired ebook's even to a
+    caller who cannot see the ebook (book_catalog.audiobook_cover). Only a
+    raster image of bounded size is passed on. 404 when the book
     is not theirs to see or has no cover; 503 when its source is down."""
     book, survivor = book_catalog.resolve_book(db, book_id)
     if book is None:
@@ -1190,14 +1192,19 @@ async def cover(request: Request, book_id: BookId, who: Scope = Depends(caller),
     if not sources:
         raise HTTPException(status_code=404, detail="No such book")
     sources.sort(key=lambda s: s != book.cover_source)
+    plex_key = (book.plex_book_key or editions[0].plex_book_key) if editions else None
 
     unavailable = False
     for source in sources:
         try:
             if source == "kavita":
                 content, content_type = await kavita.chapter_cover(book.kavita_chapter_id)
+            elif "kavita" in sources:
+                content, content_type = await pp.cover_image(plex_key)
             else:
-                content, content_type = await pp.cover_image(book.plex_book_key or editions[0].plex_book_key)
+                # The ebook is not a source of its own for this caller: when
+                # Plex has no cover, its paired ebook's stands in.
+                content, content_type = await book_catalog.audiobook_cover(db, plex_key)
         except (kavita.KavitaNoCover, pp.NotInLibrary):
             continue
         except (kavita.KavitaUnavailable, pp.PlayerUnavailable):

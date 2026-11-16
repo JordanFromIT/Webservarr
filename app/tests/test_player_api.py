@@ -7,8 +7,11 @@ is the real one on an in-memory database, so identity isolation and the
 psid/seq rules are exercised end to end. No test reaches Plex, plex.tv,
 Redis or the dev instance's settings.
 """
+import asyncio
 import json
+import time
 import unittest
+from datetime import datetime
 from unittest import mock
 
 from app.tests import helpers
@@ -20,7 +23,8 @@ try:
     from app.integrations import plex_player as pp
     from app.limiter import limiter
     from app.main import app
-    from app.models import ListeningLog, ListeningPosition
+    from app.integrations import kavita
+    from app.models import Book, BookAudioEdition, ListeningLog, ListeningPosition
     from app.routers import player
     HAVE_APP = True
 except Exception:  # pragma: no cover - the laptop has no app dependencies
@@ -497,6 +501,96 @@ class Shapes(PlayerApiBase):
                 self.assertEqual(r.status_code, 422)
         self.assertEqual(self.client.get("/api/player/prefs").json(),
                          {"skip_s": 10, "speed": 1.0, "smart_rewind": True})
+
+
+class EbookCoverFallback(PlayerApiBase):
+    """An audiobook Plex has no image for shows the cover of the ebook the
+    catalog pairs it with: only a catalog pair (never a title match), whatever
+    the listener may see in Kavita, and a Kavita failure is the 404 it was."""
+
+    def setUp(self):
+        super().setUp()
+        self.cover_image.side_effect = pp.NotInLibrary("This book has no cover")
+        self.kavita_cover = mock.AsyncMock(return_value=(b"\x89PNGk", "image/png"))
+        p = mock.patch.object(kavita, "chapter_cover", self.kavita_cover)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def pair(self, key="100:1", chapter=101, book_id=1, merged_into=None):
+        now = datetime(2026, 11, 1)
+        self.db.add(Book(id=book_id, title="A Book", sort_title="A Book", kavita_chapter_id=chapter,
+                         plex_book_key=key, updated_at=now, merged_into=merged_into))
+        self.db.add(BookAudioEdition(book_id=book_id, plex_book_key=key, narrator=""))
+        self.db.commit()
+
+    def cover(self, key="100:1"):
+        return self.client.get(f"/api/player/cover/{key}?v=1700000000")
+
+    def assert_no_cover(self, r):
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.headers["cache-control"], "no-store")
+
+    def test_no_plex_cover_serves_the_paired_ebooks_cover_cached_like_any_cover(self):
+        self.pair()
+        r = self.cover()
+        self.assertEqual((r.status_code, r.headers["content-type"], r.content), (200, "image/png", b"\x89PNGk"))
+        self.assertEqual(r.headers["cache-control"], f"private, max-age={30 * 24 * 3600}")
+        self.assertEqual(r.headers["content-security-policy"], "sandbox")
+        self.kavita_cover.assert_awaited_once_with(101)
+
+    def test_a_plex_cover_never_reads_kavita(self):
+        self.pair()
+        self.cover_image.side_effect = fake_cover_image
+        self.assertEqual(self.cover().content, b"\xff\xd8jpeg")
+        self.kavita_cover.assert_not_awaited()
+
+    def test_an_unpaired_audiobook_is_404_as_before(self):
+        self.pair(key="200:1")                  # another book's pair is not this one's
+        self.assert_no_cover(self.cover("100:1"))
+        self.kavita_cover.assert_not_awaited()
+
+    def test_a_paired_book_without_an_ebook_is_404(self):
+        self.pair(chapter=None)
+        self.assert_no_cover(self.cover())
+        self.kavita_cover.assert_not_awaited()
+
+    def test_a_retired_book_row_is_no_pair(self):
+        self.pair(merged_into=2)
+        self.assert_no_cover(self.cover())
+        self.kavita_cover.assert_not_awaited()
+
+    def test_kavita_failing_is_404_and_never_kept(self):
+        self.pair()
+        for exc in (kavita.KavitaNoCover(), kavita.KavitaUnavailable("Kavita did not answer")):
+            with self.subTest(exc=type(exc).__name__):
+                self.kavita_cover.side_effect = exc
+                self.assert_no_cover(self.cover())
+
+    def test_a_kavita_that_hangs_is_404_within_the_page_timeout(self):
+        self.pair()
+
+        async def hang(_chapter):
+            await asyncio.sleep(30)
+        self.kavita_cover.side_effect = hang
+        with mock.patch.object(kavita, "USER_TIMEOUT", 0.05):
+            started = time.monotonic()
+            r = self.cover()
+        self.assert_no_cover(r)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_plex_down_stays_503_and_kavita_is_not_asked(self):
+        self.pair()
+        self.cover_image.side_effect = pp.PlayerUnavailable("Plex is unavailable")
+        r = self.cover()
+        self.assertEqual((r.status_code, r.headers["cache-control"]), (503, "no-store"))
+        self.kavita_cover.assert_not_awaited()
+
+    def test_the_listeners_kavita_access_is_not_asked(self):
+        # The player route has no ebook scope: a listener with no Kavita at
+        # all still gets the cover of the work they may listen to.
+        self.pair()
+        with mock.patch.object(kavita, "user_series_ids", mock.AsyncMock(side_effect=AssertionError)):
+            self.assertEqual(self.cover().status_code, 200)
 
 
 class History(PlayerApiBase):

@@ -40,7 +40,7 @@ from app.dependencies import get_current_user, require_same_origin
 from app.integrations import plex_player as pp
 from app.limiter import limiter, rate_limit_key
 from app.routers.tickets import account_identity
-from app.services import listening
+from app.services import book_catalog, listening
 from app.utils import utc_iso
 
 logger = logging.getLogger(__name__)
@@ -262,12 +262,13 @@ async def book(request: Request, key: str, refresh: bool = False, who: Listener 
 
 @router.get("/cover/{key}")
 @_limit(COVER_LIMIT, "cover")
-async def cover(request: Request, key: str, who: Listener = Depends(listener)):
+async def cover(request: Request, key: str, who: Listener = Depends(listener), db: Session = Depends(get_db)):
     """The book's cover, fitted to a square, served from this origin (img-src
-    stays as it is)."""
+    stays as it is). When Plex has none, the cover of the ebook the catalog
+    pairs it with (book_catalog.audiobook_cover)."""
     await _book_access(who, key)
     try:
-        content, content_type = await pp.cover_image(key)
+        content, content_type = await book_catalog.audiobook_cover(db, key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         # A cover missing now can load later under the same ?v= (Plex back
         # up, or a fix that leaves the thumb stamp alone): a miss is never kept.

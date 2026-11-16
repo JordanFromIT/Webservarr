@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import exists
+from sqlalchemy.exc import SQLAlchemyError
 
 import redis.asyncio as aioredis
 
@@ -944,3 +945,44 @@ def knows_ebook(db, kavita_chapter_id: int) -> bool:
 
 def knows_edition(db, plex_book_key: str) -> bool:
     return db.query(BookAudioEdition.id).filter(BookAudioEdition.plex_book_key == plex_book_key).first() is not None
+
+
+def ebook_chapter_of(db, plex_book_key: str) -> Optional[int]:
+    """The Kavita chapter of the ebook the catalog pairs this audiobook edition
+    with (the live book it is in), or None when that book has no ebook or the
+    edition is in no book."""
+    row = (db.query(Book.kavita_chapter_id).join(BookAudioEdition, BookAudioEdition.book_id == Book.id)
+           .filter(BookAudioEdition.plex_book_key == plex_book_key, Book.merged_into.is_(None)).first())
+    return row[0] if row else None
+
+
+async def audiobook_cover(db, key: str) -> tuple:
+    """(image bytes, content type) of an audiobook's cover: its Plex cover
+    (plex_player.cover_image), else, when Plex has none, the cover of the
+    ebook the catalog pairs it with (never one found by title).
+
+    The ebook's cover is given whatever the caller may see of the ebook: it is
+    the cover of the work they may listen to, and nothing else about the ebook
+    is passed on. The Kavita read is bounded by kavita.USER_TIMEOUT, and its
+    failing is the same as no cover. Raises plex_player.NotInLibrary when
+    neither gives a cover, PlayerOff or PlayerUnavailable as cover_image does."""
+    try:
+        return await plex_player.cover_image(key)
+    except plex_player.PlayerOff:
+        raise
+    except plex_player.NotInLibrary as no_plex_cover:
+        missing = no_plex_cover
+    try:
+        chapter = ebook_chapter_of(db, key)
+    except SQLAlchemyError as exc:
+        logger.warning("The catalog could not be read for a cover: %s", type(exc).__name__)
+        raise missing from None
+    if chapter is None:
+        raise missing
+    try:
+        return await asyncio.wait_for(kavita.chapter_cover(chapter), kavita.USER_TIMEOUT)
+    except kavita.KavitaNoCover:
+        raise missing from None
+    except (kavita.KavitaUnavailable, asyncio.TimeoutError) as exc:
+        logger.info("The ebook's cover could not be read for an audiobook: %s", type(exc).__name__)
+        raise missing from None
