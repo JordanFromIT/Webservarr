@@ -137,20 +137,33 @@ class NowLive(Base):
         asyncio.run(insights.note_reading(r, "", body, now=NOW))
         self.assertEqual(list(r.data), [insights.READING_PREFIX + identity_key(ME)])
         self.assertEqual(list(r.ttl.values()), [300])
+        # An EPUB's pageNum counts from 0: page 41 as the reader shows it.
         self.assertEqual(asyncio.run(insights.reading_now(r)),
-                         [{"identity": ME, "volume_id": 30, "chapter_id": 77, "page": 40, "at": "2026-10-10T12:30:00.000Z"}])
+                         [{"identity": ME, "volume_id": 30, "chapter_id": 77, "page": 41, "at": "2026-10-10T12:30:00.000Z"}])
+
+    def test_a_pdfs_page_is_kavitas_own_from_1(self):
+        for page_num, shown in ((0, 1), (1, 1), (40, 40), (781, 781)):
+            with self.subTest(page_num=page_num):
+                r = FakeRedis()
+                body = json.dumps({"volumeId": 30, "chapterId": 77, "pageNum": page_num}).encode()
+                asyncio.run(insights.note_reading(r, ME, body, now=NOW, pdf=True))
+                self.assertEqual(asyncio.run(insights.reading_now(r))[0]["page"], shown)
+        r = FakeRedis()
+        asyncio.run(insights.note_reading(r, ME, json.dumps({"chapterId": 77, "pageNum": 0}).encode(), now=NOW))
+        self.assertEqual(asyncio.run(insights.reading_now(r))[0]["page"], 1)      # an EPUB's first page
 
     def test_the_proxy_notes_a_progress_save_kavita_took(self):
         from app.routers import kavita_proxy
         src = inspect.getsource(kavita_proxy.kavita_proxy)
         self.assertIn('request.method == "POST" and path.lower() == "api/reader/progress"', src)
         self.assertIn("200 <= upstream.status_code < 300", src)
-        self.assertIn("await _note_reading(current_user, body)", src)
+        self.assertIn('await _note_reading(current_user, body, pdf=request.query_params.get("format") == "pdf")', src)
         seen = mock.AsyncMock()
         with mock.patch.object(insights, "note_reading", seen), \
                 mock.patch.object(kavita_proxy.session_manager, "get_redis", mock.AsyncMock(return_value=FakeRedis())):
             asyncio.run(kavita_proxy._note_reading({"auth_method": "plex", "plex_account_id": "1001"}, b"{}"))
         self.assertEqual(seen.await_args.args[1:], (ME, b"{}"))
+        self.assertEqual(seen.await_args.kwargs, {"pdf": False})
 
 
 if __name__ == "__main__":

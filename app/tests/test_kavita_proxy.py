@@ -810,6 +810,33 @@ class PdfFile(unittest.TestCase):
                 self.assertEqual(self.fetch(query).status_code, 404)
                 self.assertEqual(self.seen, [])
 
+    def test_a_pdf_save_tells_right_now_and_not_kavita(self):
+        import httpx
+        real_client = httpx.AsyncClient
+        sent = []
+
+        def kavita(request):
+            sent.append(request)
+            return httpx.Response(200)
+
+        user = dict(self.helpers.MEMBER, kavita_token="jwt-sam", kavita_api_key="key-sam", kavita_base=KAVITA)
+        client = self.helpers.api_client(self.Session, user, headers=self.helpers.SAME_ORIGIN)
+        body = {"libraryId": 1, "seriesId": 130, "volumeId": 197, "chapterId": 198, "pageNum": 12}
+        note = mock.AsyncMock()
+        for query, pdf in (("?format=pdf", True), ("", False)):
+            with self.subTest(query=query), \
+                 mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+                 mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", mock.AsyncMock(return_value=True)), \
+                 mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=130), \
+                 mock.patch.object(kavita_proxy, "_note_reading", note), \
+                 mock.patch.object(kavita_proxy.httpx, "AsyncClient",
+                                   lambda *a, **k: real_client(*a, transport=httpx.MockTransport(kavita), **k)):
+                sent.clear()
+                r = client.post("/kavita/api/Reader/progress" + query, json=body)
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(sent[0].url.params.multi_items(), [])         # Kavita never sees format=
+                self.assertEqual(note.await_args.kwargs, {"pdf": pdf})
+
     def test_its_ranges_draw_on_the_page_budget(self):
         for path in ("api/Reader/pdf", "api/reader/PDF", "api/Reader/pdf/"):
             self.assertTrue(kavita_proxy._PAGE_LOAD_PATH.match(path), path)

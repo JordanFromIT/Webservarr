@@ -266,14 +266,14 @@ async function readerVisit(search, opts) {
     }
     if (/\/Book\/198\/chapters$/.test(url)) return [{ title: 'Kavita\'s chapter', page: 2 }];
     if (/get-progress\?chapterId=198$/.test(url)) return JSON.stringify({ pageNum: o.progress });
-    if (/Reader\/progress$/.test(url)) return '';
+    if (/Reader\/progress(\?format=pdf)?$/.test(url)) return '';
     return null;
   };
   const fetchFn = (url, init) => {
     calls.push(String(url));
     if (init && init.method === 'POST') {
       posts.push({ url: String(url), body: JSON.parse(init.body) });
-      if (/Reader\/progress$/.test(String(url))) o.progress = JSON.parse(init.body).pageNum;
+      if (/Reader\/progress(\?format=pdf)?$/.test(String(url))) o.progress = JSON.parse(init.body).pageNum;
     }
     const a = answers(String(url));
     const ok = a !== null;
@@ -311,7 +311,7 @@ async function readerVisit(search, opts) {
 }
 
 const drawnPages = (v) => v.pdf.renders.map((r) => r.page);
-const saves = (v) => v.posts.filter((x) => /Reader\/progress$/.test(x.url)).map((x) => x.body.pageNum);
+const saves = (v) => v.posts.filter((x) => /Reader\/progress(\?format=pdf)?$/.test(x.url)).map((x) => x.body.pageNum);
 
 await run('a PDF opens at Kavita\'s place, drawn by PDF.js', async () => {
   const v = await readerVisit('?seriesId=130&chapterId=198');
@@ -333,6 +333,7 @@ await run('a PDF opens at Kavita\'s place, drawn by PDF.js', async () => {
     check('without the spinner (it was drawn already)', v.$('loading').classList.contains('hidden'));
     await v.settle();
     check('and saves it as Kavita counts a PDF\'s pages, from 1', JSON.stringify(saves(v)) === '[12]', saves(v));
+    check('telling the proxy it is a PDF (for Right now)', v.posts.every((x) => /\/kavita\/api\/Reader\/progress\?format=pdf$/.test(x.url)), v.posts.map((x) => x.url));
 
     v.doc.dispatchEvent(new v.win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await v.settle();
@@ -423,6 +424,7 @@ await run('an EPUB\'s pages are saved from 0, as before', async () => {
     v.$('navNext').click();
     await v.settle();
     check('a turn to 12 saves 11', JSON.stringify(saves(v)) === '[11]', saves(v));
+    check('to the plain address', v.posts.every((x) => /\/kavita\/api\/Reader\/progress$/.test(x.url)), v.posts.map((x) => x.url));
   } finally {
     await v.end();
   }

@@ -1853,8 +1853,9 @@ class KavitaAsThePerson(unittest.TestCase):
                          [(20, 1, "0"), (20, 3, "100")])
         self.assertEqual(seen[0][2]["combination"], 1)
 
-    def progress_answers(self, progress, volumes=None, pages=None):
-        """Kavita's per-chapter progress, volumes (volume id -> [(chapter id, pages)]) and chapter sizes."""
+    def progress_answers(self, progress, volumes=None, pages=None, pdfs=()):
+        """Kavita's per-chapter progress, volumes (volume id -> [(chapter id, pages)]) and chapter sizes;
+        `pdfs`: the chapters that are PDFs (format 4, Kavita's pageNum from 1)."""
         def get_progress(request):
             chapter = int(request.url.params["chapterId"])
             if chapter == 9:
@@ -1866,12 +1867,14 @@ class KavitaAsThePerson(unittest.TestCase):
             found = (volumes or {}).get(int(request.url.params["volumeId"]))
             if found is None:
                 return httpx.Response(404)
-            return httpx.Response(200, json={"id": 1, "chapters": [{"id": c, "pages": n} for c, n in found]})
+            return httpx.Response(200, json={"id": 1, "chapters": [
+                {"id": c, "pages": n, "files": [{"format": 4 if c in pdfs else 3}]} for c, n in found]})
 
         self.answers["/api/Reader/get-progress"] = get_progress
         self.answers["/api/Series/volume"] = volume
-        self.answers["/api/Series/chapter"] = lambda r: httpx.Response(
-            200, json={"pages": (pages or {}).get(int(r.url.params["chapterId"]), 40)})
+        self.answers["/api/Series/chapter"] = lambda r: httpx.Response(200, json={
+            "pages": (pages or {}).get(int(r.url.params["chapterId"]), 40),
+            "format": 4 if int(r.url.params["chapterId"]) in pdfs else 3})
 
     def test_places_in_books_that_are_one_chapter(self):
         self.progress_answers({2: (7, "2026-10-01T08:30:00"), 3: (4, "2026-10-01T08:31:00")})
@@ -1886,6 +1889,38 @@ class KavitaAsThePerson(unittest.TestCase):
         self.answers["/api/Reader/get-progress"] = httpx.Response(401)
         with self.assertRaises(kavita.KavitaTokenRefused):
             self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(1, None), (2, None)]))
+
+    def test_a_pdf_and_an_epub_agree_at_the_first_page_the_middle_and_the_end(self):
+        # Kavita counts an EPUB's pages from 0 and a PDF's from 1 (its PDF
+        # reader saves the page it shows). A place is the reader's, from 0,
+        # for both: the same page reads the same, and the last is finished.
+        from app.routers.books import _ebook_progress
+        epub, pdf = 2, 3
+        for shown, epub_num, pdf_num, want in ((1, 0, 1, None), (21, 20, 21, "50%"), (41, 40, 41, "Finished")):
+            with self.subTest(page=shown):
+                self.progress_answers({epub: (epub_num, "2026-10-01T08:30:00"), pdf: (pdf_num, "2026-10-01T08:30:00")},
+                                      pages={epub: 41, pdf: 41}, pdfs={pdf})
+                places = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(epub, None), (pdf, None)]))
+                if want is None:
+                    self.assertEqual(places, {})          # the first page: not started, for either
+                    continue
+                self.assertEqual(places[epub]["page"], shown - 1)
+                self.assertEqual(places[pdf]["page"], shown - 1)
+                self.assertEqual(places[pdf]["toc_page"], shown - 1)
+                for chapter in (epub, pdf):
+                    progress = _ebook_progress(places[chapter])
+                    self.assertEqual(progress["label"], want)
+                    self.assertEqual(progress["finished"], want == "Finished")
+        # A PDF in a numbered volume: its chapter read to the end counts whole.
+        self.progress_answers({101: (30, "2026-10-01T08:00:00"), 102: (11, "2026-10-02T09:00:00")},
+                              volumes={50: [(101, 30), (102, 30)]}, pdfs={101, 102})
+        place = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))[101]
+        self.assertEqual((place["page"], place["pages"], place["toc_chapter"], place["toc_page"]), (40, 60, 102, 10))
+        self.progress_answers({101: (30, "2026-10-01T08:00:00"), 102: (30, "2026-10-02T09:00:00")},
+                              volumes={50: [(101, 30), (102, 30)]}, pdfs={101, 102})
+        place = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))[101]
+        self.assertEqual((place["page"], place["pages"]), (60, 60))
+        self.assertTrue(_ebook_progress(place)["finished"])
 
     def test_a_volume_is_read_whole_not_by_its_first_chapter(self):
         # Volume 50 is one book in three files. The first is read to its last page, the second part way.

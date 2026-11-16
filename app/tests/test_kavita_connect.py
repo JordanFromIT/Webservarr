@@ -149,6 +149,7 @@ READER_FOREGROUND = {"series-detail": r"^/api/Series/series-detail\?",
                      "book-page": r"^/api/Book//book-page\?"}
 READER_BACKGROUND = {"chapters": r"^/api/Book//chapters$",
                      "get-progress": r"^/api/Reader/get-progress\?",
+                     # format=pdf only on a PDF's saves (pdfMark), for Insights.
                      "progress": r"^/api/Reader/progress$",
                      "bookmark": r"^/api/Reader/bookmark$"}
 

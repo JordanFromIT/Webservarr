@@ -781,7 +781,7 @@ export async function mount(ctx) {
 
     if (useBeacon && navigator.sendBeacon) {
       // Fire-and-forget; same-origin so the session cookie rides along.
-      if (navigator.sendBeacon('/kavita/api/Reader/progress',
+      if (navigator.sendBeacon('/kavita/api/Reader/progress' + pdfMark(),
         new Blob([progressBody(page)], { type: 'application/json' }))) writer.sent(page);
       return;
     }
@@ -803,6 +803,9 @@ export async function mount(ctx) {
   // number it shows, and a PDF is read when that reaches its page count) and
   // an EPUB's from 0. The reader counts from 0 for both; only these two
   // convert.
+  // A PDF's saves say so (format=pdf), for Insights' Right now, which shows
+  // the page as the reader does; the proxy keeps it from Kavita.
+  function pdfMark() { return book.pdf ? '?format=pdf' : ''; }
   function toKavitaPage(page) { return book.pdf ? page + 1 : page; }
   function fromKavitaPage(pageNum) { return book.pdf ? Math.max(pageNum - 1, 0) : pageNum; }
 
@@ -817,7 +820,7 @@ export async function mount(ctx) {
    * next save try again.
    */
   function sendProgress(page, deadline) {
-    return kavita('/api/Reader/progress', {
+    return kavita('/api/Reader/progress' + pdfMark(), {
       method: 'POST',
       signal: deadline,
       keepalive: true,

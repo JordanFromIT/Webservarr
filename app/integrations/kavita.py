@@ -527,11 +527,36 @@ async def reading_stats(base: str, token: str) -> dict:
             "hours": _whole(stats.get("timeSpentReading"))}
 
 
+# Kavita's MangaFormat for a PDF (a chapter's or file's format, a reading-
+# history item's seriesFormat). Kavita counts a PDF's pages from 1.
+PDF_FORMAT = 4
+
+
+def _is_pdf(chapter) -> bool:
+    """True for a Kavita chapter (a ChapterDto, or one in a volume's list) that
+    is a PDF: its own format, or its file's."""
+    if not isinstance(chapter, dict):
+        return False
+    if chapter.get("format") == PDF_FORMAT:
+        return True
+    return any(isinstance(f, dict) and f.get("format") == PDF_FORMAT for f in chapter.get("files") or [])
+
+
+def reader_page(page_num: int, pdf: bool) -> int:
+    """Kavita's saved pageNum as the reader counts pages, from 0: an EPUB's is
+    that already; a PDF's counts from 1 (Kavita's PDF reader saves the page it
+    shows, and 0 is "not started"), so it is one less, never below 0. Every
+    place this module hands out is in these numbers, so a book's place,
+    percent and "finished" read the same for both formats."""
+    return max(page_num - 1, 0) if pdf else page_num
+
+
 def _volume_place(chapters: list, progress: list) -> Optional[dict]:
     """One place for a whole volume: the pages read and the pages in all its
     chapters (a finished chapter counts whole), when they last read it, and the
     chapter they were last in (`toc_chapter`) at its page (`toc_page`). None
-    when they have not started any of it."""
+    when they have not started any of it. Pages are the reader's, from 0
+    (reader_page)."""
     read = total = 0
     last = None
     for chapter, (page, at) in zip(chapters, progress):
@@ -549,7 +574,9 @@ def _volume_place(chapters: list, progress: list) -> Optional[dict]:
 
 async def book_places(base: str, token: str, books) -> dict:
     """This person's place in each book they have started: {the book's chapter
-    id: {"page", "pages", "at" (naive UTC or None), "toc_chapter", "toc_page"}}.
+    id: {"page", "pages", "at" (naive UTC or None), "toc_chapter", "toc_page"}},
+    pages as the reader counts them, from 0, for a PDF as for an EPUB
+    (reader_page).
     `books` are (chapter id, volume id or None). A numbered volume is read
     whole: its pages read and its pages in all its chapters, a volume being one
     book whatever files it comes in. A book not in a numbered volume is its one
@@ -571,11 +598,12 @@ async def book_places(base: str, token: str, books) -> dict:
 
         async def read(chapter_id: int, volume_id: Optional[int]) -> None:
             volume = await ask("/api/Series/volume", volumeId=volume_id) if volume_id else None
-            chapters = [{"id": c["id"], "pages": _whole(c.get("pages"))} for c in
+            chapters = [{"id": c["id"], "pages": _whole(c.get("pages")), "pdf": _is_pdf(c)} for c in
                         (volume.get("chapters") if isinstance(volume, dict) else None) or []
                         if isinstance(c, dict) and isinstance(c.get("id"), int)]
             if volume_id and chapters:
-                found = _volume_place(chapters, await asyncio.gather(*(progress_of(c["id"]) for c in chapters)))
+                kept = await asyncio.gather(*(progress_of(c["id"]) for c in chapters))
+                found = _volume_place(chapters, [(reader_page(page, c["pdf"]), at) for c, (page, at) in zip(chapters, kept)])
                 if found:
                     places[chapter_id] = found
                 return
@@ -583,6 +611,9 @@ async def book_places(base: str, token: str, books) -> dict:
             if page <= 0:
                 return
             chapter = await ask("/api/Series/chapter", chapterId=chapter_id)
+            page = reader_page(page, _is_pdf(chapter))
+            if page <= 0:
+                return                    # a PDF on its first page: as an EPUB there, not started
             places[chapter_id] = {"page": page, "pages": _whole(chapter.get("pages")) if isinstance(chapter, dict) else 0,
                                   "at": at, "toc_chapter": chapter_id, "toc_page": page}
 
@@ -607,7 +638,6 @@ async def book_places(base: str, token: str, books) -> dict:
 # left out.
 
 HISTORY_PAGE_SIZE = 50
-PDF_FORMAT = 4               # Kavita's MangaFormat for a PDF (an item's seriesFormat)
 HISTORY_MAX_PAGES = 6        # 300 sessions in one go at most
 
 

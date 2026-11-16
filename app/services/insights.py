@@ -369,11 +369,13 @@ def _id(value) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-async def note_reading(r, identity: str, body: bytes, now: Optional[datetime] = None) -> None:
+async def note_reading(r, identity: str, body: bytes, now: Optional[datetime] = None, pdf: bool = False) -> None:
     """Note that `identity` just saved their place in WebServarr's reader (the
     reader's progress body: volumeId, chapterId, pageNum), for Right now.
     Only those three numbers and the time are kept, for READING_TTL seconds,
-    under the person's opaque key. Anything else is ignored."""
+    under the person's opaque key. Anything else is ignored. The page is kept
+    as the reader shows it, from 1: Kavita's pageNum counts an EPUB's pages
+    from 0 and a PDF's (`pdf`) from 1."""
     if r is None or not identity:
         return
     try:
@@ -383,8 +385,12 @@ async def note_reading(r, identity: str, body: bytes, now: Optional[datetime] = 
     if not isinstance(sent, dict) or _id(sent.get("chapterId")) is None:
         return
     page = sent.get("pageNum")
+    if isinstance(page, int) and not isinstance(page, bool) and page >= 0:
+        page = max(page, 1) if pdf else page + 1
+    else:
+        page = None
     note = {"identity": identity, "volume_id": _id(sent.get("volumeId")), "chapter_id": sent["chapterId"],
-            "page": page if isinstance(page, int) and not isinstance(page, bool) and page >= 0 else None,
+            "page": page,
             "at": utc_iso(now or now_utc())}
     try:
         await r.set(READING_PREFIX + identity_key(identity), json.dumps(note), ex=READING_TTL)

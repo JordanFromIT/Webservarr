@@ -999,9 +999,10 @@ def _remember_kavita_account(session: dict, account) -> None:
         db.close()
 
 
-async def _note_reading(user: Dict[str, str], body: bytes) -> None:
+async def _note_reading(user: Dict[str, str], body: bytes, pdf: bool = False) -> None:
     """Note a reader save for the admin's Insights (only the book's numbers
-    and the time, five minutes, in Redis). Best effort: never fails the save."""
+    and the time, five minutes, in Redis). Best effort: never fails the save.
+    pdf: the reader said the book is a PDF (its pageNum counts from 1)."""
     from redis.exceptions import RedisError
     from app.routers.tickets import account_identity
     from app.services import insights
@@ -1011,7 +1012,7 @@ async def _note_reading(user: Dict[str, str], body: bytes) -> None:
     except (RedisError, OSError) as exc:
         logger.info("Reading note skipped: %s", type(exc).__name__)
         return
-    await insights.note_reading(r, account_identity(user), body)
+    await insights.note_reading(r, account_identity(user), body, pdf=pdf)
 
 
 # Two budgets per client (an IPv4 address or an IPv6 /64) across every
@@ -1130,6 +1131,9 @@ async def kavita_proxy(
         # server-side and never appears in markup the browser can read (book HTML
         # arrives with the key stripped by rewrite_book_html for exactly that reason).
         lowered = path.lower()
+        if lowered == "api/reader/progress":
+            # format=pdf is the reader's word to Insights (_note_reading), not Kavita's.
+            params.pop("format", None)
         if _PDF_PATH.match(path):
             params = {k: v for k, v in params.items() if k.lower() == "chapterid"}
             if api_key:
@@ -1171,7 +1175,7 @@ async def kavita_proxy(
         raise HTTPException(status_code=401, detail="Kavita session expired")
     if request.method == "POST" and path.lower() == "api/reader/progress" and 200 <= upstream.status_code < 300:
         # Kavita took a reader save: Insights' Right now shows who is reading (spec 4.5).
-        await _note_reading(current_user, body)
+        await _note_reading(current_user, body, pdf=request.query_params.get("format") == "pdf")
 
     response_headers = {
         k: v
