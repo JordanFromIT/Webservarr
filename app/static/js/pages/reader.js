@@ -65,7 +65,6 @@ const THEMES = {
 // A book's page shows in bookContent (an EPUB's HTML) or pdfContent (a PDF's
 // drawn page).
 const PANELS = ['loading', 'errorState', 'bookContent', 'pdfContent'];
-const PAGE_PANELS = ['bookContent', 'pdfContent'];
 
 /* The reading position's writes to Kavita (run by
  * app/tests/js/reader_progress.mjs).
@@ -525,7 +524,7 @@ export async function mount(ctx) {
    * It also keeps one turn from starting on top of another.
    */
   function canTurnPage() {
-    return book.chapterId != null && PAGE_PANELS.indexOf(activePanel) !== -1;
+    return book.chapterId != null && (activePanel === 'bookContent' || activePanel === 'pdfContent');
   }
 
   var retryAction = null;
@@ -942,9 +941,7 @@ export async function mount(ctx) {
   function redrawSoon() {
     if (!book.pdf) return;
     ctx.clearTimeout(resizeTimer);
-    resizeTimer = ctx.setTimeout(function () {
-      if (canTurnPage()) loadPage(current.page, true);
-    }, 200);
+    resizeTimer = ctx.setTimeout(function () { goToPage(current.page, true); }, 200);
   }
   window.addEventListener('resize', redrawSoon, { signal: signal });
   function watchPixelRatio() {

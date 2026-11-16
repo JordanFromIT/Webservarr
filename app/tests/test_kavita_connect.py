@@ -393,7 +393,7 @@ def check_books(t, html, js):
     return js
 
 
-READER_PANELS = ("loading", "errorState", "bookContent")
+READER_PANELS = ("loading", "errorState", "bookContent", "pdfContent")
 
 
 def check_reader(t, html, js):
@@ -487,11 +487,12 @@ def check_reader(t, html, js):
     t.assertEqual(len(live_matches(keys, r"\bgoToPage\(")), len(live_matches(keys, r"\bif\s*\(\s*!\s*canTurnPage\(\s*\)\s*\)\s*return\b")),
                   "a page key turns pages without the check")
 
-    # The three panels are one set: exactly one shows, so a stale error never
-    # stays above a working page; the edge zones (outside the panels) go with the error.
+    # The panels (an EPUB's page and a PDF's among them) are one set: exactly
+    # one shows, so a stale error never stays above a working page; the edge
+    # zones (outside the panels) go with the error.
     panels = re.search(r"\b(?:var|const)\s+PANELS\s*=\s*\[([^\]]*)\]", js_code_only(js))
     t.assertIsNotNone(panels, "no PANELS list")
-    t.assertEqual(len(split_top(panels.group(1), ",")), 3)
+    t.assertEqual(len(split_top(panels.group(1), ",")), len(READER_PANELS))
     for panel_id in READER_PANELS:
         t.assertTrue(live_matches(js, rf"""\b(?:var|const)\s+PANELS\s*=\s*\[[^\]]*['"]{panel_id}['"]"""), panel_id)
     show_panel = body_of(t, js, "showPanel")
@@ -640,8 +641,8 @@ MUTATIONS = [
     ("reader: a page is shown outside the panel set", "reader",
      "    showPanel('bookContent');", "    container.classList.remove('hidden');", check_reader),
     ("reader: loading flipped by hand", "reader",
-     "    showPanel('loading');\n    el('loadingText')",
-     "    el('bookContent').classList.add('hidden');\n    el('loading').classList.remove('hidden');\n    el('loadingText')",
+     "      showPanel('loading');\n      el('loadingText')",
+     "      el('bookContent').classList.add('hidden');\n      el('loading').classList.remove('hidden');\n      el('loadingText')",
      check_reader),
 
     ("reader: pages turn while one loads (the boot race)", "reader",

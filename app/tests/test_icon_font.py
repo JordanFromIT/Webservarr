@@ -65,7 +65,8 @@ def _code_files():
         if p.suffix not in (".py", ".js", ".mjs", ".html") or not p.is_file():
             continue
         rel = p.relative_to(APP).parts
-        if rel[0] == "tests" or rel[:2] == ("static", "css"):
+        # Third-party code (PDF.js in static/vendor) never draws the app's icons.
+        if rel[0] == "tests" or rel[:2] in (("static", "css"), ("static", "vendor")):
             continue
         yield p
 
