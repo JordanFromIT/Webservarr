@@ -585,6 +585,25 @@ class Routes(unittest.TestCase):
             r = admin.post("/api/integrations/chaptarr-request", json={"bookId": "gr:1", "format": "ebook"})
             self.assertEqual(r.status_code, 200)
 
+    def test_requests_switched_off_refuse_seerr_requests_too(self):
+        # A second path to the same action (audit F4): Seerr requests obey the switch.
+        from app.models import Setting
+        db = self.Session()
+        db.add(Setting(key="sidebar.enabled_requests", value="false"))
+        db.commit()
+        db.close()
+        body = {"mediaType": "movie", "mediaId": 603}
+        with mock.patch("app.routers.integrations._get_plex_token", mock.AsyncMock(return_value="plex-token")), \
+             mock.patch("app.integrations.seerr.create_request_as_user",
+                        mock.AsyncMock(return_value={"success": True})) as asked:
+            r = self.client.post("/api/integrations/seerr-request", json=body)
+            self.assertEqual((r.status_code, r.json()["detail"]), (403, "Requests are turned off"))
+            asked.assert_not_awaited()
+            admin = self.helpers.api_client(self.Session, user=self.helpers.ADMIN, headers=self.helpers.SAME_ORIGIN)
+            r = admin.post("/api/integrations/seerr-request", json=body)
+            self.assertEqual(r.status_code, 200)
+            asked.assert_awaited_once()
+
     def test_a_refusal_is_a_400_with_the_reason(self):
         r = self.ask({"ok": False, "message": ALREADY})
         self.assertEqual((r.status_code, r.json()["detail"]), (400, ALREADY))

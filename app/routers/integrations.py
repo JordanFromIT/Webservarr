@@ -904,10 +904,13 @@ async def create_seerr_request(
     body: RequestCreate,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
+    db: Session = Depends(get_db),
 ):
     """Create a media request in Seerr, attributed to the current Plex user when possible."""
     if body.mediaType not in ("movie", "tv"):
         raise HTTPException(status_code=400, detail="mediaType must be 'movie' or 'tv'")
+    if requests_switched_off(db, current_user):
+        raise HTTPException(status_code=403, detail=REQUESTS_OFF)
 
     # Without a Plex token there is no per-user Seerr identity, and the old
     # fallback to the admin API key made the request auto-approved, 4K-eligible
