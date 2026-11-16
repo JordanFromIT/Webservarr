@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from app import convertors  # noqa: F401 - registers {x:whole_id}
 from app.database import get_db
 from app.dependencies import get_current_user, require_same_origin
 from app.limiter import limiter
@@ -188,7 +189,7 @@ async def mark_all_read(
 
 # ":int" so this never swallows DELETE /notifications/push-subscribe below
 # (declared later, it used to 422 as a non-integer notification id).
-@router.delete("/notifications/{notification_id:int}", dependencies=[Depends(require_same_origin)])
+@router.delete("/notifications/{notification_id:whole_id}", dependencies=[Depends(require_same_origin)])
 @limiter.limit("30/minute")
 async def delete_notification(
     request: Request,

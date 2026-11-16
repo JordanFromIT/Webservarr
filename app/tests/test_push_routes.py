@@ -149,6 +149,10 @@ class PushRouteTests(unittest.TestCase):
         r = self.client.delete(f"/api/notifications/{nid}")
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.client.delete("/api/notifications/999999").status_code, 404)
+        # A run of digits past Python's int limit (4300) was a 500, not a 404.
+        for nid in ("9" * 5000, "1" * 19):
+            self.assertEqual(self.client.delete(f"/api/notifications/{nid}").status_code, 404)
+        self.assertNotEqual(self.client.put("/api/notifications/" + "9" * 5000 + "/read").status_code, 500)
 
     def test_test_push_needs_admin(self):
         r = self.client.post("/api/admin/notifications/test-push")
