@@ -145,6 +145,24 @@ class KavitaBudgets(unittest.TestCase):
         from app.routers import kavita_proxy
         self.assertEqual((kavita_proxy.PAGE_LIMIT, kavita_proxy.API_LIMIT), PINNED_KAVITA_LIMITS)
 
+    def test_the_limit_is_static_so_the_app_default_never_applies(self):
+        # A callable limit is "dynamic" in slowapi 0.1.9, and its middleware
+        # adds the app-wide default (120/minute per address) to such a route
+        # whenever it finds the route (audit F6). A static one is left to the
+        # decorator alone.
+        from slowapi.middleware import _should_exempt
+
+        from app.limiter import limiter
+        from app.routers import kavita_proxy
+        name = f"{kavita_proxy.kavita_proxy.__module__}.{kavita_proxy.kavita_proxy.__name__}"
+        self.assertNotIn(name, limiter._dynamic_route_limits)
+        self.assertEqual([str(lim.limit) for lim in limiter._route_limits[name]], ["1200 per 1 minute"])
+        self.assertTrue(_should_exempt(limiter, kavita_proxy.kavita_proxy))
+        self.assertEqual(self.budget(kavita_proxy.PAGE_LIMIT) // kavita_proxy._kavita_cost(
+            Request({"type": "http", "method": "GET", "path": "/kavita/api/Book/7/book-info", "headers": [],
+                     "client": ("203.0.113.5", 1), "query_string": b"",
+                     "path_params": {"path": "api/Book/7/book-info"}})), self.budget(kavita_proxy.API_LIMIT))
+
     def test_page_loads_share_the_large_budget_and_calls_keep_their_own(self):
         from app.routers import kavita_proxy
         pages = self.budget(kavita_proxy.PAGE_LIMIT)

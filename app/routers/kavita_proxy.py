@@ -1036,8 +1036,20 @@ def _kavita_rate_key(request: Request) -> str:
     return f"kavita-{kind}:{rate_limit_key(request)}"
 
 
-def _kavita_rate(key: str) -> str:
-    return PAGE_LIMIT if key.startswith("kavita-page:") else API_LIMIT
+def _kavita_cost(request: Request) -> int:
+    """What a request draws from its bucket. The limit is the page budget for
+    both buckets, and a call costs page/API times as much, so the API bucket
+    holds API_LIMIT calls. The limit is static (a string, not a callable)
+    because slowapi's middleware adds the app-wide default (120/minute) to a
+    route whose limits are all callables, whenever it can find the route;
+    a static one it always leaves to the decorator."""
+    if _kavita_rate_key(request).startswith("kavita-page:"):
+        return 1
+    return _budget(PAGE_LIMIT) // _budget(API_LIMIT)
+
+
+def _budget(limit: str) -> int:
+    return int(limit.split("/")[0])
 
 
 @router.api_route(
@@ -1045,7 +1057,7 @@ def _kavita_rate(key: str) -> str:
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     include_in_schema=False,
 )
-@limiter.limit(_kavita_rate, key_func=_kavita_rate_key)
+@limiter.limit(PAGE_LIMIT, key_func=_kavita_rate_key, cost=_kavita_cost)
 async def kavita_proxy(
     path: str,
     request: Request,
