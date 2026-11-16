@@ -4,7 +4,8 @@ app.main and the router modules that apply per-endpoint limits.
 """
 
 import ipaddress
-from typing import Callable, Iterable, Optional
+import inspect
+from typing import Callable, Iterable, Optional, Tuple
 
 from fastapi import Request
 from fastapi import routing as fastapi_routing
@@ -12,7 +13,8 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute, Match
 from starlette.types import Scope
 
-from slowapi import Limiter
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware, _should_exempt, async_check_limits
 
 from app.config import settings
@@ -111,9 +113,10 @@ limiter = Limiter(
 )
 
 
-def route_endpoint(routes: Iterable[BaseRoute], scope: Scope) -> Optional[Callable]:
-    """The function that will answer this request, or None (a mount such as
-    /static, a wrong method, or no route at all).
+def route_match(routes: Iterable[BaseRoute], scope: Scope) -> Tuple[Optional[Callable], dict]:
+    """(the function that will answer this request, the scope routing will
+    add for it: its path_params), or (None, {}) for a mount such as /static,
+    a wrong method, or no route at all.
 
     Since FastAPI 0.137 each include_router() is one nested entry in
     app.routes with no endpoint of its own; iter_route_contexts lists the
@@ -123,21 +126,38 @@ def route_endpoint(routes: Iterable[BaseRoute], scope: Scope) -> Optional[Callab
     endpoint, which is not a view), so it reads as None, as in slowapi."""
     flatten = getattr(fastapi_routing, "iter_route_contexts", None)
     for route in flatten(routes) if flatten else routes:
-        match, _ = route.matches(scope)
+        match, child = route.matches(scope)
         if match == Match.FULL:
-            return getattr(route, "endpoint", None)
-    return None
+            endpoint = getattr(route, "endpoint", None)
+            return endpoint, (child if endpoint is not None else {})
+    return None, {}
+
+
+def route_endpoint(routes: Iterable[BaseRoute], scope: Scope) -> Optional[Callable]:
+    """The function that will answer this request, or None (see route_match)."""
+    return route_match(routes, scope)[0]
 
 
 class DefaultLimitsMiddleware(SlowAPIMiddleware):
-    """slowapi's middleware, finding the endpoint inside included routers.
+    """slowapi's middleware, finding the endpoint inside included routers,
+    and counting a route's own limit here, first.
 
-    slowapi 0.1.9 looks for it in app.routes only, so on FastAPI 0.137+ it
-    found none for any router route and skipped the default limit for all
-    of them. The rest is slowapi's: an exempt route and a route with its own
-    static limit are left alone (its decorator counts it, once), and every
-    other route gets the default. Over the limit, the app's own 429 handler
-    answers, as it does for a route's own limit."""
+    slowapi 0.1.9 looks for the endpoint in app.routes only, so on FastAPI
+    0.137+ it found none for any router route and skipped the default limit
+    for all of them. An exempt route is left alone, and every route without
+    a limit of its own gets the default, as in slowapi.
+
+    A route with its own limit is counted here too, with exactly its own
+    limits, keys and costs (slowapi's own check), and marked done so its
+    decorator does not count it again. The decorator alone counts only once
+    FastAPI has resolved the route's dependencies (sign-in, admin,
+    same-origin, the body), so a request any of those refused (a flood of
+    401s, 403s, cross-origin or malformed posts) used to count against no
+    limit at all. Here, before routing, every request to the route counts,
+    and the budgets stay what each route declares (the /kavita proxy's 1200
+    and 240, system stats' 600). The scope gets the path_params routing
+    would give it, which some keys read (the /kavita budgets). Over a limit,
+    the app's own 429 handler answers."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         app = request.app
@@ -145,7 +165,19 @@ class DefaultLimitsMiddleware(SlowAPIMiddleware):
         if not limiter.enabled:
             return await call_next(request)
 
-        handler = route_endpoint(app.routes, request.scope)
+        handler, child = route_match(app.routes, request.scope)
+        if handler is not None and limiter._auto_check and _has_own_limits(limiter, handler):
+            request.scope["path_params"] = {**request.scope.get("path_params", {}),
+                                            **child.get("path_params", {})}
+            try:
+                limiter._check_request_limit(request, handler, False)
+            except RateLimitExceeded as exc:
+                on_429 = app.exception_handlers.get(RateLimitExceeded, _rate_limit_exceeded_handler)
+                answer = on_429(request, exc)
+                return await answer if inspect.isawaitable(answer) else answer
+            request.state._rate_limiting_complete = True
+            return await call_next(request)
+
         if _should_exempt(limiter, handler):
             return await call_next(request)
 
@@ -156,3 +188,10 @@ class DefaultLimitsMiddleware(SlowAPIMiddleware):
         if should_inject_headers:
             response = limiter._inject_headers(response, request.state.view_rate_limit)
         return response
+
+
+def _has_own_limits(limiter: Limiter, handler: Callable) -> bool:
+    name = f"{handler.__module__}.{handler.__name__}"
+    if name in limiter._exempt_routes:
+        return False
+    return name in limiter._route_limits or name in limiter._dynamic_route_limits
