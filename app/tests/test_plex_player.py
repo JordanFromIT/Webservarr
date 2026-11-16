@@ -196,6 +196,10 @@ class FakePlex:
         # Per-token readable library sections (the owner's view by default).
         self.sections = {}
         self.photo_type = "image/jpeg"
+        # Transcoder url= values Plex has no image for (it answers 404).
+        self.missing_photos = set()
+        # Album rating key -> its /posters entries.
+        self.posters = {}
         # path -> a JSON body answered as is (200), for odd shapes.
         self.raw = {}
 
@@ -246,6 +250,9 @@ class FakePlex:
             keys = self.sections.get(token, [SECTION, "5"])
             return self.mc(Directory=[{"key": k, "type": "artist", "title": f"Section {k}"} for k in keys])
         if path == "/photo/:/transcode":
+            if q.get("url", [""])[0] in self.missing_photos:
+                return httpx.Response(404, text="<html><head><title>Not Found</title></head></html>",
+                                      headers={"content-type": "text/html"})
             return httpx.Response(200, content=b"\x89PNG-or-JPEG", headers={"content-type": self.photo_type})
         if path == "/:/timeline":
             if self.timeline_down:
@@ -259,6 +266,8 @@ class FakePlex:
         parts = path.strip("/").split("/")
         if parts[:2] == ["library", "metadata"] and len(parts) >= 3:
             rk = parts[2]
+            if len(parts) == 4 and parts[3] == "posters" and rk in self.posters:
+                return self.mc(Metadata=self.posters[rk])
             if len(parts) == 4 and parts[3] == "children":
                 if rk not in TRACKS:
                     return httpx.Response(404)
@@ -2396,6 +2405,68 @@ class Cover(BridgeBase):
         self.plex.photo_type = "image/svg+xml"
         with self.assertRaises(pp.NotInLibrary):
             self.run_async(pp.cover_image("100:1"))
+
+    EMBEDDED = "/library/metadata/500/file?url=metadata%3A%2F%2Fposters%2F907b281ac238"
+    UPLOADED = "/library/metadata/500/file?url=upload%3A%2F%2Fposters%2Ff73c5776a6e1"
+
+    def transcoded(self):
+        return [parse_qs(c.url.query.decode())["url"][0] for c in self.plex.calls
+                if c.url.path == "/photo/:/transcode"]
+
+    def test_a_thumb_plex_cannot_serve_falls_back_to_the_albums_poster(self):
+        # Plex's thumb points at an image it no longer has, while the cover
+        # read from the files sits in the posters, unselected.
+        self.plex.missing_photos.add(ALBUMS["500"]["thumb"])
+        self.plex.posters["500"] = [{"key": self.EMBEDDED, "provider": "embedded", "selected": False}]
+        content, ctype = self.run_async(pp.cover_image("500:1"))
+        self.assertEqual((content, ctype), (b"\x89PNG-or-JPEG", "image/jpeg"))
+        self.assertEqual(self.transcoded(), [ALBUMS["500"]["thumb"], self.EMBEDDED])
+        call = [c for c in self.plex.calls if c.url.path == "/photo/:/transcode"][-1]
+        self.assertNotIn("minSize", parse_qs(call.url.query.decode()))
+        self.assert_no_token_in_urls()
+
+    def test_an_album_without_a_thumb_uses_its_poster(self):
+        self.plex.posters["500"] = [{"key": self.EMBEDDED, "selected": False}]
+        with mock.patch.dict(ALBUMS["500"], {"thumb": ""}):
+            self.assertEqual(self.run_async(pp.cover_image("500:1"))[1], "image/jpeg")
+        self.assertEqual(self.transcoded(), [self.EMBEDDED])
+
+    def test_the_selected_poster_wins_over_the_first(self):
+        self.plex.missing_photos.add(ALBUMS["500"]["thumb"])
+        self.plex.posters["500"] = [{"key": self.EMBEDDED, "selected": False},
+                                    {"key": self.UPLOADED, "selected": True}]
+        self.run_async(pp.cover_image("500:1"))
+        self.assertEqual(self.transcoded()[-1], self.UPLOADED)
+
+    def test_a_good_thumb_never_reads_the_posters(self):
+        self.run_async(pp.cover_image("100:1"))
+        self.assertNotIn("/library/metadata/100/posters", self.plex.paths())
+
+    def test_no_usable_poster_is_not_found(self):
+        self.plex.missing_photos.update({ALBUMS["500"]["thumb"], self.EMBEDDED})
+        for posters in ([],
+                        # A remote URL or another album's image is never fetched.
+                        [{"key": "https://metadata-static.example/poster.jpg", "selected": True}],
+                        [{"key": "/library/metadata/100/file?url=metadata%3A%2F%2Fposters%2Fabc"}],
+                        # The poster will not load either.
+                        [{"key": self.EMBEDDED}]):
+            with self.subTest(posters=posters):
+                self.plex.posters["500"] = posters
+                self.plex.calls.clear()
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.cover_image("500:1"))
+                self.assertTrue(all(u.startswith("/library/metadata/500/") for u in self.transcoded()),
+                                self.transcoded())
+
+    def test_no_thumb_stamps_the_albums_own_path_with_updated_at(self):
+        with mock.patch.dict(ALBUMS["500"], {"thumb": "", "updatedAt": 1794127966}):
+            with mock.patch.dict(TRACKS, {"500": [{**TRACKS["500"][0], "parentThumb": "", "thumb": ""}]}):
+                b = self.run_async(pp.book_detail("500:1"))
+        self.assertEqual(b["cover"], "/library/metadata/500/thumb/1794127966")
+        self.assertEqual(pp.cover_version(b["cover"]), "1794127966")
+        with mock.patch.dict(ALBUMS["500"], {"thumb": ""}):
+            with mock.patch.dict(TRACKS, {"500": [{**TRACKS["500"][0], "parentThumb": "", "thumb": ""}]}):
+                self.assertEqual(self.run_async(pp.book_detail("500:1"))["cover"], "")
 
     def test_player_off_and_plex_down(self):
         self.plex.pms_down = 500

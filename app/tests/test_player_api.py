@@ -379,6 +379,15 @@ class Shapes(PlayerApiBase):
         self.assertEqual(r.headers["content-security-policy"], "sandbox")
         self.cover_image.assert_awaited_once_with("100:1")
 
+    def test_a_missing_cover_is_never_cached(self):
+        # The same ?v= can load later (Plex back up, a poster selected).
+        for exc, code in ((pp.NotInLibrary("This book has no cover"), 404),
+                          (pp.PlayerUnavailable("Plex is unavailable"), 503)):
+            with self.subTest(code=code), mock.patch.object(pp, "cover_image", mock.AsyncMock(side_effect=exc)):
+                r = self.client.get("/api/player/cover/100:1?v=1700000000")
+                self.assertEqual(r.status_code, code)
+                self.assertEqual(r.headers["cache-control"], "no-store")
+
     def test_position_has_web_and_plex_each_with_a_timestamp(self):
         plex = {"track": "203", "offset_ms": 1, "duration_ms": 300_000, "book_ms": 300_001,
                 "book_duration_ms": 600_000, "updated_at": "2026-09-01T00:00:00.000Z", "device": "Plex",

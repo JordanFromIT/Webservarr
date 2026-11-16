@@ -622,8 +622,19 @@ def _describe(album: dict, disc: int, tracks: list, disc_count: int) -> dict:
         "author": (album.get("parentTitle") or first.get("grandparentTitle") or "").strip(),
         "series": series,
         "narrator": narrator or series_narrator,
-        "cover": album.get("thumb") or first.get("parentThumb") or first.get("thumb") or "",
+        "cover": album.get("thumb") or first.get("parentThumb") or first.get("thumb") or _stamped_thumb(album),
     }
+
+
+def _stamped_thumb(album: dict) -> str:
+    """For an album Plex gives no thumbnail: its own thumbnail path stamped
+    with its updatedAt, so the player still asks for a cover (cover_image
+    falls back to the album's posters) and a poster added later, which moves
+    updatedAt, gets a new URL. "" without a usable stamp."""
+    rating_key, updated = str(album.get("ratingKey") or ""), str(album.get("updatedAt") or "")
+    if not (_RATING_KEY.fullmatch(rating_key) and updated.isascii() and updated.isdigit()):
+        return ""
+    return f"/library/metadata/{rating_key}/thumb/{updated}"
 
 
 def _summary(album: dict, disc: int, tracks: list, disc_count: int) -> dict:
@@ -1723,6 +1734,10 @@ async def checkin_book(key: str, track_key: str) -> tuple:
 # The album thumbnail paths a cover may come from, and the square a cover is
 # scaled to fit.
 _THUMB_PATH = re.compile(r"/library/metadata/[0-9]{1,20}/thumb/[0-9]{1,20}", re.ASCII)
+# A poster Plex stores for the album: /library/metadata/<album>/file?url=
+# an encoded metadata:// or upload:// reference.
+_POSTER_PATH = re.compile(
+    r"/library/metadata/([0-9]{1,20})/file\?url=(?:metadata|upload)%3A%2F%2F[A-Za-z0-9%._-]{1,512}", re.ASCII)
 COVER_SIZE = 600
 
 
@@ -1744,22 +1759,42 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
 
     The key is checked as assert_in_library checks a book (malformed keys
     before any Plex call, then the album is in the audiobook library), in the
-    same album read that finds the thumbnail. Raises NotInLibrary (also when
-    the album has no cover or Plex cannot give it), PlayerOff or
-    PlayerUnavailable."""
+    same album read that finds the thumbnail.
+
+    Plex can point an album's thumb at an image it no longer has (a 404)
+    while the cover it read from the files sits in the album's posters,
+    unselected. So when the thumb is missing or will not load, the selected
+    poster (else the first) is tried the same way. Raises NotInLibrary (also
+    when neither gives a cover), PlayerOff or PlayerUnavailable."""
     album_key, _disc = parse_key(key)
     admin = _configured()
     async with _pms_client() as client:
         album = await _album(client, admin, album_key)
-    thumb = album.get("thumb") or ""
-    if not cover_version(thumb):
-        raise NotInLibrary("This book has no cover")
-    # get_thumbnail sends the token in a header, serves only raster image
-    # types and caps the bytes read.
-    content, content_type = await plex.get_thumbnail(thumb, width=size, height=size, fill=False)
-    if content is None:
-        raise NotInLibrary("This book's cover is not available")
-    return content, content_type
+        thumb = album.get("thumb") or ""
+        # get_thumbnail sends the token in a header, serves only raster image
+        # types and caps the bytes read.
+        if cover_version(thumb):
+            content, content_type = await plex.get_thumbnail(thumb, width=size, height=size, fill=False)
+            if content is not None:
+                return content, content_type
+        posters = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/posters")
+    poster = _chosen_poster(album_key, _items(posters))
+    if poster:
+        content, content_type = await plex.get_thumbnail(poster, width=size, height=size, fill=False)
+        if content is not None:
+            return content, content_type
+    raise NotInLibrary("This book has no cover")
+
+
+def _chosen_poster(album_key: str, posters: list) -> str:
+    """The path of the album's selected poster, else its first, when it is
+    one of the album's own stored images (never a remote URL the transcoder
+    would fetch); "" otherwise."""
+    if not posters:
+        return ""
+    path = min(posters, key=lambda p: p.get("selected") is not True).get("key")
+    m = _POSTER_PATH.fullmatch(path) if isinstance(path, str) else None
+    return path if m and m.group(1) == album_key else ""
 
 
 # --- Plex's listening state ---------------------------------------------------------

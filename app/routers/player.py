@@ -269,7 +269,11 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
     try:
         content, content_type = await pp.cover_image(key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
-        raise _http_error(exc) from None
+        # A cover missing now can load later under the same ?v= (Plex back
+        # up, or a fix that leaves the thumb stamp alone): a miss is never kept.
+        error = _http_error(exc)
+        error.headers = {"Cache-Control": "no-store"}
+        raise error from None
     return Response(content=content, media_type=content_type, headers={
         "Cache-Control": f"private, max-age={COVER_MAX_AGE}",
         # Loaded as a document rather than an <img>, it can run nothing.
