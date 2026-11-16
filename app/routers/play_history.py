@@ -117,36 +117,59 @@ async def history(request: Request,
              and (kind != "audio" or n["source"] == "plex")]
     failed = {n["source"] for n in notes if n["reason"] == "unavailable"}
 
-    audio, audio_more = [], False
     by_key = {}
     if kind in ("all", "audio") and who.audio and who.identity:
         try:
             by_key = {key: rows[book_id] for key, (book_id, _n) in book_catalog.live_editions(db).items()
                       if book_id in rows and rows[book_id].audio}
-            audio, audio_more = ph.audio_sessions(db, who.identity, set(by_key), cursor, limit)
         except SQLAlchemyError as exc:
-            logger.warning("Play history: the listening log could not be read: %s", type(exc).__name__)
+            logger.warning("Play history: the catalog could not be read: %s", type(exc).__name__)
             raise HTTPException(status_code=503, detail=UNREADABLE) from None
-
-    ebooks, ebook_more, resume = [], False, None
     chapters = {}
-    numbers = {}
     if kind in ("all", "ebook") and who.kavita:
         chapters = {r.kavita_chapter_id: r for r in rows.values() if r.ebook and r.kavita_chapter_id is not None}
-        base, token = who.kavita
-        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=ph.DAYS)
-        try:
-            found, complete = await kavita.reading_sessions(base, token, since, cursor[0] if cursor else None,
-                                                            enough=limit + 1)
-            ebooks, ebook_more, resume = ph.ebook_page(found, chapters, cursor, limit, complete)
-        except kavita.KavitaTokenRefused:
-            notes.append({"source": "kavita", "reason": "not_connected",
-                          "text": "Connect to your ebook library to see your reading"})
-        except kavita.KavitaUnavailable:
-            notes.append({"source": "kavita", "reason": "unavailable", "text": "Ebooks are unavailable right now"})
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=ph.DAYS)
+    kavita_note = None
+
+    async def one_page(at):
+        """(the merged page after cursor `at`, Kavita's note or None)."""
+        audio, audio_more = [], False
+        if by_key:
+            try:
+                audio, audio_more = ph.audio_sessions(db, who.identity, set(by_key), at, limit)
+            except SQLAlchemyError as exc:
+                logger.warning("Play history: the listening log could not be read: %s", type(exc).__name__)
+                raise HTTPException(status_code=503, detail=UNREADABLE) from None
+        ebooks, ebook_more, resume, note = [], False, None, None
+        if kind in ("all", "ebook") and who.kavita:
+            base, token = who.kavita
+            try:
+                found, complete = await kavita.reading_sessions(base, token, since, at[0] if at else None,
+                                                                enough=limit + 1)
+                ebooks, ebook_more, resume = ph.ebook_page(found, chapters, at, limit, complete)
+            except kavita.KavitaTokenRefused:
+                note = {"source": "kavita", "reason": "not_connected",
+                        "text": "Connect to your ebook library to see your reading"}
+            except kavita.KavitaUnavailable:
+                note = {"source": "kavita", "reason": "unavailable", "text": "Ebooks are unavailable right now"}
+        return ph.merge(audio, audio_more, ebooks, ebook_more, limit, resume), note
+
+    # A page can come back empty with more to read: Kavita's newest sessions
+    # all in chapters the caller can't see (another chapter of a numbered
+    # volume, a book not in the catalog). The next stretch is read here, a few
+    # times at most, rather than handing the window an empty page.
+    at = cursor
+    for _hop in range(ph.EMPTY_HOPS):
+        page, kavita_note = await one_page(at)
+        if page.items or not page.next_key or kavita_note:
+            break
+        at = page.next_key
+    if kavita_note:
+        notes.append(kavita_note)
+        if kavita_note["reason"] == "unavailable":
             failed.add("kavita")
 
-    page = ph.merge(audio, audio_more, ebooks, ebook_more, limit, resume)
+    numbers = {}
     shown = [s for s in page.items if isinstance(s, ph.EbookSession)]
     if shown and who.kavita:
         base, token = who.kavita

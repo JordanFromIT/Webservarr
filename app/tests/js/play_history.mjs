@@ -218,6 +218,48 @@ await run('error and the filtered empty state', async () => {
   check('a filter with nothing offers All', /No audiobook listening yet/.test(p.$('.ws-hx-state').textContent) && /Show all/.test(p.$('.ws-hx-state button').textContent));
 });
 
+await run('a source the server could not read: its note shows, and the list never claims to be everything', async () => {
+  const down = { source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' };
+  let p = page({ answers: [{ items: [audio(1, T)], next_before: null, notes: [down] }] });
+  p.h.open(p.$('#userMenuBtn'));
+  await flush();
+  check('the note is above the list', p.$('#wsHxList').firstElementChild.className === 'ws-hx-note' &&
+    /Ebooks are unavailable right now\./.test(p.$('.ws-hx-note').textContent));
+  check('the listening still shows', p.$$('.ws-hx-row').length === 1);
+  check('no "everything" line', !p.$('.ws-hx-end'));
+  p = page({ answers: [{ items: [], next_before: null, notes: [{ source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see your reading' }] }] });
+  p.h.open(p.$('#userMenuBtn'));
+  await flush();
+  check('with nothing to list too, the note still shows over the empty state', !!p.$('.ws-hx-note') && !!p.$('.ws-hx-state'));
+  p = page({ answers: [{ items: [audio(1, T)], next_before: null, notes: [] }] });
+  p.h.open(p.$('#userMenuBtn'));
+  await flush();
+  check('every source answered: no note, and the end line', !p.$('.ws-hx-note') && !!p.$('.ws-hx-end'));
+});
+
+await run('an empty page with more behind it is read past, never shown as empty', async () => {
+  let p = page({ answers: [
+    { items: [], next_before: 'k1', notes: [] },
+    { items: [], next_before: 'k2', notes: [] },
+    { items: [ebook(2, T)], next_before: null, notes: [] }
+  ] });
+  p.h.open(p.$('#userMenuBtn'));
+  check('still the skeleton while it reads on', !!p.$('#wsHxList [aria-busy="true"]'));
+  await flush();
+  check('it asked past each empty page', p.calls.join('|') === '/api/me/history?kind=all&limit=20|/api/me/history?kind=all&limit=20&before=k1|/api/me/history?kind=all&limit=20&before=k2', p.calls);
+  check('and shows what it found', p.$$('.ws-hx-row').length === 1 && !p.$('.ws-hx-state'));
+  const empties = [];
+  for (let i = 0; i <= H.EMPTY_HOPS; i++) empties.push({ items: [], next_before: 'z' + i, notes: [] });
+  p = page({ answers: empties.concat([{ items: [audio(1, T)], next_before: null, notes: [] }]) });
+  p.h.open(p.$('#userMenuBtn'));
+  await flush();
+  check('a bounded number of reads', p.calls.length === H.EMPTY_HOPS + 1, p.calls);
+  check('then a way on, not the empty state', /Load more/.test(p.$('.ws-hx-state').textContent) && !/Nothing here yet/.test(p.$('.ws-hx-state').textContent));
+  p.click(p.$('.ws-hx-state button'));
+  await flush();
+  check('which reads on from there', p.calls[p.calls.length - 1] === '/api/me/history?kind=all&limit=20&before=z' + H.EMPTY_HOPS && p.$$('.ws-hx-row').length === 1, p.calls);
+});
+
 function fakePlayer(state) {
   const log = [];
   const p = {

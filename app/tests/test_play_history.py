@@ -412,3 +412,106 @@ class ShellEntry(unittest.TestCase):
         self.assertRegex(side, r'<li class="\{\{history_cls\}\}">\s*<button type="button" class="ws-sheet-row" data-play-history>')
         self.assertIn('id="wsHistory"', side)
         self.assertIn('src="/static/js/play-history.js?v=1"', side)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class HiddenReadingNeverSkipped(unittest.TestCase):
+    """Kavita's newest sessions all in chapters the caller can't see (another
+    chapter of a numbered volume, a book not in the catalog): the visible
+    session further back is still listed, under All and under eBooks."""
+    A = Endpoint.A
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        db = self.Session()
+        t = now()
+        db.add(Book(id=1, title="Audio Book", author="Ann", sort_title="Audio Book", updated_at=t, plex_book_key="100:1"))
+        db.add(BookAudioEdition(book_id=1, plex_book_key="100:1"))
+        db.add(Book(id=2, title="Read Book", author="Bea", sort_title="Read Book", updated_at=t,
+                    kavita_chapter_id=70, kavita_series_id=5))
+        for h in range(1, 26):
+            sitting(db, "plex:1001", "100:1", t - timedelta(hours=h), 2)
+        db.commit()
+        db.close()
+        self.kavita = [ebook_row(1000 + i, 99, t - timedelta(minutes=10 * i), minutes=5) for i in range(60)]
+        self.kavita.append(ebook_row(7, 70, t - timedelta(hours=15), minutes=5))
+        scope = Scope(identity="plex:1001", series={5}, kavita=(KAVITA, "TOKEN"), audio=True)
+
+        async def fake_scope(user, session_id):
+            return scope
+
+        async def fake_sessions(base, token, since, until=None, enough=50):
+            # kavita.reading_sessions' contract: newest start first, 50 a page,
+            # stop once `enough` rows are in hand.
+            rows = sorted((r for r in self.kavita if r["end"] >= since and (until is None or r["end"] <= until)),
+                          key=lambda r: r["start"], reverse=True)
+            out = []
+            for i in range(0, len(rows), 50):
+                out += rows[i:i + 50]
+                if i + 50 >= len(rows):
+                    return out, True
+                if len(out) >= enough:
+                    return out, False
+            return out, True
+
+        async def fake_number(base, token, chapter_id, page):
+            return None
+
+        for p in (mock.patch.object(route, "scope_of", fake_scope),
+                  mock.patch.object(route.kavita, "reading_sessions", fake_sessions),
+                  mock.patch.object(route.kavita, "chapter_number_at", fake_number)):
+            p.start()
+            self.addCleanup(p.stop)
+        self.client = helpers.api_client(self.Session, user=self.A)
+        self.addCleanup(helpers.reset_overrides)
+
+    def every_page(self, kind):
+        seen, before = [], None
+        for _ in range(20):
+            params = {"kind": kind, "limit": 20}
+            if before:
+                params["before"] = before
+            body = self.client.get("/api/me/history", params=params).json()
+            seen.append([i["id"] for i in body["items"]])
+            before = body["next_before"]
+            if not before:
+                return seen
+        self.fail("paging never ended")
+
+    def test_all_lists_the_visible_session_and_every_listen_once(self):
+        flat = [i for page in self.every_page("all") for i in page]
+        self.assertIn("e7.70", flat)
+        self.assertEqual(sum(1 for i in flat if i.startswith("a")), 25)
+        self.assertEqual(len(flat), len(set(flat)))
+
+    def test_ebooks_first_page_is_never_empty_with_more_behind_it(self):
+        pages = self.every_page("ebook")
+        self.assertEqual(pages[0], ["e7.70"])
+
+    def test_merge_stops_where_reading_stopped(self):
+        t = now()
+        a = [mock.Mock(key=(t - timedelta(hours=h), 1, h, 0)) for h in (1, 2, 3)]
+        resume = (t - timedelta(minutes=150), 0, ph.RESUME_ID, 0)
+        page = ph.merge(a, True, [], True, 3, resume)
+        self.assertEqual(page.items, a[:2])
+        self.assertEqual(page.next_key, resume)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class FarCursor(unittest.TestCase):
+    def test_a_cursor_past_the_last_time_is_refused(self):
+        with self.assertRaises(ValueError):
+            ph.parse_cursor("9999-12-31T23:55:00Z~a1")
+        self.assertEqual(ph.parse_cursor("9999-12-31T23:40:00Z~a1")[0], datetime(9999, 12, 31, 23, 40))
+
+    def test_the_route_answers_422(self):
+        Session = helpers.make_sessionmaker()
+        client = helpers.api_client(Session, user=Endpoint.A)
+        self.addCleanup(helpers.reset_overrides)
+
+        async def fake_scope(user, session_id):
+            return Scope(identity="plex:1001", series=set(), kavita=None, audio=True)
+
+        with mock.patch.object(route, "scope_of", fake_scope):
+            r = client.get("/api/me/history", params={"before": "9999-12-31T23:55:00Z~a1"})
+        self.assertEqual(r.status_code, 422)

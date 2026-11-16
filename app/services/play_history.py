@@ -46,6 +46,10 @@ PAGE_DEFAULT = 20
 PAGE_MAX = 50
 KINDS = ("all", "audio", "ebook")
 BATCH = 2000                       # log rows read at a time
+EMPTY_HOPS = 4                     # empty pages read past in one request (see the router)
+# The id a reading resume key carries: every session ending at that instant
+# sorts before it, so none of them is skipped.
+RESUME_ID = 10 ** 18 - 1
 DAYS = listening.LOG_DAYS          # how far back history goes (the log's own reach)
 
 # Within a cursor's (end, kind, id, sub) order, listening sorts after reading
@@ -65,6 +69,9 @@ def parse_cursor(value: str) -> tuple:
         at = datetime.fromisoformat(m.group("at"))
     except ValueError:
         raise ValueError("before must be a cursor from an earlier page") from None
+    if at > datetime.max - SESSION_GAP:
+        # Reading starts SESSION_GAP above the cursor: no such time exists.
+        raise ValueError("before must be a cursor from an earlier page")
     return at, RANK[m.group("kind")], int(m.group("id")), int(m.group("sub") or 0)
 
 
@@ -220,7 +227,7 @@ def ebook_page(rows: list, chapters: dict, before: Optional[tuple], limit: int,
         # Kavita had more than one read could take and too few of them could be
         # shown: the next page goes on below the oldest row read.
         oldest = min(r["end"] for r in rows)
-        resume = (oldest, RANK["e"], 0, 0)
+        resume = (oldest, RANK["e"], RESUME_ID, 0)
     return items[:limit], more, resume
 
 
@@ -258,5 +265,11 @@ def merge(audio: list, audio_more: bool, ebooks: list, ebook_more: bool, limit: 
                 if last > next_key:
                     page = [s for s in page if s.key >= last]
                     next_key = last
+        # Reading that stopped early with nothing it could show has read only
+        # down to ebook_resume: the page ends there too, so the sessions
+        # between it and the end of this page are read next, not skipped.
+        if ebook_more and not ebooks and ebook_resume is not None and ebook_resume > next_key:
+            page = [s for s in page if s.key >= ebook_resume]
+            next_key = ebook_resume
         return Merged(page, next_key)
     return Merged([], ebook_resume)

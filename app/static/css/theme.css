@@ -2812,3 +2812,8 @@ html[data-player-full] #scrollDownHint { display: none; }
   .ws-hx-close, .ws-hx-chip, .ws-hx-btn { transition: none; }
   .ws-hx-btn:active { transform: none; }
 }
+/* A source the server couldn't read (eBooks down, not connected): one quiet
+   line above the list. */
+.ws-hx-note { display: flex; align-items: flex-start; gap: 6px; margin: 12px 0 0; font-size: 13px; line-height: 1.35; color: rgb(var(--color-text) / .7); }
+.ws-hx-note .material-symbols-outlined { font-size: 16px; margin-top: 1px; color: rgb(var(--color-accent)); }
+.ws-hx-note + .ws-hx-state { min-height: calc(100% - 32px); }

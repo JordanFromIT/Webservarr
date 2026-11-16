@@ -44,6 +44,7 @@
 export const HISTORY_URL = '/api/me/history';
 export const PAGE = 20;
 export const KINDS = ['all', 'audio', 'ebook'];
+export const EMPTY_HOPS = 3;
 const DAY_MS = 86400000;
 
 function num(v) {
@@ -234,28 +235,39 @@ export function createHistory(env) {
     if (append) view.more = 'loading';
     else view = { kind: kind, items: [], next: null, status: 'loading', more: 'idle' };
     draw();
-    let req;
-    try {
-      req = env.fetch(historyUrl(kind, before), { credentials: 'same-origin', signal: c ? c.signal : undefined,
-        headers: { Accept: 'application/json' } });
-    } catch (e) {
-      req = Promise.reject(e);
+    const firstNew = view.items.length;
+    // A page can come back empty with more still to read (the server reads
+    // past a few such stretches itself): up to EMPTY_HOPS more are read here
+    // before anything is drawn, so an empty page is never shown as the end.
+    function step(cursor, hop) {
+      let req;
+      try {
+        req = env.fetch(historyUrl(kind, cursor), { credentials: 'same-origin', signal: c ? c.signal : undefined,
+          headers: { Accept: 'application/json' } });
+      } catch (e) {
+        req = Promise.reject(e);
+      }
+      return Promise.resolve(req).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (data) {
+        if (my !== seq) return null;
+        const items = data && Array.isArray(data.items) ? data.items : [];
+        const next = data && typeof data.next_before === 'string' ? data.next_before : null;
+        view.items = view.items.concat(items);
+        view.next = next;
+        view.notes = data && Array.isArray(data.notes) ? data.notes : [];
+        if (!items.length && next && hop < EMPTY_HOPS) return step(next, hop + 1);
+        return items.length;
+      });
     }
-    return Promise.resolve(req).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    }).then(function (data) {
-      if (my !== seq) return;
-      const items = data && Array.isArray(data.items) ? data.items : [];
-      const firstNew = view.items.length;
-      view.items = view.items.concat(items);
-      view.next = data && typeof data.next_before === 'string' ? data.next_before : null;
-      view.notes = data && Array.isArray(data.notes) ? data.notes : [];
+    return step(before, 0).then(function (got) {
+      if (my !== seq || got === null) return;
       view.status = 'ready';
       view.more = 'idle';
       draw();
       // After Load more: focus the first new session's main action.
-      if (append && items.length) {
+      if (append && view.items.length > firstNew) {
         const rows = list.querySelectorAll('.ws-hx-row');
         const row = rows[firstNew];
         const go = row && row.querySelector('[data-hx-go]');
@@ -281,7 +293,8 @@ export function createHistory(env) {
         'The server didn’t answer. Check your connection, then try again.',
         { label: 'Try again', icon: 'refresh', run: function () { load(false); } });
     }
-    if (!view.items.length) return drawEmpty();
+    drawNotes();
+    if (!view.items.length) return view.next ? drawStretch() : drawEmpty();
     const days = groupByDay(view.items, now());
     days.forEach(function (d, i) {
       const sec = el('section', 'ws-hx-day');
@@ -305,13 +318,39 @@ export function createHistory(env) {
         more.textContent = view.more === 'error' ? 'Couldn’t load more. Try again' : 'Load more';
       }
       list.appendChild(more);
-    } else {
+    } else if (!notesOf(view).length) {
+      // Only when every source answered: with one down or not connected this
+      // is not everything.
       list.appendChild(el('p', 'ws-hx-end', 'That’s everything from the last 180 days.'));
     }
   }
 
+  function notesOf(v) {
+    return (v.notes || []).filter(function (n) { return n && typeof n.text === 'string' && n.text; });
+  }
+
+  // What the server said about a source it couldn't read (eBooks down, not
+  // connected, audiobooks unavailable), above whatever else shows.
+  function drawNotes() {
+    notesOf(view).forEach(function (n) {
+      const p = el('p', 'ws-hx-note');
+      p.appendChild(icon('info'));
+      p.appendChild(el('span', null, /[.!?]$/.test(n.text) ? n.text : n.text + '.'));
+      list.appendChild(p);
+    });
+  }
+
+  // Nothing to show in what has been read so far, and more to read.
+  function drawStretch() {
+    drawState('history', 'Nothing to show here yet',
+      'Older sessions may still be further back.',
+      { label: view.more === 'loading' ? 'Loading…' : view.more === 'error' ? 'Couldn’t load more. Try again' : 'Load more',
+        icon: 'expand_more',
+        run: function () { if (view.more !== 'loading') load(true); } });
+  }
+
   function drawEmpty() {
-    const note = (view.notes || []).filter(function (n) { return n && n.text; })[0];
+    const noted = notesOf(view).length > 0;
     if (kind === 'all') {
       return drawState('history', 'Nothing here yet',
         'When you listen to an audiobook or read an eBook, each session shows up here so you can go back to any point.',
@@ -319,7 +358,7 @@ export function createHistory(env) {
     }
     const audio = kind === 'audio';
     return drawState(audio ? 'headphones' : 'menu_book', audio ? 'No audiobook listening yet' : 'No eBook reading yet',
-      note && note.reason === 'not_connected' && !audio ? note.text + '.' :
+      noted ? 'Switch to All to see everything else.' :
         'Nothing in the last 180 days. Switch to All to see everything else.',
       { label: 'Show all', run: function () { setKind('all'); } });
   }
