@@ -505,12 +505,13 @@ class Shapes(PlayerApiBase):
 
 class EbookCoverFallback(PlayerApiBase):
     """An audiobook Plex has no image for shows the cover of the ebook the
-    catalog pairs it with: only a catalog pair (never a title match), whatever
+    catalog pairs it with: only a catalog pair (never a title match), only
+    when Plex has no image at all (never when one failed to load), whatever
     the listener may see in Kavita, and a Kavita failure is the 404 it was."""
 
     def setUp(self):
         super().setUp()
-        self.cover_image.side_effect = pp.NotInLibrary("This book has no cover")
+        self.cover_image.side_effect = pp.NoCover("This book has no cover")
         self.kavita_cover = mock.AsyncMock(return_value=(b"\x89PNGk", "image/png"))
         p = mock.patch.object(kavita, "chapter_cover", self.kavita_cover)
         p.start()
@@ -530,18 +531,29 @@ class EbookCoverFallback(PlayerApiBase):
         self.assertEqual(r.status_code, 404)
         self.assertEqual(r.headers["cache-control"], "no-store")
 
-    def test_no_plex_cover_serves_the_paired_ebooks_cover_cached_like_any_cover(self):
+    def test_no_plex_cover_serves_the_paired_ebooks_cover_cached_for_a_day(self):
+        # A cover replaced in Kavita keeps the URL: it shows within a day.
         self.pair()
         r = self.cover()
         self.assertEqual((r.status_code, r.headers["content-type"], r.content), (200, "image/png", b"\x89PNGk"))
-        self.assertEqual(r.headers["cache-control"], f"private, max-age={30 * 24 * 3600}")
+        self.assertEqual(r.headers["cache-control"], f"private, max-age={24 * 3600}")
         self.assertEqual(r.headers["content-security-policy"], "sandbox")
         self.kavita_cover.assert_awaited_once_with(101)
 
     def test_a_plex_cover_never_reads_kavita(self):
         self.pair()
         self.cover_image.side_effect = fake_cover_image
-        self.assertEqual(self.cover().content, b"\xff\xd8jpeg")
+        r = self.cover()
+        self.assertEqual(r.content, b"\xff\xd8jpeg")
+        self.assertEqual(r.headers["cache-control"], f"private, max-age={30 * 24 * 3600}")
+        self.kavita_cover.assert_not_awaited()
+
+    def test_a_plex_cover_that_would_not_load_is_never_replaced(self):
+        # A transcoder error or timeout: the ebook's cover would be kept under
+        # the URL the Plex cover uses, so it is the uncached 404 it was.
+        self.pair()
+        self.cover_image.side_effect = pp.NotInLibrary("This book's cover is not available")
+        self.assert_no_cover(self.cover())
         self.kavita_cover.assert_not_awaited()
 
     def test_an_unpaired_audiobook_is_404_as_before(self):
@@ -584,6 +596,34 @@ class EbookCoverFallback(PlayerApiBase):
         r = self.cover()
         self.assertEqual((r.status_code, r.headers["cache-control"]), (503, "no-store"))
         self.kavita_cover.assert_not_awaited()
+
+    def test_cover_urls_carry_the_paired_ebook(self):
+        def urls():
+            return (self.client.get("/api/player/book/100:1").json()["cover"],
+                    {b["key"]: b["cover"] for b in self.client.get("/api/player/books").json()["books"]}["100:1"])
+        # Unpaired: stamped by Plex alone, as before.
+        self.assertEqual(urls(), ("/api/player/cover/100:1?v=1700000000",) * 2)
+        self.pair()
+        self.assertEqual(urls(), ("/api/player/cover/100:1?v=1700000000-101",) * 2)
+        # Paired with another ebook (an override, then a rebuild): a new URL.
+        self.db.query(Book).filter(Book.id == 1).update({"kavita_chapter_id": 202})
+        self.db.commit()
+        self.assertEqual(urls(), ("/api/player/cover/100:1?v=1700000000-202",) * 2)
+        # Kept apart: back to Plex's stamp alone.
+        self.db.query(BookAudioEdition).filter(BookAudioEdition.plex_book_key == "100:1").delete()
+        self.db.commit()
+        self.assertEqual(urls(), ("/api/player/cover/100:1?v=1700000000",) * 2)
+
+    def test_the_next_books_cover_url_carries_its_paired_ebook(self):
+        self.pair()
+        self.next_in_series.return_value = dict(BOOKS[0])
+        self.assertEqual(self.client.get("/api/player/next/200:1").json()["next"]["cover"],
+                         "/api/player/cover/100:1?v=1700000000-101")
+
+    def test_a_book_with_no_thumbnail_still_has_no_cover_url(self):
+        self.pair(key="200:1")
+        self.assertEqual({b["key"]: b["cover"] for b in self.client.get("/api/player/books").json()["books"]}["200:1"],
+                         "")
 
     def test_the_listeners_kavita_access_is_not_asked(self):
         # The player route has no ebook scope: a listener with no Kavita at

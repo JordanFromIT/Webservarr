@@ -1204,7 +1204,7 @@ async def cover(request: Request, book_id: BookId, who: Scope = Depends(caller),
             else:
                 # The ebook is not a source of its own for this caller: when
                 # Plex has no cover, its paired ebook's stands in.
-                content, content_type = await book_catalog.audiobook_cover(db, plex_key)
+                content, content_type, _from_ebook = await book_catalog.audiobook_cover(db, plex_key)
         except (kavita.KavitaNoCover, pp.NotInLibrary):
             continue
         except (kavita.KavitaUnavailable, pp.PlayerUnavailable):

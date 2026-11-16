@@ -32,6 +32,7 @@ from typing import Annotated, Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Cookie, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -61,6 +62,9 @@ def _limit(rate: str, route: str):
 # Cover URLs carry the thumbnail's version stamp, so a changed cover gets a
 # new URL and the old one can be kept a long time.
 COVER_MAX_AGE = 30 * 24 * 60 * 60
+# The paired ebook's cover, standing in for a book Plex has no image for: its
+# URL changes with the pairing, not with a cover replaced in Kavita, so a day.
+EBOOK_COVER_MAX_AGE = 24 * 60 * 60
 
 # Check-in events as Plex timeline states. A leave is paused, not stopped:
 # the page is going away or hidden, the listener has not finished, and Plex
@@ -203,9 +207,26 @@ def _http_error(exc: Exception, forbid: bool = False) -> HTTPException:
                          detail="Plex is unavailable right now. Try again in a moment.")
 
 
-def _cover_url(key: str, thumb) -> str:
+def _cover_url(key: str, thumb, chapters: dict) -> str:
+    """The book's cover URL, stamped with its thumbnail's version and, when
+    the catalog pairs it with an ebook, that ebook's chapter (from
+    _ebook_chapters), so a pairing change gives the stand-in cover a new URL.
+    "" when Plex gives no thumbnail path."""
     version = pp.cover_version(thumb)
-    return f"/api/player/cover/{key}?v={version}" if version else ""
+    if not version:
+        return ""
+    chapter = chapters.get(key)
+    return f"/api/player/cover/{key}?v={version}" + (f"-{chapter}" if chapter is not None else "")
+
+
+def _ebook_chapters(db: Session, keys) -> dict:
+    """book_catalog.ebook_chapters for cover URLs; {} when the catalog cannot
+    be read (the URLs are then stamped by Plex alone, as for an unpaired book)."""
+    try:
+        return book_catalog.ebook_chapters(db, keys)
+    except SQLAlchemyError as exc:
+        logger.warning("The catalog could not be read for cover URLs: %s", type(exc).__name__)
+        return {}
 
 
 # --- Library ------------------------------------------------------------------------
@@ -233,19 +254,21 @@ async def _book_access(who: "Listener", key: str, force: bool = False) -> dict:
 
 @router.get("/books")
 @_limit(PLAYER_LIMIT, "books")
-async def books(request: Request, who: Listener = Depends(listener)):
+async def books(request: Request, who: Listener = Depends(listener), db: Session = Depends(get_db)):
     """The audiobook library's books, for a listener who may read it."""
     try:
         await pp.library_access(who.session(), session_id=who.session_id)
         found = await pp.list_books()
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         raise _http_error(exc, forbid=True) from None
-    return {"books": [{**b, "cover": _cover_url(b["key"], b.get("cover"))} for b in found]}
+    chapters = _ebook_chapters(db, [b["key"] for b in found])
+    return {"books": [{**b, "cover": _cover_url(b["key"], b.get("cover"), chapters)} for b in found]}
 
 
 @router.get("/book/{key}")
 @_limit(PLAYER_LIMIT, "book")
-async def book(request: Request, key: str, refresh: bool = False, who: Listener = Depends(listener)):
+async def book(request: Request, key: str, refresh: bool = False, who: Listener = Depends(listener),
+               db: Session = Depends(get_db)):
     """One book's tracks and chapters, plus this listener's stream access:
     their own server token and the server's connection URIs. `refresh`
     asks plex.tv again (after the stream refused the cached token)."""
@@ -254,7 +277,7 @@ async def book(request: Request, key: str, refresh: bool = False, who: Listener 
         detail = await pp.book_detail(key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         raise _http_error(exc) from None
-    body = {**detail, "cover": _cover_url(key, detail.get("cover")),
+    body = {**detail, "cover": _cover_url(key, detail.get("cover"), _ebook_chapters(db, [key])),
             "stream": {"token": access["token"], "uris": access["uris"]}}
     # It carries the listener's server token: never stored by a cache.
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
@@ -268,7 +291,7 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener), d
     pairs it with (book_catalog.audiobook_cover)."""
     await _book_access(who, key)
     try:
-        content, content_type = await book_catalog.audiobook_cover(db, key)
+        content, content_type, from_ebook = await book_catalog.audiobook_cover(db, key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         # A cover missing now can load later under the same ?v= (Plex back
         # up, or a fix that leaves the thumb stamp alone): a miss is never kept.
@@ -276,7 +299,7 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener), d
         error.headers = {"Cache-Control": "no-store"}
         raise error from None
     return Response(content=content, media_type=content_type, headers={
-        "Cache-Control": f"private, max-age={COVER_MAX_AGE}",
+        "Cache-Control": f"private, max-age={EBOOK_COVER_MAX_AGE if from_ebook else COVER_MAX_AGE}",
         # Loaded as a document rather than an <img>, it can run nothing.
         "Content-Security-Policy": "sandbox",
     })
@@ -622,7 +645,7 @@ async def dismiss_orphans(request: Request, key: str, who: Listener = Depends(li
 
 @router.get("/next/{key}")
 @_limit(PLAYER_LIMIT, "next")
-async def next_book(request: Request, key: str, who: Listener = Depends(listener)):
+async def next_book(request: Request, key: str, who: Listener = Depends(listener), db: Session = Depends(get_db)):
     """The next book in this book's series, {"next": book or null}: the book
     fields /books gives. The same narrator's edition when the library has it,
     else another edition; null for a standalone book, the last one, or one
@@ -636,7 +659,8 @@ async def next_book(request: Request, key: str, who: Listener = Depends(listener
         raise _http_error(exc) from None
     if found is None:
         return {"next": None}
-    return {"next": {**found, "cover": _cover_url(found["key"], found.get("cover"))}}
+    chapters = _ebook_chapters(db, [found["key"]])
+    return {"next": {**found, "cover": _cover_url(found["key"], found.get("cover"), chapters)}}
 
 
 class Checkin(BaseModel):

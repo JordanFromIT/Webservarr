@@ -1391,12 +1391,18 @@ class Cover(BooksBase):
         # Dune's ebook is in a library this caller does not reach: its cover is
         # still the cover of the work they may listen to.
         self.reach = {2}
-        self.plex_cover.side_effect = pp.NotInLibrary("This book has no cover")
+        self.plex_cover.side_effect = pp.NoCover("This book has no cover")
         r = self.get("/api/books/1/cover")
         self.assertEqual((r.status_code, r.content), (200, b"\x89PNGk"))
         self.assertIn("private", r.headers["cache-control"])
         self.plex_cover.assert_awaited_once_with("10:1")
         self.kavita_cover.assert_awaited_once_with(101)
+
+    def test_a_plex_cover_that_would_not_load_is_never_replaced_by_a_hidden_ebook(self):
+        self.reach = {2}
+        self.plex_cover.side_effect = pp.NotInLibrary("This book's cover is not available")
+        self.assertEqual(self.get("/api/books/1/cover").status_code, 404)
+        self.kavita_cover.assert_not_awaited()
 
     def test_a_visible_ebook_is_read_once_when_neither_has_a_cover(self):
         self.plex_cover.side_effect = pp.NotInLibrary("This book has no cover")
@@ -1405,13 +1411,13 @@ class Cover(BooksBase):
         self.kavita_cover.assert_awaited_once_with(101)
 
     def test_an_audiobook_with_no_ebook_and_no_plex_cover_is_404(self):
-        self.plex_cover.side_effect = pp.NotInLibrary("This book has no cover")
+        self.plex_cover.side_effect = pp.NoCover("This book has no cover")
         self.assertEqual(self.get("/api/books/7/cover").status_code, 404)
         self.kavita_cover.assert_not_awaited()
 
     def test_a_kavita_outage_behind_a_missing_plex_cover_is_404(self):
         self.reach = {2}
-        self.plex_cover.side_effect = pp.NotInLibrary("This book has no cover")
+        self.plex_cover.side_effect = pp.NoCover("This book has no cover")
         self.kavita_cover.side_effect = kavita.KavitaUnavailable("Kavita did not answer")
         self.assertEqual(self.get("/api/books/1/cover").status_code, 404)
 

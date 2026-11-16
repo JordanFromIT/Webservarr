@@ -947,42 +947,53 @@ def knows_edition(db, plex_book_key: str) -> bool:
     return db.query(BookAudioEdition.id).filter(BookAudioEdition.plex_book_key == plex_book_key).first() is not None
 
 
-def ebook_chapter_of(db, plex_book_key: str) -> Optional[int]:
-    """The Kavita chapter of the ebook the catalog pairs this audiobook edition
-    with (the live book it is in), or None when that book has no ebook or the
-    edition is in no book."""
-    row = (db.query(Book.kavita_chapter_id).join(BookAudioEdition, BookAudioEdition.book_id == Book.id)
-           .filter(BookAudioEdition.plex_book_key == plex_book_key, Book.merged_into.is_(None)).first())
-    return row[0] if row else None
+
+def ebook_chapters(db, keys: Iterable[str]) -> Dict[str, int]:
+    """{Plex book key: the Kavita chapter of the ebook the catalog pairs that
+    audiobook edition with (the live book it is in)}, for those of `keys`
+    whose book has an ebook."""
+    wanted = list(dict.fromkeys(keys))
+    q = (db.query(BookAudioEdition.plex_book_key, Book.kavita_chapter_id)
+         .join(Book, Book.id == BookAudioEdition.book_id)
+         .filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None)))
+    found: Dict[str, int] = {}
+    for start in range(0, len(wanted), 400):
+        for key, chapter in q.filter(BookAudioEdition.plex_book_key.in_(wanted[start:start + 400])):
+            found[key] = chapter
+    return found
 
 
 async def audiobook_cover(db, key: str) -> tuple:
-    """(image bytes, content type) of an audiobook's cover: its Plex cover
-    (plex_player.cover_image), else, when Plex has none, the cover of the
-    ebook the catalog pairs it with (never one found by title).
+    """(image bytes, content type, from_ebook) of an audiobook's cover: its
+    Plex cover (plex_player.cover_image), else, only when Plex has no image
+    for it at all (plex_player.NoCover), the cover of the ebook the catalog
+    pairs it with (never one found by title); from_ebook says which.
 
-    The ebook's cover is given whatever the caller may see of the ebook: it is
-    the cover of the work they may listen to, and nothing else about the ebook
-    is passed on. The Kavita read is bounded by kavita.USER_TIMEOUT, and its
-    failing is the same as no cover. Raises plex_player.NotInLibrary when
-    neither gives a cover, PlayerOff or PlayerUnavailable as cover_image does."""
+    A Plex image that only failed to load (a transcoder error, a timeout) is
+    never replaced: the ebook's cover would then be kept under the URL the
+    Plex cover uses. The ebook's cover is given whatever the caller may see of
+    the ebook: it is the cover of the work they may listen to, and nothing else
+    about the ebook is passed on. The Kavita read is bounded by
+    kavita.USER_TIMEOUT, and its failing is the same as no cover. Raises
+    plex_player.NotInLibrary (NoCover included) when there is no cover,
+    PlayerOff or PlayerUnavailable as cover_image does."""
     try:
-        return await plex_player.cover_image(key)
-    except plex_player.PlayerOff:
-        raise
-    except plex_player.NotInLibrary as no_plex_cover:
+        content, content_type = await plex_player.cover_image(key)
+        return content, content_type, False
+    except plex_player.NoCover as no_plex_cover:
         missing = no_plex_cover
     try:
-        chapter = ebook_chapter_of(db, key)
+        chapter = ebook_chapters(db, [key]).get(key)
     except SQLAlchemyError as exc:
         logger.warning("The catalog could not be read for a cover: %s", type(exc).__name__)
         raise missing from None
     if chapter is None:
         raise missing
     try:
-        return await asyncio.wait_for(kavita.chapter_cover(chapter), kavita.USER_TIMEOUT)
+        content, content_type = await asyncio.wait_for(kavita.chapter_cover(chapter), kavita.USER_TIMEOUT)
     except kavita.KavitaNoCover:
         raise missing from None
     except (kavita.KavitaUnavailable, asyncio.TimeoutError) as exc:
         logger.info("The ebook's cover could not be read for an audiobook: %s", type(exc).__name__)
         raise missing from None
+    return content, content_type, True

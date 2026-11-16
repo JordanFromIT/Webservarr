@@ -101,6 +101,13 @@ class PlayerOff(NotInLibrary):
     """No audiobook library is configured: the player is off (404)."""
 
 
+class NoCover(NotInLibrary):
+    """Plex has no image for the book's cover at all (404): no thumbnail and
+    no stored poster, or Plex said it has none for every one tried. A cover
+    that only failed to load (a transcoder error, a timeout) is the plain
+    NotInLibrary, which says nothing about whether an image exists."""
+
+
 # --- Config -------------------------------------------------------------------
 
 def _admin() -> dict:
@@ -1771,25 +1778,31 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
     while the cover it read from the files sits in the album's posters,
     unselected. So when the thumb is missing or will not load, the album's
     own posters are tried the same way, the selected one first, until one
-    loads (POSTER_TRIES at most). Raises NotInLibrary (also
-    when neither gives a cover), PlayerOff or PlayerUnavailable."""
+    loads (POSTER_TRIES at most). Raises NoCover when Plex has no image for
+    it at all, NotInLibrary when one would not load, PlayerOff or
+    PlayerUnavailable."""
     album_key, _disc = parse_key(key)
     admin = _configured()
+    failed = False         # an image that may exist would not load
     async with _pms_client() as client:
         album = await _album(client, admin, album_key)
         thumb = album.get("thumb") or ""
-        # get_thumbnail sends the token in a header, serves only raster image
-        # types and caps the bytes read.
+        # fetch_thumbnail sends the token in a header, serves only raster
+        # image types and caps the bytes read.
         if cover_version(thumb):
-            content, content_type = await plex.get_thumbnail(thumb, width=size, height=size, fill=False)
+            content, content_type, missing = await plex.fetch_thumbnail(thumb, width=size, height=size, fill=False)
             if content is not None:
                 return content, content_type
+            failed = not missing
         posters = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/posters")
     for poster in _usable_posters(album_key, _items(posters))[:POSTER_TRIES]:
-        content, content_type = await plex.get_thumbnail(poster, width=size, height=size, fill=False)
+        content, content_type, missing = await plex.fetch_thumbnail(poster, width=size, height=size, fill=False)
         if content is not None:
             return content, content_type
-    raise NotInLibrary("This book has no cover")
+        failed = failed or not missing
+    if failed:
+        raise NotInLibrary("This book's cover is not available")
+    raise NoCover("This book has no cover")
 
 
 def _usable_posters(album_key: str, posters: list) -> list:

@@ -323,9 +323,19 @@ async def get_thumbnail(path: str, width: int = 300, height: int = 170, fill: bo
     covers width x height (one side may be longer), without it fits inside.
     Returns (None, None) on failure.
     """
+    content, content_type, _missing = await fetch_thumbnail(path, width=width, height=height, fill=fill)
+    return content, content_type
+
+
+async def fetch_thumbnail(path: str, width: int = 300, height: int = 170, fill: bool = True) -> tuple:
+    """get_thumbnail's (content_bytes, content_type), plus whether Plex said
+    it has no such image: (None, None, True) only for a 404 answer. Any other
+    failure (not set up, an error status, a timeout, a refused body) is
+    (None, None, False), which says nothing about whether the image exists.
+    """
     config = _get_config()
     if not config["url"] or not config["token"]:
-        return None, None
+        return None, None, False
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
@@ -342,26 +352,26 @@ async def get_thumbnail(path: str, width: int = 300, height: int = 170, fill: bo
                 headers={"X-Plex-Token": config["token"]},
             ) as resp:
                 if resp.status_code != 200:
-                    return None, None
+                    return None, None, resp.status_code == 404
                 # Serve only a real raster image, never SVG/HTML (stored-XSS
                 # risk on our origin), and cap the bytes read (M10).
                 content_type = (resp.headers.get("content-type", "") or "").split(";")[0].strip().lower()
                 if content_type not in ALLOWED_IMAGE_TYPES:
                     logger.warning("Plex thumbnail served unexpected content-type %r", content_type)
-                    return None, None
+                    return None, None, False
                 chunks = []
                 total = 0
                 async for chunk in resp.aiter_bytes():
                     total += len(chunk)
                     if total > MAX_THUMBNAIL_BYTES:
                         logger.warning("Plex thumbnail exceeded %d byte cap", MAX_THUMBNAIL_BYTES)
-                        return None, None
+                        return None, None, False
                     chunks.append(chunk)
-                return b"".join(chunks), content_type
+                return b"".join(chunks), content_type, False
     except Exception as e:
         logger.warning("Failed to fetch Plex thumbnail: %s", str(e))
 
-    return None, None
+    return None, None, False
 
 
 # Resolution buckets we report, in the order they are shown. Plex's own filter

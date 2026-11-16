@@ -198,6 +198,9 @@ class FakePlex:
         self.photo_type = "image/jpeg"
         # Transcoder url= values Plex has no image for (it answers 404).
         self.missing_photos = set()
+        # Transcoder url= values that fail without saying the image is gone:
+        # url -> an HTTP status, or "timeout".
+        self.failing_photos = {}
         # Album rating key -> its /posters entries.
         self.posters = {}
         # path -> a JSON body answered as is (200), for odd shapes.
@@ -250,6 +253,11 @@ class FakePlex:
             keys = self.sections.get(token, [SECTION, "5"])
             return self.mc(Directory=[{"key": k, "type": "artist", "title": f"Section {k}"} for k in keys])
         if path == "/photo/:/transcode":
+            failing = self.failing_photos.get(q.get("url", [""])[0])
+            if failing == "timeout":
+                raise httpx.ReadTimeout("transcoder timed out", request=request)
+            if failing:
+                return httpx.Response(failing, text="transcoder error")
             if q.get("url", [""])[0] in self.missing_photos:
                 return httpx.Response(404, text="<html><head><title>Not Found</title></head></html>",
                                       headers={"content-type": "text/html"})
@@ -2477,6 +2485,38 @@ class Cover(BridgeBase):
                 self.assertEqual(pp._usable_posters("500", [{"key": base + ref, "selected": True}]), [])
         for good in (self.EMBEDDED, self.UPLOADED, self.SECOND):
             self.assertIsNotNone(pp._POSTER_PATH.fullmatch(good), good)
+
+    def test_plex_with_no_image_at_all_is_no_cover(self):
+        # No thumb and no poster, or Plex answers 404 for every one tried.
+        self.plex.missing_photos.update({ALBUMS["500"]["thumb"], self.EMBEDDED})
+        for posters in ([], [{"key": self.EMBEDDED}]):
+            with self.subTest(posters=posters):
+                self.plex.posters["500"] = posters
+                with self.assertRaises(pp.NoCover):
+                    self.run_async(pp.cover_image("500:1"))
+        self.plex.posters["500"] = []
+        with mock.patch.dict(ALBUMS["500"], {"thumb": ""}), self.assertRaises(pp.NoCover):
+            self.run_async(pp.cover_image("500:1"))
+
+    def test_a_cover_that_would_not_load_is_not_no_cover(self):
+        # A transcoder error or timeout says nothing about whether the image
+        # exists: never NoCover, so nothing stands in for it.
+        for failing in (500, 502, "timeout"):
+            for broken in ("thumb", "poster"):
+                with self.subTest(failing=failing, broken=broken):
+                    self.plex.missing_photos = {ALBUMS["500"]["thumb"]} if broken == "poster" else set()
+                    self.plex.failing_photos = {ALBUMS["500"]["thumb"] if broken == "thumb" else self.EMBEDDED: failing}
+                    self.plex.posters["500"] = [{"key": self.EMBEDDED}] if broken == "poster" else []
+                    with self.assertRaises(pp.NotInLibrary) as caught:
+                        self.run_async(pp.cover_image("500:1"))
+                    self.assertNotIsInstance(caught.exception, pp.NoCover)
+
+    def test_get_thumbnail_keeps_its_two_values(self):
+        self.plex.missing_photos.add(ALBUMS["500"]["thumb"])
+        self.assertEqual(self.run_async(pp.plex.get_thumbnail(ALBUMS["500"]["thumb"])), (None, None))
+        self.assertEqual(self.run_async(pp.plex.fetch_thumbnail(ALBUMS["500"]["thumb"])), (None, None, True))
+        self.plex.failing_photos = {ALBUMS["100"]["thumb"]: 500}
+        self.assertEqual(self.run_async(pp.plex.fetch_thumbnail(ALBUMS["100"]["thumb"])), (None, None, False))
 
     def test_a_good_thumb_never_reads_the_posters(self):
         self.run_async(pp.cover_image("100:1"))
