@@ -56,8 +56,9 @@ _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 # chapterId through: extractPdf, which has Kavita turn every page into an
 # image, is the work of Kavita's own apps, never this reader's. The file is
 # fetched in byte ranges (Kavita answers them), so the headers that describe a
-# range come back with it.
-_PDF_PATH = re.compile(r"^api/reader/pdf$", re.IGNORECASE)
+# range come back with it. A trailing slash is the same route to Kavita
+# (ASP.NET ignores it), so it is the same route here, under the same rules.
+_PDF_PATH = re.compile(r"^api/reader/pdf/?$", re.IGNORECASE)
 _PDF_RANGE_HEADERS = {"content-length", "content-range", "accept-ranges"}
 
 # What a proxied request can name, so the proxy can ask whether this person may
@@ -1024,7 +1025,7 @@ PAGE_LIMIT = "1200/minute"
 API_LIMIT = "240/minute"
 # A PDF's byte ranges count as page loads: the reader fetches the parts of the
 # file the pages near the one on screen need, in 1 MB pieces.
-_PAGE_LOAD_PATH = re.compile(r"^api/(image/.+|book/\d+/(book-page|book-resources)|reader/pdf)$", re.IGNORECASE)
+_PAGE_LOAD_PATH = re.compile(r"^api/(image/.+|book/\d+/(book-page|book-resources)|reader/pdf/?)$", re.IGNORECASE)
 
 
 def _kavita_rate_key(request: Request) -> str:
@@ -1206,8 +1207,11 @@ async def kavita_proxy(
     if _PDF_PATH.match(path):
         response_headers.update(
             (k, v) for k, v in upstream.headers.items() if k.lower() in _PDF_RANGE_HEADERS)
-        # The URL carries no key and no person, so no shared cache may keep it.
-        response_headers["cache-control"] = "private, max-age=3600"
+        # Never kept, whatever the answer: the URL names no person, so a
+        # browser shared by two members would hand one the other's cached
+        # file, and a Kavita error kept would outlive the problem. PDF.js
+        # reads the ranges it needs as it goes; a revisit fetches them again.
+        response_headers["cache-control"] = "no-store"
 
     async def stream_body():
         try:

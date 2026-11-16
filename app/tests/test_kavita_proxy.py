@@ -705,6 +705,7 @@ class PdfFile(unittest.TestCase):
     shared cache may keep it. Kavita is stubbed at the HTTP layer."""
 
     PDF = b"%PDF-1.4\n" + b"x" * 90
+    status = None             # Kavita answers the file with this status instead
 
     def setUp(self):
         from app.tests import helpers
@@ -723,8 +724,11 @@ class PdfFile(unittest.TestCase):
     def kavita(self, request):
         import httpx
         self.seen.append(request)
-        if request.url.path != "/api/Reader/pdf":
+        if request.url.path not in ("/api/Reader/pdf", "/api/Reader/pdf/"):
             return httpx.Response(404)
+        if self.status:
+            return httpx.Response(self.status, headers={"Cache-Control": "public, max-age=3600"},
+                                  content=b"" if self.status == 204 else b'{"title":"error"}')
         if "apiKey" not in request.url.params:
             return httpx.Response(400, json={"errors": {"apiKey": ["The apiKey field is required."]}})
         headers = {"Content-Type": "application/pdf", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600",
@@ -739,6 +743,9 @@ class PdfFile(unittest.TestCase):
         return httpx.Response(200, content=self.PDF, headers=headers)
 
     def fetch(self, query, key="key-sam", visible=True, headers=None):
+        return self.fetch_path("api/Reader/pdf?" + query, key, visible, headers)
+
+    def fetch_path(self, path, key="key-sam", visible=True, headers=None):
         import httpx
         real_client = httpx.AsyncClient
         transport = httpx.MockTransport(self.kavita)
@@ -750,7 +757,7 @@ class PdfFile(unittest.TestCase):
              mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=130), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient",
                                lambda *a, **k: real_client(*a, transport=transport, **k)):
-            return client.get("/kavita/api/Reader/pdf?" + query, headers=headers or {})
+            return client.get("/kavita/" + path, headers=headers or {})
 
     def test_a_range_is_served_with_the_persons_key_and_the_chapter_alone(self):
         r = self.fetch("chapterId=198&extractPdf=true&apiKey=someone-elses", headers={"Range": "bytes=0-9"})
@@ -766,12 +773,29 @@ class PdfFile(unittest.TestCase):
         self.assertEqual(r.headers["content-type"], "application/pdf")
         self.check.assert_awaited_once_with(KAVITA, "jwt-sam", [("chapter", 198, 130)])
 
-    def test_the_whole_file_and_no_shared_cache(self):
+    def test_the_whole_file_is_never_cached(self):
         r = self.fetch("chapterId=198")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.content, self.PDF)
         self.assertEqual(r.headers["content-length"], str(len(self.PDF)))
-        self.assertEqual(r.headers["cache-control"], "private, max-age=3600")
+        # Not even privately: another member on the same browser must not get it.
+        self.assertEqual(r.headers["cache-control"], "no-store")
+
+    def test_kavitas_errors_are_never_cached_either(self):
+        for status in (400, 404, 500, 204):
+            with self.subTest(status=status):
+                self.status = status
+                r = self.fetch("chapterId=198", headers={"Range": "bytes=0-9"})
+                self.assertEqual(r.status_code, status)
+                self.assertEqual(r.headers["cache-control"], "no-store")
+
+    def test_a_trailing_slash_is_the_same_route_under_the_same_rules(self):
+        r = self.fetch_path("api/Reader/pdf/?chapterId=198&extractPdf=true&apiKey=someone-elses", headers={"Range": "bytes=0-9"})
+        self.assertEqual(r.status_code, 206)
+        (sent,) = self.seen
+        self.assertEqual(sorted(sent.url.params.multi_items()), [("apiKey", "key-sam"), ("chapterId", "198")])
+        self.assertEqual(r.headers["cache-control"], "no-store")
+        self.assertEqual(r.headers["content-range"], f"bytes 0-9/{len(self.PDF)}")
         self.assertNotIn("key-sam", r.headers.get("content-disposition", ""))
 
     def test_a_hidden_chapter_is_404_and_kavita_is_never_asked(self):
@@ -787,7 +811,7 @@ class PdfFile(unittest.TestCase):
                 self.assertEqual(self.seen, [])
 
     def test_its_ranges_draw_on_the_page_budget(self):
-        for path in ("api/Reader/pdf", "api/reader/PDF"):
+        for path in ("api/Reader/pdf", "api/reader/PDF", "api/Reader/pdf/"):
             self.assertTrue(kavita_proxy._PAGE_LOAD_PATH.match(path), path)
         self.assertFalse(kavita_proxy._PAGE_LOAD_PATH.match("api/Reader/progress"))
 
