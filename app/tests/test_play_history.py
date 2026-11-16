@@ -410,12 +410,15 @@ class Endpoint(unittest.TestCase):
             with self.subTest(q=q):
                 self.assertEqual(self.client.get("/api/me/history?" + q).status_code, 422)
 
-    def test_rate_limited_per_session(self):
-        from app.limiter import limiter
+    def test_rate_limited_per_session_and_per_address(self):
+        # Per address too: several sign-ins must not each get a budget (audit F3).
+        from app.limiter import limiter, rate_limit_key
         from app.routers.player import session_rate_key
         name = f"{route.history.__module__}.{route.history.__name__}"
-        self.assertEqual([(str(lim.limit), lim.key_func, lim.scope) for lim in limiter._route_limits[name]],
-                         [("60 per 1 minute", session_rate_key, "me:history")])
+        limits = sorted((str(lim.limit), lim.key_func.__name__, lim.scope or "")
+                        for lim in limiter._route_limits[name])
+        self.assertEqual(limits, sorted([("60 per 1 minute", session_rate_key.__name__, "me:history"),
+                                         ("60 per 1 minute", rate_limit_key.__name__, "")]))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

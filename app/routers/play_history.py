@@ -11,8 +11,9 @@ library their account reaches). A source that cannot be read leaves its
 sessions out and adds a note, as the Continue row does; 503 only when
 nothing asked for could be read. Errors are 4xx or 503, never 500.
 
-Rate limited per session, as the player's routes are. Nothing is cached in
-the module (two uvicorn workers).
+Rate limited per session, as the player's routes are, and per address.
+Nothing is cached in the module (two uvicorn workers); the books' contents,
+for the chapter numbers, are cached in Redis (kavita.chapter_number_at).
 """
 
 import asyncio
@@ -41,6 +42,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 HISTORY_LIMIT = "60/minute"
+# Per address as well: a member with several sign-ins has a budget per
+# session, and each call can ask Kavita for every shown book's contents.
+HISTORY_ADDRESS_LIMIT = "60/minute"
 UNREADABLE = "Your history couldn't be read right now. Try again in a moment."
 
 
@@ -88,6 +92,7 @@ async def _caller(user: dict = Depends(get_current_user),
 
 @router.get("/history")
 @limiter.shared_limit(HISTORY_LIMIT, scope="me:history", key_func=session_rate_key)
+@limiter.limit(HISTORY_ADDRESS_LIMIT)
 async def history(request: Request,
                   kind: str = Query("all", pattern="^(all|audio|ebook)$"),
                   before: Optional[str] = Query(None, max_length=64),

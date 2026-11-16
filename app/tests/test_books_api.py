@@ -1765,6 +1765,31 @@ class Places(unittest.TestCase):
 
 # --- The person's own Kavita reads, at the httpx layer ---------------------------------------
 
+class _DictRedis:
+    """The two Redis calls the contents cache makes, kept in a dict, with
+    each set's TTL. `down` makes both raise as a Redis that is gone would."""
+
+    def __init__(self):
+        self.data, self.ttl, self.down = {}, {}, False
+
+    def _check(self):
+        if self.down:
+            from redis.exceptions import ConnectionError as RedisConnectionError
+            raise RedisConnectionError("down")
+
+    async def get(self, key):
+        self._check()
+        return self.data.get(key)
+
+    async def set(self, key, value, ex=None):
+        self._check()
+        self.data[key], self.ttl[key] = value, ex
+
+    def clear(self):
+        self.data.clear()
+        self.ttl.clear()
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class KavitaAsThePerson(unittest.TestCase):
     TOKEN = "SECRET-USER-JWT"
@@ -1774,9 +1799,11 @@ class KavitaAsThePerson(unittest.TestCase):
         self.requests = []
         self.answers = {}
         self.real_client = httpx.AsyncClient
+        self.toc_cache = _DictRedis()
         for p in (mock.patch.object(kavita.httpx, "AsyncClient", self.client),
                   mock.patch.object(kavita.integration_config, "read",
-                                    lambda keys: {kavita.URL_KEY: KAVITA, kavita.API_KEY: self.KEY})):
+                                    lambda keys: {kavita.URL_KEY: KAVITA, kavita.API_KEY: self.KEY}),
+                  mock.patch.object(kavita, "_toc_redis", mock.AsyncMock(return_value=self.toc_cache))):
             p.start()
             self.addCleanup(p.stop)
 
@@ -1957,10 +1984,59 @@ class KavitaAsThePerson(unittest.TestCase):
         self.assertIsNone(number(0))                                       # the cover
         self.assertIsNone(number(1))                                       # "Part One"
         self.assertIsNone(number(39))                                      # "Epilogue"
+        self.toc_cache.clear()
         self.answers["/api/Book/101/chapters"] = httpx.Response(500)       # a nicety, never an error
         self.assertIsNone(number(20))
         self.answers["/api/Book/101/chapters"] = httpx.Response(401)
         self.assertIsNone(number(20))
+
+    TOC = [{"title": "Chapter 3", "page": 4, "children": []}]
+
+    def test_contents_are_kept_for_a_day_and_shared(self):
+        # Kavita re-parses the EPUB for every /chapters call (audit F3).
+        self.answers["/api/Book/101/chapters"] = httpx.Response(200, json=self.TOC)
+        first = self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, 5))
+        again = self.run_async(kavita.chapter_number_at(KAVITA, "ANOTHER-READERS-JWT", 101, 9))
+        self.assertEqual((first, again), (3, 3))
+        self.assertEqual([r.url.path for r in self.requests], ["/api/Book/101/chapters"])
+        self.assertEqual(list(self.toc_cache.ttl.values()), [24 * 60 * 60])
+        self.assertNotIn(self.TOKEN, "".join(self.toc_cache.data) + "".join(self.toc_cache.data.values()))
+        # Another chapter, or the same one at another Kavita address, is its own.
+        self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 102, 5))
+        self.run_async(kavita.chapter_number_at("http://other-kavita.invalid:5000", self.TOKEN, 101, 5))
+        self.assertEqual(len(self.requests), 3)
+
+    def test_contents_kavita_could_not_give_are_not_kept(self):
+        self.answers["/api/Book/101/chapters"] = httpx.Response(500)
+        self.assertIsNone(self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, 5)))
+        self.answers["/api/Book/101/chapters"] = httpx.Response(200, json=self.TOC)
+        self.assertEqual(self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, 5)), 3)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_contents_still_answer_without_redis(self):
+        self.toc_cache.down = True
+        self.answers["/api/Book/101/chapters"] = httpx.Response(200, json=self.TOC)
+        self.assertEqual(self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, 5)), 3)
+
+    def test_contents_fetches_go_four_at_a_time(self):
+        import asyncio
+        busy = {"now": 0, "most": 0}
+
+        async def slow(request):
+            busy["now"] += 1
+            busy["most"] = max(busy["most"], busy["now"])
+            await asyncio.sleep(0.02)
+            busy["now"] -= 1
+            return httpx.Response(200, json=self.TOC)
+
+        self.client = lambda **kwargs: self.real_client(transport=httpx.MockTransport(slow))
+        with mock.patch.object(kavita.httpx, "AsyncClient", self.client):
+            async def many():
+                return await asyncio.gather(*(kavita.chapter_number_at(KAVITA, self.TOKEN, c, 5)
+                                              for c in range(200, 220)))
+            self.assertEqual(self.run_async(many()), [3] * 20)
+        self.assertEqual(busy["most"], kavita.TOC_CONCURRENCY)
+        self.assertEqual(kavita.TOC_CONCURRENCY, 4)
 
     def test_cover_is_read_with_the_server_key_and_only_an_image_is_passed_on(self):
         self.answers["/api/image/chapter-cover"] = httpx.Response(200, content=b"\x89PNGdata",

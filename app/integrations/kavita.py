@@ -16,14 +16,17 @@ sentence, safe to store and to show on the Settings page.
 """
 
 import asyncio
+import hashlib
 import html
 import json
 import logging
 import re
+import weakref
 from datetime import datetime
 from typing import Optional
 
 import httpx
+from redis.exceptions import RedisError
 
 from app.integrations import config as integration_config
 
@@ -730,19 +733,63 @@ def _toc_entries(items, out: list) -> None:
             _toc_entries(item.get("children"), out)
 
 
+# A book's table of contents is book data, the same for every reader, and
+# Kavita re-parses the EPUB for every /chapters call. So each chapter's is
+# kept in Redis for a day (never module memory: uvicorn runs several
+# workers), and the fetches that miss go TOC_CONCURRENCY at a time per worker.
+TOC_TTL = 24 * 60 * 60
+TOC_CONCURRENCY = 4
+_TOC_PREFIX = "webservarr:cache:kavita-toc:"
+_toc_gates: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _toc_gate() -> asyncio.Semaphore:
+    """This event loop's semaphore for contents fetches (a semaphore belongs
+    to the loop that first waits on it)."""
+    loop = asyncio.get_running_loop()
+    gate = _toc_gates.get(loop)
+    if gate is None:
+        gate = _toc_gates[loop] = asyncio.Semaphore(TOC_CONCURRENCY)
+    return gate
+
+
+async def _toc_redis():
+    from app.auth import session_manager
+    return await session_manager.get_redis()
+
+
+async def _toc(base: str, token: str, chapter_id: int) -> Optional[list]:
+    """The chapter's contents as [[page, title], ...], from the shared copy
+    when there is one, or None when Kavita can't be read."""
+    key = f"{_TOC_PREFIX}{hashlib.sha256(base.encode()).hexdigest()[:16]}:{int(chapter_id)}"
+    try:
+        cached = await (await _toc_redis()).get(key)
+        if cached is not None:
+            return json.loads(cached)
+    except (RedisError, ValueError) as exc:
+        logger.warning("Kavita contents cache could not be read: %s", type(exc).__name__)
+    async with _toc_gate():
+        try:
+            async with _user_client() as client:
+                data = await _as_user(client, base, token, "GET", f"/api/Book/{int(chapter_id)}/chapters")
+        except KavitaUnavailable:
+            return None
+    entries: list = []
+    _toc_entries(data, entries)
+    try:
+        await (await _toc_redis()).set(key, json.dumps(entries), ex=TOC_TTL)
+    except RedisError as exc:
+        logger.warning("Kavita contents cache could not be written: %s", type(exc).__name__)
+    return entries
+
+
 async def chapter_number_at(base: str, token: str, chapter_id: int, page: int) -> Optional[int]:
     """The number of the book's own chapter the reader is in at `page` ("Chapter
     12 - ..." in its table of contents), or None when the contents don't number
     it. Never raises for a book whose contents can't be read: the label is a
     nicety."""
-    try:
-        async with _user_client() as client:
-            data = await _as_user(client, base, token, "GET", f"/api/Book/{int(chapter_id)}/chapters")
-    except KavitaUnavailable:
-        return None
-    entries: list = []
-    _toc_entries(data, entries)
-    current = [e for e in entries if e[0] <= page]
+    entries = await _toc(base, token, chapter_id)
+    current = [e for e in entries or [] if e[0] <= page]
     if not current:
         return None
     found = _CHAPTER_TITLE.match(max(current, key=lambda e: e[0])[1])
