@@ -1089,9 +1089,10 @@ async def book_detail(request: Request, book_id: BookId, background: BackgroundT
 async def _request_actions(book, editions) -> dict:
     """Per format the catalog lacks, whether the page can ask for it in place:
     "ready", "requested" (the request snapshot has it as asked for and not
-    here yet), or null (not lacking, or this server takes no requests for it:
-    the page keeps the Requests link). Only the cached snapshot is read: a
-    page view never waits on Chaptarr."""
+    here yet, or it was asked for from this page since the snapshot was
+    built), or null (not lacking, or this server takes no requests for it:
+    the page keeps the Requests link). Only Redis is read: a page view never
+    waits on Chaptarr."""
     lacking = {"ebook": book.kavita_chapter_id is None, "audio": not editions}
     actions: dict = {"ebook": None, "audio": None}
     if not any(lacking.values()):
@@ -1101,6 +1102,7 @@ async def _request_actions(book, editions) -> dict:
         return actions
     snapshot = await book_requests.get_cached_snapshot()
     asked = chaptarr.requested_formats((snapshot or {}).get("items") or [], book.title, book.author)
+    asked |= await book_requests.asked_formats(book.id)
     for key, fmt in (("ebook", "ebook"), ("audio", "audiobook")):
         if lacking[key] and fmt in takes:
             actions[key] = "requested" if fmt in asked else "ready"
@@ -1144,6 +1146,8 @@ async def request_format(request: Request, book_id: BookId, body: FormatRequestI
     if not result["ok"]:
         raise HTTPException(status_code=404 if result.get("not_found") else 400, detail=result["message"])
     integrations._book_request_time(db, result.get("book_ids") or [])
+    if result.get("state") != "available":
+        await book_requests.mark_asked(book.id, fmt)
     title, foreign_id = result.get("title") or "", result.get("foreign_id") or ""
     if title and foreign_id:
         integrations._record_requester(db, user, foreign_id, title, fmt)

@@ -24,7 +24,6 @@ Two things worth knowing, both established by testing against the live instance:
 """
 
 import asyncio
-import difflib
 import json
 import logging
 import re
@@ -845,13 +844,6 @@ async def _request_formats(cfg: dict, foreign_id: str, book: Dict[str, Any], tit
 
 NOT_FOUND = "We couldn't find this book to request it."
 
-# How alike two spellings of an author's name must be to count as one (0..1).
-# "Michael Chrichton" (a typo in an ebook's metadata) against Chaptarr's
-# "Michael Crichton" is 0.97; two different people sharing a first name stay
-# well under it.
-_NAME_LIKE = 0.85
-
-
 def _title_key(title: str) -> str:
     """A title as two sources are compared on: no series marker, case,
     punctuation or "&" against "and"."""
@@ -870,10 +862,14 @@ def _name_key(name: str) -> str:
 
 
 def _author_likeness(wanted: str, candidate: str) -> float:
-    """How surely `candidate` (one name) is the author the catalog names, 0..1:
-    1 for the same name, the spelling likeness from _NAME_LIKE up, else 0.
+    """How surely `candidate` (one name) is the author the catalog names: 1
+    for the same name, 0.5 for the same name with a slip in it (the Books
+    catalog's pairing rule, book_catalog.same_author: "Michael Chrichton", a
+    typo in an ebook's metadata, is Chaptarr's "Michael Crichton"), else 0.
     The catalog can name several ("A, B & C"): each one is tried, and the
     whole string first ("Le Guin, Ursula K.")."""
+    from app.services.book_catalog import same_author
+
     got = _name_key(candidate)
     if not got:
         return 0.0
@@ -884,9 +880,8 @@ def _author_likeness(wanted: str, candidate: str) -> float:
             continue
         if want == got:
             return 1.0
-        likeness = difflib.SequenceMatcher(None, want, got).ratio()
-        if likeness >= _NAME_LIKE:
-            best = max(best, likeness)
+        if same_author(name, candidate):
+            best = 0.5
     return best
 
 
@@ -1004,6 +999,19 @@ async def _search_foreign_id(cfg: dict, title: str, author: str, row_ids: set) -
     return foreign_id
 
 
+async def _logged_id(cfg: dict, title: str, author: str, work: List[Dict[str, Any]]) -> str:
+    """The id a request for this work is logged under (the event log line,
+    Insights): the search result's, as the Requests page logs the same book
+    when it is asked for there, so one book asked for both ways is one line.
+    The work's own id when the search cannot name it."""
+    try:
+        found = await _search_foreign_id(cfg, title, author, {r["id"] for r in work})
+    except ChaptarrUnavailable as exc:
+        logger.info("Chaptarr search unavailable for the log id of %r: %s", title, exc)
+        found = None
+    return found or work[0].get("foreignBookId") or ""
+
+
 async def request_missing_format(title: str, author: str, fmt: str) -> Dict[str, Any]:
     """
     Request one format ("ebook" or "audiobook") of a book the Books catalog
@@ -1015,8 +1023,8 @@ async def request_missing_format(title: str, author: str, fmt: str) -> Dict[str,
     format, or one the library lacks, is requested as the Requests page would
     (request_book) once Chaptarr's search names it unambiguously.
 
-    Returns request_book's answer plus "foreign_id" (the work's id, for the
-    event log and Insights) on success, or {"ok": False, "message",
+    Returns request_book's answer plus "foreign_id" (for the event log and
+    Insights: the search result's id, as the Requests page has it) on success, or {"ok": False, "message",
     "not_found": True} when the book cannot be pinned down: nothing is asked
     for then, rather than a guess (an omnibus, another edition).
     """
@@ -1036,7 +1044,9 @@ async def request_missing_format(title: str, author: str, fmt: str) -> Dict[str,
         if rows:
             result = await _want_existing(cfg, [r["id"] for r in rows], rows[0].get("title") or title,
                                           all(r.get("monitored") for r in rows))
-            return {**result, "foreign_id": rows[0].get("foreignBookId") or ""}
+            if result["ok"]:
+                result["foreign_id"] = await _logged_id(cfg, title, author, work)
+            return result
         foreign_id = await _search_foreign_id(cfg, title, author, {r["id"] for r in work})
     except ChaptarrUnavailable as exc:
         logger.warning("Chaptarr could not be read to request %r: %s", title, exc)

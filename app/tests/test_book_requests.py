@@ -455,5 +455,42 @@ class WarmerTakesBothTurns(unittest.TestCase):
         self.assertEqual(built, ["books"])
 
 
+class _FakeRedis:
+    """Keys and their expiry, as the marks are written; `down` fails every call."""
+
+    def __init__(self, down=False):
+        self.keys, self.down = {}, down
+
+    async def set(self, key, value, ex=None):
+        if self.down:
+            raise ConnectionError("redis down")
+        self.keys[key] = ex
+
+    async def exists(self, key):
+        if self.down:
+            raise ConnectionError("redis down")
+        return int(key in self.keys)
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class AskedFromTheBookPage(unittest.TestCase):
+    """The book page's mark: a format asked for there reads Requested on a
+    reopen before the snapshot is rebuilt. Redis is faked."""
+
+    def test_a_mark_is_per_book_and_format_and_outlives_the_snapshot_turn(self):
+        fake = _FakeRedis()
+        with mock.patch.object(book_requests, "_get_redis", return_value=fake):
+            asyncio.run(book_requests.mark_asked(763, "audiobook"))
+            self.assertEqual(asyncio.run(book_requests.asked_formats(763)), {"audiobook"})
+            self.assertEqual(asyncio.run(book_requests.asked_formats(49)), set())
+        self.assertEqual(list(fake.keys.values()), [book_requests.ASKED_TTL])
+        self.assertGreater(book_requests.ASKED_TTL, book_requests.CACHE_TTL)
+
+    def test_redis_down_is_no_mark_and_no_failure(self):
+        with mock.patch.object(book_requests, "_get_redis", return_value=_FakeRedis(down=True)):
+            asyncio.run(book_requests.mark_asked(763, "audiobook"))
+            self.assertEqual(asyncio.run(book_requests.asked_formats(763)), set())
+
+
 if __name__ == "__main__":
     unittest.main()

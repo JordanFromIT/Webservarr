@@ -126,9 +126,14 @@ class BooksBase(unittest.TestCase):
         # Chaptarr is never reached: which formats it takes, and the cached request snapshot.
         self.takes = mock.Mock(return_value=set())
         self.snapshot = mock.AsyncMock(return_value=None)
+        self.marks = set()
         patches = [
             mock.patch.object(chaptarr, "request_formats", self.takes),
             mock.patch.object(book_requests, "get_cached_snapshot", self.snapshot),
+            mock.patch.object(book_requests, "asked_formats",
+                              mock.AsyncMock(side_effect=lambda book_id: {f for b, f in self.marks if b == book_id})),
+            mock.patch.object(book_requests, "mark_asked",
+                              mock.AsyncMock(side_effect=lambda book_id, fmt: self.marks.add((book_id, fmt)))),
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
             mock.patch.object(books.kavita_proxy, "kavita_url_for", side_effect=lambda user: KAVITA),
             mock.patch.object(kavita, "user_series_ids", self.series_ids),
@@ -736,12 +741,19 @@ class FormatRequest(BooksBase):
         finally:
             db.close()
 
+    def test_a_reopen_straight_after_reads_requested_before_the_snapshot_has_it(self):
+        self.assertEqual(self.ok("/api/books/4")["request_actions"]["audio"], "ready")
+        self.assertEqual(self.post(4, "audiobook").status_code, 200)
+        self.assertEqual(self.ok("/api/books/4")["request_actions"], {"ebook": None, "audio": "requested"})
+        self.assertEqual(self.ok("/api/books/7")["request_actions"]["ebook"], "ready")     # only that book
+
     def test_already_here_is_not_recorded_as_a_request(self):
         from app.models import BookRequester
 
         self.asked.return_value = {"ok": True, "message": "Already in the library", "state": "available"}
         r = self.post(4, "audiobook")
         self.assertEqual(r.json()["state"], "available")
+        self.assertEqual(self.marks, set())
         db = self.Session()
         try:
             self.assertEqual(db.query(BookRequester).count(), 0)

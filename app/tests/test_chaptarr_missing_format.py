@@ -86,8 +86,9 @@ class _Resp:
 class FakeChaptarr:
     """Answers the GETs from its tables and records every write."""
 
-    def __init__(self, books, search=SEARCH, authors=AUTHORS, down=False):
+    def __init__(self, books, search=SEARCH, authors=AUTHORS, down=False, search_down=False):
         self.books, self.search, self.authors, self.down = books, search, authors, down
+        self.search_down = search_down
         self.gets, self.writes = [], []
 
     def client(self, **kwargs):
@@ -110,7 +111,7 @@ class FakeChaptarr:
                 if path == "/api/v1/book":
                     return _Resp(200, fake.books if (params or {}).get("authorId") == 27 else [])
                 if path == "/api/v1/search":
-                    return _Resp(200, fake.search)
+                    return _Resp(503, {}) if fake.search_down else _Resp(200, fake.search)
                 return _Resp(404, {})
 
             async def put(self, url, headers=None, json=None):
@@ -151,13 +152,20 @@ class RequestMissingFormat(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["state"], "requested")
         self.assertEqual(result["book_ids"], [8882])
-        self.assertEqual(result["foreign_id"], "hc:9724")
         self.assertEqual(fake.writes, [
             ("PUT", "/api/v1/book/monitor", {"bookIds": [8882], "monitored": True}),
             ("POST", "/api/v1/command", {"name": "BookSearch", "bookIds": [8882]}),
         ])
         self.request_book.assert_not_awaited()
-        self.assertNotIn("/api/v1/search", [p for p, _ in fake.gets])    # the library row was enough
+        # Logged under the search result's id, as the Requests page logs Jurassic Park.
+        self.assertEqual(result["foreign_id"], "gr:3376836")
+
+    def test_the_log_id_falls_back_to_the_work_when_search_cannot_name_it(self):
+        fake = FakeChaptarr(jurassic(), search_down=True)
+        result = self.ask(fake)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["foreign_id"], "hc:9724")
+        self.assertEqual(len(fake.writes), 2)                               # the request itself went through
 
     def test_the_ebook_the_same_way(self):
         books = jurassic(audio_monitored=True, audio_files=True)
@@ -230,7 +238,7 @@ class RequestMissingFormat(unittest.TestCase):
 class Matching(unittest.TestCase):
     def test_author_likeness(self):
         self.assertEqual(chaptarr._author_likeness("Michael Crichton", "michael crichton"), 1.0)
-        self.assertGreater(chaptarr._author_likeness("Michael Chrichton", "Michael Crichton"), 0.85)
+        self.assertEqual(chaptarr._author_likeness("Michael Chrichton", "Michael Crichton"), 0.5)
         self.assertEqual(chaptarr._author_likeness("Michael Crichton", "Michael Connelly"), 0.0)
         self.assertEqual(chaptarr._author_likeness("Douglas Preston, Lincoln Child", "Lincoln Child"), 1.0)
         self.assertEqual(chaptarr._author_likeness("J. R. R. Tolkien", "J.R.R. Tolkien"), 1.0)

@@ -245,6 +245,34 @@ def _get_redis():
     return _redis
 
 
+# A format of a Books catalog book asked for from its page (POST
+# /api/books/<id>/request), remembered until the snapshot has certainly been
+# rebuilt with it in (the warmer's turn, with room to spare): so the page
+# reads Requested on a reopen straight after, not only after the next rebuild.
+ASKED_KEY = "webservarr:book_asked:{book_id}:{fmt}"
+ASKED_TTL = 2 * CACHE_TTL
+
+
+async def mark_asked(book_id: int, fmt: str) -> None:
+    """Remember that this format of this catalog book was just asked for.
+    Never fails the request: without the mark the page waits for the rebuild."""
+    try:
+        await _get_redis().set(ASKED_KEY.format(book_id=book_id, fmt=fmt), "1", ex=ASKED_TTL)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not mark a book request: %s", exc)
+
+
+async def asked_formats(book_id: int) -> set:
+    """The formats ("ebook", "audiobook") of this catalog book marked as just
+    asked for; empty when Redis cannot say."""
+    try:
+        found = [await _get_redis().exists(ASKED_KEY.format(book_id=book_id, fmt=f)) for f in FORMATS]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read book request marks: %s", exc)
+        return set()
+    return {f for f, here in zip(FORMATS, found) if here}
+
+
 async def get_cached_snapshot():
     """The last built snapshot, or None."""
     try:
