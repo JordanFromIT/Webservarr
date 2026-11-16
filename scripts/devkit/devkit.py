@@ -507,8 +507,10 @@ async def attach_kavita(session_id: str) -> None:
             token = await kavita._token(client, base, key)
     except kavita.KavitaUnavailable as exc:
         raise DevkitError(f"cannot link Kavita: {exc}") from None
+    # The key too, as a real sign-in keeps it: the proxy adds it server side to
+    # the calls Kavita takes no token on (a book's images, a PDF's file).
     await session_manager.update_session(
-        session_id, {"kavita_token": token, "kavita_api_key": "", "kavita_base": base})
+        session_id, {"kavita_token": token, "kavita_api_key": key, "kavita_base": base})
 
 
 async def purge_sessions() -> int:

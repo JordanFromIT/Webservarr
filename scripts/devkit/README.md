@@ -82,7 +82,8 @@ dk cleanup
 
 Notes:
 
-- `--kavita-link` signs the session in to Kavita with the configured key. Without
+- `--kavita-link` signs the session in to Kavita with the configured key (kept in
+  the session as a real sign-in keeps its own, for images and PDFs). Without
   it, `/books` and the book pages start the Kavita hand-off and leave the site.
 - The session carries the admin Plex token (read inside the container, never
   printed), so the player works for either role.
