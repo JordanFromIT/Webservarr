@@ -13,7 +13,7 @@ nothing asked for could be read. Errors are 4xx or 503, never 500.
 
 Rate limited per session, as the player's routes are, and per address.
 Nothing is cached in the module (two uvicorn workers); the books' contents,
-for the chapter numbers, are cached in Redis (kavita.chapter_number_at).
+for the chapter numbers, are cached in Redis (kavita.chapter_numbers_at).
 """
 
 import asyncio
@@ -182,10 +182,17 @@ async def history(request: Request,
     shown = [s for s in page.items if isinstance(s, ph.EbookSession)]
     if shown and who.kavita:
         base, token = who.kavita
-        # The book's own chapter number, from its contents: only for what is shown.
-        found_numbers = await asyncio.gather(*(kavita.chapter_number_at(base, token, s.chapter_id, s.end_page)
-                                               for s in shown))
-        numbers = {(s.session_id, s.chapter_id): n for s, n in zip(shown, found_numbers)}
+        # The book's own chapter number, from its contents: only for what is
+        # shown, and each chapter's contents read once however many of its
+        # sessions are on the page.
+        by_chapter: dict = {}
+        for s in shown:
+            by_chapter.setdefault(s.chapter_id, []).append(s)
+        found = await asyncio.gather(*(kavita.chapter_numbers_at(base, token, chapter_id,
+                                                                 [s.end_page for s in sessions])
+                                       for chapter_id, sessions in by_chapter.items()))
+        numbers = {(s.session_id, s.chapter_id): n
+                   for sessions, ns in zip(by_chapter.values(), found) for s, n in zip(sessions, ns)}
 
     wanted = {"all": {"plex", "kavita"}, "audio": {"plex"}, "ebook": {"kavita"}}[kind]
     if not page.items and failed and wanted <= failed | _absent(who):

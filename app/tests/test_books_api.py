@@ -2006,6 +2006,32 @@ class KavitaAsThePerson(unittest.TestCase):
         self.run_async(kavita.chapter_number_at("http://other-kavita.invalid:5000", self.TOKEN, 101, 5))
         self.assertEqual(len(self.requests), 3)
 
+    def test_callers_missing_one_chapter_at_once_share_one_fetch(self):
+        # A cold cache: 50 reads of one chapter at once are one Kavita call
+        # (bug-hunter, F3), and each still gets its own page's number.
+        import asyncio
+        toc = [{"title": "Chapter 1", "page": 0, "children": []}, {"title": "Chapter 2", "page": 25, "children": []}]
+
+        async def slow(request):
+            self.requests.append(request)
+            await asyncio.sleep(0.02)
+            return httpx.Response(200, json=toc)
+
+        self.client = lambda **kwargs: self.real_client(transport=httpx.MockTransport(slow))
+        with mock.patch.object(kavita.httpx, "AsyncClient", self.client):
+            async def many():
+                return await asyncio.gather(*(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, page)
+                                              for page in range(50)))
+            numbers = self.run_async(many())
+        self.assertEqual(numbers, [1] * 25 + [2] * 25)
+        self.assertEqual([r.url.path for r in self.requests], ["/api/Book/101/chapters"])
+
+    def test_numbers_for_many_pages_read_the_contents_once(self):
+        self.answers["/api/Book/101/chapters"] = httpx.Response(200, json=self.TOC)
+        self.assertEqual(self.run_async(kavita.chapter_numbers_at(KAVITA, self.TOKEN, 101, [1, 5, 9])),
+                         [None, 3, 3])
+        self.assertEqual(len(self.requests), 1)
+
     def test_contents_kavita_could_not_give_are_not_kept(self):
         self.answers["/api/Book/101/chapters"] = httpx.Response(500)
         self.assertIsNone(self.run_async(kavita.chapter_number_at(KAVITA, self.TOKEN, 101, 5)))

@@ -317,12 +317,15 @@ class Endpoint(unittest.TestCase):
                 raise self.sessions
             return self.sessions
 
-        async def fake_number(base, token, chapter_id, page):
-            return 12
+        self.numbers_asked = []
+
+        async def fake_numbers(base, token, chapter_id, pages):
+            self.numbers_asked.append((chapter_id, list(pages)))
+            return [12] * len(pages)
 
         for p in (mock.patch.object(route, "scope_of", fake_scope),
                   mock.patch.object(route.kavita, "reading_sessions", fake_sessions),
-                  mock.patch.object(route.kavita, "chapter_number_at", fake_number)):
+                  mock.patch.object(route.kavita, "chapter_numbers_at", fake_numbers)):
             p.start()
             self.addCleanup(p.stop)
         self.client = app_client(self, self.Session, self.A)
@@ -357,6 +360,17 @@ class Endpoint(unittest.TestCase):
         self.assertEqual((item["kind"], item["book_id"], item["chapter"], item["start_page"], item["end_page"],
                           item["pages"]), ("ebook", 2, 12, 121, 143, 600))
         self.assertEqual(item["read_url"], "/reader?seriesId=5&chapterId=70&page=143")
+
+    def test_one_chapters_sessions_read_its_contents_once(self):
+        # 50 sittings in one book: one contents read, not 50 (bug-hunter, F3).
+        t = now()
+        self.sessions = ([ebook_row(100 + i, 70, t - timedelta(minutes=30 * i), start_page=i, end_page=i + 1,
+                                    pages=600) for i in range(50)], True)
+        body = self.client.get("/api/me/history?kind=ebook&limit=50").json()
+        self.assertEqual(len(body["items"]), 50)
+        self.assertEqual([c for c, _pages in self.numbers_asked], [70])
+        self.assertEqual(sorted(self.numbers_asked[0][1]), [i + 1 for i in range(50)])
+        self.assertEqual({i["chapter"] for i in body["items"]}, {12})
 
     def test_a_pdf_sessions_pages_are_kavitas_own_from_1(self):
         # Kavita's PDF reader saves the page it shows (1 is the first page,
@@ -487,12 +501,12 @@ class HiddenReadingNeverSkipped(unittest.TestCase):
                     return out, False
             return out, True
 
-        async def fake_number(base, token, chapter_id, page):
-            return None
+        async def fake_numbers(base, token, chapter_id, pages):
+            return [None] * len(pages)
 
         for p in (mock.patch.object(route, "scope_of", fake_scope),
                   mock.patch.object(route.kavita, "reading_sessions", fake_sessions),
-                  mock.patch.object(route.kavita, "chapter_number_at", fake_number)):
+                  mock.patch.object(route.kavita, "chapter_numbers_at", fake_numbers)):
             p.start()
             self.addCleanup(p.stop)
         self.client = app_client(self, self.Session, self.A)
