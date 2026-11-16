@@ -99,18 +99,38 @@ export function openPdf(lib, opts) {
   });
 }
 
-function roomKey(room) {
-  return [Math.round(room.width), Math.round(room.height), room.phone ? 1 : 0, room.ratio].join('x');
+/**
+ * What a drawn page depends on: the room's width, its height unless on a
+ * phone (fitted to the width there, so the browser's toolbar sliding away
+ * as the page scrolls changes nothing), and the pixel ratio. Two rooms with
+ * the same key draw the same canvas.
+ */
+export function roomKey(room) {
+  return [Math.round(room.width), room.phone ? 'phone' : Math.round(room.height), room.ratio].join('x');
 }
 
 /** The book on an open PDF.js document (exported for the JS checks). */
 export function pdfBook(doc, ownerDocument) {
-  var kept = new Map();      // page index -> { key, promise, task, canvas, done }
+  var kept = new Map();      // page index -> { key, promise, task, page, canvas, done }
+
+  // PDF.js keeps a page's decoded images and fonts until the page is cleaned
+  // up (a scanned book holds hundreds of MB after a few dozen turns), so a
+  // page let go is cleaned up too, once a cancelled render has stopped
+  // (cleanup does nothing while one runs).
+  function release(entry) {
+    if (entry.page) entry.page.cleanup();
+  }
 
   function drop(index) {
     var entry = kept.get(index);
     kept.delete(index);
-    if (entry.task) entry.task.cancel();
+    if (entry.task) {
+      var task = entry.task;
+      task.cancel();
+      task.promise.then(function () { release(entry); }, function () { release(entry); });
+    } else {
+      release(entry);
+    }
     // Gives the pixels back at once (Safari holds a dropped canvas's memory
     // for a long time). Never the page still on screen.
     if (entry.canvas && !entry.canvas.isConnected) entry.canvas.width = 0;
@@ -118,7 +138,11 @@ export function pdfBook(doc, ownerDocument) {
 
   function render(index, room, entry) {
     return doc.getPage(index + 1).then(function (page) {
-      if (kept.get(index) !== entry) throw new Error('dropped');
+      if (kept.get(index) !== entry) {
+        page.cleanup();
+        throw new Error('dropped');
+      }
+      entry.page = page;
       var base = page.getViewport({ scale: 1 });
       var scale = fitScale(base.width, base.height, room);
       var cssWidth = Math.floor(base.width * scale);
@@ -147,7 +171,7 @@ export function pdfBook(doc, ownerDocument) {
     var entry = kept.get(index);
     if (entry && entry.key === key) return entry.promise;
     if (entry) drop(index);
-    entry = { key: key, promise: null, task: null, canvas: null, done: false };
+    entry = { key: key, promise: null, task: null, page: null, canvas: null, done: false };
     kept.set(index, entry);
     entry.promise = render(index, room, entry);
     entry.promise.then(null, function () { if (kept.get(index) === entry) kept.delete(index); });

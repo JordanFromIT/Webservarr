@@ -166,9 +166,10 @@ class AudioPaging(unittest.TestCase):
         self.assertFalse(more)
 
 
-def ebook_row(session, chapter, end, minutes=20, start_page=10, end_page=30, pages=300):
+def ebook_row(session, chapter, end, minutes=20, start_page=10, end_page=30, pages=300, pdf=False):
     return {"session_id": session, "chapter_id": chapter, "series_id": 5, "start": end - timedelta(minutes=minutes),
-            "end": end, "start_page": start_page, "end_page": end_page, "pages": pages, "seconds": minutes * 60}
+            "end": end, "start_page": start_page, "end_page": end_page, "pages": pages, "seconds": minutes * 60,
+            "pdf": pdf}
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -231,12 +232,17 @@ class KavitaSessions(unittest.TestCase):
             return httpx.Response(200, json=page, headers={"pagination": json.dumps({"totalPages": len(self.history)})})
         return httpx.Response(404)
 
-    def item(self, session, chapter, generated=False):
-        return {"sessionId": session, "isGeneratedSession": generated, "seriesId": 5,
+    def item(self, session, chapter, generated=False, series_format=3):
+        return {"sessionId": session, "isGeneratedSession": generated, "seriesId": 5, "seriesFormat": series_format,
                 "startTimeUtc": "2026-11-14T20:00:00.1234567", "endTimeUtc": "2026-11-14T20:38:00.7654321Z",
                 "chapters": [{"chapterId": chapter, "startTimeUtc": "2026-11-14T20:00:00.1234567",
                               "endTimeUtc": "2026-11-14T20:38:00.7654321Z", "startPage": 120, "endPage": 142,
                               "totalPages": 600, "durationSeconds": 2280}]}
+
+    def test_a_pdf_series_is_marked(self):
+        self.history = [[self.item(1, 70, series_format=4), self.item(2, 71)]]
+        rows, _complete = asyncio.run(kavita.reading_sessions(KAVITA, "TOKEN", datetime(2026, 5, 1)))
+        self.assertEqual({r["chapter_id"]: r["pdf"] for r in rows}, {70: True, 71: False})
 
     def test_reads_the_persons_own_sessions_by_their_libraries(self):
         self.history = [[self.item(1, 70), self.item(2, 71, generated=True)]]
@@ -248,6 +254,7 @@ class KavitaSessions(unittest.TestCase):
         self.assertEqual((r["session_id"], r["chapter_id"], r["start_page"], r["end_page"], r["pages"]),
                          (1, 70, 120, 142, 600))
         self.assertEqual(r["end"], datetime(2026, 11, 14, 20, 38, 0, 765432))
+        self.assertFalse(r["pdf"])
         q = self.requests[-1].url.params
         self.assertEqual(q.get_list("Libraries"), ["1", "4"])
         self.assertEqual(q["StartDate"], "2026-05-01T00:00:00Z")
@@ -340,6 +347,19 @@ class Endpoint(unittest.TestCase):
         self.assertEqual((item["kind"], item["book_id"], item["chapter"], item["start_page"], item["end_page"],
                           item["pages"]), ("ebook", 2, 12, 121, 143, 600))
         self.assertEqual(item["read_url"], "/reader?seriesId=5&chapterId=70&page=143")
+
+    def test_a_pdf_sessions_pages_are_kavitas_own_from_1(self):
+        # Kavita's PDF reader saves the page it shows (1 is the first page,
+        # the page count the last), so a PDF's pages are not moved on by one.
+        t = now()
+        self.sessions = ([ebook_row(8, 70, t, start_page=120, end_page=142, pages=600, pdf=True)], True)
+        item = self.client.get("/api/me/history?kind=ebook").json()["items"][0]
+        self.assertEqual((item["start_page"], item["end_page"]), (120, 142))
+        self.assertEqual(item["read_url"], "/reader?seriesId=5&chapterId=70&page=142")
+        self.sessions = ([ebook_row(8, 70, t, start_page=0, end_page=600, pages=600, pdf=True)], True)
+        item = self.client.get("/api/me/history?kind=ebook").json()["items"][0]
+        self.assertEqual((item["start_page"], item["end_page"]), (1, 600))       # finished: the last page
+        self.assertEqual(item["read_url"], "/reader?seriesId=5&chapterId=70&page=600")
 
     def test_all_merges_newest_first_and_pages(self):
         t = now()

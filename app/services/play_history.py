@@ -195,6 +195,7 @@ class EbookSession:
     end_page: int
     pages: int
     seconds: int
+    pdf: bool = False          # Kavita counts a PDF's pages from 1, an EPUB's from 0
 
     @property
     def key(self) -> tuple:
@@ -217,7 +218,7 @@ def ebook_page(rows: list, chapters: dict, before: Optional[tuple], limit: int,
         seen.add(k)
         s = EbookSession(session_id=r["session_id"], chapter_id=r["chapter_id"], start=r["start"], end=r["end"],
                          start_page=r["start_page"], end_page=r["end_page"], pages=r["pages"],
-                         seconds=r["seconds"])
+                         seconds=r["seconds"], pdf=bool(r.get("pdf")))
         if before is None or s.key < before:
             items.append(s)
     items.sort(key=lambda s: s.key, reverse=True)

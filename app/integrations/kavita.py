@@ -597,8 +597,9 @@ async def book_places(base: str, token: str, books) -> dict:
 #
 # Kavita 0.9 keeps a reading session for every sitting (it closes one after 10
 # minutes without a page turn), one activity row per chapter read in it: the
-# chapter, the first and last page (the reader's pageNum, from 0), the
-# chapter's pages and the time. /api/Stats/reading-history gives the caller's
+# chapter, the first and last page (Kavita's pageNum: from 0 for an EPUB, from
+# 1 for a PDF, whose own reader saves the page it shows), the chapter's pages
+# and the time. /api/Stats/reading-history gives the caller's
 # own sessions only, with their own token, newest start first. It filters by
 # library and matches nothing without a library named, so the person's own
 # libraries are asked for first. Sessions Kavita made up when it upgraded
@@ -606,6 +607,7 @@ async def book_places(base: str, token: str, books) -> dict:
 # left out.
 
 HISTORY_PAGE_SIZE = 50
+PDF_FORMAT = 4               # Kavita's MangaFormat for a PDF (an item's seriesFormat)
 HISTORY_MAX_PAGES = 6        # 300 sessions in one go at most
 
 
@@ -646,7 +648,8 @@ def _session_rows(items) -> list:
             rows.append({"session_id": session_id, "chapter_id": chapter_id,
                          "series_id": _whole(item.get("seriesId")), "start": start, "end": end,
                          "start_page": _whole(ch.get("startPage")), "end_page": _whole(ch.get("endPage")),
-                         "pages": _whole(ch.get("totalPages")), "seconds": _whole(ch.get("durationSeconds"))})
+                         "pages": _whole(ch.get("totalPages")), "seconds": _whole(ch.get("durationSeconds")),
+                         "pdf": item.get("seriesFormat") == PDF_FORMAT})
     return rows
 
 
@@ -655,7 +658,8 @@ async def reading_sessions(base: str, token: str, since: datetime, until: Option
     """(rows, complete): this person's own reading sessions that ended from
     `since` to `until` (naive UTC; None for now), one row per chapter read in
     a session: {session_id, chapter_id, series_id, start, end (naive UTC),
-    start_page, end_page (the reader's pageNum, from 0), pages, seconds}.
+    start_page, end_page (Kavita's pageNum: from 0 for an EPUB, from 1 for a
+    PDF), pages, seconds, pdf (the series is a PDF)}.
     Pages are read newest start first until `enough` rows are in hand or
     Kavita has no more; `complete` is True when it had no more."""
     rows: list = []

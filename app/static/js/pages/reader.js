@@ -381,6 +381,15 @@ export async function mount(ctx) {
   var guide = null;
   // Page loads started, so only the newest one puts its page up (loadPage).
   var turns = 0;
+  // A PDF page on screen: its index and the room it was drawn for (a resize
+  // to the same room draws nothing; a redraw of that page keeps the scroll).
+  var shownPdf = { page: -1, key: '' };
+  // A resize that came while a page was loading, for once it is up.
+  var redrawPending = false;
+  // page= (Play history) still to be taken as the reader's choice: on the
+  // first page put on screen, whenever that is (boot, or Try again after a
+  // failed first load). Set at boot.
+  var startPending = false;
   // Sample mode (see the top): nothing about this visit is ever saved.
   var sample = ctx.url.searchParams.get('sample') === '1';
 
@@ -639,7 +648,8 @@ export async function mount(ctx) {
     var turn = ++turns;
     var room = book.pdf ? pdfRoom() : null;
 
-    if (!room || !book.pdf.drawn(page, room)) {
+    // A redraw of the PDF page on screen (a resize) keeps it up meanwhile.
+    if (!room || (!book.pdf.drawn(page, room) && page !== shownPdf.page)) {
       showPanel('loading');
       el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
     }
@@ -647,7 +657,7 @@ export async function mount(ctx) {
     var shown = room
       ? book.pdf.draw(page, room).then(function (canvas) {
         if (signal.aborted || turn !== turns) return false;
-        renderPdfPage(canvas);
+        renderPdfPage(canvas, page, room);
         return true;
       })
       : kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
@@ -664,6 +674,19 @@ export async function mount(ctx) {
     return shown
       .then(function (rendered) {
         if (!rendered) return;
+        if (redrawPending) {
+          redrawPending = false;
+          redrawSoon();
+        }
+        if (startPending) {
+          // The page the address named is the reader's own choice: once it
+          // is on screen it is saved, as a page jump is, and leaves the
+          // address (dropStartPage).
+          startPending = false;
+          positionKnown = true;
+          queueProgress();
+          dropStartPage();
+        }
         if (!skipSave) {
           // The reader chose this page: from here it is theirs to save
           // (never in a sample, where nothing is saved).
@@ -698,11 +721,13 @@ export async function mount(ctx) {
     return { width: Math.max(width, 120), height: Math.max(height, 160), phone: phone, ratio: window.devicePixelRatio || 1 };
   }
 
-  function renderPdfPage(canvas) {
+  function renderPdfPage(canvas, page, room) {
     var container = el('pdfContent');
     if (canvas.parentNode !== container || container.childNodes.length !== 1) container.replaceChildren(canvas);
     showPanel('pdfContent');
-    scrollToTop();
+    // A new page starts at its top; the same page drawn again stays put.
+    if (page !== shownPdf.page) scrollToTop();
+    shownPdf = { page: page, key: pdfHelper.roomKey(room) };
   }
 
   function updateChrome() {
@@ -770,9 +795,16 @@ export async function mount(ctx) {
       seriesId: book.seriesId,
       volumeId: book.volumeId,
       chapterId: book.chapterId,
-      pageNum: page
+      pageNum: toKavitaPage(page)
     });
   }
+
+  // Kavita counts a PDF's pages from 1 (its own PDF reader saves the page
+  // number it shows, and a PDF is read when that reaches its page count) and
+  // an EPUB's from 0. The reader counts from 0 for both; only these two
+  // convert.
+  function toKavitaPage(page) { return book.pdf ? page + 1 : page; }
+  function fromKavitaPage(pageNum) { return book.pdf ? Math.max(pageNum - 1, 0) : pageNum; }
 
   /**
    * One write, for the writer: true when Kavita took the page. Not on the
@@ -808,7 +840,7 @@ export async function mount(ctx) {
         // An empty or null body is Kavita's "not started": a known page 0.
         // Anything unparsable throws, and the position stays unknown.
         var p = text ? JSON.parse(text) : null;
-        return (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
+        return (p && typeof p.pageNum === 'number') ? fromKavitaPage(p.pageNum) : 0;
       });
   }
 
@@ -941,7 +973,11 @@ export async function mount(ctx) {
   function redrawSoon() {
     if (!book.pdf) return;
     ctx.clearTimeout(resizeTimer);
-    resizeTimer = ctx.setTimeout(function () { goToPage(current.page, true); }, 200);
+    resizeTimer = ctx.setTimeout(function () {
+      // Mid-load: once the page is up (loadPage). The same room: nothing.
+      if (!canTurnPage()) redrawPending = true;
+      else if (pdfHelper.roomKey(pdfRoom()) !== shownPdf.key) goToPage(current.page, true);
+    }, 200);
   }
   window.addEventListener('resize', redrawSoon, { signal: signal });
   function watchPixelRatio() {
@@ -1075,6 +1111,7 @@ export async function mount(ctx) {
 
   var target = readerTarget(ctx.url.searchParams);
   var startPage = readerPage(ctx.url.searchParams);
+  startPending = !!startPage && !sample;
   if (!target.seriesId) {
     showError('No book selected', 'Open a book from the library.');
     return leave;
@@ -1124,13 +1161,6 @@ export async function mount(ctx) {
   }).then(function (page) {
     return loadPage(page, true);
   }).then(function () {
-    // That page is the reader's own choice: once it is on screen it is saved,
-    // as a page jump is.
-    if (startPage && !sample && !signal.aborted && canTurnPage()) {
-      positionKnown = true;
-      queueProgress();
-      dropStartPage();
-    }
     // Only once there is a rendered page to point at. Starting earlier
     // spotlights an empty loading spinner.
     if (!signal.aborted && guide && !sample) guide.maybeStart();

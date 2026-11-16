@@ -52,18 +52,19 @@ const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) =
 // ---------------------------------------------------------------------------
 
 function fakeDoc(opts) {
-  const o = Object.assign({ pages: 781, outline: [], hold: false }, opts || {});
+  const o = Object.assign({ pages: 781, outline: [], hold: false, failOnce: false }, opts || {});
   const doc = {
-    numPages: o.pages, renders: [], cancelled: [], held: [],
+    numPages: o.pages, renders: [], cancelled: [], held: [], cleaned: [],
     getPage(n) {
       return Promise.resolve({
+        cleanup() { doc.cleaned.push(n - 1); return true; },
         getViewport({ scale }) { return { width: 400 * scale, height: 600 * scale, scale }; },
         render(params) {
           const entry = { page: n - 1, params };
           doc.renders.push(entry);
           let done;
           const promise = new Promise((resolve, reject) => { done = { resolve, reject }; });
-          if (o.hold) doc.held.push(done); else done.resolve();
+          if (o.failOnce) { o.failOnce = false; done.reject(new Error('Bad XRef entry')); } else if (o.hold) doc.held.push(done); else done.resolve();
           return { promise, cancel() { doc.cancelled.push(n - 1); done.reject(new Error('cancelled')); } };
         }
       });
@@ -133,6 +134,39 @@ await run('only the page and its neighbours are drawn', async () => {
   check('the first page has one neighbour', ends.drawn(1, room) && !ends.drawn(-1, room));
 });
 
+await run('the room a page is drawn for', async () => {
+  const phone = { width: 390, height: 700, phone: true, ratio: 3 };
+  check('a phone\'s height does not count (fitted to the width)', P.roomKey(phone) === P.roomKey(Object.assign({}, phone, { height: 760 })));
+  check('its width and ratio do', P.roomKey(phone) !== P.roomKey(Object.assign({}, phone, { width: 412 })) &&
+    P.roomKey(phone) !== P.roomKey(Object.assign({}, phone, { ratio: 2 })));
+  const wide = { width: 1392, height: 776, phone: false, ratio: 1 };
+  check('a wide screen\'s height does', P.roomKey(wide) !== P.roomKey(Object.assign({}, wide, { height: 700 })));
+  const doc = fakeDoc();
+  const book = P.pdfBook(doc, win0.document);
+  await book.draw(10, phone);
+  await flush();
+  const renders = doc.renders.length;
+  check('a phone toolbar sliding away draws nothing again', book.drawn(10, Object.assign({}, phone, { height: 760 })) && doc.renders.length === renders);
+});
+
+await run('a page let go is cleaned up in PDF.js', async () => {
+  const doc = fakeDoc();
+  const book = P.pdfBook(doc, win0.document);
+  await book.draw(10, room);
+  await flush();
+  check('nothing cleaned while kept', doc.cleaned.length === 0, doc.cleaned);
+  await book.draw(400, room);
+  await flush();
+  check('the old window\'s pages are', [9, 10, 11].every((i) => doc.cleaned.includes(i)) && !doc.cleaned.includes(400), doc.cleaned);
+  const held = fakeDoc({ hold: true });
+  const slow = P.pdfBook(held, win0.document);
+  slow.draw(10, room).then(null, () => {});
+  await flush();
+  slow.draw(300, room).then(null, () => {});
+  await flush();
+  check('a page still drawing is cancelled, then cleaned', held.cancelled.includes(10) && held.cleaned.includes(10), [held.cancelled, held.cleaned]);
+});
+
 await run('a page let go while drawing is cancelled', async () => {
   const doc = fakeDoc({ hold: true });
   const book = P.pdfBook(doc, win0.document);
@@ -190,9 +224,12 @@ const FAKE_PDFJS = 'export const GlobalWorkerOptions = {};\n' +
   'export function getDocument(src) { return globalThis.__readerPdfTest(src); }\n';
 
 async function readerVisit(search, opts) {
-  const o = Object.assign({ format: 4, progress: 10, outline: [], openStatus: 0 }, opts || {});
-  const win = new Window({ url: 'https://ws.test/reader' + search, width: 390, height: 844 });
+  // progress: Kavita's saved pageNum, which counts a PDF's pages from 1 (11:
+  // the 11th page) and an EPUB's from 0. A save moves it, as Kavita does.
+  const o = Object.assign({ format: 4, progress: 11, outline: [], openStatus: 0, hold: false, failPageOnce: false }, opts || {});
+  const win = new Window({ url: 'https://ws.test/reader' + search, width: o.width || 390, height: o.height || 844 });
   const doc = win.document;
+  Object.defineProperty(doc.documentElement, 'clientWidth', { get: () => win.innerWidth, configurable: true });
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
   doc.getElementById('readerPdfJs').setAttribute('data-ws-dep', dataUrl(PDF_SRC));
   doc.getElementById('pdfjsLib').setAttribute('data-ws-dep', dataUrl(FAKE_PDFJS + '// ' + Math.random()));
@@ -201,7 +238,7 @@ async function readerVisit(search, opts) {
   const calls = [];
   const posts = [];
   const opened = [];
-  const pdf = fakeDoc({ pages: 781, outline: o.outline });
+  const pdf = fakeDoc({ pages: 781, outline: o.outline, hold: o.hold, failOnce: o.failRenderOnce });
   let destroyed = 0;
   let reconnects = 0;
   const g = globalThis;
@@ -223,7 +260,10 @@ async function readerVisit(search, opts) {
     if (/\/Book\/198\/book-info$/.test(url)) {
       return { pages: 781, libraryId: 1, volumeId: 197, seriesId: 130, seriesFormat: o.format, bookTitle: 'Harry Potter and the Deathly Hallows' };
     }
-    if (/\/Book\/198\/book-page\?page=\d+$/.test(url)) return '<p>A page.</p>';
+    if (/\/Book\/198\/book-page\?page=\d+$/.test(url)) {
+      if (o.failPageOnce) { o.failPageOnce = false; return null; }
+      return '<p>A page.</p>';
+    }
     if (/\/Book\/198\/chapters$/.test(url)) return [{ title: 'Kavita\'s chapter', page: 2 }];
     if (/get-progress\?chapterId=198$/.test(url)) return JSON.stringify({ pageNum: o.progress });
     if (/Reader\/progress$/.test(url)) return '';
@@ -231,7 +271,10 @@ async function readerVisit(search, opts) {
   };
   const fetchFn = (url, init) => {
     calls.push(String(url));
-    if (init && init.method === 'POST') posts.push({ url: String(url), body: JSON.parse(init.body) });
+    if (init && init.method === 'POST') {
+      posts.push({ url: String(url), body: JSON.parse(init.body) });
+      if (/Reader\/progress$/.test(String(url))) o.progress = JSON.parse(init.body).pageNum;
+    }
     const a = answers(String(url));
     const ok = a !== null;
     return Promise.resolve({ ok, status: ok ? 200 : 404, json: () => Promise.resolve(a),
@@ -251,7 +294,7 @@ async function readerVisit(search, opts) {
   for (let i = 0; i < 4; i++) await flush();
   const $ = (id) => doc.getElementById(id);
   const visit = {
-    calls, posts, opened, pdf, doc, $, win,
+    calls, posts, opened, pdf, doc, $, win, get kavitaPage() { return o.progress; },
     get reconnects() { return reconnects; },
     get destroyed() { return destroyed; },
     pageInfo: () => $('pageInfo').textContent.replace(/\s/g, ''),
@@ -289,11 +332,15 @@ await run('a PDF opens at Kavita\'s place, drawn by PDF.js', async () => {
     check('a turn shows 12', v.pageInfo() === '12/781', v.pageInfo());
     check('without the spinner (it was drawn already)', v.$('loading').classList.contains('hidden'));
     await v.settle();
-    check('and saves it from 0, as an EPUB page', JSON.stringify(saves(v)) === '[11]', saves(v));
+    check('and saves it as Kavita counts a PDF\'s pages, from 1', JSON.stringify(saves(v)) === '[12]', saves(v));
 
     v.doc.dispatchEvent(new v.win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await v.settle();
-    check('the arrow key turns back', v.pageInfo() === '11/781' && saves(v)[saves(v).length - 1] === 10, [v.pageInfo(), saves(v)]);
+    check('the arrow key turns back', v.pageInfo() === '11/781' && saves(v)[saves(v).length - 1] === 11, [v.pageInfo(), saves(v)]);
+    for (let i = 0; i < 3; i++) { v.$('pageJumpInput').value = '781'; v.$('pageJumpForm').dispatchEvent(new v.win.Event('submit', { cancelable: true })); }
+    await v.settle();
+    check('the last page saves the page count, so Kavita marks it read', v.pageInfo() === '781/781' && saves(v)[saves(v).length - 1] === 781,
+      [v.pageInfo(), saves(v)]);
   } finally {
     await v.end();
   }
@@ -306,7 +353,7 @@ await run('page= opens that page and saves it', async () => {
     check('Kavita\'s place was still read', v.calls.some((u) => /get-progress\?chapterId=198/.test(u)));
     check('page 20 (19 from 0) drawn, not Kavita\'s 11', v.pageInfo() === '20/781' && drawnPages(v).includes(19), [v.pageInfo(), drawnPages(v)]);
     await v.settle();
-    check('saved as a page jump', saves(v).length >= 1 && saves(v).every((p) => p === 19), saves(v));
+    check('saved as a page jump (Kavita\'s 20)', saves(v).length >= 1 && saves(v).every((p) => p === 20), saves(v));
     check('and page= has left the address, so a reload opens Kavita\'s place', v.win.location.search === '?seriesId=130&chapterId=198', v.win.location.search);
   } finally {
     await v.end();
@@ -335,7 +382,7 @@ await run('the outline lists the contents', async () => {
     check('one entry, the outline\'s', links.length === 1 && links[0].textContent === 'Chapter Two', links.map((a) => a.textContent));
     links[0].click();
     await v.settle();
-    check('it goes to its page', v.pageInfo() === '41/781' && saves(v)[saves(v).length - 1] === 40, [v.pageInfo(), saves(v)]);
+    check('it goes to its page', v.pageInfo() === '41/781' && saves(v)[saves(v).length - 1] === 41, [v.pageInfo(), saves(v)]);
   } finally {
     await v.end();
   }
@@ -358,7 +405,7 @@ await run('a refused sign-in goes round the hand-off', async () => {
 });
 
 await run('an EPUB is untouched', async () => {
-  const v = await readerVisit('?seriesId=130&chapterId=198', { format: 3 });
+  const v = await readerVisit('?seriesId=130&chapterId=198', { format: 3, progress: 10 });
   try {
     check('PDF.js never opened', v.opened.length === 0);
     check('Kavita\'s page and contents asked for', v.calls.some((u) => /book-page\?page=10$/.test(u)) && v.calls.some((u) => /\/chapters$/.test(u)), v.calls);
@@ -368,6 +415,97 @@ await run('an EPUB is untouched', async () => {
     await v.end();
   }
 });
+
+await run('an EPUB\'s pages are saved from 0, as before', async () => {
+  const v = await readerVisit('?seriesId=130&chapterId=198', { format: 3, progress: 10 });
+  try {
+    check('opens at Kavita\'s 10 as page 11', v.pageInfo() === '11/781', v.pageInfo());
+    v.$('navNext').click();
+    await v.settle();
+    check('a turn to 12 saves 11', JSON.stringify(saves(v)) === '[11]', saves(v));
+  } finally {
+    await v.end();
+  }
+});
+
+await run('a resize redraws only when the room changed, and keeps the place', async () => {
+  const v = await readerVisit('?seriesId=130&chapterId=198');
+  const scrolls = [];
+  v.win.scrollTo = (x, y) => { scrolls.push([x, y]); };
+  try {
+    await v.settle();
+    const before = v.pdf.renders.length;
+    v.win.dispatchEvent(new v.win.Event('resize'));
+    await v.settle();
+    check('the same size: nothing drawn, no jump to the top', v.pdf.renders.length === before && scrolls.length === 0, [v.pdf.renders.length - before, scrolls]);
+    v.win.happyDOM.setViewport({ width: 390, height: 900 });
+    v.win.dispatchEvent(new v.win.Event('resize'));
+    await v.settle();
+    check('a phone\'s height only (the toolbar sliding away): the same', v.pdf.renders.length === before && scrolls.length === 0,
+      [v.pdf.renders.length - before, scrolls]);
+    v.win.happyDOM.setViewport({ width: 412, height: 900 });
+    v.win.dispatchEvent(new v.win.Event('resize'));
+    await v.settle();
+    const canvas = v.$('pdfContent').querySelector('canvas');
+    check('a new width draws the page again at it', v.pdf.renders.length > before && canvas.style.width === '412px', [v.pdf.renders.length - before, canvas.style.width]);
+    check('still the same page, kept where it was scrolled, never the spinner', v.pageInfo() === '11/781' && scrolls.length === 0 &&
+      v.$('loading').classList.contains('hidden'), [v.pageInfo(), scrolls]);
+    check('and a redraw saves nothing', saves(v).length === 0, saves(v));
+    v.$('navNext').click();
+    await v.settle();
+    check('a turn still starts the new page at its top', scrolls.length === 1, scrolls);
+  } finally {
+    await v.end();
+  }
+});
+
+await run('a resize during a page load is drawn once the page is up', async () => {
+  const v = await readerVisit('?seriesId=130&chapterId=198', { hold: true });
+  try {
+    check('the first page is still drawing', !v.$('loading').classList.contains('hidden') && v.pdf.held.length > 0);
+    v.win.happyDOM.setViewport({ width: 844, height: 390 });       // turned to landscape
+    v.win.dispatchEvent(new v.win.Event('resize'));
+    await v.settle();
+    for (let i = 0; i < 4; i++) { v.pdf.held.splice(0).forEach((d) => d.resolve()); await v.settle(); }
+    const canvas = v.$('pdfContent').querySelector('canvas');
+    // 844 wide is not a phone: the whole page fits 390 - 56 - 12 - 56 = 266 high.
+    check('page 11 is drawn for the new window', v.pageInfo() === '11/781' && canvas && canvas.style.height === '266px',
+      canvas && [canvas.style.width, canvas.style.height]);
+  } finally {
+    await v.end();
+  }
+});
+
+for (const [format, name, opts] of [[3, 'EPUB', { failPageOnce: true, progress: 10 }], [4, 'PDF', { failRenderOnce: true }]]) {
+  await run(`${name}: page= is taken on the first page shown, even after Try again`, async () => {
+    const v = await readerVisit('?seriesId=130&chapterId=198&page=143', Object.assign({ format }, opts));
+    let href;
+    try {
+      check('the first load failed', !v.$('errorState').classList.contains('hidden'));
+      check('nothing saved, page= kept meanwhile', saves(v).length === 0 && /page=143/.test(v.win.location.search), [saves(v), v.win.location.search]);
+      v.$('errorRetry').click();
+      await v.settle();
+      const at = format === 4 ? 143 : 142;
+      check('Try again shows 143 and saves it', v.pageInfo() === '143/781' && saves(v).length === 1 && saves(v)[0] === at, [v.pageInfo(), saves(v)]);
+      check('and page= has left the address', v.win.location.search === '?seriesId=130&chapterId=198', v.win.location.search);
+      v.$('pageJumpInput').value = '200';
+      v.$('pageJumpForm').dispatchEvent(new v.win.Event('submit', { cancelable: true }));
+      await v.settle();
+      href = v.win.location.search;
+    } finally {
+      await v.end();
+    }
+    const held = v.kavitaPage;
+    const again = await readerVisit(href, { format, progress: held });
+    try {
+      await again.settle();
+      check('a reload opens at the newer 200 and saves nothing', again.pageInfo() === '200/781' && saves(again).length === 0,
+        [again.pageInfo(), saves(again)]);
+    } finally {
+      await again.end();
+    }
+  });
+}
 
 console.log(`reader_pdf: ${total - failed}/${total} checks passed`);
 if (failed) process.exit(1);

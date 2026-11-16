@@ -63,10 +63,14 @@ def _audio_item(s: ph.AudioSession, row) -> dict:
 
 
 def _ebook_item(s: ph.EbookSession, row, chapter: Optional[int]) -> dict:
-    # Kavita's pages count from 0; the reader shows page + 1, and so does this.
+    # Kavita counts an EPUB's pages from 0, and the reader shows page + 1, as
+    # this does; a PDF's it counts from 1 (its own PDF reader saves the page it
+    # shows), so those are the reader's numbers already.
     pages = s.pages if s.pages > 0 else None
-    last = min(s.end_page + 1, pages) if pages else s.end_page + 1
-    first = min(s.start_page + 1, last)
+    end = max(s.end_page, 1) if s.pdf else s.end_page + 1
+    start = max(s.start_page, 1) if s.pdf else s.start_page + 1
+    last = min(end, pages) if pages else end
+    first = min(start, last)
     return {"kind": "ebook", "id": f"e{s.session_id}.{s.chapter_id}", **_book_fields(row),
             "start": utc_iso(s.start), "end": utc_iso(s.end), "read_ms": s.seconds * 1000,
             "chapter": chapter, "start_page": first, "end_page": last, "pages": pages,
