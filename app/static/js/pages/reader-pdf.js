@@ -106,7 +106,8 @@ export function openPdf(lib, opts) {
  * the same key draw the same canvas.
  */
 export function roomKey(room) {
-  return [Math.round(room.width), room.phone ? 'phone' : Math.round(room.height), room.ratio].join('x');
+  // -1 stands in for the height on a phone (no real height is negative).
+  return [Math.round(room.width), room.phone ? -1 : Math.round(room.height), room.ratio].join('x');
 }
 
 /** The book on an open PDF.js document (exported for the JS checks). */
