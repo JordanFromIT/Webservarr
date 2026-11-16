@@ -273,7 +273,8 @@ def _typo_pairs(ebooks: Dict[int, _Item], alone: Dict[str, List[_Item]], members
     The title must match exactly as pairing matches it: the ebook's title,
     keyed with the editions' spelling of the author, gives the editions' work
     key. Never when either side is named by an override, when the ebook's own
-    key is another ebook's too, when either title is several books in one,
+    key is another ebook's too, when the editions' key is any ebook's (two
+    ebooks of one key left them alone), when either title is several books in one,
     or when it is not one to one (an ebook with two such candidates, or
     editions two ebooks could take)."""
     found: Dict[int, List[str]] = {}
@@ -284,7 +285,9 @@ def _typo_pairs(ebooks: Dict[int, _Item], alone: Dict[str, List[_Item]], members
             continue
         for key, items in alone.items():
             g = items[0].fields
-            if g is None or any(i.id in named for i in items) or _SEVERAL.search(g.get("title") or "") \
+            # Editions left alone because two ebooks share their key are too
+            # uncertain for the exact pass; a third, misspelt ebook never takes them.
+            if key in ebooks_by_key or g is None or any(i.id in named for i in items) or _SEVERAL.search(g.get("title") or "") \
                     or not same_author(f.get("author") or "", g.get("author") or ""):
                 continue
             try:

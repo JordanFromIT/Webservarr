@@ -331,6 +331,14 @@ class NearAuthor(CatalogCase):
         self.rebuild()
         self.assertEqual(set(self.live()), {(1212, None), (1213, None), (None, self.JP_KEY)})
 
+    def test_editions_two_ebooks_share_are_not_given_to_a_misspelt_third(self):
+        self.sources.ebooks = [ebook(1, "Jurassic Park", "Michael Crichton"),
+                               ebook(2, "Jurassic Park", "Michael Crichton"),
+                               ebook(3, "Jurassic Park", "Michael Chrichton")]
+        self.sources.audiobooks = [audiobook(self.JP_KEY, "Jurassic Park", "Michael Crichton")]
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1, None), (2, None), (3, None), (None, self.JP_KEY)})
+
     def test_a_side_already_paired_or_named_by_an_override_is_left_alone(self):
         self.jp()
         self.sources.ebooks.append(ebook(1300, "Jurassic Park", "Michael Crichton"))     # pairs exactly
