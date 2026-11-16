@@ -29,6 +29,8 @@ const STATIC = join(here, '../../static');
 const REQUESTS_PATH = process.env.REQUESTS_JS || join(STATIC, 'js/pages/requests.js');
 const REQUESTS_HTML = readFileSync(join(STATIC, 'requests.html'), 'utf8');
 const AUTH_JS = readFileSync(join(STATIC, 'js/auth.js'), 'utf8');
+// The find box's matcher, a page helper (search-match.js) on the real page.
+const SEARCH_JS = readFileSync(join(STATIC, 'js/search-match.js'), 'utf8');
 
 const report = console.error.bind(console);
 let failed = 0;
@@ -95,6 +97,8 @@ const requestsModule = await import('data:text/javascript;charset=utf-8,' + enco
 
 // escapeHtml and getTimeAgo are auth.js globals on the real page.
 const authGlobals = new Function(AUTH_JS + '\nreturn { escapeHtml, getTimeAgo };')();
+const searchHelper = {};
+new Function('window', SEARCH_JS)(searchHelper);
 
 const NAV = /<div id="wsPage"[\s\S]*<\/main>/;
 const quietConsole = { error() {}, warn() {}, log() {}, info() {} };
@@ -125,6 +129,7 @@ function visit(routes) {
   set('checkAuth', async () => ({ username: 'sam', is_admin: false }));
   set('escapeHtml', authGlobals.escapeHtml);
   set('getTimeAgo', authGlobals.getTimeAgo);
+  set('WSSearch', searchHelper.WSSearch);
   set('requestAnimationFrame', (fn) => clock.setTimeout(fn, 16));
   set('cancelAnimationFrame', (id) => clock.clearTimeout(id));
   // Reduced motion: the search bar settles at once.
@@ -233,6 +238,16 @@ await run('the Kind filter', async () => {
     t.q('#rsSearch').value = 'twain';
     t.q('#rsSearch').dispatchEvent(new t.win.Event('input'));
     check('the find box matches an author', t.rows().length === 1 && t.cells(t.rows()[0])[0].indexOf('The Adventures of Huckleberry') === 0);
+    // Books search's rules: a slip, words out of order, a half-typed last word.
+    for (const q of ['twian', 'finn huckleberry', 'huckleberry fi']) {
+      t.q('#rsSearch').value = q;
+      t.q('#rsSearch').dispatchEvent(new t.win.Event('input'));
+      check('the find box forgives ' + q, t.rows().length === 1 && t.cells(t.rows()[0])[0].indexOf('The Adventures of Huckleberry') === 0,
+            t.rows().map((tr) => t.cells(tr)[0]));
+    }
+    t.q('#rsSearch').value = 'zzzz';
+    t.q('#rsSearch').dispatchEvent(new t.win.Event('input'));
+    check('the find box still finds nothing for nonsense', t.rows().length === 0);
   } finally { t.release(); }
 });
 

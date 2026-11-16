@@ -127,6 +127,7 @@ jobs:
           node app/tests/js/home_push_banner.mjs
           node app/tests/js/welcome_tour.mjs
           node app/tests/js/requests_page.mjs
+          node app/tests/js/search_match.mjs
           node app/tests/js/login_status.mjs
           node app/tests/js/script_icons.mjs
           node app/tests/js/toast.mjs

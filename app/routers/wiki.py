@@ -12,7 +12,7 @@ import os
 import re
 import unicodedata
 import uuid
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Sequence
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
@@ -27,6 +27,7 @@ from app.dependencies import get_current_user, require_admin, require_same_origi
 from app.icons import drawable
 from app.limiter import limiter
 from app.models import Setting, WikiCategory, WikiPage
+from app.services import search_match
 from app.settings_registry import REGISTRY, validate_value
 from app.utils import utc_iso, validate_image_magic
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SNIPPET_RADIUS = 80  # characters either side of a search hit
+_MATCHED_IN = {0: "title", 1: "summary", 2: "body"}  # search field group -> matched_in
 
 # Outside the public /static tree, on the persisted data volume, so images are
 # reachable only through the auth-checked endpoint below.
@@ -261,19 +263,29 @@ def _plain_text(markdown_source: str) -> str:
     return _WS.sub(" ", text).strip()
 
 
-def _snippet(content: str, term: str) -> dict:
+def _snippet(content: str, term: str, words: Sequence[str] = ()) -> dict:
     """A plain-text window around the first case-insensitive hit, plus the offset
-    and length of the match within that window.
+    and length of the match within that window. Without a hit for the whole
+    term, the first of `words` (the page's words a search matched) found in
+    the text is the hit instead.
 
     Offsets rather than inserted markup: the server must never emit HTML into a
     JSON field that the client will render, and the client can highlight a range
     without parsing anything.
     """
     body = _plain_text(content)
-    idx = body.lower().find((term or "").lower())
+    low = body.lower()
+    idx = low.find((term or "").lower())
+    for word in words:
+        if idx >= 0:
+            break
+        hit = re.search(r"\b" + re.escape(word), low)
+        if hit:
+            idx, term = hit.start(), body[hit.start():hit.start() + len(word)]
     if idx < 0:
         # The term matched the raw source but not the flattened text (it was
-        # inside a link target or a code fence). Show the opening lines rather
+        # inside a link target or a code fence), or matched only once folded
+        # (accents, apostrophes). Show the opening lines rather
         # than nothing, with no highlight.
         return {
             "snippet": body[: SNIPPET_RADIUS * 2].strip(),
@@ -350,39 +362,29 @@ async def list_pages(
         query = query.filter(WikiPage.category_id == cat.id)
 
     term = (q or "").strip()
-    if term:
-        # Searching the markdown source rather than content_html so a query never
-        # matches on tag names or attribute values the author never typed.
-        like = f"%{term}%"
-        query = query.filter(
-            WikiPage.title.ilike(like)
-            | WikiPage.summary.ilike(like)
-            | WikiPage.content.ilike(like)
-        )
-
     pages = query.order_by(WikiPage.sort_order, WikiPage.title).all()
     cats = {c.id: c for c in db.query(WikiCategory).all()}
 
-    results = []
+    if not term:
+        return [_page_brief(page, cats.get(page.category_id)) for page in pages][offset:offset + limit]
+
+    # The same matching as Books (search_match): the whole term inside a field
+    # first, then its words in any order, half typed or slightly misspelt.
+    # Searching the markdown source rather than content_html so a query never
+    # matches on tag names or attribute values the author never typed.
+    search = search_match.Query(term)
+    ranked = []
     for page in pages:
+        found = search.match([(0, page.title or ""), (1, page.summary or ""), (2, page.content or "")])
+        if not found:
+            continue
         item = _page_brief(page, cats.get(page.category_id))
-        if term:
-            low = term.lower()
-            if low in (page.title or "").lower():
-                item["matched_in"] = "title"
-            elif low in (page.summary or "").lower():
-                item["matched_in"] = "summary"
-            else:
-                item["matched_in"] = "body"
-            item.update(_snippet(page.content, term))
-        results.append(item)
-
-    if term:
+        item["matched_in"] = _MATCHED_IN[found.group]
+        item.update(_snippet(page.content, term, found.words))
         # Title hits first, then summary, then body; alphabetical within each.
-        rank = {"title": 0, "summary": 1, "body": 2}
-        results.sort(key=lambda r: (rank.get(r.get("matched_in"), 3), (r["title"] or "").lower()))
-
-    return results[offset:offset + limit]
+        ranked.append(((found.tier, found.group, found.edits, (page.title or "").lower()), item))
+    ranked.sort(key=lambda r: r[0])
+    return [item for _key, item in ranked][offset:offset + limit]
 
 
 @router.get("/pages/{slug}")

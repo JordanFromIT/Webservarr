@@ -55,7 +55,8 @@ from app.limiter import limiter
 from app.routers import kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import book_catalog, book_discovery, book_personal, insights_store, kavita_keys, listening
+from app.services import (book_catalog, book_discovery, book_personal, insights_store, kavita_keys, listening,
+                          search_match)
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -549,6 +550,27 @@ def _request_url(text: str) -> str:
     return "/requests?q=" + quote(text, safe="")
 
 
+def _search_ranked(rows: List[CatalogRow], narrators: Dict[int, List[str]], q: str) -> List[CatalogRow]:
+    """The rows matching `q`, best first (the order /search documents)."""
+    query = search_match.Query(q)
+    initials: Dict[str, List[str]] = {}
+    ranked = []
+    for row in rows:
+        fields = [(0, row.title), (1, row.series), (2, row.author)]
+        if row.audio:
+            fields += [(2, n) for n in narrators.get(row.id, [])]
+        if row.series not in initials:
+            initials[row.series] = search_match.initials(row.series)
+        extra = [(1, w) for w in initials[row.series]]
+        if row.series and row.series_number is not None and float(row.series_number).is_integer():
+            extra.append((1, str(int(row.series_number))))
+        found = query.match(fields, extra)
+        if found:
+            ranked.append((found.rank, book_catalog.fold(row.sort_title), row.id, row))
+    ranked.sort(key=lambda r: r[:3])
+    return [r[3] for r in ranked]
+
+
 @router.get("/search")
 @_limit(LIST_LIMIT, "search")
 @_db_503
@@ -560,33 +582,26 @@ async def search(request: Request,
                  series: Names = Query(None),
                  narrator: Names = Query(None),
                  who: Scope = Depends(caller), db: Session = Depends(get_db)):
-    """Books matching `q` in their title, series, author or narrator, ignoring
-    case and accents: {"items": [BookCard], "request_url" (null while a source is
-    not reachable), "notes"}. Title
-    matches come first, then series, then people; within a group a match at the
-    start of the field first, then by title. `format`, `author`, `series` and
-    `narrator` narrow the search as they narrow the library."""
-    needle = book_catalog.fold(q)
-    if not needle:
+    """Books matching `q` in their title, series, author or narrator
+    (search_match: the whole query inside a field first, as search always
+    did, then every word found in any order, then the last word half typed,
+    then with spelling slips; "dungeon crawler carl 7" also finds the series'
+    book 7): {"items": [BookCard], "request_url" (null while a source is not
+    reachable), "notes"}. Within each of those, title matches come first, then
+    series, then people; then a match at the start of the field, then by
+    title. `format`, `author`, `series` and `narrator` narrow the search as
+    they narrow the library."""
+    if not book_catalog.fold(q):
         raise HTTPException(status_code=422, detail="Search for at least one character")
     f = _filters(author, series, narrator)
     rows = _kept_by_format(book_catalog.visible_rows(db, who.series, who.audio), format)
     narrators = book_catalog.narrators_by_book(db) if who.audio else {}
     if f.any():
         rows = _filtered(rows, f, narrators)
-    ranked = []
-    for row in rows:
-        fields = [(0, book_catalog.fold(row.title)), (1, book_catalog.fold(row.series)),
-                  (2, book_catalog.fold(row.author))]
-        if row.audio:
-            fields += [(2, book_catalog.fold(n)) for n in narrators.get(row.id, [])]
-        hits = [(group, 0 if text.startswith(needle) else 1) for group, text in fields if needle in text]
-        if hits:
-            ranked.append((min(hits), book_catalog.fold(row.sort_title), row.id, row))
-    ranked.sort(key=lambda r: r[:3])
+    found = _search_ranked(rows, narrators, q)
     # A source that cannot be reached may be hiding books the library already has:
     # no "request it" then (null), and the page says why instead.
-    return {"items": [_book_card(r[3]) for r in ranked[:limit]],
+    return {"items": [_book_card(row) for row in found[:limit]],
             "request_url": None if who.notes else _request_url(q.strip()), "notes": who.notes}
 
 

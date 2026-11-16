@@ -871,7 +871,7 @@ export async function mount(ctx) {
     var _expanded = {};
 
     function visible() {
-      var q = ($('rsSearch').value || '').trim().toLowerCase();
+      var q = ($('rsSearch').value || '').trim();
       var fs = $('rsFilterStatus').value;
       var ft = $('rsFilterType').value;
 
@@ -879,9 +879,10 @@ export async function mount(ctx) {
         if (fs && rsStatusOf(r).key !== fs) return false;
         if (ft && (RS_KIND_FILTER[ft] || []).indexOf(r.media_type) === -1) return false;
         if (q) {
-          var hay = (rsCellValue(r, 'title') + ' ' + rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status') +
-                     ' ' + (r.author || '')).toLowerCase();
-          if (hay.indexOf(q) === -1) return false;
+          // Books search's rules (search-match.js): any word order, small slips forgiven.
+          var hay = rsCellValue(r, 'title') + ' ' + rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status') +
+                    ' ' + (r.author || '');
+          if (!WSSearch.matches(q, hay)) return false;
         }
         return true;
       });
