@@ -22,7 +22,8 @@
  *   Then it plays. On a phone the full player opens (WS.playerUI.openOnStart).
  * - An eBook session's "Continue reading from here": the reader at that
  *   page (/reader?seriesId=&chapterId=&page=, js/pages/reader.js), with
- *   the sessionStorage mark the reader needs before it takes page=.
+ *   the localStorage mark the reader needs before it takes page=
+ *   (markReaderStart).
  * - "Book page": the book's own page.
  *
  * The window keeps one height, so nothing moves when the list lands. Text
@@ -185,8 +186,33 @@ export function ebookRow(it) {
   };
 }
 
-// Must match js/pages/reader.js's READER_START_KEY.
+// Must match js/pages/reader.js's READER_START_KEY and READER_START_TTL_MS.
 export const READER_START_KEY = 'ws-reader-start';
+export const READER_START_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * Mark a reader link as Play history's (js/pages/reader.js takeStartPage):
+ * localStorage[READER_START_KEY] gains "chapterId:page" with the time, and
+ * loses marks past READER_START_TTL_MS. localStorage so a link opened in a
+ * new tab carries it; only this site's own pages can write it.
+ */
+export function markReaderStart(storage, url, now) {
+  const t = typeof now === 'number' ? now : Date.now();
+  try {
+    const q = new URL(url, 'https://reader.invalid').searchParams;
+    const chapter = q.get('chapterId');
+    const at = q.get('page');
+    if (!storage || !chapter || !at) return;
+    let marks = {};
+    try { marks = JSON.parse(storage.getItem(READER_START_KEY) || '{}') || {}; } catch (e) { marks = {}; }
+    const kept = {};
+    Object.keys(marks).forEach(function (k) {
+      if (typeof marks[k] === 'number' && t - marks[k] >= 0 && t - marks[k] <= READER_START_TTL_MS) kept[k] = marks[k];
+    });
+    kept[chapter + ':' + at] = t;
+    storage.setItem(READER_START_KEY, JSON.stringify(kept));
+  } catch (e) { /* no storage: the reader opens at Kavita's place */ }
+}
 
 export function historyUrl(kind, before) {
   const k = KINDS.indexOf(kind) === -1 ? 'all' : kind;
@@ -470,7 +496,14 @@ export function createHistory(env) {
     } else {
       go = el('a', 'ws-hx-btn is-ghost');
       go.href = it.read_url;
-      go.addEventListener('click', function () { markReaderStart(it.read_url); });
+      // Every way the link can be followed: a click, a middle-click
+      // (auxclick), and before a menu's "Open in new tab" (mousedown,
+      // contextmenu, and touchstart for a long press).
+      const mark = function () { markReaderStart(localStore(), it.read_url); };
+      ['click', 'auxclick', 'mousedown', 'contextmenu'].forEach(function (type) {
+        go.addEventListener(type, mark);
+      });
+      go.addEventListener('touchstart', mark, { passive: true });
     }
     go.setAttribute('data-hx-go', '');
     go.setAttribute('aria-label', say.aria);
@@ -485,16 +518,8 @@ export function createHistory(env) {
     return li;
   }
 
-  // The reader takes page= only with this mark beside it (READER_START_KEY,
-  // js/pages/reader.js), so a link from anywhere else cannot move a
-  // reader's place. Set as the link is followed; the reader clears it.
-  function markReaderStart(url) {
-    try {
-      const q = new URL(url, 'https://reader.invalid').searchParams;
-      const chapter = q.get('chapterId');
-      const at = q.get('page');
-      if (chapter && at) env.win.sessionStorage.setItem(READER_START_KEY, chapter + ':' + at);
-    } catch (e) { /* no storage: the reader opens at Kavita's place */ }
+  function localStore() {
+    try { return env.win.localStorage; } catch (e) { return null; }
   }
 
   // ---- Play from here ----

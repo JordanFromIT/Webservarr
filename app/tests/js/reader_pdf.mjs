@@ -230,7 +230,7 @@ async function readerVisit(search, opts) {
   const win = new Window({ url: 'https://ws.test/reader' + search, width: o.width || 390, height: o.height || 844 });
   const doc = win.document;
   // Play history's mark (reader.READER_START_KEY), without which page= is ignored.
-  if (o.mark) win.sessionStorage.setItem(reader.READER_START_KEY, o.mark);
+  if (o.mark) win.localStorage.setItem(reader.READER_START_KEY, JSON.stringify({ [o.mark]: Date.now() }));
   Object.defineProperty(doc.documentElement, 'clientWidth', { get: () => win.innerWidth, configurable: true });
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
   doc.getElementById('readerPdfJs').setAttribute('data-ws-dep', dataUrl(PDF_SRC));

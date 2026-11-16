@@ -347,25 +347,43 @@ export function readerPage(params) {
 }
 
 /**
- * The page= to open at, only when Play history set the mark for it just
- * before navigating: sessionStorage[READER_START_KEY] = "chapterId:page"
- * (js/play-history.js). The mark is cleared whatever it says, so it is used
- * once. Without a matching mark (a link someone sent, an old tab), null.
+ * The page= to open at, only when Play history marked it as its link was
+ * followed: localStorage[READER_START_KEY] is {"chapterId:page": ms, ...}
+ * (js/play-history.js markReaderStart). localStorage, not sessionStorage, so
+ * a link opened in a new tab (middle-click, Ctrl/Cmd+click, long-press)
+ * carries it too; each mark is good for READER_START_TTL_MS. This one, and
+ * any expired, are cleared whatever happens, so a mark is used once.
+ * Without a matching live mark (a link someone sent, an old tab), null.
  */
 export const READER_START_KEY = 'ws-reader-start';
-export function takeStartPage(params, storage) {
-  var mark = null;
-  try {
-    mark = storage ? storage.getItem(READER_START_KEY) : null;
-    if (mark !== null) storage.removeItem(READER_START_KEY);
-  } catch (e) { mark = null; }
+export const READER_START_TTL_MS = 2 * 60 * 1000;
+export function takeStartPage(params, storage, now) {
+  var t = typeof now === 'number' ? now : Date.now();
   var page = readerPage(params);
   var chapter = readerTarget(params).chapterId;
-  return page && chapter && mark === chapter + ':' + page ? page : null;
+  var mark = chapter + ':' + page;
+  var live = false;
+  try {
+    var raw = storage ? storage.getItem(READER_START_KEY) : null;
+    if (raw === null) return null;
+    var marks = {};
+    try { marks = JSON.parse(raw) || {}; } catch (e) { marks = {}; }
+    var kept = {};
+    var left = 0;
+    Object.keys(marks).forEach(function (k) {
+      var at = marks[k];
+      var fresh = typeof at === 'number' && t - at >= 0 && t - at <= READER_START_TTL_MS;
+      if (k === mark) live = fresh;
+      else if (fresh) { kept[k] = at; left += 1; }
+    });
+    if (left) storage.setItem(READER_START_KEY, JSON.stringify(kept));
+    else storage.removeItem(READER_START_KEY);
+  } catch (e) { return null; }
+  return page && chapter && live ? page : null;
 }
 
-function sessionStore() {
-  try { return window.sessionStorage; } catch (e) { return null; }
+function localStore() {
+  try { return window.localStorage; } catch (e) { return null; }
 }
 
 /**
@@ -1143,7 +1161,7 @@ export async function mount(ctx) {
   };
 
   var target = readerTarget(ctx.url.searchParams);
-  var startPage = takeStartPage(ctx.url.searchParams, sessionStore());
+  var startPage = takeStartPage(ctx.url.searchParams, localStore());
   startPending = !!startPage && !sample;
   dropPending = ctx.url.searchParams.has('page') && !sample;
   if (!target.seriesId) {

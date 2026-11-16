@@ -340,12 +340,16 @@ await run('the reader\'s page from the address', async () => {
 
 // kavitaPage: Kavita's saved pageNum (from 0), which a save moves, as Kavita does.
 let kavitaPage = 300;
-// mark: the sessionStorage mark Play history sets before it navigates
-// (reader.READER_START_KEY), or none.
+// mark: the localStorage mark Play history sets as its link is followed
+// (reader.READER_START_KEY): "chapter:page" for one set just now, or the
+// stored text itself ({...} JSON), or none. Each visit is a new tab: a new
+// Window, so a fresh sessionStorage.
 async function readerVisit(search, mark) {
   const win = new Window({ url: 'https://ws.test/reader' + search });
   const doc = win.document;
-  if (mark != null) win.sessionStorage.setItem(reader.READER_START_KEY, mark);
+  if (mark != null) {
+    win.localStorage.setItem(reader.READER_START_KEY, mark.charAt(0) === '{' ? mark : JSON.stringify({ [mark]: Date.now() }));
+  }
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
   const ctl = new win.AbortController();
   const calls = [];
@@ -405,7 +409,8 @@ async function readerVisit(search, mark) {
   if (typeof leave === 'function') leave();
   await flush();
   for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; }
-  return { calls, posts, pageInfo, href, replaced, mark: win.sessionStorage.getItem(reader.READER_START_KEY) };
+  return { calls, posts, pageInfo, href, replaced, mark: win.localStorage.getItem(reader.READER_START_KEY),
+    sessionKeys: win.sessionStorage.length };
 }
 
 await run('the reader opens at page= and saves it as a page jump', async () => {
@@ -450,7 +455,8 @@ await run('page= without Play history\'s mark is ignored (a link someone sent)',
       !v.calls.some((u) => /book-page\?page=599$/.test(u)) && v.pageInfo.replace(/\s/g, '') === '301/600', [v.pageInfo, v.calls]);
     check(what + ': saves nothing', !v.posts.some((x) => /Reader\/progress$/.test(x.url)), v.posts.map((x) => x.body));
     check(what + ': page= still leaves the address', v.href === '/reader?seriesId=5&chapterId=77', v.href);
-    check(what + ': and the mark is gone', v.mark === null, v.mark);
+    // Another tab's live mark (another page or chapter) stays for that tab.
+    check(what + ': and no mark is left for this page', v.mark === null || !('77:600' in JSON.parse(v.mark)), v.mark);
     check(what + ': Kavita keeps 300', kavitaPage === 300, kavitaPage);
   }
   const used = await readerVisit('?seriesId=5&chapterId=77&page=143', '77:143');
@@ -460,28 +466,76 @@ await run('page= without Play history\'s mark is ignored (a link someone sent)',
 
 await run('the mark the reader takes', async () => {
   const q = (s) => new URLSearchParams(s);
-  const store = (v) => { const m = new Map(v == null ? [] : [[reader.READER_START_KEY, v]]);
-    return { getItem: (k) => (m.has(k) ? m.get(k) : null), removeItem: (k) => m.delete(k), m }; };
-  let st = store('7:143');
-  check('chapter and page match', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), st) === 143 && st.m.size === 0);
-  st = store('7:143');
-  check('no chapter in the address: none, mark still cleared', reader.takeStartPage(q('seriesId=5&page=143'), st) === null && st.m.size === 0);
-  check('no storage: none', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), null) === null);
-  const throwing = { getItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
-  check('storage that throws: none', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), throwing) === null);
+  const NOW = 1_800_000_000_000;
+  const TTL = reader.READER_START_TTL_MS;
+  const store = (marks) => {
+    const m = new Map(marks == null ? [] : [[reader.READER_START_KEY, typeof marks === 'string' ? marks : JSON.stringify(marks)]]);
+    return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)),
+      removeItem: (k) => m.delete(k), m, marks: () => (m.has(reader.READER_START_KEY) ? JSON.parse(m.get(reader.READER_START_KEY)) : null) };
+  };
+  const at = q('seriesId=5&chapterId=7&page=143');
+  let st = store({ '7:143': NOW - 1000 });
+  check('a live mark for this chapter and page: taken and cleared', reader.takeStartPage(at, st, NOW) === 143 && st.m.size === 0);
+  st = store({ '7:143': NOW - TTL - 1 });
+  check('past two minutes: none, and cleared', reader.takeStartPage(at, st, NOW) === null && st.m.size === 0);
+  st = store({ '7:143': NOW + 60000 });
+  check('a mark from the future: none', reader.takeStartPage(at, st, NOW) === null);
+  st = store({ '7:143': NOW - 1000, '9:20': NOW - 2000, '8:1': NOW - TTL - 5 });
+  check('another tab\'s live mark is kept, expired ones go', reader.takeStartPage(at, st, NOW) === 143 &&
+    JSON.stringify(st.marks()) === JSON.stringify({ '9:20': NOW - 2000 }), st.marks());
+  st = store({ '7:144': NOW, '8:143': NOW });
+  check('another page or chapter: none', reader.takeStartPage(at, st, NOW) === null);
+  st = store('not json');
+  check('junk: none, and cleared', reader.takeStartPage(at, st, NOW) === null && st.m.size === 0);
+  st = store({ '7:143': NOW });
+  check('no chapter in the address: none', reader.takeStartPage(q('seriesId=5&page=143'), st, NOW) === null);
+  check('no storage: none', reader.takeStartPage(at, null, NOW) === null);
+  const throwing = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  check('storage that throws: none', reader.takeStartPage(at, throwing, NOW) === null);
+  check('the same key and life on both sides', H.READER_START_KEY === reader.READER_START_KEY &&
+    H.READER_START_TTL_MS === reader.READER_START_TTL_MS && TTL === 120000);
+  const written = store(null);
+  H.markReaderStart(written, '/reader?seriesId=5&chapterId=7&page=143', NOW);
+  H.markReaderStart(written, '/reader?seriesId=5&chapterId=9&page=2', NOW + TTL + 1);
+  check('marking prunes expired marks', JSON.stringify(written.marks()) === JSON.stringify({ '9:2': NOW + TTL + 1 }), written.marks());
+  H.markReaderStart(throwing, '/reader?seriesId=5&chapterId=7&page=143', NOW);    // never throws
 });
 
-await run('Continue reading from here sets the reader\'s mark as it is followed', async () => {
-  const p = page({ answers: [{ items: [ebook(2, T)], next_before: null, notes: [] }] });
-  p.h.open(p.$('#userMenuBtn'));
-  await flush();
-  const go = p.$('[data-hx-go]');
-  check('the link is the reader at the page', go && go.getAttribute('href') === '/reader?seriesId=5&chapterId=70&page=143', go && go.getAttribute('href'));
-  check('no mark before the click', p.win.sessionStorage.getItem(H.READER_START_KEY) === null);
-  go.addEventListener('click', (e) => e.preventDefault());     // happy-dom would navigate
-  p.click(go);
-  check('marked chapter:page', p.win.sessionStorage.getItem(H.READER_START_KEY) === '70:143', p.win.sessionStorage.getItem(H.READER_START_KEY));
-  check('the same key the reader reads', H.READER_START_KEY === reader.READER_START_KEY);
+await run('Continue reading from here marks the link however it is followed', async () => {
+  for (const type of ['click', 'auxclick', 'mousedown', 'contextmenu', 'touchstart']) {
+    const p = page({ answers: [{ items: [ebook(2, T)], next_before: null, notes: [] }] });
+    p.h.open(p.$('#userMenuBtn'));
+    await flush();
+    const go = p.$('[data-hx-go]');
+    check(type + ': the link is the reader at the page', go && go.getAttribute('href') === '/reader?seriesId=5&chapterId=70&page=143', go && go.getAttribute('href'));
+    check(type + ': no mark before', p.win.localStorage.getItem(H.READER_START_KEY) === null);
+    go.addEventListener('click', (e) => e.preventDefault());     // happy-dom would navigate
+    const Ev = type === 'touchstart' ? p.win.Event : p.win.MouseEvent;
+    go.dispatchEvent(new Ev(type, { bubbles: true, button: type === 'auxclick' ? 1 : 0 }));
+    const raw = p.win.localStorage.getItem(H.READER_START_KEY);
+    let marks = {};
+    try { marks = JSON.parse(raw); } catch (e) { marks = {}; }
+    check(type + ': marked chapter:page, now', typeof marks['70:143'] === 'number' && Math.abs(Date.now() - marks['70:143']) < 5000, raw);
+    check(type + ': nothing in sessionStorage', p.win.sessionStorage.length === 0);
+    if (type !== 'auxclick') continue;
+    // The new tab a middle-click opens: its own sessionStorage, this site's localStorage.
+    kavitaPage = 300;
+    const tab = await readerVisit('?seriesId=5&chapterId=70&page=143'.replace(/70/g, '77'), raw.replace('70:143', '77:143'));
+    check('the new tab opens at the marked page and saves it', tab.pageInfo.replace(/\s/g, '') === '143/600' &&
+      tab.posts.some((x) => /Reader\/progress$/.test(x.url) && x.body.pageNum === 142) && tab.sessionKeys === 0, [tab.pageInfo, tab.sessionKeys]);
+    check('and uses the mark up', tab.mark === null, tab.mark);
+    kavitaPage = 300;
+  }
+});
+
+await run('a mark more than two minutes old is ignored', async () => {
+  kavitaPage = 300;
+  const old = JSON.stringify({ '77:143': Date.now() - reader.READER_START_TTL_MS - 1000 });
+  const v = await readerVisit('?seriesId=5&chapterId=77&page=143', old);
+  check('opens where Kavita has the reader, saves nothing', v.pageInfo.replace(/\s/g, '') === '301/600' &&
+    !v.posts.some((x) => /Reader\/progress$/.test(x.url)), [v.pageInfo, v.posts.map((x) => x.body)]);
+  check('the stale mark is cleared, page= leaves the address', v.mark === null && v.href === '/reader?seriesId=5&chapterId=77', [v.mark, v.href]);
+  kavitaPage = 300;
 });
 
 console.log(`play_history: ${total - failed}/${total} checks passed`);
