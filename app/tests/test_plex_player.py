@@ -2438,6 +2438,46 @@ class Cover(BridgeBase):
         self.run_async(pp.cover_image("500:1"))
         self.assertEqual(self.transcoded()[-1], self.UPLOADED)
 
+    SECOND = "/library/metadata/500/file?url=metadata%3A%2F%2Fposters%2Fcom.plexapp.agents.localmedia_1a2b"
+
+    def test_a_broken_selected_poster_falls_back_to_the_next(self):
+        self.plex.missing_photos.update({ALBUMS["500"]["thumb"], self.UPLOADED})
+        self.plex.posters["500"] = [{"key": self.UPLOADED, "selected": True}, {"key": self.EMBEDDED, "selected": False}]
+        self.assertEqual(self.run_async(pp.cover_image("500:1"))[1], "image/jpeg")
+        self.assertEqual(self.transcoded(), [ALBUMS["500"]["thumb"], self.UPLOADED, self.EMBEDDED])
+
+    def test_a_selected_remote_poster_gives_way_to_a_local_one(self):
+        self.plex.missing_photos.add(ALBUMS["500"]["thumb"])
+        self.plex.posters["500"] = [{"key": "https://metadata-static.example/poster.jpg", "selected": True},
+                                    {"key": self.EMBEDDED, "selected": False}]
+        self.assertEqual(self.run_async(pp.cover_image("500:1"))[1], "image/jpeg")
+        self.assertEqual(self.transcoded(), [ALBUMS["500"]["thumb"], self.EMBEDDED])
+
+    def test_a_broken_first_unselected_poster_falls_back_to_the_next(self):
+        self.plex.missing_photos.update({ALBUMS["500"]["thumb"], self.EMBEDDED})
+        self.plex.posters["500"] = [{"key": self.EMBEDDED}, {"key": self.SECOND}]
+        self.assertEqual(self.run_async(pp.cover_image("500:1"))[1], "image/jpeg")
+        self.assertEqual(self.transcoded(), [ALBUMS["500"]["thumb"], self.EMBEDDED, self.SECOND])
+
+    def test_posters_tried_are_bounded(self):
+        self.plex.missing_photos.add(ALBUMS["500"]["thumb"])
+        broken = [f"/library/metadata/500/file?url=metadata%3A%2F%2Fposters%2Fbroken{i}" for i in range(9)]
+        self.plex.missing_photos.update(broken)
+        self.plex.posters["500"] = [{"key": k} for k in broken]
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.cover_image("500:1"))
+        self.assertEqual(self.transcoded(), [ALBUMS["500"]["thumb"]] + broken[:pp.POSTER_TRIES])
+
+    def test_an_encoded_traversal_or_ampersand_is_refused(self):
+        base = "/library/metadata/500/file?url=metadata%3A%2F%2F"
+        for ref in ("posters%2F..%2F..%2Fetc", "..%2Fposters", "posters%2F%2E%2E%2Fx", "posters%26url%3Dhttp",
+                    "posters%2F.hidden", "posters%2F%2Fx", "", "posters%3Fx", "a" * 513):
+            with self.subTest(ref=ref):
+                self.assertIsNone(pp._POSTER_PATH.fullmatch(base + ref))
+                self.assertEqual(pp._usable_posters("500", [{"key": base + ref, "selected": True}]), [])
+        for good in (self.EMBEDDED, self.UPLOADED, self.SECOND):
+            self.assertIsNotNone(pp._POSTER_PATH.fullmatch(good), good)
+
     def test_a_good_thumb_never_reads_the_posters(self):
         self.run_async(pp.cover_image("100:1"))
         self.assertNotIn("/library/metadata/100/posters", self.plex.paths())

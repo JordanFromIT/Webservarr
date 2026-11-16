@@ -1735,9 +1735,15 @@ async def checkin_book(key: str, track_key: str) -> tuple:
 # scaled to fit.
 _THUMB_PATH = re.compile(r"/library/metadata/[0-9]{1,20}/thumb/[0-9]{1,20}", re.ASCII)
 # A poster Plex stores for the album: /library/metadata/<album>/file?url=
-# an encoded metadata:// or upload:// reference.
+# an encoded metadata:// or upload:// reference, its parts joined by %2F.
+# No other escape (an encoded "." or "&" would reach Plex decoded), and no
+# part starting with a dot ("." and ".." included).
 _POSTER_PATH = re.compile(
-    r"/library/metadata/([0-9]{1,20})/file\?url=(?:metadata|upload)%3A%2F%2F[A-Za-z0-9%._-]{1,512}", re.ASCII)
+    r"/library/metadata/([0-9]{1,20})/file\?url=(?:metadata|upload)%3A%2F%2F"
+    r"(?=[A-Za-z0-9%._-]{1,512}$)[A-Za-z0-9_-][A-Za-z0-9._-]*(?:%2F[A-Za-z0-9_-][A-Za-z0-9._-]*)*", re.ASCII)
+# Posters tried at most for one cover, so a long list of broken ones costs
+# a bounded number of Plex calls.
+POSTER_TRIES = 5
 COVER_SIZE = 600
 
 
@@ -1763,8 +1769,9 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
 
     Plex can point an album's thumb at an image it no longer has (a 404)
     while the cover it read from the files sits in the album's posters,
-    unselected. So when the thumb is missing or will not load, the selected
-    poster (else the first) is tried the same way. Raises NotInLibrary (also
+    unselected. So when the thumb is missing or will not load, the album's
+    own posters are tried the same way, the selected one first, until one
+    loads (POSTER_TRIES at most). Raises NotInLibrary (also
     when neither gives a cover), PlayerOff or PlayerUnavailable."""
     album_key, _disc = parse_key(key)
     admin = _configured()
@@ -1778,23 +1785,24 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
             if content is not None:
                 return content, content_type
         posters = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/posters")
-    poster = _chosen_poster(album_key, _items(posters))
-    if poster:
+    for poster in _usable_posters(album_key, _items(posters))[:POSTER_TRIES]:
         content, content_type = await plex.get_thumbnail(poster, width=size, height=size, fill=False)
         if content is not None:
             return content, content_type
     raise NotInLibrary("This book has no cover")
 
 
-def _chosen_poster(album_key: str, posters: list) -> str:
-    """The path of the album's selected poster, else its first, when it is
-    one of the album's own stored images (never a remote URL the transcoder
-    would fetch); "" otherwise."""
-    if not posters:
-        return ""
-    path = min(posters, key=lambda p: p.get("selected") is not True).get("key")
-    m = _POSTER_PATH.fullmatch(path) if isinstance(path, str) else None
-    return path if m and m.group(1) == album_key else ""
+def _usable_posters(album_key: str, posters: list) -> list:
+    """The paths of the album's posters that are its own stored images (never
+    a remote URL the transcoder would fetch, nor another album's), the
+    selected one first, then in Plex's order."""
+    usable = []
+    for p in posters:
+        path = p.get("key") if isinstance(p, dict) else None
+        m = _POSTER_PATH.fullmatch(path) if isinstance(path, str) else None
+        if m and m.group(1) == album_key:
+            usable.append((p.get("selected") is not True, path))
+    return [path for _rest, path in sorted(usable, key=lambda u: u[0])]
 
 
 # --- Plex's listening state ---------------------------------------------------------
