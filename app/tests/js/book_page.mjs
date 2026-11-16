@@ -440,6 +440,117 @@ await run('no request link when the site sends requests to the Seerr embed, or t
   check('nor a script address', w.qa('[data-request]').length === 0 && w.qa('a[href^="javascript"]').length === 0);
 });
 
+// ---- The in-place request (request_actions) ----
+
+const ASK_AUDIO = { formats: { ebook: EBOOK, audio: null }, request_links: { ebook: null, audio: '/requests?q=x' }, request_actions: { ebook: null, audio: 'ready' } };
+const reqLabel = (t, kind) => rr(t.text(`[data-request="${kind}"] [data-label]`));
+const reqSub = (t, kind) => rr(t.text(`[data-request="${kind}"] [data-sub]`));
+const POSTS = (t) => t.net.calls.filter((c) => c.url === '/api/books/2/request');
+
+await run('in place: Request the audiobook is a button, not a link, and full width', async (make) => {
+  const t = await open(make, detail(ASK_AUDIO));
+  const ask = t.q('[data-request="audio"]');
+  check('a button in the audio slot', !!ask && ask.tagName === 'BUTTON' && ask.getAttribute('type') === 'button' && ask.closest('[data-slot]').getAttribute('data-slot') === 'audio');
+  check('it says Request the audiobook, and there is none yet', reqLabel(t, 'audio') === 'Request the audiobook' && reqSub(t, 'audio') === 'No audiobook in the library yet', [reqLabel(t, 'audio'), reqSub(t, 'audio')]);
+  check('no address to go to', !ask.getAttribute('href'));
+  check('the request card runs full width with no Sample segment', !ask.closest('[data-split]') && /ws-lift/.test(ask.className) && !t.q('[data-action="sample"]'));
+  check('nothing was asked for yet', POSTS(t).length === 0);
+});
+
+await run('in place: Requesting… while it is out, then Requested, disabled', async (make) => {
+  const answer = deferred();
+  const withMine = detail(Object.assign({ my_list: false, queue_position: null, my_rating: null }, ASK_AUDIO));
+  const t = await open(make, withMine, { routes: (net) => {
+    bookRoutes(withMine)(net);
+    net.on('/api/books/2/request', () => answer.promise);
+  } });
+  t.WS.cache.set('book:2', withMine);
+  t.click('[data-request="audio"]');
+  await flush();
+  const posts = POSTS(t);
+  check('one POST for this book', posts.length === 1, t.net.calls.map((c) => c.url));
+  check('asking for the audiobook', posts[0] && posts[0].init.method === 'POST' && JSON.parse(posts[0].init.body).format === 'audiobook', posts[0] && posts[0].init.body);
+  check('it says Requesting…', reqLabel(t, 'audio') === 'Requesting…' && t.q('[data-request="audio"]').getAttribute('aria-busy') === 'true', reqLabel(t, 'audio'));
+  t.click('[data-request="audio"]');
+  await flush();
+  check('a second press while it is out sends nothing more', POSTS(t).length === 1);
+  answer.resolve({ body: { ok: true, message: 'Book requested', state: 'requested' } });
+  await flush();
+  const ask = t.q('[data-request="audio"]');
+  check('Requested, with what happens next', reqLabel(t, 'audio') === 'Requested' && reqSub(t, 'audio') === 'We’ll add it when it’s found', [reqLabel(t, 'audio'), reqSub(t, 'audio')]);
+  check('disabled (and no longer busy)', ask.getAttribute('aria-disabled') === 'true' && ask.getAttribute('aria-busy') === null && /cursor-not-allowed/.test(ask.className));
+  check('a screen reader is told', t.text('#bookSaid') === 'Requested', t.text('#bookSaid'));
+  check('the kept copy of the book is dropped', !t.WS.cache.has('book:2'));
+  t.click('[data-request="audio"]');
+  await flush();
+  check('pressing it again sends nothing', POSTS(t).length === 1);
+});
+
+await run('in place: already asked for shows Requested from the start', async (make) => {
+  const t = await open(make, detail(Object.assign({}, ASK_AUDIO, { request_actions: { ebook: null, audio: 'requested' } })));
+  const ask = t.q('[data-request="audio"]');
+  check('Requested, disabled', reqLabel(t, 'audio') === 'Requested' && ask.getAttribute('aria-disabled') === 'true', reqLabel(t, 'audio'));
+  t.click('[data-request="audio"]');
+  await flush();
+  check('a press sends nothing', POSTS(t).length === 0);
+});
+
+await run('in place: a refusal says so briefly and can be tried again', async (make) => {
+  let status = 400;
+  const t = await open(make, detail(ASK_AUDIO), { routes: (net) => {
+    bookRoutes(detail(ASK_AUDIO))(net);
+    net.on('/api/books/2/request', () => (status ? { status, body: { detail: 'Chaptarr couldn\'t add this book.' } } : { body: { ok: true, state: 'requested' } }));
+  } });
+  t.click('[data-request="audio"]');
+  await flush();
+  const ask = t.q('[data-request="audio"]');
+  check('back to Request the audiobook, with a short reason', reqLabel(t, 'audio') === 'Request the audiobook' && reqSub(t, 'audio') === 'Couldn’t request it. Try again', [reqLabel(t, 'audio'), reqSub(t, 'audio')]);
+  check('enabled again', ask.getAttribute('aria-disabled') === null && ask.getAttribute('aria-busy') === null);
+  check('the server\'s admin wording is not shown', !/Chaptarr/.test(ask.textContent));
+  status = 429;
+  t.click('[data-request="audio"]');
+  await flush();
+  check('the daily cap says so', reqSub(t, 'audio') === 'Daily request limit reached. Try tomorrow', reqSub(t, 'audio'));
+  status = 0;
+  t.click('[data-request="audio"]');
+  await flush();
+  check('the retry goes through', reqLabel(t, 'audio') === 'Requested' && POSTS(t).length === 3, [reqLabel(t, 'audio'), POSTS(t).length]);
+});
+
+await run('in place: already here, or a book that can\'t be pinned down', async (make) => {
+  const t = await open(make, detail(ASK_AUDIO), { routes: (net) => {
+    bookRoutes(detail(ASK_AUDIO))(net);
+    net.on('/api/books/2/request', () => ({ body: { ok: true, message: 'Already in the library', state: 'available' } }));
+  } });
+  t.click('[data-request="audio"]');
+  await flush();
+  check('it says it is in the library already, disabled', reqLabel(t, 'audio') === 'Already in the library' && t.q('[data-request="audio"]').getAttribute('aria-disabled') === 'true', reqLabel(t, 'audio'));
+  const u = await open(make, detail(ASK_AUDIO), { routes: (net) => {
+    bookRoutes(detail(ASK_AUDIO))(net);
+    net.on('/api/books/2/request', () => ({ status: 404, body: { detail: 'We couldn\'t find this book to request it.' } }));
+  } });
+  u.click('[data-request="audio"]');
+  await flush();
+  const link = u.q('[data-request="audio"]');
+  check('not found: it becomes the Requests link', !!link && link.tagName === 'A' && link.getAttribute('href') === '/requests?q=x', link && link.outerHTML);
+  check('saying where to look', reqSub(u, 'audio') === 'Find it on the Requests page', reqSub(u, 'audio'));
+});
+
+await run('in place: Request the ebook, symmetric; none in the Seerr embed; a link without request_actions', async (make) => {
+  const t = await open(make, detail({ formats: { ebook: null, audio: { available: true, editions: [EDITIONS[0]], preferred: '100:1' } }, request_links: { ebook: '/requests?q=x', audio: null }, request_actions: { ebook: 'ready', audio: null } }), { routes: (net) => {
+    bookRoutes(detail({ formats: { ebook: null, audio: { available: true, editions: [EDITIONS[0]], preferred: '100:1' } }, request_links: { ebook: '/requests?q=x', audio: null }, request_actions: { ebook: 'ready', audio: null } }))(net);
+    net.on('/api/books/2/request', () => ({ body: { ok: true, state: 'requested' } }));
+  } });
+  check('a Request the ebook button', t.q('[data-request="ebook"]').tagName === 'BUTTON' && reqLabel(t, 'ebook') === 'Request the ebook');
+  t.click('[data-request="ebook"]');
+  await flush();
+  check('asking for the ebook', POSTS(t).length === 1 && JSON.parse(POSTS(t)[0].init.body).format === 'ebook' && reqLabel(t, 'ebook') === 'Requested');
+  const u = await open(make, detail(ASK_AUDIO), { branding: { requests_source: 'seerr_embed' } });
+  check('embed: no request at all', u.qa('[data-request]').length === 0);
+  const w = await open(make, detail({ formats: { ebook: EBOOK, audio: null }, request_links: { ebook: null, audio: '/requests?q=x' }, request_actions: { ebook: null, audio: null } }));
+  check('no in-place request on this server: the Requests link', w.q('[data-request="audio"]').tagName === 'A');
+});
+
 await run('a format hidden from this person is not shown at all, and not offered for request', async (make) => {
   const t = await open(make, detail({ formats: { ebook: EBOOK, audio: null }, request_links: { ebook: null, audio: null }, notes: [] }));
   check('no Listen, no request, no disabled stand-in', !t.q('[data-action="listen"]') && t.qa('[data-request]').length === 0 && t.qa('[data-slot="audio"]').length === 0);

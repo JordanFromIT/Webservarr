@@ -48,15 +48,15 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user, require_admin
-from app.integrations import kavita
+from app.integrations import chaptarr, kavita
 from app.integrations import plex_player as pp
 from app.integrations.config import same_address
 from app.limiter import limiter
-from app.routers import kavita_proxy
+from app.routers import integrations, kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import (book_catalog, book_discovery, book_personal, insights_store, kavita_keys, listening,
-                          search_match)
+from app.services import (book_catalog, book_discovery, book_personal, book_requests, insights_store, kavita_keys,
+                          listening, search_match)
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -1004,7 +1004,9 @@ async def book_detail(request: Request, book_id: BookId, background: BackgroundT
     A null format is one the caller cannot reach (or the book lacks).
     `preferred` is the edition with the caller's newest unfinished place, else
     their newest place, else the primary edition. `request_links` holds the Requests page link for a format
-    the catalog lacks, null otherwise. A book that was merged into another
+    the catalog lacks, null otherwise; `request_actions` whether the page
+    can ask for that format in place (POST /<id>/request, see
+    _request_actions). A book that was merged into another
     answers 307 (never cached) to the surviving id; an unknown one, or one the caller can see
     no format of, is 404."""
     book, survivor = book_catalog.resolve_book(db, book_id)
@@ -1079,8 +1081,74 @@ async def book_detail(request: Request, book_id: BookId, background: BackgroundT
         "formats": formats,
         "request_links": {"ebook": _request_url(ask) if book.kavita_chapter_id is None else None,
                           "audio": _request_url(ask) if not editions else None},
+        "request_actions": await _request_actions(book, editions),
         "notes": notes,
     }
+
+
+async def _request_actions(book, editions) -> dict:
+    """Per format the catalog lacks, whether the page can ask for it in place:
+    "ready", "requested" (the request snapshot has it as asked for and not
+    here yet), or null (not lacking, or this server takes no requests for it:
+    the page keeps the Requests link). Only the cached snapshot is read: a
+    page view never waits on Chaptarr."""
+    lacking = {"ebook": book.kavita_chapter_id is None, "audio": not editions}
+    actions: dict = {"ebook": None, "audio": None}
+    if not any(lacking.values()):
+        return actions
+    takes = chaptarr.request_formats()
+    if not takes:
+        return actions
+    snapshot = await book_requests.get_cached_snapshot()
+    asked = chaptarr.requested_formats((snapshot or {}).get("items") or [], book.title, book.author)
+    for key, fmt in (("ebook", "ebook"), ("audio", "audiobook")):
+        if lacking[key] and fmt in takes:
+            actions[key] = "requested" if fmt in asked else "ready"
+    return actions
+
+
+class FormatRequestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    format: Literal["ebook", "audiobook"]
+
+
+@router.post("/{book_id}/request", dependencies=[Depends(require_same_origin)])
+@limiter.limit("10/minute")
+@_db_503
+async def request_format(request: Request, book_id: BookId, body: FormatRequestIn,
+                         who: Scope = Depends(caller), db: Session = Depends(get_db),
+                         user: dict = Depends(get_current_user)):
+    """Ask for the format a book the caller can see lacks, in place of the
+    Requests page's search: {"ok", "message", "state"} with state "requested"
+    or "available" (it turned out to be here already). The same guards as
+    the Requests page's book request (POST /api/integrations/chaptarr-request):
+    same-origin, 10 a minute, the per-user daily cap, and the same records
+    (when it was asked, who asked, the event log line). 404 for a book the
+    caller cannot see, or one Chaptarr cannot be pinned down for (nothing is
+    asked for then); 409 for a format the catalog already has; 400 when
+    Chaptarr refuses or cannot be reached."""
+    book, _survivor = book_catalog.resolve_book(db, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="No such book")
+    editions = book_catalog.editions_of(db, book)
+    if not (_is_visible_ebook(book, who) or (who.audio and bool(editions))):
+        raise HTTPException(status_code=404, detail="No such book")
+    fmt = body.format
+    if (book.kavita_chapter_id is not None) if fmt == "ebook" else bool(editions):
+        raise HTTPException(status_code=409, detail="Already in the library")
+
+    await integrations._enforce_daily_book_cap(user)
+    logger.info("Book request by %s (user=%s): book %d format=%s",
+                user.get("username") or user.get("display_name") or "?", integrations._user_key(user), book.id, fmt)
+    result = await chaptarr.request_missing_format(book.title, book.author, fmt)
+    if not result["ok"]:
+        raise HTTPException(status_code=404 if result.get("not_found") else 400, detail=result["message"])
+    integrations._book_request_time(db, result.get("book_ids") or [])
+    title, foreign_id = result.get("title") or "", result.get("foreign_id") or ""
+    if title and foreign_id:
+        integrations._record_requester(db, user, foreign_id, title, fmt)
+        integrations._book_request_line(db, foreign_id, fmt, title)
+    return {"ok": True, "message": result["message"], "state": result.get("state") or "requested"}
 
 
 # --- Covers -----------------------------------------------------------------------------

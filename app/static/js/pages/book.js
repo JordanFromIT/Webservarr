@@ -9,8 +9,9 @@
  * Listen, which plays the audiobook. Each says how far the person is. A book
  * with several narrators is one page: Listen offers them, with the one the
  * person was last in preselected; their places stay per narrator. A format the
- * library lacks is a link to ask for it; one whose source is down is a
- * disabled button that says so.
+ * library lacks is asked for right here (POST /api/books/<id>/request), or,
+ * where the server can't, is a link to Requests; one whose source is down is
+ * a disabled button that says so.
  *
  * Everything comes from GET /api/books/<id> (the server reads the progress
  * live and decides what this person may see). Everything is drawn in one write
@@ -730,6 +731,80 @@ export async function mount(ctx) {
     return a;
   }
 
+  // The in-place request's words, by where it stands. The idle words are the link's.
+  const ASKED = {
+    requesting: { label: 'Requesting…', icon: 'progress_activity' },
+    requested: { label: 'Requested', sub: 'We’ll add it when it’s found', icon: 'check_circle' },
+    available: { label: 'Already in the library', sub: 'It may be listed on its own in Books', icon: 'check_circle' }
+  };
+
+  /** The format's request, made here (POST /api/books/<id>/request): idle,
+      Requesting… while it is out, then Requested (disabled) or, refused, the
+      idle words again with the reason under them, ready to try again. A book
+      Chaptarr can't pin down becomes the Requests link. */
+  function requestButton(kind, href, asked) {
+    const word = kind === 'ebook' ? 'ebook' : 'audiobook';
+    const idle = { label: 'Request the ' + word, sub: 'No ' + word + ' in the library yet', icon: kind === 'ebook' ? 'menu_book' : 'headphones' };
+    const b = control('button', '', QUIET, idle.icon, idle.label, idle.sub);
+    b.type = 'button';
+    b.setAttribute('data-request', kind);
+    b.setAttribute('data-state', 'idle');
+    let busy = false;
+    function paint(st, sub) {
+      const w = ASKED[st] || idle;
+      b.setAttribute('data-state', st);
+      b.querySelector('[data-icon]').textContent = w.icon;
+      b.querySelector('[data-label]').textContent = w.label;
+      b.querySelector('[data-sub]').textContent = sub || w.sub || idle.sub;
+      const done = st === 'requested' || st === 'available';
+      b.className = BTN + (done ? OFF : QUIET);
+      // Disabled for a pointer, but it keeps the focus it was pressed with, so
+      // a screen reader hears the new words.
+      if (done) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+      if (st === 'requesting') b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
+    }
+    function failedText(err) {
+      const status = statusOf(err);
+      if (status === 429) return 'Daily request limit reached. Try tomorrow';
+      return 'Couldn’t request it. Try again';
+    }
+    b.addEventListener('click', function () {
+      if (busy || b.getAttribute('aria-disabled') === 'true') return;
+      busy = true;
+      paint('requesting', 'No ' + word + ' in the library yet');
+      sendBooks('POST', bookUrl('request'), { format: word }).then(function (data) {
+        busy = false;
+        if (signal.aborted) return;
+        forgetKept();
+        paint(data && data.state === 'available' ? 'available' : 'requested');
+        say(ASKED[b.getAttribute('data-state')].label);
+      }, function (err) {
+        busy = false;
+        if (signal.aborted) return;
+        if (statusOf(err) === 404 && href) {
+          const link = requestLink(kind, href);
+          link.querySelector('[data-sub]').textContent = 'Find it on the Requests page';
+          b.replaceWith(link);
+          link.focus();
+          return;
+        }
+        paint('idle', failedText(err));
+      });
+    }, { signal: signal });
+    if (asked) paint('requested');
+    return b;
+  }
+
+  /** A format the library lacks ('ebook' or 'audio'): asked for here when the
+      server can, else a link to Requests. Neither when requests go to the Seerr embed. */
+  function requestControl(data, kind) {
+    const href = requestHref(data.request_links[kind]);
+    const action = data.request_actions[kind];
+    if (state.embed) return null;
+    if (action === 'ready' || action === 'requested') return slot(kind, requestButton(kind, href, action === 'requested'));
+    return href ? slot(kind, requestLink(kind, href)) : null;
+  }
+
   function slot(kind, node) {
     const cell = el('div', 'min-w-0');
     cell.setAttribute('data-slot', kind);
@@ -761,10 +836,7 @@ export async function mount(ctx) {
       bar(a, f.progress, main);
       return slot('ebook', split(a, readSampleLink(href, main), main));
     }
-    if (data.request_links.ebook) {
-      const href = requestHref(data.request_links.ebook);
-      return href && !state.embed ? slot('ebook', requestLink('ebook', href)) : null;
-    }
+    if (data.request_links.ebook || data.request_actions.ebook) return requestControl(data, 'ebook');
     if (needsConnect(data)) {
       const b = control('button', 'read', QUIET, 'menu_book', 'Read', connectText());
       b.type = 'button';
@@ -794,10 +866,7 @@ export async function mount(ctx) {
       if (f.editions.length > 1) cell.appendChild(narratorPicker(f.editions));
       return cell;
     }
-    if (data.request_links.audio) {
-      const href = requestHref(data.request_links.audio);
-      return href && !state.embed ? slot('audio', requestLink('audio', href)) : null;
-    }
+    if (data.request_links.audio || data.request_actions.audio) return requestControl(data, 'audio');
     if (data.notes.some(function (n) { return n && n.source === 'plex'; })) {
       const off = control('button', 'listen', OFF, 'headphones', 'Listen', noteText(data, 'plex', 'Audiobooks are unavailable right now'));
       off.type = 'button';
@@ -1075,6 +1144,7 @@ export async function mount(ctx) {
       book: data.book,
       formats: { ebook: f.ebook || null, audio: audio },
       request_links: Object.assign({ ebook: null, audio: null }, data.request_links || {}),
+      request_actions: Object.assign({ ebook: null, audio: null }, data.request_actions || {}),
       notes: Array.isArray(data.notes) ? data.notes : [],
       mine: has ? {
         list: data.my_list,

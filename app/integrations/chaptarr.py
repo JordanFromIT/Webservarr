@@ -24,9 +24,11 @@ Two things worth knowing, both established by testing against the live instance:
 """
 
 import asyncio
+import difflib
 import json
 import logging
 import re
+import unicodedata
 from html import unescape
 from typing import Any, Dict, List, Optional
 
@@ -832,6 +834,217 @@ async def _request_formats(cfg: dict, foreign_id: str, book: Dict[str, Any], tit
         answer["title"] = title
         answer["book_ids"] = [i for r in results if r["ok"] for i in r["book_ids"]]
     return answer
+
+
+# --- A Books catalog book's missing format --------------------------------------
+# The book page asks for the format it lacks of a book the library already
+# holds in the other. The catalog keeps no Chaptarr ids (it is built from
+# Kavita and Plex), so the book is found again by its title and author: in
+# the library's own rows first, where the format that is here pins the work,
+# and only then through Chaptarr's search.
+
+NOT_FOUND = "We couldn't find this book to request it."
+
+# How alike two spellings of an author's name must be to count as one (0..1).
+# "Michael Chrichton" (a typo in an ebook's metadata) against Chaptarr's
+# "Michael Crichton" is 0.97; two different people sharing a first name stay
+# well under it.
+_NAME_LIKE = 0.85
+
+
+def _title_key(title: str) -> str:
+    """A title as two sources are compared on: no series marker, case,
+    punctuation or "&" against "and"."""
+    main = openlibrary.clean_title(_split_series(title or "")[0])
+    return " ".join(re.findall(r"[a-z0-9]+", main.lower().replace("&", " and ")))
+
+
+def _main_title_key(title: str) -> str:
+    """The title before its subtitle, as _title_key compares it."""
+    return _title_key((title or "").split(":")[0])
+
+
+def _name_key(name: str) -> str:
+    plain = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    return " ".join(re.findall(r"[a-z0-9]+", plain.lower()))
+
+
+def _author_likeness(wanted: str, candidate: str) -> float:
+    """How surely `candidate` (one name) is the author the catalog names, 0..1:
+    1 for the same name, the spelling likeness from _NAME_LIKE up, else 0.
+    The catalog can name several ("A, B & C"): each one is tried, and the
+    whole string first ("Le Guin, Ursula K.")."""
+    got = _name_key(candidate)
+    if not got:
+        return 0.0
+    best = 0.0
+    for name in [wanted] + re.split(r",|&|;|\band\b", wanted or ""):
+        want = _name_key(name)
+        if not want:
+            continue
+        if want == got:
+            return 1.0
+        likeness = difflib.SequenceMatcher(None, want, got).ratio()
+        if likeness >= _NAME_LIKE:
+            best = max(best, likeness)
+    return best
+
+
+def _row_has_file(row: Dict[str, Any]) -> bool:
+    return bool(row.get("hasFiles")) or bool((row.get("statistics") or {}).get("bookFileCount"))
+
+
+def requested_formats(items: List[Dict[str, Any]], title: str, author: str) -> set:
+    """The formats ("ebook", "audiobook") of this book that stand asked for in
+    the request snapshot's rows (book_requests: monitored, no file yet)."""
+    key = _title_key(title)
+    return {row.get("media_type") for row in items
+            if key and _title_key(row.get("title") or "") == key
+            and (not row.get("author") or _author_likeness(author, row.get("author")))}
+
+
+def request_formats() -> set:
+    """The formats a book can be asked for in on this server: Chaptarr is set
+    up and has that format's root folder."""
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"]:
+        return set()
+    return {f for f in BOOK_FORMATS if _root_folder(cfg, f)}
+
+
+async def _library_work(cfg: dict, client: httpx.AsyncClient, title: str, author: str,
+                        have: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    The library's rows (both formats) for the one work that is this book, []
+    when the library holds no such work, None when it cannot tell which.
+
+    The author is matched by name (the closest, and only one), then their
+    books by title: the whole title, else the title before its subtitle. A
+    row Chaptarr marks as an omnibus never counts ("Jurassic Park & The Lost
+    World" is not Jurassic Park), nor does a title that only starts the same.
+    Two works with the same title (two editions as two works) are told apart
+    by the format `have`: the work whose row of it has a file is the one this
+    book came from. Raises ChaptarrUnavailable when Chaptarr cannot be read.
+    """
+    headers = {"X-Api-Key": cfg["api_key"]}
+    try:
+        resp = await client.get(f"{cfg['url']}/api/v1/author", headers=headers)
+        authors = resp.json() if resp.status_code == 200 else None
+        if not isinstance(authors, list):
+            raise ChaptarrUnavailable(f"author list returned HTTP {resp.status_code}")
+        scored = sorted(((_author_likeness(author, a.get("authorName") or ""), a.get("id"))
+                         for a in authors if isinstance(a, dict) and isinstance(a.get("id"), int)), reverse=True)
+        if not scored or not scored[0][0]:
+            return []
+        if len(scored) > 1 and scored[1][0] == scored[0][0]:
+            return None
+        resp = await client.get(f"{cfg['url']}/api/v1/book", params={"authorId": scored[0][1]}, headers=headers)
+        rows = resp.json() if resp.status_code == 200 else None
+        if not isinstance(rows, list):
+            raise ChaptarrUnavailable(f"author's books returned HTTP {resp.status_code}")
+    except (httpx.RequestError, ValueError) as exc:
+        raise ChaptarrUnavailable(f"{type(exc).__name__}: {exc}") from exc
+
+    rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), int)
+            and r.get("mediaType") in BOOK_FORMATS and not r.get("isOmnibus")]
+    for key_of in (_title_key, _main_title_key):
+        wanted = key_of(title)
+        same = [r for r in rows if wanted and key_of(r.get("title") or "") == wanted]
+        if same:
+            break
+    works: Dict[Any, List[Dict[str, Any]]] = {}
+    for row in same:
+        works.setdefault(row.get("foreignBookId") or row["id"], []).append(row)
+    if len(works) > 1:
+        works = {k: v for k, v in works.items()
+                 if any(r.get("mediaType") == have and _row_has_file(r) for r in v)}
+        if len(works) != 1:
+            return None
+    return next(iter(works.values()), [])
+
+
+async def _search_foreign_id(cfg: dict, title: str, author: str, row_ids: set) -> Optional[str]:
+    """
+    The search result (its foreignId) that is this book, for a format the
+    library has no row for: the one whose library rows are `row_ids` (the
+    work _library_work found), or, with none, the one result with the same
+    title by the same author that is not an omnibus. None when there is no
+    single such result. Raises ChaptarrUnavailable when Chaptarr cannot be read.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{cfg['url']}/api/v1/search",
+                params={"term": _split_series(title)[0], "provider": SEARCH_PROVIDER},
+                headers={"X-Api-Key": cfg["api_key"]},
+            )
+        raw = resp.json() if resp.status_code == 200 else None
+    except (httpx.RequestError, ValueError) as exc:
+        raise ChaptarrUnavailable(f"{type(exc).__name__}: {exc}") from exc
+    if not isinstance(raw, list):
+        raise ChaptarrUnavailable(f"search returned HTTP {resp.status_code}")
+
+    found: Dict[str, Dict[str, Any]] = {}
+    for result in raw:
+        book = result.get("book") if isinstance(result, dict) else None
+        foreign_id = result.get("foreignId") if isinstance(result, dict) else None
+        if not isinstance(book, dict) or not isinstance(foreign_id, str) or not foreign_id:
+            continue
+        if row_ids:
+            held = {r.get("id") for f in BOOK_FORMATS for r in _rows_for(book, f)}
+            if held & row_ids:
+                found[foreign_id] = book
+        elif not book.get("isOmnibus") and _title_key(book.get("title") or "") == _title_key(title) \
+                and _author_likeness(author, (book.get("author") or {}).get("authorName") or ""):
+            found[foreign_id] = book
+    if len(found) != 1:
+        return None
+    foreign_id, book = next(iter(found.items()))
+    await _cache_book(foreign_id, book)
+    return foreign_id
+
+
+async def request_missing_format(title: str, author: str, fmt: str) -> Dict[str, Any]:
+    """
+    Request one format ("ebook" or "audiobook") of a book the Books catalog
+    holds in the other format, by its catalog title and author.
+
+    The library's row for this format of the same work is monitored and
+    searched when there is one (_want_existing, which does not search again
+    for a row searched in the last few hours); a work with no row in this
+    format, or one the library lacks, is requested as the Requests page would
+    (request_book) once Chaptarr's search names it unambiguously.
+
+    Returns request_book's answer plus "foreign_id" (the work's id, for the
+    event log and Insights) on success, or {"ok": False, "message",
+    "not_found": True} when the book cannot be pinned down: nothing is asked
+    for then, rather than a guess (an omnibus, another edition).
+    """
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"] or not _root_folder(cfg, fmt):
+        return {"ok": False, "message": "Requests for this format are not set up"}
+    have = "ebook" if fmt == "audiobook" else "audiobook"
+    missing = {"ok": False, "message": NOT_FOUND, "not_found": True}
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            work = await _library_work(cfg, client, title, author, have)
+        if work is None:
+            return missing
+        rows = [r for r in work if r.get("mediaType") == fmt]
+        if any(_row_has_file(r) for r in rows):
+            return {"ok": True, "message": "Already in the library", "state": "available"}
+        if rows:
+            result = await _want_existing(cfg, [r["id"] for r in rows], rows[0].get("title") or title,
+                                          all(r.get("monitored") for r in rows))
+            return {**result, "foreign_id": rows[0].get("foreignBookId") or ""}
+        foreign_id = await _search_foreign_id(cfg, title, author, {r["id"] for r in work})
+    except ChaptarrUnavailable as exc:
+        logger.warning("Chaptarr could not be read to request %r: %s", title, exc)
+        return {"ok": False, "message": "Could not reach Chaptarr"}
+    if not foreign_id:
+        return missing
+    result = await request_book(foreign_id, fmt)
+    return {**result, "foreign_id": foreign_id} if result["ok"] else result
 
 
 async def _add_book(cfg: dict, foreign_id: str, book: Dict[str, Any], fmt: str, title: str) -> Dict[str, Any]:

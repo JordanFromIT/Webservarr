@@ -29,12 +29,12 @@ except Exception:  # pragma: no cover - the laptop has no app dependencies
 
 if HAVE_APP:
     # Not in the guard above: a missing module of this work must fail the suite, not skip it.
-    from app.integrations import kavita
+    from app.integrations import chaptarr, kavita
     from app.integrations import plex_player as pp
     from app.main import app
     from app.models import Book, BookAudioEdition, BookPairOverride, ListeningLog, ListeningPosition
     from app.routers import books
-    from app.services import book_catalog, insights_store, listening
+    from app.services import book_catalog, book_requests, insights_store, listening
 
 ORIGIN = "https://localhost"
 KAVITA = "http://kavita.test:5000"
@@ -123,7 +123,12 @@ class BooksBase(unittest.TestCase):
         self.rebuild = mock.AsyncMock(return_value={"ok": True, "ebooks": 5, "audiobooks": 6, "books": 8,
                                                     "errors": {"kavita": None, "plex": None}, "skipped": False})
         self.on = mock.Mock(return_value=True)
+        # Chaptarr is never reached: which formats it takes, and the cached request snapshot.
+        self.takes = mock.Mock(return_value=set())
+        self.snapshot = mock.AsyncMock(return_value=None)
         patches = [
+            mock.patch.object(chaptarr, "request_formats", self.takes),
+            mock.patch.object(book_requests, "get_cached_snapshot", self.snapshot),
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
             mock.patch.object(books.kavita_proxy, "kavita_url_for", side_effect=lambda user: KAVITA),
             mock.patch.object(kavita, "user_series_ids", self.series_ids),
@@ -665,6 +670,113 @@ class BookPage(BooksBase):
         make_book(self.db, 62, "Old Secret", merged_into=5)
         r = self.client.get("/api/books/62")
         self.assertEqual(r.status_code, 404)
+
+
+class FormatRequest(BooksBase):
+    """The book page's in-place request for the format a book lacks: what the
+    detail offers (request_actions) and POST /api/books/<id>/request. Chaptarr
+    is faked at chaptarr.request_missing_format (its own tests cover the
+    mapping at the HTTP layer); the daily cap's Redis is faked too."""
+
+    def setUp(self):
+        super().setUp()
+        self.takes.return_value = {"ebook", "audiobook"}
+        self.asked = mock.AsyncMock(return_value={"ok": True, "message": "Book requested", "title": "Emma",
+                                                  "state": "requested", "book_ids": [8882],
+                                                  "foreign_id": "hc:9724"})
+        self.cap = mock.AsyncMock(return_value=None)
+        for p in (mock.patch.object(chaptarr, "request_missing_format", self.asked),
+                  mock.patch.object(books.integrations, "_enforce_daily_book_cap", self.cap)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def post(self, book_id, fmt, origin=ORIGIN):
+        return self.client.post(f"/api/books/{book_id}/request", json={"format": fmt},
+                                headers={"Origin": origin} if origin else {})
+
+    def test_the_detail_offers_the_lacking_format_in_place(self):
+        self.assertEqual(self.ok("/api/books/4")["request_actions"], {"ebook": None, "audio": "ready"})
+        self.assertEqual(self.ok("/api/books/7")["request_actions"], {"ebook": "ready", "audio": None})
+        self.assertEqual(self.ok("/api/books/1")["request_actions"], {"ebook": None, "audio": None})
+
+    def test_a_format_already_asked_for_reads_requested(self):
+        self.snapshot.return_value = {"items": [
+            {"request_id": "book-8882", "media_type": "audiobook", "title": "Emma", "author": "Jane Austen"},
+            {"request_id": "book-1", "media_type": "ebook", "title": "Emma", "author": "Jane Austen"},
+            {"request_id": "book-2", "media_type": "audiobook", "title": "Emma & Persuasion", "author": "Jane Austen"},
+        ]}
+        self.assertEqual(self.ok("/api/books/4")["request_actions"], {"ebook": None, "audio": "requested"})
+        self.snapshot.return_value = {"items": [
+            {"request_id": "book-3", "media_type": "audiobook", "title": "Emma", "author": "Someone Else"}]}
+        self.assertEqual(self.ok("/api/books/4")["request_actions"]["audio"], "ready")   # another author's Emma
+
+    def test_a_server_that_takes_no_requests_keeps_the_link(self):
+        self.takes.return_value = {"ebook"}                     # no audiobook root folder
+        body = self.ok("/api/books/4")
+        self.assertEqual(body["request_actions"], {"ebook": None, "audio": None})
+        self.assertTrue(body["request_links"]["audio"].startswith("/requests?q="))
+        self.takes.return_value = set()
+        self.snapshot.reset_mock()
+        self.assertEqual(self.ok("/api/books/7")["request_actions"], {"ebook": None, "audio": None})
+        self.snapshot.assert_not_awaited()                      # no requests here: Redis is not read
+
+    def test_a_request_asks_for_that_format_of_that_book_and_is_recorded(self):
+        from app.models import BookRequester, BookRequestTime
+
+        r = self.post(4, "audiobook")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"ok": True, "message": "Book requested", "state": "requested"})
+        self.asked.assert_awaited_once_with("Emma", "Jane Austen", "audiobook")
+        self.cap.assert_awaited_once()
+        db = self.Session()
+        try:
+            self.assertEqual([t.book_id for t in db.query(BookRequestTime)], [8882])
+            asked = db.query(BookRequester).one()
+            self.assertEqual((asked.identity, asked.foreign_id, asked.format), ("plex:1001", "hc:9724", "audiobook"))
+        finally:
+            db.close()
+
+    def test_already_here_is_not_recorded_as_a_request(self):
+        from app.models import BookRequester
+
+        self.asked.return_value = {"ok": True, "message": "Already in the library", "state": "available"}
+        r = self.post(4, "audiobook")
+        self.assertEqual(r.json()["state"], "available")
+        db = self.Session()
+        try:
+            self.assertEqual(db.query(BookRequester).count(), 0)
+        finally:
+            db.close()
+
+    def test_a_format_the_catalog_has_is_409_and_asks_nothing(self):
+        self.assertEqual(self.post(4, "ebook").status_code, 409)
+        self.assertEqual(self.post(1, "audiobook").status_code, 409)
+        self.asked.assert_not_awaited()
+        self.cap.assert_not_awaited()
+
+    def test_a_book_the_caller_cannot_see_is_404(self):
+        self.assertEqual(self.post(5, "audiobook").status_code, 404)          # in a library they don't reach
+        self.assertEqual(self.post(9999, "audiobook").status_code, 404)
+        self.asked.assert_not_awaited()
+
+    def test_chaptarr_answers_become_404_and_400(self):
+        self.asked.return_value = {"ok": False, "message": chaptarr.NOT_FOUND, "not_found": True}
+        r = self.post(4, "audiobook")
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, chaptarr.NOT_FOUND))
+        self.asked.return_value = {"ok": False, "message": "Could not reach Chaptarr"}
+        self.assertEqual(self.post(4, "audiobook").status_code, 400)
+
+    def test_the_daily_cap_stops_a_request(self):
+        self.cap.side_effect = HTTPException(status_code=429, detail="Daily book request limit (20) reached.")
+        self.assertEqual(self.post(4, "audiobook").status_code, 429)
+        self.asked.assert_not_awaited()
+
+    def test_only_a_known_format_same_origin(self):
+        self.assertEqual(self.post(4, "both").status_code, 422)
+        self.assertEqual(self.client.post("/api/books/4/request", json={"format": "audiobook", "x": 1},
+                                          headers={"Origin": ORIGIN}).status_code, 422)
+        self.assertEqual(self.post(4, "audiobook", origin="https://evil.example").status_code, 403)
+        self.asked.assert_not_awaited()
 
 
 class Search(BooksBase):
