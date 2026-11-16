@@ -331,7 +331,9 @@ async def get_seerr_url(
 
 
 @router.post("/seerr-auth", dependencies=[Depends(require_same_origin)])
+@limiter.limit("30/minute")
 async def seerr_auth(
+    request: Request,
     response: Response,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
@@ -900,7 +902,9 @@ class RequestCreate(BaseModel):
 
 
 @router.post("/seerr-request", dependencies=[Depends(require_same_origin)])
+@limiter.limit("30/minute")
 async def create_seerr_request(
+    request: Request,
     body: RequestCreate,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
@@ -978,7 +982,9 @@ async def get_issue_detail(
 
 
 @router.post("/issues", dependencies=[Depends(require_same_origin)])
+@limiter.limit("30/minute")
 async def create_issue(
+    request: Request,
     body: IssueCreate,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
@@ -1003,7 +1009,9 @@ async def create_issue(
 
 
 @router.post("/issues/{issue_id}/comment", dependencies=[Depends(require_same_origin)])
+@limiter.limit("30/minute")
 async def create_issue_comment(
+    request: Request,
     issue_id: int,
     body: IssueCommentCreate,
     current_user: dict = Depends(get_current_user),

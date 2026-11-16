@@ -204,17 +204,21 @@ To disable simple auth once Plex OAuth or Authentik OIDC is configured, turn off
 
 ### Rate Limiting
 
-All endpoints are rate-limited to prevent abuse:
+All endpoints are rate-limited to prevent abuse. A route with a limit of its own uses that limit; every other route gets the default.
 
 | Endpoint Type | Limit |
 |---|---|
 | Login endpoints | 5 requests/minute per IP |
+| Access request form (public) | Plex PIN 5/minute and 20/hour, submit 5/hour per IP |
 | File uploads | 10 requests/minute per IP |
 | Write operations (POST/PUT/DELETE) | 30 requests/minute per IP |
 | Public endpoints (branding, status) | 60 requests/minute per IP |
-| Read operations (GET) | 120 requests/minute per IP |
+| Books and audiobook player | Their own budgets per signed-in session (60/minute for most) |
+| Book reader (`/kavita/...`) | 1200 page loads and 240 other calls a minute per IP |
+| System stats (top bar gauges, polled every second) | 600 requests/minute per IP |
+| Everything else (default) | 120 requests/minute per IP |
 
-Rate limits are enforced per client IP. When behind a reverse proxy (Cloudflare, nginx), the `CF-Connecting-IP` or `X-Forwarded-For` header is used. Exceeded limits return HTTP 429.
+Rate limits are enforced per client IP (an IPv6 client per /64). When behind a reverse proxy (Cloudflare, nginx), the first valid address in `CF-Connecting-IP` or `X-Forwarded-For` is used, only when the request comes from Cloudflare or a local proxy. Exceeded limits return HTTP 429.
 
 ### Session Security
 

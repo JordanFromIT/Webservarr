@@ -217,6 +217,47 @@ class KavitaBudgets(unittest.TestCase):
             self.assertEqual(kind(method, path), "kavita-api", (method, path))
 
 
+# Router writes that had no limit of their own (so none at all before the
+# default reached router routes), held to the documented write budget.
+WRITE_ROUTES = [
+    "app.routers.simple_auth.simple_logout",
+    "app.routers.access_requests.approve_access_request",
+    "app.routers.access_requests.deny_access_request",
+    "app.routers.access_requests.unblock_access_request",
+    "app.routers.integrations.seerr_auth",
+    "app.routers.integrations.create_seerr_request",
+    "app.routers.integrations.create_issue",
+    "app.routers.integrations.create_issue_comment",
+]
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class WriteBudget(unittest.TestCase):
+    """Writes are 30 a minute per address (docs/setup.md)."""
+
+    def test_these_writes_have_the_write_budget(self):
+        import app.main  # noqa: F401 - registers every route's limits
+        from app.limiter import limiter, rate_limit_key
+        for name in WRITE_ROUTES:
+            with self.subTest(route=name):
+                self.assertEqual([(str(lim.limit), lim.key_func) for lim in limiter._route_limits.get(name, [])],
+                                 [("30 per 1 minute", rate_limit_key)])
+
+    def test_the_31st_seerr_request_from_one_address_is_429(self):
+        helpers.api_client(helpers.make_sessionmaker(), user=helpers.MEMBER, headers=helpers.SAME_ORIGIN)
+        self.addCleanup(helpers.reset_overrides)
+        self.addCleanup(_private_limiter())
+        helpers.set_rate_limits(True)
+        from app.main import app
+        client = TestClient(app, client=PROXY, headers=helpers.SAME_ORIGIN)
+        with mock.patch("app.routers.setup.is_setup_completed", return_value=True), \
+             mock.patch("app.routers.integrations._get_plex_token", mock.AsyncMock(return_value=None)):
+            codes = [client.post("/api/integrations/seerr-request", json={"mediaType": "movie", "mediaId": 1},
+                                 headers={"CF-Connecting-IP": "203.0.113.20"}).status_code for _ in range(31)]
+        self.assertEqual(codes[:30], [400] * 30)     # no Plex token: refused, but counted
+        self.assertEqual(codes[30], 429)
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class SlowapiLogFilter(unittest.TestCase):
     """Defence in depth: should the warning ever carry the path again, the

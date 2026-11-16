@@ -174,6 +174,7 @@ async def logout_redirect(
 
 
 @router.post("/simple-logout")
+@limiter.limit("30/minute")
 async def simple_logout(
     request: Request,
     response: Response,

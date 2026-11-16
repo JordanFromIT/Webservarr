@@ -311,7 +311,9 @@ async def access_libraries(current_user: dict = Depends(require_admin)):
 
 @admin_router.post("/access-requests/{request_id}/approve",
                    dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
-async def approve_access_request(request_id: int, body: ApproveBody, current_user: dict = Depends(require_admin),
+@limiter.limit("30/minute")
+async def approve_access_request(request: Request, request_id: int, body: ApproveBody,
+                                 current_user: dict = Depends(require_admin),
                                  db: Session = Depends(get_db)):
     """Approve and share the server with that account and the ticked
     libraries. Approval is final even when Plex refuses the share; the row
@@ -347,7 +349,9 @@ async def approve_access_request(request_id: int, body: ApproveBody, current_use
 
 @admin_router.post("/access-requests/{request_id}/deny",
                    dependencies=[Depends(require_same_origin), Depends(require_encodable_body)])
-async def deny_access_request(request_id: int, body: DenyBody, current_user: dict = Depends(require_admin),
+@limiter.limit("30/minute")
+async def deny_access_request(request: Request, request_id: int, body: DenyBody,
+                              current_user: dict = Depends(require_admin),
                               db: Session = Depends(get_db)):
     row = _row_in(db, request_id, "pending")
     svc.deny(db, row, body.block, account_identity(current_user), svc.now_utc())
@@ -356,7 +360,8 @@ async def deny_access_request(request_id: int, body: DenyBody, current_user: dic
 
 
 @admin_router.post("/access-requests/{request_id}/unblock", dependencies=[Depends(require_same_origin)])
-async def unblock_access_request(request_id: int, current_user: dict = Depends(require_admin),
+@limiter.limit("30/minute")
+async def unblock_access_request(request: Request, request_id: int, current_user: dict = Depends(require_admin),
                                  db: Session = Depends(get_db)):
     row = _row_in(db, request_id, "blocked")
     logger.info("Access request %s unblocked: account=%s", row.id, row.plex_account_id)
