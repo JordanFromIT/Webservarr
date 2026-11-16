@@ -22,6 +22,7 @@ from app.config import settings
 from app.limiter import limiter
 from app.database import get_db, init_db, SessionLocal
 from app.auth import session_manager
+from app.dependencies import still_has_access
 from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
@@ -467,7 +468,10 @@ async def _require_session(session_id: Optional[str]) -> Optional[dict]:
     gate access and to render the shell for that user (see app/pages.py)."""
     if not session_id:
         return None
-    return await session_manager.get_session(session_id)
+    user_data = await session_manager.get_session(session_id)
+    if user_data and not await still_has_access(session_id, user_data):
+        return None
+    return user_data
 
 
 # Root endpoint - serve main dashboard

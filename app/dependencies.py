@@ -2,11 +2,68 @@
 FastAPI dependencies for authentication and authorization.
 """
 
+import logging
+import time
+
 from fastapi import Cookie, HTTPException, Request, status, Depends
 from typing import Optional, Dict
 from urllib.parse import urlsplit
-from app.auth import session_manager
+from app.auth import session_digest, session_manager
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# How often a signed-in Plex session's server membership is asked again.
+ACCESS_RECHECK_S = 24 * 60 * 60
+
+
+async def still_has_access(session_id: str, user_data: Dict[str, str]) -> bool:
+    """False when a session's Plex account has lost access to the server
+    (taken off the share), after deleting the session and the person's kept
+    Kavita key. Sign-in checks membership once; sessions persist up to the
+    absolute lifetime, so it is asked again here at most once a day per
+    session. Recent sign-ins count as checked, so ordinary requests make no
+    Plex call. A Redis claim (SET NX for the whole interval) keeps concurrent
+    requests from asking twice. Plex being unreachable ("unknown") keeps the
+    session: nobody is signed out because Plex is down. A session without a
+    plex_token (a local password) is never asked."""
+    plex_token = user_data.get("plex_token")
+    if not plex_token:
+        return True
+    checked = user_data.get("access_checked_at") or user_data.get("created_at") or "0"
+    try:
+        checked_at = int(checked)
+    except ValueError:
+        checked_at = 0
+    now = int(time.time())
+    if now - checked_at < ACCESS_RECHECK_S:
+        return True
+    redis = await session_manager.get_redis()
+    claim = f"session_access_check:{session_digest(session_id)}"
+    if not await redis.set(claim, "1", nx=True, ex=ACCESS_RECHECK_S):
+        return True
+
+    from app.database import SessionLocal
+    from app.routers.auth import _server_membership
+    db = SessionLocal()
+    try:
+        membership = await _server_membership(plex_token, db)
+    finally:
+        db.close()
+
+    if membership == "member":
+        await session_manager.update_session(session_id, {"access_checked_at": str(now)})
+        return True
+    if membership in ("not_member", "token_rejected"):
+        from app.routers.tickets import account_identity
+        from app.services import kavita_keys
+        await session_manager.delete_session(session_id)
+        identity = account_identity(user_data)
+        if identity:
+            kavita_keys.forget(identity)
+        logger.warning("Session ended: its Plex account no longer has access (%s)", membership)
+        return False
+    return True
 
 
 async def get_current_user(
@@ -32,6 +89,13 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"}
         )
 
+    if not await still_has_access(session_id, user_data):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
     return user_data
 
 
@@ -44,7 +108,10 @@ async def get_current_user_optional(
     if not session_id:
         return None
 
-    return await session_manager.get_session(session_id)
+    user_data = await session_manager.get_session(session_id)
+    if user_data and not await still_has_access(session_id, user_data):
+        return None
+    return user_data
 
 
 async def require_admin(
