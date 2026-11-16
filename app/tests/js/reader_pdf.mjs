@@ -307,6 +307,7 @@ await run('page= opens that page and saves it', async () => {
     check('page 20 (19 from 0) drawn, not Kavita\'s 11', v.pageInfo() === '20/781' && drawnPages(v).includes(19), [v.pageInfo(), drawnPages(v)]);
     await v.settle();
     check('saved as a page jump', saves(v).length >= 1 && saves(v).every((p) => p === 19), saves(v));
+    check('and page= has left the address, so a reload opens Kavita\'s place', v.win.location.search === '?seriesId=130&chapterId=198', v.win.location.search);
   } finally {
     await v.end();
   }

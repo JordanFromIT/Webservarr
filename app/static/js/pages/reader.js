@@ -32,7 +32,8 @@
  *
  * A page in the address (/reader?seriesId=&chapterId=&page=N, from 1: Play
  * history's "Continue reading from here") opens the book at that page, after
- * Kavita's own place has been read, and saves it as a page jump does.
+ * Kavita's own place has been read, and saves it as a page jump does. Then
+ * it leaves the address (dropStartPage), so it is used once.
  *
  * Sample mode (/reader?seriesId=&chapterId=&sample=1, books spec 3b section
  * 7, "Read a sample"): the same reader, read-only. It opens at the first
@@ -989,6 +990,22 @@ export async function mount(ctx) {
     el('sampleBanner').hidden = false;
   }
 
+  /**
+   * page= is a one-time instruction: once that page is open (and saved as a
+   * jump), it leaves the address. Left there, a reload, a phone restoring a
+   * discarded tab or Back to this entry (the router mounts again from the
+   * address) would reopen the old page and write it over the newer place
+   * Kavita holds by then. The entry is replaced, its router state kept.
+   */
+  function dropStartPage() {
+    try {
+      var u = new URL(window.location.href);
+      if (!u.searchParams.has('page')) return;
+      u.searchParams.delete('page');
+      window.history.replaceState(window.history.state, '', u.pathname + u.search + u.hash);
+    } catch (e) { /* the address keeps it; a reload opens that page again */ }
+  }
+
   // ---- PDF books ----
 
   // reader-pdf.js, once a PDF is opened.
@@ -1115,6 +1132,7 @@ export async function mount(ctx) {
     if (startPage && !sample && !signal.aborted && canTurnPage()) {
       positionKnown = true;
       queueProgress();
+      dropStartPage();
     }
     // Only once there is a rendered page to point at. Starting earlier
     // spotlights an empty loading spinner.

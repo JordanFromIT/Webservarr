@@ -338,6 +338,8 @@ await run('the reader\'s page from the address', async () => {
   check('the target is unchanged by it', JSON.stringify(reader.readerTarget(q('seriesId=5&chapterId=77&page=3'))) === JSON.stringify({ seriesId: 5, chapterId: 77 }));
 });
 
+// kavitaPage: Kavita's saved pageNum (from 0), which a save moves, as Kavita does.
+let kavitaPage = 300;
 async function readerVisit(search) {
   const win = new Window({ url: 'https://ws.test/reader' + search });
   const doc = win.document;
@@ -358,13 +360,16 @@ async function readerVisit(search) {
     if (/\/Book\/77\/book-info$/.test(url)) return { pages: 600, libraryId: 1, volumeId: 905, seriesId: 5, bookTitle: 'Children of Time' };
     if (/\/Book\/77\/book-page\?page=\d+$/.test(url)) return '<p>A page.</p>';
     if (/\/Book\/77\/chapters$/.test(url)) return [];
-    if (/get-progress\?chapterId=77$/.test(url)) return JSON.stringify({ pageNum: 300 });
+    if (/get-progress\?chapterId=77$/.test(url)) return JSON.stringify({ pageNum: kavitaPage });
     if (/Reader\/progress$/.test(url)) return '';
     return null;
   };
   const fetchFn = (url, init) => {
     calls.push(String(url));
-    if (init && init.method === 'POST') posts.push({ url: String(url), body: JSON.parse(init.body) });
+    if (init && init.method === 'POST') {
+      posts.push({ url: String(url), body: JSON.parse(init.body) });
+      if (/Reader\/progress$/.test(String(url))) kavitaPage = JSON.parse(init.body).pageNum;
+    }
     const a = answers(String(url));
     const ok = a !== null;
     return Promise.resolve({ ok, status: ok ? 200 : 404, json: () => Promise.resolve(a),
@@ -372,6 +377,11 @@ async function readerVisit(search) {
   };
   set('fetch', fetchFn);
   win.fetch = fetchFn;
+  const replaced = [];
+  const replaceState = win.history.replaceState.bind(win.history);
+  win.history.replaceState = (state, title, url) => { replaced.push({ state, url }); replaceState(state, title, url); };
+  win.history.replaceState({ ws: 1, i: 4 }, '', win.location.href);
+  replaced.length = 0;
   const timers = [];
   const ctx = {
     root: doc.getElementById('wsPage'), signal: ctl.signal, url: new URL('https://ws.test/reader' + search),
@@ -386,12 +396,13 @@ async function readerVisit(search) {
   timers.splice(0).forEach((fn) => fn());     // the save's debounce
   await flush();
   const pageInfo = doc.getElementById('pageInfo').textContent;
+  const href = win.location.pathname + win.location.search;
   ctl.abort();
   await mounted;
   if (typeof leave === 'function') leave();
   await flush();
   for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; }
-  return { calls, posts, pageInfo };
+  return { calls, posts, pageInfo, href, replaced };
 }
 
 await run('the reader opens at page= and saves it as a page jump', async () => {
@@ -401,9 +412,31 @@ await run('the reader opens at page= and saves it as a page jump', async () => {
   check('shown as 143 of 600', v.pageInfo.replace(/\s/g, '') === '143/600', v.pageInfo);
   const saves = v.posts.filter((x) => /Reader\/progress$/.test(x.url));
   check('and saved there', saves.length >= 1 && saves.every((x) => x.body.pageNum === 142), saves.map((x) => x.body));
+  kavitaPage = 300;
   const plain = await readerVisit('?seriesId=5&chapterId=77');
   check('without page= it opens where Kavita has the reader, and saves nothing', plain.calls.some((u) => /book-page\?page=300$/.test(u)) &&
     !plain.posts.some((x) => /Reader\/progress$/.test(x.url)), plain.calls);
+});
+
+await run('page= is used once: a reload never writes it over a newer place', async () => {
+  kavitaPage = 300;
+  const first = await readerVisit('?seriesId=5&chapterId=77&page=143');
+  check('opened at 143', first.pageInfo.replace(/\s/g, '') === '143/600', first.pageInfo);
+  check('page= left the address, the rest kept', first.href === '/reader?seriesId=5&chapterId=77', first.href);
+  check('by replacing the entry, keeping the router\'s state', first.replaced.length === 1 &&
+    JSON.stringify(first.replaced[0].state) === JSON.stringify({ ws: 1, i: 4 }), first.replaced);
+  // They read on: Kavita now holds page 200.
+  kavitaPage = 199;
+  // A reload, a restored tab or Back mounts from the address as it now is.
+  const again = await readerVisit(first.href.slice('/reader'.length));
+  check('the reload opens at Kavita\'s newer page', again.pageInfo.replace(/\s/g, '') === '200/600', again.pageInfo);
+  check('and saves nothing', !again.posts.some((x) => /Reader\/progress$/.test(x.url)), again.posts.map((x) => x.body));
+  check('Kavita keeps 199', kavitaPage === 199, kavitaPage);
+  const plain = await readerVisit('?seriesId=5&chapterId=77');
+  check('an address without page= is left alone', plain.replaced.length === 0, plain.replaced);
+  const sample = await readerVisit('?seriesId=5&chapterId=77&sample=1&page=9');
+  check('a sample ignores page= and leaves its address alone', sample.replaced.length === 0 && sample.pageInfo.replace(/\s/g, '') === '1/600', [sample.replaced, sample.pageInfo]);
+  kavitaPage = 300;
 });
 
 console.log(`play_history: ${total - failed}/${total} checks passed`);
