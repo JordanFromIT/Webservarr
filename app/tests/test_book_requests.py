@@ -464,12 +464,12 @@ class _FakeRedis:
     async def set(self, key, value, ex=None):
         if self.down:
             raise ConnectionError("redis down")
-        self.keys[key] = ex
+        self.keys[key] = (value, ex)
 
-    async def exists(self, key):
+    async def get(self, key):
         if self.down:
             raise ConnectionError("redis down")
-        return int(key in self.keys)
+        return self.keys.get(key, (None, None))[0]
 
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
@@ -477,19 +477,29 @@ class AskedFromTheBookPage(unittest.TestCase):
     """The book page's mark: a format asked for there reads Requested on a
     reopen before the snapshot is rebuilt. Redis is faked."""
 
-    def test_a_mark_is_per_book_and_format_and_outlives_the_snapshot_turn(self):
+    def test_a_mark_is_per_book_and_format_and_fresh_for_two_snapshot_turns(self):
         fake = _FakeRedis()
         with mock.patch.object(book_requests, "_get_redis", return_value=fake):
-            asyncio.run(book_requests.mark_asked(763, "audiobook"))
-            self.assertEqual(asyncio.run(book_requests.asked_formats(763)), {"audiobook"})
-            self.assertEqual(asyncio.run(book_requests.asked_formats(49)), set())
-        self.assertEqual(list(fake.keys.values()), [book_requests.ASKED_TTL])
-        self.assertGreater(book_requests.ASKED_TTL, book_requests.CACHE_TTL)
+            asyncio.run(book_requests.mark_asked(763, "audiobook", [8882]))
+            self.assertEqual(asyncio.run(book_requests.asked_formats(763, [])), {"audiobook"})
+            self.assertEqual(asyncio.run(book_requests.asked_formats(49, [])), set())
+        self.assertEqual([ex for _v, ex in fake.keys.values()], [book_requests.ASKED_TTL])
+        self.assertGreater(book_requests.ASKED_FRESH, book_requests.CACHE_TTL)
+
+    def test_after_that_the_snapshot_row_decides_whatever_its_title(self):
+        fake = _FakeRedis()
+        later = book_requests.time.time() + book_requests.ASKED_FRESH + 60
+        with mock.patch.object(book_requests, "_get_redis", return_value=fake):
+            asyncio.run(book_requests.mark_asked(763, "audiobook", [8882]))
+            with mock.patch.object(book_requests.time, "time", return_value=later):
+                items = [{"request_id": "book-8882", "media_type": "audiobook", "title": "Jurassic Park"}]
+                self.assertEqual(asyncio.run(book_requests.asked_formats(763, items)), {"audiobook"})
+                self.assertEqual(asyncio.run(book_requests.asked_formats(763, [{"request_id": "book-1"}])), set())
 
     def test_redis_down_is_no_mark_and_no_failure(self):
         with mock.patch.object(book_requests, "_get_redis", return_value=_FakeRedis(down=True)):
-            asyncio.run(book_requests.mark_asked(763, "audiobook"))
-            self.assertEqual(asyncio.run(book_requests.asked_formats(763)), set())
+            asyncio.run(book_requests.mark_asked(763, "audiobook", [8882]))
+            self.assertEqual(asyncio.run(book_requests.asked_formats(763, [])), set())
 
 
 if __name__ == "__main__":

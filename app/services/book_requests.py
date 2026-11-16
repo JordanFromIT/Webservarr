@@ -246,31 +246,46 @@ def _get_redis():
 
 
 # A format of a Books catalog book asked for from its page (POST
-# /api/books/<id>/request), remembered until the snapshot has certainly been
-# rebuilt with it in (the warmer's turn, with room to spare): so the page
-# reads Requested on a reopen straight after, not only after the next rebuild.
+# /api/books/<id>/request): when, and which Chaptarr rows were asked for. For
+# ASKED_FRESH (until the snapshot has certainly been rebuilt with it in) the
+# page reads Requested on its own; after that while the snapshot still holds
+# one of those rows as a request, whatever title Chaptarr gives it (the book
+# may have been found through a subtitle: "Jurassic Park: A Novel").
 ASKED_KEY = "webservarr:book_asked:{book_id}:{fmt}"
-ASKED_TTL = 2 * CACHE_TTL
+ASKED_FRESH = 2 * CACHE_TTL
+ASKED_TTL = 30 * 24 * 3600
 
 
-async def mark_asked(book_id: int, fmt: str) -> None:
-    """Remember that this format of this catalog book was just asked for.
-    Never fails the request: without the mark the page waits for the rebuild."""
+async def mark_asked(book_id: int, fmt: str, row_ids) -> None:
+    """Remember that this format of this catalog book was just asked for, as
+    these Chaptarr rows. Never fails the request: without the mark the page
+    goes by the snapshot's titles."""
+    value = json.dumps({"at": time.time(), "rows": [i for i in row_ids if isinstance(i, int)]})
     try:
-        await _get_redis().set(ASKED_KEY.format(book_id=book_id, fmt=fmt), "1", ex=ASKED_TTL)
+        await _get_redis().set(ASKED_KEY.format(book_id=book_id, fmt=fmt), value, ex=ASKED_TTL)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not mark a book request: %s", exc)
 
 
-async def asked_formats(book_id: int) -> set:
-    """The formats ("ebook", "audiobook") of this catalog book marked as just
-    asked for; empty when Redis cannot say."""
+async def asked_formats(book_id: int, items) -> set:
+    """The formats ("ebook", "audiobook") of this catalog book asked for from
+    its page that stand asked for: marked within ASKED_FRESH, or with a row
+    the snapshot's `items` still hold as a request. Empty when Redis cannot say."""
+    requests = {row.get("request_id") for row in items or []}
+    found = set()
     try:
-        found = [await _get_redis().exists(ASKED_KEY.format(book_id=book_id, fmt=f)) for f in FORMATS]
+        for fmt in FORMATS:
+            raw = await _get_redis().get(ASKED_KEY.format(book_id=book_id, fmt=fmt))
+            if not raw:
+                continue
+            mark = json.loads(raw)
+            if time.time() - float(mark.get("at") or 0) < ASKED_FRESH \
+                    or any(f"book-{i}" in requests for i in mark.get("rows") or []):
+                found.add(fmt)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not read book request marks: %s", exc)
         return set()
-    return {f for f, here in zip(FORMATS, found) if here}
+    return found
 
 
 async def get_cached_snapshot():

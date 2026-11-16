@@ -764,6 +764,22 @@ async def _enforce_daily_book_cap(current_user: dict) -> None:
         )
 
 
+REQUESTS_OFF = "Requests are turned off"
+
+
+def requests_switched_off(db: Session, current_user: dict) -> bool:
+    """Whether the Requests page is switched off for this caller (Settings >
+    Pages): the page sends them home then, so nothing else lets them request
+    either. Admins keep it, as they keep a switched-off page."""
+    from app.models import Setting
+    from app.settings_registry import switch_is_off
+
+    if current_user.get("is_admin") == "true":
+        return False
+    row = db.query(Setting).filter(Setting.key == "sidebar.enabled_requests").first()
+    return bool(row) and switch_is_off(row.value)
+
+
 @router.post("/chaptarr-request", dependencies=[Depends(require_same_origin)])
 @limiter.limit("10/minute")
 async def create_chaptarr_request(
@@ -776,6 +792,8 @@ async def create_chaptarr_request(
     added (not one already there) makes the event log's "Requested:" line."""
     if not body.bookId.strip():
         raise HTTPException(status_code=400, detail="bookId is required")
+    if requests_switched_off(db, current_user):
+        raise HTTPException(status_code=403, detail=REQUESTS_OFF)
     fmt = body.format if body.format in ("audiobook", "both") else "ebook"
 
     await _enforce_daily_book_cap(current_user)

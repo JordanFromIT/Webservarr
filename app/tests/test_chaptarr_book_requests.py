@@ -570,6 +570,21 @@ class Routes(unittest.TestCase):
         self.assertEqual(r.json()["states"], {"ebook": "requested", "audiobook": "requested"})
         self.assertNotIn("title", r.json())
 
+    def test_requests_switched_off_refuse_members_but_not_admins(self):
+        from app.models import Setting
+        db = self.Session()
+        db.add(Setting(key="sidebar.enabled_requests", value="false"))
+        db.commit()
+        db.close()
+        answer = {"ok": True, "message": "Book requested", "state": "requested"}
+        with mock.patch("app.integrations.chaptarr.request_book", mock.AsyncMock(return_value=dict(answer))) as asked:
+            r = self.client.post("/api/integrations/chaptarr-request", json={"bookId": "gr:1", "format": "ebook"})
+            self.assertEqual((r.status_code, r.json()["detail"]), (403, "Requests are turned off"))
+            asked.assert_not_awaited()
+            admin = self.helpers.api_client(self.Session, user=self.helpers.ADMIN, headers=self.helpers.SAME_ORIGIN)
+            r = admin.post("/api/integrations/chaptarr-request", json={"bookId": "gr:1", "format": "ebook"})
+            self.assertEqual(r.status_code, 200)
+
     def test_a_refusal_is_a_400_with_the_reason(self):
         r = self.ask({"ok": False, "message": ALREADY})
         self.assertEqual((r.status_code, r.json()["detail"]), (400, ALREADY))

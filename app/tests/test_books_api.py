@@ -131,9 +131,10 @@ class BooksBase(unittest.TestCase):
             mock.patch.object(chaptarr, "request_formats", self.takes),
             mock.patch.object(book_requests, "get_cached_snapshot", self.snapshot),
             mock.patch.object(book_requests, "asked_formats",
-                              mock.AsyncMock(side_effect=lambda book_id: {f for b, f in self.marks if b == book_id})),
+                              mock.AsyncMock(side_effect=lambda book_id, items: {f for b, f in self.marks
+                                                                                  if b == book_id})),
             mock.patch.object(book_requests, "mark_asked",
-                              mock.AsyncMock(side_effect=lambda book_id, fmt: self.marks.add((book_id, fmt)))),
+                              mock.AsyncMock(side_effect=lambda book_id, fmt, rows: self.marks.add((book_id, fmt)))),
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
             mock.patch.object(books.kavita_proxy, "kavita_url_for", side_effect=lambda user: KAVITA),
             mock.patch.object(kavita, "user_series_ids", self.series_ids),
@@ -746,6 +747,38 @@ class FormatRequest(BooksBase):
         self.assertEqual(self.post(4, "audiobook").status_code, 200)
         self.assertEqual(self.ok("/api/books/4")["request_actions"], {"ebook": None, "audio": "requested"})
         self.assertEqual(self.ok("/api/books/7")["request_actions"]["ebook"], "ready")     # only that book
+
+    def test_the_mark_names_the_rows_asked_for_and_sees_the_snapshot(self):
+        self.post(4, "audiobook")
+        book_requests.mark_asked.assert_awaited_once_with(4, "audiobook", [8882])
+        self.snapshot.return_value = {"items": [{"request_id": "book-8882"}]}
+        self.ok("/api/books/4")
+        book_requests.asked_formats.assert_awaited_with(4, [{"request_id": "book-8882"}])
+
+    def switch_requests_off(self):
+        from app.models import Setting
+        db = self.Session()
+        try:
+            db.add(Setting(key="sidebar.enabled_requests", value="false"))
+            db.commit()
+        finally:
+            db.close()
+
+    def test_requests_switched_off_offer_nothing_to_a_member(self):
+        self.switch_requests_off()
+        body = self.ok("/api/books/4")
+        self.assertEqual(body["request_links"], {"ebook": None, "audio": None})
+        self.assertEqual(body["request_actions"], {"ebook": None, "audio": None})
+        r = self.post(4, "audiobook")
+        self.assertEqual((r.status_code, r.json()["detail"]), (403, "Requests are turned off"))
+        self.asked.assert_not_awaited()
+        self.cap.assert_not_awaited()
+
+    def test_requests_switched_off_still_serve_an_admin(self):
+        self.switch_requests_off()
+        self.as_user(ADMIN)
+        self.assertEqual(self.ok("/api/books/4")["request_actions"]["audio"], "ready")
+        self.assertEqual(self.post(4, "audiobook").status_code, 200)
 
     def test_already_here_is_not_recorded_as_a_request(self):
         from app.models import BookRequester
