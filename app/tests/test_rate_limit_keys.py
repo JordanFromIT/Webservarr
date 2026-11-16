@@ -60,6 +60,25 @@ class TheKey(unittest.TestCase):
         self.assertEqual(self.key("2001:db8:1:2::a", peer="93.184.216.34"), "93.184.216.34")
         self.assertEqual(self.key(None, peer="2a00:1450:4001:9:1::5"), "2a00:1450:4001:9::/64")
 
+    def headers_key(self, headers, peer=PROXY[0]):
+        raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        return rate_limit_key(Request({"type": "http", "method": "GET", "path": "/", "headers": raw,
+                                       "client": (peer, 1234), "query_string": b""}))
+
+    def test_a_forwarded_header_never_gives_an_empty_key(self):
+        # An empty key makes slowapi skip every limit on the route.
+        cases = [
+            ({"X-Forwarded-For": ",203.0.113.7"}, "203.0.113.7"),
+            ({"X-Forwarded-For": " , junk, 203.0.113.8, 198.51.100.1"}, "203.0.113.8"),
+            ({"X-Forwarded-For": ","}, PROXY[0]),
+            ({"X-Forwarded-For": "not-an-ip"}, PROXY[0]),
+            ({"CF-Connecting-IP": " ", "X-Forwarded-For": "203.0.113.9"}, "203.0.113.9"),
+            ({"CF-Connecting-IP": "junk"}, PROXY[0]),
+        ]
+        for headers, want in cases:
+            with self.subTest(headers=headers):
+                self.assertEqual(self.headers_key(headers), want)
+
     def test_a_value_that_is_not_an_address_is_kept_as_it_is(self):
         self.assertEqual(self.key(None, peer="testclient"), "testclient")
 

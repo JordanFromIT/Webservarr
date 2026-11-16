@@ -55,13 +55,25 @@ def _get_client_ip(request: Request) -> str:
     a forged CF-Connecting-IP cannot rotate rate-limit buckets."""
     peer = request.client.host if request.client else None
     if peer and _is_trusted_proxy(peer):
-        cf_ip = request.headers.get("cf-connecting-ip")
-        if cf_ip:
-            return cf_ip.strip()
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        for header in ("cf-connecting-ip", "x-forwarded-for"):
+            ip = _first_ip(request.headers.get(header))
+            if ip:
+                return ip
     return peer or "unknown"
+
+
+def _first_ip(value) -> str:
+    """The first entry of a comma-separated header that is an IP address, or
+    "". Never an empty or junk entry: an empty key makes slowapi skip every
+    limit (`X-Forwarded-For: ,203.0.113.7`)."""
+    for part in (value or "").split(","):
+        candidate = part.strip()
+        try:
+            ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        return candidate
+    return ""
 
 
 def rate_limit_key(request: Request) -> str:
