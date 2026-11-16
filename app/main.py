@@ -26,7 +26,7 @@ from app.seed import seed_secret_key
 from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
 from app import home_event_log, home_news, web_analytics
-from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery, access_requests, insights
+from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, activity_webhooks, chaptarr_webhook, books, book_personal, book_discovery, access_requests, insights, play_history
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services import book_requests as book_requests_service
@@ -428,6 +428,7 @@ app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
 app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
 app.include_router(request_status.router, prefix="/api/request-status", tags=["Request Status"])
 app.include_router(player.router, prefix="/api/player", tags=["Player"])
+app.include_router(play_history.router, prefix="/api/me", tags=["Play history"])
 # Before the arr webhooks: their /{app} would take "n8n" as an app.
 app.include_router(activity_webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(chaptarr_webhook.router, prefix="/api/webhooks", tags=["Webhooks"])

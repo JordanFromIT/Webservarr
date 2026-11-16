@@ -438,8 +438,11 @@ def check_reader(t, html, js):
     t.assertLess(guard, first(t, save, r"\bwriter\.write\(", "no save call"), "the save goes out before the check")
     # The write itself (one at a time, through the writer) is a background call.
     t.assertTrue(live_matches(js, r"writer = progressWriter\(sendProgress, 'chapter:' \+ book\.chapterId\);"))
+    # Three: Kavita's answer (restoreProgress), a page the reader turned to
+    # (loadPage) and a page the address named (Play history's page=, once it
+    # is on screen: their own choice, as a page jump is).
     sets = live_matches(js, r"\bpositionKnown\s*=\s*true\b")
-    t.assertEqual(len(sets), 2, "positionKnown is confirmed somewhere unexpected")
+    t.assertEqual(len(sets), 3, "positionKnown is confirmed somewhere unexpected")
     restore = body_of(t, js, "restoreProgress")
     t.assertEqual(len(live_matches(restore, r"\bpositionKnown\s*=\s*true\b")), 1,
                   "restoreProgress does not confirm the looked-up position")

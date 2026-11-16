@@ -57,8 +57,9 @@
 </nav>
 
 <!-- More: a modal sheet from the bottom (shell.js wireSheet). The pages the
-     tab bar has no room for, then the home-screen row (install.js), the
-     welcome tour again (js/welcome.js) and Sign out. -->
+     tab bar has no room for, then the home-screen row (install.js), Play
+     history (js/play-history.js), the welcome tour again (js/welcome.js) and
+     Sign out. -->
 <dialog id="wsMoreSheet" class="ws-sheet" aria-labelledby="wsMoreTitle">
   <div class="ws-sheet-scrim" data-sheet-close></div>
   <div class="ws-sheet-panel ws-frost" data-sheet-panel>
@@ -89,6 +90,12 @@
           </ol>
         </div>
       </li>
+      <li class="{{history_cls}}">
+        <button type="button" class="ws-sheet-row" data-play-history>
+          <span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">history</span>
+          <span class="ws-sheet-row-text"><span class="ws-sheet-row-line"><span class="ws-sheet-row-label">Play history</span></span><span class="ws-sheet-row-sub">Pick up where a session ended</span></span>
+        </button>
+      </li>
       <li>
         <a class="ws-sheet-row" href="/?welcome=1">
           <span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">help</span>
@@ -105,6 +112,26 @@
     <p class="ws-sheet-version {{admin_block}}">{{version}}</p>
   </div>
 </dialog>
+
+<!-- Play history (js/play-history.js): the person's own listening and
+     reading sessions, opened from the account menu and from More. Static
+     markup run as a dialog by WSUI.modal; the list is drawn into #wsHxList. -->
+<div id="wsHistory" class="ws-hx" hidden>
+  <div class="ws-hx-scrim ws-scrim" data-hx-close></div>
+  <div class="ws-hx-box ws-frost" data-dialog-box aria-labelledby="wsHxTitle" aria-describedby="wsHxSub">
+    <button type="button" class="ws-hx-close" data-hx-close aria-label="Close"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+    <div class="ws-hx-head">
+      <h2 id="wsHxTitle" class="ws-hx-title">Play history</h2>
+      <p id="wsHxSub" class="ws-hx-sub">Pick up any book from where a session ended.</p>
+      <div class="ws-hx-chips" role="group" aria-label="Show">
+        <button type="button" class="ws-hx-chip" data-hx-filter="all" aria-pressed="true">All</button>
+        <button type="button" class="ws-hx-chip" data-hx-filter="audio" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">headphones</span>Audiobooks</button>
+        <button type="button" class="ws-hx-chip" data-hx-filter="ebook" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">menu_book</span>eBooks</button>
+      </div>
+    </div>
+    <div id="wsHxList" class="ws-hx-list"></div>
+  </div>
+</div>
 
 <!-- Scroll-down hint (mobile only). shell.js shows it only while there is
      content below the fold and hides it at the bottom. -->
@@ -125,6 +152,11 @@
 <!-- The service status panel (status-panel.js): the header pill's popover
      and the top bar chip's sheet. A module, so shell.js has made window.WS. -->
 <script type="module" src="/static/js/status-panel.js?v=1"></script>
+
+<!-- Play history (play-history.js, WS.playHistory): the window above, and
+     its entries in the account menu and in More. A module, so shell.js has
+     made window.WS. -->
+<script type="module" src="/static/js/play-history.js?v=1"></script>
 
 <!-- The event log at the top of every page (event-log.js, WS.eventLog) and
      the headers' gauges (gauges.js): one of each for the life of the

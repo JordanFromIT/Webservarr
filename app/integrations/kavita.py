@@ -593,6 +593,102 @@ async def book_places(base: str, token: str, books) -> dict:
     return places
 
 
+# --- Reading sessions (Play history) ---------------------------------------------------
+#
+# Kavita 0.9 keeps a reading session for every sitting (it closes one after 10
+# minutes without a page turn), one activity row per chapter read in it: the
+# chapter, the first and last page (the reader's pageNum, from 0), the
+# chapter's pages and the time. /api/Stats/reading-history gives the caller's
+# own sessions only, with their own token, newest start first. It filters by
+# library and matches nothing without a library named, so the person's own
+# libraries are asked for first. Sessions Kavita made up when it upgraded
+# (isGeneratedSession: an estimate from old progress, not a real sitting) are
+# left out.
+
+HISTORY_PAGE_SIZE = 50
+HISTORY_MAX_PAGES = 6        # 300 sessions in one go at most
+
+
+def _utc_stamp(value) -> Optional[datetime]:
+    """A Kavita UTC timestamp ("2026-11-14T22:20:13.1234567", with or without
+    a Z) as a naive UTC datetime, or None. Kavita sends seven fraction digits,
+    more than datetime takes, so the fraction is cut to six."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().removesuffix("Z").removesuffix("z")
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(?:[+-]00:?00)?", text)
+    if not m:
+        return None
+    try:
+        at = datetime.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+    frac = (m.group(2) or "")[:6].ljust(6, "0")
+    return at.replace(microsecond=int(frac))
+
+
+def _session_rows(items) -> list:
+    """Kavita's reading-history items as one row per chapter read in a session."""
+    rows = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or item.get("isGeneratedSession") is True:
+            continue
+        session_id = item.get("sessionId")
+        if not isinstance(session_id, int) or isinstance(session_id, bool):
+            continue
+        for ch in item.get("chapters") or []:
+            if not isinstance(ch, dict):
+                continue
+            chapter_id = ch.get("chapterId")
+            start, end = _utc_stamp(ch.get("startTimeUtc")), _utc_stamp(ch.get("endTimeUtc"))
+            if not isinstance(chapter_id, int) or isinstance(chapter_id, bool) or start is None or end is None:
+                continue
+            rows.append({"session_id": session_id, "chapter_id": chapter_id,
+                         "series_id": _whole(item.get("seriesId")), "start": start, "end": end,
+                         "start_page": _whole(ch.get("startPage")), "end_page": _whole(ch.get("endPage")),
+                         "pages": _whole(ch.get("totalPages")), "seconds": _whole(ch.get("durationSeconds"))})
+    return rows
+
+
+async def reading_sessions(base: str, token: str, since: datetime, until: Optional[datetime] = None,
+                           enough: int = HISTORY_PAGE_SIZE) -> tuple:
+    """(rows, complete): this person's own reading sessions that ended from
+    `since` to `until` (naive UTC; None for now), one row per chapter read in
+    a session: {session_id, chapter_id, series_id, start, end (naive UTC),
+    start_page, end_page (the reader's pageNum, from 0), pages, seconds}.
+    Pages are read newest start first until `enough` rows are in hand or
+    Kavita has no more; `complete` is True when it had no more."""
+    rows: list = []
+    async with _user_client() as client:
+        libraries = await _as_user(client, base, token, "GET", "/api/Library/libraries")
+        ids = [lib["id"] for lib in libraries or [] if isinstance(lib, dict)
+               and isinstance(lib.get("id"), int) and not isinstance(lib.get("id"), bool)]
+        if not ids:
+            return [], True
+        params = [("Libraries", i) for i in ids] + [
+            ("StartDate", since.strftime("%Y-%m-%dT%H:%M:%SZ")), ("TimeZoneId", "UTC"),
+            ("PageSize", HISTORY_PAGE_SIZE)]
+        if until is not None:
+            params.append(("EndDate", until.strftime("%Y-%m-%dT%H:%M:%S.%fZ")))
+        for page in range(1, HISTORY_MAX_PAGES + 1):
+            items, headers = await _answer_as_user(client, base, token, "GET", "/api/Stats/reading-history",
+                                                   params=params + [("PageNumber", page)])
+            if items is None:
+                return rows, True             # a Kavita without the route: no sessions to show
+            if not isinstance(items, list):
+                raise KavitaUnavailable("Kavita's answer could not be read")
+            rows.extend(_session_rows(items))
+            try:
+                pages = int(json.loads(headers.get("pagination") or "{}").get("totalPages") or 0)
+            except (ValueError, TypeError, AttributeError):
+                pages = 0
+            if page >= pages or not items:
+                return rows, True
+            if len(rows) >= enough:
+                return rows, False
+    return rows, False
+
+
 def _toc_entries(items, out: list) -> None:
     for item in items if isinstance(items, list) else []:
         if isinstance(item, dict):

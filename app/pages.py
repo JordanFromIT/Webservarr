@@ -788,6 +788,9 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str, 
         "install_name": site_name or NO_NAME,
         "version": ("v" + version) if version else "",
         "admin_block": "" if is_admin else "hidden",
+        # Play history (the account menu and More) goes with Books: there is
+        # nothing to have played while Books is off or switched off.
+        "history_cls": "" if any(it["id"] == "library" for it in tabs + more) else "hidden",
         "user_name": (user or {}).get("display_name") or (user or {}).get("username") or "",
         "user_role": ("Admin" if is_admin else "User") if user else "",
         "avatar_style": avatar_style,

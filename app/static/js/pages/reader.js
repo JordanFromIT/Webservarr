@@ -21,6 +21,10 @@
  * timer is the one timer here not the visit's. They touch nothing on the page.
  * The reading settings are set on #wsPage, so they go with the page.
  *
+ * A page in the address (/reader?seriesId=&chapterId=&page=N, from 1: Play
+ * history's "Continue reading from here") opens the book at that page, after
+ * Kavita's own place has been read, and saves it as a page jump does.
+ *
  * Sample mode (/reader?seriesId=&chapterId=&sample=1, books spec 3b section
  * 7, "Read a sample"): the same reader, read-only. It opens at the first
  * page and never asks Kavita where the reader is (no get-progress), never
@@ -310,6 +314,18 @@ export function readerTarget(params) {
     return n > 0 ? n : null;
   }
   return { seriesId: id('seriesId'), chapterId: id('chapterId') };
+}
+
+/**
+ * The page the address asks the reader to open at (page=, as the reader
+ * numbers pages, from 1), or null. Play history's "Continue reading from
+ * here" names one: the reader opens there instead of where Kavita has them,
+ * and that is their choice, saved like a page jump (a turn of their own).
+ */
+export function readerPage(params) {
+  var raw = params.get('page');
+  var n = /^\d{1,6}$/.test(raw || '') ? parseInt(raw, 10) : 0;
+  return n > 0 ? n : null;
 }
 
 export async function mount(ctx) {
@@ -886,6 +902,7 @@ export async function mount(ctx) {
   };
 
   var target = readerTarget(ctx.url.searchParams);
+  var startPage = readerPage(ctx.url.searchParams);
   if (!target.seriesId) {
     showError('No book selected', 'Open a book from the library.');
     return leave;
@@ -923,11 +940,20 @@ export async function mount(ctx) {
     el('bookTitle').textContent = book.title;
     ctx.setTitle(book.title);
     loadTOC();
-    // A sample opens at the start and never asks where the reader is.
-    return sample ? 0 : restoreProgress();
+    // A sample opens at the start and never asks where the reader is. A page
+    // named in the address (Play history) is opened instead of Kavita's place,
+    // which is still read first, so the writer knows what Kavita holds.
+    if (sample) return 0;
+    return restoreProgress().then(function (known) { return startPage ? startPage - 1 : known; });
   }).then(function (page) {
     return loadPage(page, true);
   }).then(function () {
+    // That page is the reader's own choice: once it is on screen it is saved,
+    // as a page jump is.
+    if (startPage && !sample && !signal.aborted && canTurnPage()) {
+      positionKnown = true;
+      queueProgress();
+    }
     // Only once there is a rendered page to point at. Starting earlier
     // spotlights an empty loading spinner.
     if (!signal.aborted && guide && !sample) guide.maybeStart();
