@@ -255,6 +255,116 @@ class Overrides(CatalogCase):
         self.assertIn((2, "20:1"), self.live())
 
 
+class NearAuthor(CatalogCase):
+    """An ebook and an audiobook of one title whose author is spelled slightly
+    differently pair (book_catalog._typo_pairs). The real case: Kavita's
+    Jurassic Park names "Michael Chrichton", Plex's "Michael Crichton" (dev
+    books 763 and 49, November 2026)."""
+
+    JP_KEY = "293899:1"
+
+    def jp(self, ebook_author="Michael Chrichton", audio_author="Michael Crichton", title="Jurassic Park"):
+        self.sources.ebooks = [ebook(1212, title, ebook_author)]
+        self.sources.audiobooks = [audiobook(self.JP_KEY, title, audio_author)]
+
+    def test_jurassic_park_pairs_despite_the_typo(self):
+        self.jp()
+        out = self.rebuild()
+        self.assertEqual(out["books"], 1)
+        self.assertEqual(set(self.live()), {(1212, self.JP_KEY)})
+
+    def test_an_existing_pair_of_rows_merges_and_what_people_kept_follows(self):
+        from app.models import BookContinueHidden, BookListEntry, BookRating
+        from app.services import book_personal
+
+        self.jp(audio_author="Someone Else")                 # two books first, as on dev
+        self.rebuild()
+        e_id, a_id = self.live()[(1212, None)], self.live()[(None, self.JP_KEY)]
+        db = self.db()
+        try:
+            book_personal.add_to_list(db, "plex:1", e_id)
+            book_personal.set_rating(db, "plex:1", e_id, 4)
+            book_personal.hide_from_continue(db, "plex:1", e_id, datetime(2026, 11, 1))
+        finally:
+            db.close()
+        self.jp()
+        self.rebuild()
+        self.assertEqual(self.live(), {(1212, self.JP_KEY): a_id})     # the audiobook's row is the book's
+        self.assertEqual(self.book(e_id).merged_into, a_id)            # the ebook's id still finds it
+        db = self.db()
+        try:
+            self.assertEqual([r.book_id for r in db.query(BookListEntry)], [a_id])
+            self.assertEqual([(r.book_id, r.stars) for r in db.query(BookRating)], [(a_id, 4)])
+            self.assertEqual([r.book_id for r in db.query(BookContinueHidden)], [a_id])
+            self.assertEqual(book_catalog.resolve_book(db, e_id)[1], a_id)
+        finally:
+            db.close()
+
+    def test_same_title_different_authors_stay_apart(self):
+        for audio_author in ("Brian Herbert", "Michael Connelly", "Michel Chriton"):
+            with self.subTest(audio_author=audio_author):
+                self.jp(audio_author=audio_author)
+                self.rebuild()
+                self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY)})
+
+    def test_an_omnibus_never_pairs_by_a_near_author(self):
+        for title in ("Jurassic Park / Congo", "The Jurassic Park Omnibus", "Jurassic Park Books 1-2",
+                      "The Crichton Collection"):
+            with self.subTest(title=title):
+                self.jp(title=title)
+                self.rebuild()
+                self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY)})
+
+    def test_a_different_title_never_pairs(self):
+        self.sources.ebooks = [ebook(1212, "Jurassic Park", "Michael Chrichton")]
+        self.sources.audiobooks = [audiobook(self.JP_KEY, "The Lost World", "Michael Crichton")]
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY)})
+
+    def test_two_candidates_pair_neither(self):
+        self.jp()
+        self.sources.audiobooks.append(audiobook("300:1", "Jurassic Park", "Michael Chrichtan"))
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY), (None, "300:1")})
+        self.sources.audiobooks = [audiobook(self.JP_KEY, "Jurassic Park", "Michael Crichton")]
+        self.sources.ebooks.append(ebook(1213, "Jurassic Park", "Michael Crichtan"))    # two ebooks could take it
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (1213, None), (None, self.JP_KEY)})
+
+    def test_a_side_already_paired_or_named_by_an_override_is_left_alone(self):
+        self.jp()
+        self.sources.ebooks.append(ebook(1300, "Jurassic Park", "Michael Crichton"))     # pairs exactly
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (1300, self.JP_KEY)})
+        self.sources.ebooks = self.sources.ebooks[:1]
+        self.override(1212, self.JP_KEY, "apart")
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY)})
+
+    def test_an_override_on_another_book_keeps_the_edition_out(self):
+        self.jp()
+        self.sources.ebooks.append(ebook(5, "Something Else", "Michael Crichton"))
+        self.override(5, self.JP_KEY, "pair")
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (5, self.JP_KEY)})
+
+    def test_short_names_never_slip(self):
+        self.jp(ebook_author="Li Bo", audio_author="Li Po")
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1212, None), (None, self.JP_KEY)})
+
+    def test_same_author(self):
+        same = book_catalog.same_author
+        self.assertTrue(same("Michael Chrichton", "Michael Crichton"))
+        self.assertTrue(same("J.R.R. Tolkien", "J. R. R. Tolkien"))
+        self.assertTrue(same("Charlotte Brontë", "charlotte bronte"))
+        self.assertFalse(same("Frank Herbert", "Brian Herbert"))
+        self.assertFalse(same("Michael Crichton", "Crichton"))
+        self.assertFalse(same("Micheal Chrichton", "Michael Crichton"))     # no word exactly equal
+        self.assertFalse(same("Li Bo", "Li Po"))
+        self.assertFalse(same("", ""))
+
+
 class KeepLastGood(CatalogCase):
     def setUp(self):
         super().setUp()

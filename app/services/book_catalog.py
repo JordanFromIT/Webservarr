@@ -143,6 +143,7 @@ def _ebook_item(book: dict, known_series: tuple = ()) -> _Item:
         except Exception as exc:  # noqa: BLE001 - no key means no automatic pair, as for the player
             logger.warning("No work key could be made of an ebook's title: %s", type(exc).__name__)
     return _Item("k", book["id"], key, {
+        "pairing_title": title if key else "",
         "title": book["title"], "sort_title": book["sort_title"], "author": book["author"],
         "narrator": "", "series": book["series"], "series_number": book["series_number"],
         "description": book["description"], "added_at": book["added_at"],
@@ -197,17 +198,105 @@ def _groups(ebooks: Dict[int, _Item], editions: Dict[str, _Item], overrides: lis
         if len(owners) == 1 and (owners[0], item.id) not in apart:
             members[owners[0]].append(item.id)
             placed.add(item.id)
-    groups: List[tuple] = [(ebooks[cid], [editions[k] for k in sorted(set(members[cid]))]) for cid in sorted(ebooks)]
     alone: Dict[str, List[_Item]] = {}
+    loose: List[_Item] = []
     for item in editions.values():
         if item.id in placed:
             continue
         if item.key:
             alone.setdefault(item.key, []).append(item)
         else:
-            groups.append((None, [item]))
+            loose.append(item)
+    named = {o.kavita_chapter_id for o in overrides} | {o.plex_book_key for o in overrides}
+    for chapter_id, key in _typo_pairs(ebooks, alone, members, ebooks_by_key, named):
+        members[chapter_id].extend(i.id for i in alone.pop(key))
+    groups: List[tuple] = [(ebooks[cid], [editions[k] for k in sorted(set(members[cid]))]) for cid in sorted(ebooks)]
+    groups += [(None, [item]) for item in loose]
     groups += [(None, sorted(items, key=lambda i: i.id)) for items in alone.values()]
     return groups
+
+
+# A title that is several books in one never pairs by a near author: an
+# omnibus, a box set, "Books 1-3", "Jurassic Park / Congo".
+_SEVERAL = re.compile(r"\bomnibus\b|\bbox(?:ed)?\s*set\b|\bcollection\b|\btrilogy\b|\bbooks?\s*\d+\s*(?:-|–|to|&|and)\s*\d+"
+                      r"|\s/\s", re.IGNORECASE)
+
+
+def same_author(a: str, b: str) -> bool:
+    """Whether two spellings of an author's name are one person, by the
+    Books search's slip rules (search_match): the same words in order, each
+    equal or within that word's slips ("Michael Chrichton" is "Michael
+    Crichton"), at least one word exactly equal, and NAME_MIN_LETTERS letters
+    at least for a slip to count. Case, accents and punctuation never count,
+    and a run of initials is one word ("J.R.R." and "J. R. R." alike)."""
+    from app.services import search_match
+
+    def name_words(text) -> List[str]:
+        out: List[str] = []
+        initials = ""
+        for w in search_match.words(text):
+            if len(w) == 1 and w.isalpha():
+                initials += w
+                continue
+            if initials:
+                out.append(initials)
+                initials = ""
+            out.append(w)
+        return out + ([initials] if initials else [])
+
+    wa, wb = name_words(a), name_words(b)
+    if not wa or len(wa) != len(wb):
+        return False
+    if wa == wb:
+        return True
+    if min(len("".join(wa)), len("".join(wb))) < NAME_MIN_LETTERS or not any(x == y for x, y in zip(wa, wb)):
+        return False
+    for x, y in zip(wa, wb):
+        if x != y:
+            allowed = search_match._slips_allowed(min(x, y, key=len))
+            if not allowed or search_match.edit_distance(x, y, allowed) > allowed:
+                return False
+    return True
+
+
+# A name shorter than this (letters and digits) never matches with a slip.
+NAME_MIN_LETTERS = 8
+
+
+def _typo_pairs(ebooks: Dict[int, _Item], alone: Dict[str, List[_Item]], members: Dict[int, List[str]],
+                ebooks_by_key: Dict[str, List[int]], named: set) -> List[tuple]:
+    """(chapter id, work key) for an ebook left without editions and a work
+    key's editions left without an ebook that are one book whose author's
+    name is spelled slightly differently on the two sides (a typo in Kavita's
+    metadata: "Michael Chrichton" against Plex's "Michael Crichton").
+
+    The title must match exactly as pairing matches it: the ebook's title,
+    keyed with the editions' spelling of the author, gives the editions' work
+    key. Never when either side is named by an override, when the ebook's own
+    key is another ebook's too, when either title is several books in one,
+    or when it is not one to one (an ebook with two such candidates, or
+    editions two ebooks could take)."""
+    found: Dict[int, List[str]] = {}
+    for cid, ebook in ebooks.items():
+        f = ebook.fields
+        if members[cid] or cid in named or f is None or not ebook.key or not f.get("pairing_title") \
+                or len(ebooks_by_key.get(ebook.key, [])) != 1 or _SEVERAL.search(f.get("title") or ""):
+            continue
+        for key, items in alone.items():
+            g = items[0].fields
+            if g is None or any(i.id in named for i in items) or _SEVERAL.search(g.get("title") or "") \
+                    or not same_author(f.get("author") or "", g.get("author") or ""):
+                continue
+            try:
+                if plex_player.work_key(g["author"], f["pairing_title"]) == key:
+                    found.setdefault(cid, []).append(key)
+            except Exception as exc:  # noqa: BLE001 - no key, no pair (as _ebook_item)
+                logger.warning("No work key could be made for a near-author pairing: %s", type(exc).__name__)
+    takers: Dict[str, int] = {}
+    for keys in found.values():
+        for key in keys:
+            takers[key] = takers.get(key, 0) + 1
+    return sorted((cid, keys[0]) for cid, keys in found.items() if len(keys) == 1 and takers[keys[0]] == 1)
 
 
 def _groups_in_outage(ebooks: Dict[int, _Item], editions: Dict[str, _Item], overrides: list, live: list,
