@@ -15,11 +15,10 @@ import logging
 import os
 
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.limiter import limiter
+from app.limiter import DefaultLimitsMiddleware, limiter
 from app.database import get_db, init_db, SessionLocal
 from app.auth import session_manager
 from app.dependencies import still_has_access
@@ -272,7 +271,7 @@ class BodySizeLimitMiddleware:
 
 # Innermost middleware (registered first): see the class docstring.
 app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
-app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(DefaultLimitsMiddleware)
 
 # CORS middleware - built from config
 _cors_origins = [settings.app_url]

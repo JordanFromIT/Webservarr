@@ -1088,8 +1088,16 @@ async def get_upcoming_releases(
 
 # --- Netdata Endpoints ---
 
+# The top bar's gauges (static/js/gauges.js) ask once a second from every
+# open tab on every page, so the 120/minute default is two tabs. One address
+# can be a whole household, so this allows ten tabs per address.
+SYSTEM_STATS_LIMIT = "600/minute"
+
+
 @router.get("/system-stats")
+@limiter.limit(SYSTEM_STATS_LIMIT)
 async def get_system_stats(
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
     """Get system stats from Netdata. Requires authentication."""

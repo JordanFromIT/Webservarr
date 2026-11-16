@@ -4,10 +4,16 @@ app.main and the router modules that apply per-endpoint limits.
 """
 
 import ipaddress
+from typing import Callable, Iterable, Optional
 
 from fastapi import Request
+from fastapi import routing as fastapi_routing
+from starlette.responses import Response
+from starlette.routing import BaseRoute, Match
+from starlette.types import Scope
 
 from slowapi import Limiter
+from slowapi.middleware import SlowAPIMiddleware, _should_exempt, async_check_limits
 
 from app.config import settings
 
@@ -91,3 +97,50 @@ limiter = Limiter(
     swallow_errors=True,
     in_memory_fallback_enabled=True,
 )
+
+
+def route_endpoint(routes: Iterable[BaseRoute], scope: Scope) -> Optional[Callable]:
+    """The function that will answer this request, or None (a mount such as
+    /static, a wrong method, or no route at all).
+
+    Since FastAPI 0.137 each include_router() is one nested entry in
+    app.routes with no endpoint of its own; iter_route_contexts lists the
+    routes inside them in dispatch order. Without it (a flat layout) the
+    routes are matched as they are. The first full match wins, as in routing.
+    A mount has no endpoint attribute (its matched scope names its app as the
+    endpoint, which is not a view), so it reads as None, as in slowapi."""
+    flatten = getattr(fastapi_routing, "iter_route_contexts", None)
+    for route in flatten(routes) if flatten else routes:
+        match, _ = route.matches(scope)
+        if match == Match.FULL:
+            return getattr(route, "endpoint", None)
+    return None
+
+
+class DefaultLimitsMiddleware(SlowAPIMiddleware):
+    """slowapi's middleware, finding the endpoint inside included routers.
+
+    slowapi 0.1.9 looks for it in app.routes only, so on FastAPI 0.137+ it
+    found none for any router route and skipped the default limit for all
+    of them. The rest is slowapi's: an exempt route and a route with its own
+    static limit are left alone (its decorator counts it, once), and every
+    other route gets the default. Over the limit, the app's own 429 handler
+    answers, as it does for a route's own limit."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        app = request.app
+        limiter: Limiter = app.state.limiter
+        if not limiter.enabled:
+            return await call_next(request)
+
+        handler = route_endpoint(app.routes, request.scope)
+        if _should_exempt(limiter, handler):
+            return await call_next(request)
+
+        error_response, should_inject_headers = await async_check_limits(limiter, request, handler, app)
+        if error_response is not None:
+            return error_response
+        response = await call_next(request)
+        if should_inject_headers:
+            response = limiter._inject_headers(response, request.state.view_rate_limit)
+        return response
