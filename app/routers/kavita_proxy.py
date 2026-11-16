@@ -53,9 +53,9 @@ _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 # A PDF book's file, which the reader renders itself (pdf.js) because Kavita's
 # page API reads only EPUBs. Kavita takes nothing but an apiKey on it (no
 # Bearer token), so the proxy adds the person's own key and passes only the
-# chapterId through: extractPdf, which has Kavita turn every page into an
-# image, is the work of Kavita's own apps, never this reader's. The file is
-# fetched in byte ranges (Kavita answers them), so the headers that describe a
+# chapterId through (extractPdf is dropped on every path, see send()). Kavita
+# serves any chapter's own file there, so an answer that is not a PDF is a 404.
+# The file is fetched in byte ranges (Kavita answers them), so the headers that describe a
 # range come back with it. A trailing slash is the same route to Kavita
 # (ASP.NET ignores it), so it is the same route here, under the same rules.
 _PDF_PATH = re.compile(r"^api/reader/pdf/?$", re.IGNORECASE)
@@ -1124,7 +1124,10 @@ async def kavita_proxy(
     async def send():
         """(client, upstream response) for this request with the token held now."""
         headers = build_forward_headers(request, token)
-        params = dict(request.query_params)
+        # extractPdf has Kavita render every page of a PDF to images (on
+        # chapter-info, file-dimensions, image): never this site's work, so it
+        # is dropped on every path, ignoring case as ASP.NET reads it.
+        params = {k: v for k, v in request.query_params.items() if k.lower() != "extractpdf"}
         # Kavita's asset endpoints reject the Bearer token and require an apiKey
         # query parameter, because they are designed for <img src> and CSS url()
         # references that cannot send headers. Inject it here so the key stays
@@ -1173,6 +1176,13 @@ async def kavita_proxy(
         await upstream.aclose()
         await client.aclose()
         raise HTTPException(status_code=401, detail="Kavita session expired")
+    if (_PDF_PATH.match(path) and upstream.status_code in (200, 206)
+            and upstream.headers.get("content-type", "").split(";")[0].strip().lower() != "application/pdf"):
+        # Kavita's GetPdf serves any chapter's own file (an EPUB, an archive)
+        # and does not ask for its Download role: this route hands back PDFs only.
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=404, detail="Not found")
     if request.method == "POST" and path.lower() == "api/reader/progress" and 200 <= upstream.status_code < 300:
         # Kavita took a reader save: Insights' Right now shows who is reading (spec 4.5).
         await _note_reading(current_user, body, pdf=request.query_params.get("format") == "pdf")

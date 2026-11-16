@@ -706,6 +706,7 @@ class PdfFile(unittest.TestCase):
 
     PDF = b"%PDF-1.4\n" + b"x" * 90
     status = None             # Kavita answers the file with this status instead
+    content_type = "application/pdf"   # the type Kavita gives the chapter's file
 
     def setUp(self):
         from app.tests import helpers
@@ -731,7 +732,7 @@ class PdfFile(unittest.TestCase):
                                   content=b"" if self.status == 204 else b'{"title":"error"}')
         if "apiKey" not in request.url.params:
             return httpx.Response(400, json={"errors": {"apiKey": ["The apiKey field is required."]}})
-        headers = {"Content-Type": "application/pdf", "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600",
+        headers = {"Content-Type": self.content_type, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600",
                    "Content-Disposition": 'attachment; filename="Book.pdf"', "ETag": '"abc"'}
         wanted = request.headers.get("range", "")
         if wanted.startswith("bytes="):
@@ -836,6 +837,33 @@ class PdfFile(unittest.TestCase):
                 self.assertEqual(r.status_code, 200)
                 self.assertEqual(sent[0].url.params.multi_items(), [])         # Kavita never sees format=
                 self.assertEqual(note.await_args.kwargs, {"pdf": pdf})
+
+    def test_a_chapter_that_is_not_a_pdf_is_404(self):
+        # Kavita's GetPdf serves any chapter's own file (an EPUB, a CBZ) without
+        # its Download role: the route hands back PDFs only.
+        for kind in ("application/epub+zip", "application/zip", "application/octet-stream", ""):
+            for headers in ({}, {"Range": "bytes=0-9"}):
+                with self.subTest(kind=kind, headers=headers):
+                    self.content_type = kind
+                    r = self.fetch("chapterId=198", headers=headers)
+                    self.assertEqual(r.status_code, 404)
+                    self.assertNotIn(self.PDF[:10], r.content)
+
+    def test_a_pdf_type_with_parameters_or_other_case_is_still_a_pdf(self):
+        self.content_type = "Application/PDF; charset=binary"
+        r = self.fetch("chapterId=198", headers={"Range": "bytes=0-9"})
+        self.assertEqual(r.status_code, 206)
+        self.assertEqual(r.content, self.PDF[:10])
+
+    def test_extract_pdf_never_reaches_kavita_on_any_path(self):
+        # extractPdf=true has Kavita render every page of a PDF to images.
+        for path in ("api/reader/chapter-info", "api/reader/file-dimensions", "api/reader/image"):
+            for name in ("extractPdf", "EXTRACTPDF", "extractpdf"):
+                with self.subTest(path=path, name=name):
+                    self.seen = []
+                    self.fetch_path(f"{path}?chapterId=198&{name}=true&page=1")
+                    (sent,) = self.seen
+                    self.assertEqual(sorted(k.lower() for k in sent.url.params.keys()), ["chapterid", "page"])
 
     def test_its_ranges_draw_on_the_page_budget(self):
         for path in ("api/Reader/pdf", "api/reader/PDF", "api/Reader/pdf/"):
