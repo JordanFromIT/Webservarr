@@ -209,7 +209,8 @@ class MovedRoutes(PageRoutesBase):
 
     def test_the_book_page_wants_a_whole_number_and_a_session(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
-        for path in ("/books/abc", "/books/1.5", "/books/-3"):
+        # A run of digits past Python's int limit (4300) was a 500, not a 404.
+        for path in ("/books/abc", "/books/1.5", "/books/-3", "/books/" + "9" * 5000, "/books/" + "1" * 19):
             self.assertEqual(self.get(path, MEMBER_SESSION, values).status_code, 404, path)
         for path in ("/books/7", "/books/person?role=author&name=X", "/books/series?name=X"):
             r = self.get(path, None, values)

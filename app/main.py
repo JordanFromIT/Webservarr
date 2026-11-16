@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request, Cookie, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
+from starlette.convertors import Convertor, register_url_convertor
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -154,6 +155,21 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app. The interactive docs and the schema they read are
 # served in debug only: elsewhere they would hand anyone the full route map.
 # app.openapi() still builds the schema for code that needs it.
+class _BookIdConvertor(Convertor):
+    """A path id of 1 to 18 digits. Starlette's own int convertor matches any
+    run of digits, and int() refuses one past Python's 4300-digit limit, which
+    answered a long id with a 500; this one simply does not match it (404)."""
+    regex = "[0-9]{1,18}"
+
+    def convert(self, value: str) -> int:
+        return int(value)
+
+    def to_string(self, value: int) -> str:
+        return str(value)
+
+
+register_url_convertor("book_id", _BookIdConvertor())
+
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
@@ -771,7 +787,7 @@ async def books_stats_page(
     return await shell_page("books-stats", request, user, gate="library")
 
 
-@app.get("/books/{book_id:int}", response_class=HTMLResponse, tags=["Pages"])
+@app.get("/books/{book_id:book_id}", response_class=HTMLResponse, tags=["Pages"])
 async def book_page(
     request: Request,
     book_id: int,
