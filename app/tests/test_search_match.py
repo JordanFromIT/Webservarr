@@ -55,6 +55,15 @@ class Matcher(unittest.TestCase):
         self.assertIsNotNone(q.match([(1, "Dungeon Crawler Carl")], [(1, "dcc"), (1, "7")]))
         self.assertIsNone(q.match([(1, "Dungeon Crawler Carl")], [(1, "dcc"), (1, "8")]))
 
+    def test_a_word_typed_twice_is_looked_for_once(self):
+        self.assertEqual(search_match.Query("ruin ruin inev ruin").terms, ["inev", "ruin"])
+        self.assertEqual(search_match.Query("ruin inev inev").terms, ["ruin", "inev"])   # the last stays last
+
+    def test_nothing_left_once_folded_matches_nothing(self):
+        for q in ("\u00b4", "\u00a8", "\u0301", ""):
+            with self.subTest(q=q):
+                self.assertIsNone(search_match.Query(q).match([(0, "Anything at all")]))
+
     def test_edit_distance(self):
         self.assertEqual(search_match.edit_distance("dnue", "dune", 1), 1)          # a swap is one edit
         self.assertEqual(search_match.edit_distance("dinnimen", "dinniman", 2), 1)
@@ -352,6 +361,29 @@ class WikiSearch(unittest.TestCase):
         self.assertEqual(page["matched_in"], "body")
         hit = page["snippet"][page["match_offset"]:page["match_offset"] + page["match_length"]]
         self.assertEqual(hit, "remembers")
+
+    def test_a_long_query_is_refused_like_books(self):
+        self.assertEqual(len(self.search("x" * 100)), 0)
+        self.assertEqual(self.client.get("/api/wiki/pages", params={"q": "x" * 101}).status_code, 422)
+
+    def test_a_query_of_repeated_words_stays_fast(self):
+        import time
+        from app.models import WikiPage
+        db = self.Session()
+        words = " ".join(f"word{i} lorem{i % 97} ipsum{i % 89}" for i in range(4000))
+        for n in range(20):
+            db.add(WikiPage(title=f"Long {n}", slug=f"long-{n}", content=words, content_html="<p>x</p>",
+                            published=True, author_name="Admin"))
+        db.commit()
+        db.close()
+        start = time.perf_counter()
+        self.assertEqual(self.search(("zqxwvkpj " * 11).strip()), [])
+        self.assertLess(time.perf_counter() - start, 2.0)
+
+    def test_an_accent_alone_finds_nothing(self):
+        for q in ("\u00b4", "\u00a8", "\u0301"):
+            with self.subTest(q=q):
+                self.assertEqual(self.search(q), [])
 
     def test_no_term_lists_every_page(self):
         self.assertEqual(len(self.search("")), 3)

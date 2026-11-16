@@ -251,6 +251,33 @@ await run('the Kind filter', async () => {
   } finally { t.release(); }
 });
 
+await run('the find box forgives titles and authors, never the shared status words', async () => {
+  const films = { generated_at: new Date().toISOString(), counts: {}, total: 2, items: [
+    { request_id: 21, media_type: 'movie', title: 'A Film', year: 2026, requested_at: iso(4), reason_code: 'DECLINED' },
+    { request_id: 22, media_type: 'tv', title: 'A Show', year: 2025, requested_at: iso(5), reason_code: 'TV_PARTIAL' }
+  ] };
+  const t = visit(routes({ body: films }, { body: BOOKS }));
+  try {
+    await t.mount();
+    const find = (q) => {
+      t.q('#rsSearch').value = q;
+      t.q('#rsSearch').dispatchEvent(new t.win.Event('input'));
+      return t.rows().map((tr) => t.cells(tr)[0]);
+    };
+    // Near "done", "down" and "some": a slip must not reach the Why and Status sentences.
+    for (const q of ['dune', 'gone', 'bone', 'the town', 'home']) {
+      check('no slip into the status words: ' + q, find(q).length === 0, find(q));
+    }
+    // Typed as they read, those words still find their rows.
+    check('"42% done" finds the download', find('42% done').length === 1 && find('42% done')[0].indexOf('Halfway') === 0);
+    check('"turned down" finds the declined film', find('turned down').length === 1 && find('turned down')[0].indexOf('A Film') === 0);
+    check('"rest still coming" finds the part-here show', find('rest still coming').length === 1);
+    // The title and author are still forgiven.
+    check('a slip in a title', find('halfwya').length === 1 && find('halfwya')[0].indexOf('Halfway') === 0, find('halfwya'));
+    check('a slip in an author', find('turnye').length === 1 && find('turnye')[0].indexOf('Marius') === 0, find('turnye'));
+  } finally { t.release(); }
+});
+
 await run('Chaptarr down: the films and shows still list, and a line says why', async () => {
   const t = visit(routes({ body: FILMS }, { status: 503, body: { detail: 'Book requests can’t be checked right now.' } }));
   try {

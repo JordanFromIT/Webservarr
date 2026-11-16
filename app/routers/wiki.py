@@ -14,7 +14,8 @@ import unicodedata
 import uuid
 from typing import Dict, List, Literal, Optional, Sequence
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -305,6 +306,29 @@ def _snippet(content: str, term: str, words: Sequence[str] = ()) -> dict:
     }
 
 
+def _search_pages(pages: List[WikiPage], cats: Dict[int, WikiCategory], term: str) -> List[dict]:
+    """The pages matching `term`, best first, each with its matched_in and snippet.
+
+    The same matching as Books (search_match): the whole term inside a field
+    first, then its words in any order, half typed or slightly misspelt.
+    Searching the markdown source rather than content_html so a query never
+    matches on tag names or attribute values the author never typed.
+    """
+    search = search_match.Query(term)
+    ranked = []
+    for page in pages:
+        found = search.match([(0, page.title or ""), (1, page.summary or ""), (2, page.content or "")])
+        if not found:
+            continue
+        item = _page_brief(page, cats.get(page.category_id))
+        item["matched_in"] = _MATCHED_IN[found.group]
+        item.update(_snippet(page.content, term, found.words))
+        # Title hits first, then summary, then body; alphabetical within each.
+        ranked.append(((found.tier, found.group, found.edits, (page.title or "").lower()), item))
+    ranked.sort(key=lambda r: r[0])
+    return [item for _key, item in ranked]
+
+
 # ============================================================
 # Read endpoints (any signed-in user)
 # ============================================================
@@ -337,7 +361,8 @@ async def list_categories(
 async def list_pages(
     request: Request,
     category: Optional[str] = None,
-    q: Optional[str] = None,
+    # Capped like Books search: the matcher's work grows with the words asked for.
+    q: Optional[str] = Query(None, max_length=100),
     include_drafts: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -368,23 +393,9 @@ async def list_pages(
     if not term:
         return [_page_brief(page, cats.get(page.category_id)) for page in pages][offset:offset + limit]
 
-    # The same matching as Books (search_match): the whole term inside a field
-    # first, then its words in any order, half typed or slightly misspelt.
-    # Searching the markdown source rather than content_html so a query never
-    # matches on tag names or attribute values the author never typed.
-    search = search_match.Query(term)
-    ranked = []
-    for page in pages:
-        found = search.match([(0, page.title or ""), (1, page.summary or ""), (2, page.content or "")])
-        if not found:
-            continue
-        item = _page_brief(page, cats.get(page.category_id))
-        item["matched_in"] = _MATCHED_IN[found.group]
-        item.update(_snippet(page.content, term, found.words))
-        # Title hits first, then summary, then body; alphabetical within each.
-        ranked.append(((found.tier, found.group, found.edits, (page.title or "").lower()), item))
-    ranked.sort(key=lambda r: r[0])
-    return [item for _key, item in ranked][offset:offset + limit]
+    # Matching every page's text is CPU work: off the event loop.
+    ranked = await run_in_threadpool(_search_pages, pages, cats, term)
+    return ranked[offset:offset + limit]
 
 
 @router.get("/pages/{slug}")

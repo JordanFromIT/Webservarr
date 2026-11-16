@@ -255,6 +255,7 @@ export async function mount(ctx) {
       'text-frosted-blue placeholder:text-steel-blue focus:border-focus focus:ring-0 transition-colors');
     input.type = 'search';
     input.name = 'q';
+    input.maxLength = 100;                 // the search API's cap (/api/wiki/pages q)
     input.placeholder = 'Search the wiki…';
     input.value = initial || '';
     input.setAttribute('aria-label', 'Search the wiki');

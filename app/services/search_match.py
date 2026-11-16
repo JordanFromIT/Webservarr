@@ -22,7 +22,7 @@ words ("the", "of", ...) are left out of a query that has other words, so
 "the inevitable ruin" finds "This Inevitable Ruin". A slip is one edit
 (a letter added, dropped, changed, or two swapped) in a word of 4 to 7
 letters, two in a word of 8 or more; shorter words and numbers must be exact.
-Two neighbouring words of an item also count run together ("leguin").
+Two neighbouring words of a short field also count run together ("leguin").
 """
 import re
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
@@ -32,6 +32,8 @@ from app.services.book_catalog import fold
 FILLER = frozenset({"the", "a", "an", "this", "of", "and", "to", "in", "on"})
 # Read as part of the number after them: "book 7" is "7".
 NUMBER_WORDS = frozenset({"book", "vol", "volume"})
+# Run-together neighbours ("leguin") only in fields of up to this many words.
+PAIRED_WORDS = 40
 
 TIER_PHRASE, TIER_WORDS, TIER_PREFIX, TIER_TYPO = 0, 1, 2, 3
 _EXACT, _PREFIX, _TYPO = 0, 1, 2
@@ -72,7 +74,9 @@ def _item_words(folded: str) -> List[str]:
     """The words of an item's folded field, plus the joined forms a reader may
     type: "Half-Blood" also as "halfblood", "J. R. R." also as "jrr", and two
     neighbouring words run together, "Le Guin" also as "leguin" (not with a
-    filler word: "ofthe" would only be noise)."""
+    filler word: "ofthe" would only be noise; and only in a field of up to
+    PAIRED_WORDS words, a name or a title: across a long wiki page every pair
+    is a new word to compare, for matches nobody types)."""
     out: List[str] = []
     joined: List[str] = []
     for chunk in _plain(folded).split():
@@ -88,7 +92,8 @@ def _item_words(folded: str) -> List[str]:
         if len(letters) > 1:
             joined.append("".join(letters))
         letters = []
-    joined += [a + b for a, b in zip(out, out[1:]) if a not in FILLER and b not in FILLER]
+    if len(out) <= PAIRED_WORDS:
+        joined += [a + b for a, b in zip(out, out[1:]) if a not in FILLER and b not in FILLER]
     return out + joined
 
 
@@ -158,11 +163,14 @@ class Query:
         kept = [w for i, w in enumerate(typed)
                 if not (w in NUMBER_WORDS and i + 1 < len(typed) and typed[i + 1].isdigit())]
         significant = [w for w in kept if w not in FILLER]
-        self.terms: List[str] = significant or kept
+        # A word typed twice is one word to find (its last place kept: the
+        # last word may be half typed).
+        self.terms: List[str] = list(reversed(dict.fromkeys(reversed(significant or kept))))
         # The last word may be half typed, unless it was a filler left out.
         self._prefix_last = bool(self.terms) and bool(kept) and kept[-1] == self.terms[-1] \
             and not self.terms[-1].isdigit()
         self._slips = [_slips_allowed(t) for t in self.terms]
+        self._half = len(self.terms) - 1 if self._prefix_last else -1   # the term that may be half typed
         self._letters = [frozenset(t) for t in self.terms]
         self._memo: List[Dict[str, Optional[Tuple[int, int]]]] = [{} for _ in self.terms]
         # Authors, series and narrators repeat across a library: fold each once.
@@ -172,7 +180,9 @@ class Query:
     def _fold(self, text: str) -> str:
         found = self._folded.get(text)
         if found is None:
-            found = self._folded[text] = fold(text)
+            # Plain ASCII (most of a wiki page) folds to itself in lower case:
+            # the same answer as fold(), without its walk over every letter.
+            found = self._folded[text] = " ".join(text.lower().split()) if text.isascii() else fold(text)
         return found
 
     def _item_words(self, folded: str) -> List[str]:
@@ -183,6 +193,8 @@ class Query:
 
     def _compare(self, i: int, word: str) -> Optional[Tuple[int, int]]:
         """(kind, edits) for query term `i` against an item word, or None."""
+        if i != self._half and abs(len(word) - len(self.terms[i])) > self._slips[i]:
+            return None                    # too long or short for any match: no memo needed
         memo = self._memo[i]
         if word in memo:
             return memo[word]
@@ -223,6 +235,9 @@ class Query:
         """How the item with these (group, text) fields matches, or None.
         `extra_words` are (group, word) pairs that count as words of the item
         but not as text to find the phrase in (a series' number, initials)."""
+        if not self.phrase:
+            # Nothing left once folded ("\u00b4" alone): nothing to look for.
+            return None
         folded = [(group, self._fold(text or "")) for group, text in fields]
         hits = [(group, 0 if text.startswith(self.phrase) else 1)
                 for group, text in folded if self.phrase in text]
@@ -231,15 +246,33 @@ class Query:
             return Match(TIER_PHRASE, group, 0, start)
         if not self.terms:
             return None
-        item = [(group, pos, w) for group, text in folded for pos, w in enumerate(self._item_words(text))]
-        item += [(group, 1, w) for group, w in extra_words]
+        # Each different word once, where it counts most (best group, then the
+        # start of a field), so a long page costs its vocabulary, not its length.
+        item: Dict[str, Tuple[int, int]] = {}
+        for group, text in folded:
+            words_ = self._item_words(text)
+            if not words_:
+                continue
+            first = (group, 0)
+            later = (group, 1)
+            if first < item.get(words_[0], (99, 1)):
+                item[words_[0]] = first
+            for w in words_[1:]:
+                if later < item.get(w, (99, 1)):
+                    item[w] = later
+        for group, w in extra_words:
+            if (group, 1) < item.get(w, (99, 1)):
+                item[w] = (group, 1)
         best: List[Tuple[int, int, int, int, str]] = []
-        for i in range(len(self.terms)):
+        for i, term in enumerate(self.terms):
+            if term in item:                       # an exact word: nothing beats it
+                best.append((_EXACT, 0, *item[term], term))
+                continue
             top = None
-            for group, pos, w in item:
+            for w, (group, start) in item.items():
                 found = self._compare(i, w)
                 if found is not None:
-                    candidate = (found[0], found[1], group, 0 if pos == 0 else 1, w)
+                    candidate = (found[0], found[1], group, start, w)
                     if top is None or candidate < top:
                         top = candidate
             if top is None:

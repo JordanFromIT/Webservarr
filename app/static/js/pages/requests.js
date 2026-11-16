@@ -879,10 +879,13 @@ export async function mount(ctx) {
         if (fs && rsStatusOf(r).key !== fs) return false;
         if (ft && (RS_KIND_FILTER[ft] || []).indexOf(r.media_type) === -1) return false;
         if (q) {
-          // Books search's rules (search-match.js): any word order, small slips forgiven.
-          var hay = rsCellValue(r, 'title') + ' ' + rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status') +
-                    ' ' + (r.author || '');
-          if (!WSSearch.matches(q, hay)) return false;
+          // The title and author by Books search's rules (search-match.js: any
+          // word order, small slips forgiven). The Status and Why words are
+          // sentences many rows share, so they match only as typed: forgiven,
+          // "dune" would find every "...% done".
+          var named = rsCellValue(r, 'title') + ' ' + (r.author || '');
+          var said = (rsCellValue(r, 'why') + ' ' + rsCellValue(r, 'status')).toLowerCase();
+          if (!WSSearch.matches(q, named) && said.indexOf(q.toLowerCase()) === -1) return false;
         }
         return true;
       });
