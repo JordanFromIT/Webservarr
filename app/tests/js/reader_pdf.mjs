@@ -229,6 +229,8 @@ async function readerVisit(search, opts) {
   const o = Object.assign({ format: 4, progress: 11, outline: [], openStatus: 0, hold: false, failPageOnce: false }, opts || {});
   const win = new Window({ url: 'https://ws.test/reader' + search, width: o.width || 390, height: o.height || 844 });
   const doc = win.document;
+  // Play history's mark (reader.READER_START_KEY), without which page= is ignored.
+  if (o.mark) win.sessionStorage.setItem(reader.READER_START_KEY, o.mark);
   Object.defineProperty(doc.documentElement, 'clientWidth', { get: () => win.innerWidth, configurable: true });
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
   doc.getElementById('readerPdfJs').setAttribute('data-ws-dep', dataUrl(PDF_SRC));
@@ -349,7 +351,7 @@ await run('a PDF opens at Kavita\'s place, drawn by PDF.js', async () => {
 });
 
 await run('page= opens that page and saves it', async () => {
-  const v = await readerVisit('?seriesId=130&chapterId=198&page=20');
+  const v = await readerVisit('?seriesId=130&chapterId=198&page=20', { mark: '198:20' });
   try {
     check('Kavita\'s place was still read', v.calls.some((u) => /get-progress\?chapterId=198/.test(u)));
     check('page 20 (19 from 0) drawn, not Kavita\'s 11', v.pageInfo() === '20/781' && drawnPages(v).includes(19), [v.pageInfo(), drawnPages(v)]);
@@ -480,7 +482,7 @@ await run('a resize during a page load is drawn once the page is up', async () =
 
 for (const [format, name, opts] of [[3, 'EPUB', { failPageOnce: true, progress: 10 }], [4, 'PDF', { failRenderOnce: true }]]) {
   await run(`${name}: page= is taken on the first page shown, even after Try again`, async () => {
-    const v = await readerVisit('?seriesId=130&chapterId=198&page=143', Object.assign({ format }, opts));
+    const v = await readerVisit('?seriesId=130&chapterId=198&page=143', Object.assign({ format, mark: '198:143' }, opts));
     let href;
     try {
       check('the first load failed', !v.$('errorState').classList.contains('hidden'));

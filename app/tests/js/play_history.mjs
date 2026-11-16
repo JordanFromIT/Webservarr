@@ -340,9 +340,12 @@ await run('the reader\'s page from the address', async () => {
 
 // kavitaPage: Kavita's saved pageNum (from 0), which a save moves, as Kavita does.
 let kavitaPage = 300;
-async function readerVisit(search) {
+// mark: the sessionStorage mark Play history sets before it navigates
+// (reader.READER_START_KEY), or none.
+async function readerVisit(search, mark) {
   const win = new Window({ url: 'https://ws.test/reader' + search });
   const doc = win.document;
+  if (mark != null) win.sessionStorage.setItem(reader.READER_START_KEY, mark);
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
   const ctl = new win.AbortController();
   const calls = [];
@@ -402,11 +405,11 @@ async function readerVisit(search) {
   if (typeof leave === 'function') leave();
   await flush();
   for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; }
-  return { calls, posts, pageInfo, href, replaced };
+  return { calls, posts, pageInfo, href, replaced, mark: win.sessionStorage.getItem(reader.READER_START_KEY) };
 }
 
 await run('the reader opens at page= and saves it as a page jump', async () => {
-  const v = await readerVisit('?seriesId=5&chapterId=77&page=143');
+  const v = await readerVisit('?seriesId=5&chapterId=77&page=143', '77:143');
   check('Kavita\'s place was still read first', v.calls.some((u) => /get-progress\?chapterId=77/.test(u)), v.calls);
   check('the page asked for is 143 (142 from 0), not Kavita\'s 300', v.calls.some((u) => /book-page\?page=142$/.test(u)) && !v.calls.some((u) => /book-page\?page=300$/.test(u)), v.calls);
   check('shown as 143 of 600', v.pageInfo.replace(/\s/g, '') === '143/600', v.pageInfo);
@@ -420,7 +423,7 @@ await run('the reader opens at page= and saves it as a page jump', async () => {
 
 await run('page= is used once: a reload never writes it over a newer place', async () => {
   kavitaPage = 300;
-  const first = await readerVisit('?seriesId=5&chapterId=77&page=143');
+  const first = await readerVisit('?seriesId=5&chapterId=77&page=143', '77:143');
   check('opened at 143', first.pageInfo.replace(/\s/g, '') === '143/600', first.pageInfo);
   check('page= left the address, the rest kept', first.href === '/reader?seriesId=5&chapterId=77', first.href);
   check('by replacing the entry, keeping the router\'s state', first.replaced.length === 1 &&
@@ -437,6 +440,48 @@ await run('page= is used once: a reload never writes it over a newer place', asy
   const sample = await readerVisit('?seriesId=5&chapterId=77&sample=1&page=9');
   check('a sample ignores page= and leaves its address alone', sample.replaced.length === 0 && sample.pageInfo.replace(/\s/g, '') === '1/600', [sample.replaced, sample.pageInfo]);
   kavitaPage = 300;
+});
+
+await run('page= without Play history\'s mark is ignored (a link someone sent)', async () => {
+  for (const [what, mark] of [['no mark', null], ['another page', '77:144'], ['another chapter', '78:143'], ['junk', 'x']]) {
+    kavitaPage = 300;
+    const v = await readerVisit('?seriesId=5&chapterId=77&page=600', mark);
+    check(what + ': opens where Kavita has the reader', v.calls.some((u) => /book-page\?page=300$/.test(u)) &&
+      !v.calls.some((u) => /book-page\?page=599$/.test(u)) && v.pageInfo.replace(/\s/g, '') === '301/600', [v.pageInfo, v.calls]);
+    check(what + ': saves nothing', !v.posts.some((x) => /Reader\/progress$/.test(x.url)), v.posts.map((x) => x.body));
+    check(what + ': page= still leaves the address', v.href === '/reader?seriesId=5&chapterId=77', v.href);
+    check(what + ': and the mark is gone', v.mark === null, v.mark);
+    check(what + ': Kavita keeps 300', kavitaPage === 300, kavitaPage);
+  }
+  const used = await readerVisit('?seriesId=5&chapterId=77&page=143', '77:143');
+  check('a matching mark is used once: cleared', used.mark === null && used.pageInfo.replace(/\s/g, '') === '143/600', [used.mark, used.pageInfo]);
+  kavitaPage = 300;
+});
+
+await run('the mark the reader takes', async () => {
+  const q = (s) => new URLSearchParams(s);
+  const store = (v) => { const m = new Map(v == null ? [] : [[reader.READER_START_KEY, v]]);
+    return { getItem: (k) => (m.has(k) ? m.get(k) : null), removeItem: (k) => m.delete(k), m }; };
+  let st = store('7:143');
+  check('chapter and page match', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), st) === 143 && st.m.size === 0);
+  st = store('7:143');
+  check('no chapter in the address: none, mark still cleared', reader.takeStartPage(q('seriesId=5&page=143'), st) === null && st.m.size === 0);
+  check('no storage: none', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), null) === null);
+  const throwing = { getItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  check('storage that throws: none', reader.takeStartPage(q('seriesId=5&chapterId=7&page=143'), throwing) === null);
+});
+
+await run('Continue reading from here sets the reader\'s mark as it is followed', async () => {
+  const p = page({ answers: [{ items: [ebook(2, T)], next_before: null, notes: [] }] });
+  p.h.open(p.$('#userMenuBtn'));
+  await flush();
+  const go = p.$('[data-hx-go]');
+  check('the link is the reader at the page', go && go.getAttribute('href') === '/reader?seriesId=5&chapterId=70&page=143', go && go.getAttribute('href'));
+  check('no mark before the click', p.win.sessionStorage.getItem(H.READER_START_KEY) === null);
+  go.addEventListener('click', (e) => e.preventDefault());     // happy-dom would navigate
+  p.click(go);
+  check('marked chapter:page', p.win.sessionStorage.getItem(H.READER_START_KEY) === '70:143', p.win.sessionStorage.getItem(H.READER_START_KEY));
+  check('the same key the reader reads', H.READER_START_KEY === reader.READER_START_KEY);
 });
 
 console.log(`play_history: ${total - failed}/${total} checks passed`);

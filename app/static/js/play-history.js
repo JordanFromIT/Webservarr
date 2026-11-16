@@ -21,7 +21,8 @@
  *   device's newer save, which then asks before anything is overwritten).
  *   Then it plays. On a phone the full player opens (WS.playerUI.openOnStart).
  * - An eBook session's "Continue reading from here": the reader at that
- *   page (/reader?seriesId=&chapterId=&page=, js/pages/reader.js).
+ *   page (/reader?seriesId=&chapterId=&page=, js/pages/reader.js), with
+ *   the sessionStorage mark the reader needs before it takes page=.
  * - "Book page": the book's own page.
  *
  * The window keeps one height, so nothing moves when the list lands. Text
@@ -183,6 +184,9 @@ export function ebookRow(it) {
     aria: 'Continue reading ' + it.title + (where ? ' from ' + where.charAt(0).toLowerCase() + where.slice(1) : '')
   };
 }
+
+// Must match js/pages/reader.js's READER_START_KEY.
+export const READER_START_KEY = 'ws-reader-start';
 
 export function historyUrl(kind, before) {
   const k = KINDS.indexOf(kind) === -1 ? 'all' : kind;
@@ -466,6 +470,7 @@ export function createHistory(env) {
     } else {
       go = el('a', 'ws-hx-btn is-ghost');
       go.href = it.read_url;
+      go.addEventListener('click', function () { markReaderStart(it.read_url); });
     }
     go.setAttribute('data-hx-go', '');
     go.setAttribute('aria-label', say.aria);
@@ -478,6 +483,18 @@ export function createHistory(env) {
     acts.appendChild(page);
     li.appendChild(acts);
     return li;
+  }
+
+  // The reader takes page= only with this mark beside it (READER_START_KEY,
+  // js/pages/reader.js), so a link from anywhere else cannot move a
+  // reader's place. Set as the link is followed; the reader clears it.
+  function markReaderStart(url) {
+    try {
+      const q = new URL(url, 'https://reader.invalid').searchParams;
+      const chapter = q.get('chapterId');
+      const at = q.get('page');
+      if (chapter && at) env.win.sessionStorage.setItem(READER_START_KEY, chapter + ':' + at);
+    } catch (e) { /* no storage: the reader opens at Kavita's place */ }
   }
 
   // ---- Play from here ----

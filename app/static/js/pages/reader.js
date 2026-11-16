@@ -32,8 +32,10 @@
  *
  * A page in the address (/reader?seriesId=&chapterId=&page=N, from 1: Play
  * history's "Continue reading from here") opens the book at that page, after
- * Kavita's own place has been read, and saves it as a page jump does. Then
- * it leaves the address (dropStartPage), so it is used once.
+ * Kavita's own place has been read, and saves it as a page jump does. Only
+ * when Play history marked it (takeStartPage): a link from anywhere else
+ * must not move a reader's place, so an unmarked page= is ignored. Either
+ * way it leaves the address (dropStartPage), so it is used once.
  *
  * Sample mode (/reader?seriesId=&chapterId=&sample=1, books spec 3b section
  * 7, "Read a sample"): the same reader, read-only. It opens at the first
@@ -345,6 +347,28 @@ export function readerPage(params) {
 }
 
 /**
+ * The page= to open at, only when Play history set the mark for it just
+ * before navigating: sessionStorage[READER_START_KEY] = "chapterId:page"
+ * (js/play-history.js). The mark is cleared whatever it says, so it is used
+ * once. Without a matching mark (a link someone sent, an old tab), null.
+ */
+export const READER_START_KEY = 'ws-reader-start';
+export function takeStartPage(params, storage) {
+  var mark = null;
+  try {
+    mark = storage ? storage.getItem(READER_START_KEY) : null;
+    if (mark !== null) storage.removeItem(READER_START_KEY);
+  } catch (e) { mark = null; }
+  var page = readerPage(params);
+  var chapter = readerTarget(params).chapterId;
+  return page && chapter && mark === chapter + ':' + page ? page : null;
+}
+
+function sessionStore() {
+  try { return window.sessionStorage; } catch (e) { return null; }
+}
+
+/**
  * True when Kavita's book-info names a PDF (its seriesFormat, Kavita's
  * MangaFormat: 3 is an EPUB, 4 a PDF). Read from what the reader already has,
  * so a PDF is never first asked for as an EPUB page.
@@ -390,6 +414,9 @@ export async function mount(ctx) {
   // first page put on screen, whenever that is (boot, or Try again after a
   // failed first load). Set at boot.
   var startPending = false;
+  // page= still to be dropped from the address, taken or not, on that same
+  // first page.
+  var dropPending = false;
   // Sample mode (see the top): nothing about this visit is ever saved.
   var sample = ctx.url.searchParams.get('sample') === '1';
 
@@ -680,11 +707,14 @@ export async function mount(ctx) {
         }
         if (startPending) {
           // The page the address named is the reader's own choice: once it
-          // is on screen it is saved, as a page jump is, and leaves the
-          // address (dropStartPage).
+          // is on screen it is saved, as a page jump is.
           startPending = false;
           positionKnown = true;
           queueProgress();
+        }
+        if (dropPending) {
+          // And page= leaves the address (dropStartPage), taken or ignored.
+          dropPending = false;
           dropStartPage();
         }
         if (!skipSave) {
@@ -1113,8 +1143,9 @@ export async function mount(ctx) {
   };
 
   var target = readerTarget(ctx.url.searchParams);
-  var startPage = readerPage(ctx.url.searchParams);
+  var startPage = takeStartPage(ctx.url.searchParams, sessionStore());
   startPending = !!startPage && !sample;
+  dropPending = ctx.url.searchParams.has('page') && !sample;
   if (!target.seriesId) {
     showError('No book selected', 'Open a book from the library.');
     return leave;
