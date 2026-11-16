@@ -942,6 +942,18 @@ class Webhook(unittest.TestCase):
             self.assertEqual(self.rebuild.await_count, 3)
             self.assertEqual(self.sleeps, [20, 100])
 
+    def test_the_scan_line_is_logged_whatever_count_comes_back(self):
+        # A count that is not a number used to hit %d: "--- Logging error ---" and the line was lost.
+        for count, expected in ((1, "Kavita was asked to scan 1 library after a Chaptarr import"),
+                                (0, "Kavita was asked to scan 0 libraries after a Chaptarr import"),
+                                (None, "came back without a count of libraries asked")):
+            with self.subTest(count=count):
+                self.scan.return_value = count
+                self.claimed.clear()
+                with self.assertLogs("app.routers.chaptarr_webhook", "INFO") as logs:
+                    self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)
+                self.assertTrue(any(expected in line for line in logs.output), logs.output)
+
     def test_a_rebuild_that_fails_does_not_stop_the_scan_or_the_later_rebuilds(self):
         self.rebuild.side_effect = RuntimeError("database is locked")
         self.assertEqual(self.post({"eventType": "Download"}).status_code, 204)

@@ -122,7 +122,11 @@ async def _claim(key: str, seconds: int) -> bool:
 async def _scan_quietly() -> None:
     try:
         asked = await kavita.scan_libraries()
-        logger.info("Kavita was asked to scan %d librar%s after a Chaptarr import", asked, "y" if asked == 1 else "ies")
+        if isinstance(asked, int):
+            logger.info("Kavita was asked to scan %d librar%s after a Chaptarr import", asked, "y" if asked == 1 else "ies")
+        else:
+            # %d of anything else is a logging error and the line is lost; never log a made-up count.
+            logger.warning("Kavita's scan after a Chaptarr import came back without a count of libraries asked")
     except kavita.KavitaUnavailable as exc:
         logger.warning("Kavita could not be asked to scan after a Chaptarr import: %s", exc)
     except Exception as exc:  # noqa: BLE001
