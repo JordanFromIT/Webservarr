@@ -486,6 +486,36 @@ await run('in place: Requesting… while it is out, then Requested, disabled', a
   check('pressing it again sends nothing', POSTS(t).length === 1);
 });
 
+await run('in place: the live answer drawn over a kept copy while a request is out keeps it out', async (make) => {
+  const live = deferred();
+  const answer = deferred();
+  const kept = detail(ASK_AUDIO);
+  const fresh = detail(Object.assign({}, ASK_AUDIO, { book: { description: 'A newer summary.' } }));
+  const t = make('book', { routes: (net) => {
+    net.on('/api/books/', () => live.promise.then(() => ({ body: fresh })));
+    net.on('/api/books/2/request', () => answer.promise);
+  } });
+  t.WS.cache.set('book:2', kept);
+  const mounted = t.mount();
+  await t.clock.advance(1600);
+  const first = t.q('[data-request="audio"]');
+  check('the kept copy offers the request', !!first && reqLabel(t, 'audio') === 'Request the audiobook');
+  t.click('[data-request="audio"]');
+  await flush();
+  live.resolve();
+  await t.clock.advance(100);
+  await mounted;
+  const again = t.q('[data-request="audio"]');
+  check('the book was drawn again (a new button)', !!again && again !== first && /newer summary/.test(t.q('#bookRest').textContent));
+  check('and it still says Requesting…', reqLabel(t, 'audio') === 'Requesting…' && again.getAttribute('aria-busy') === 'true', reqLabel(t, 'audio'));
+  t.click('[data-request="audio"]');
+  await flush();
+  check('a press on the new button sends nothing more', POSTS(t).length === 1, POSTS(t).length);
+  answer.resolve({ body: { ok: true, state: 'requested' } });
+  await flush();
+  check('the answer lands on the button on screen', reqLabel(t, 'audio') === 'Requested' && t.q('[data-request="audio"]').getAttribute('aria-disabled') === 'true');
+});
+
 await run('in place: already asked for shows Requested from the start', async (make) => {
   const t = await open(make, detail(Object.assign({}, ASK_AUDIO, { request_actions: { ebook: null, audio: 'requested' } })));
   const ask = t.q('[data-request="audio"]');

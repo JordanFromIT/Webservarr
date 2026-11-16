@@ -183,7 +183,8 @@ export async function mount(ctx) {
     sampleAsked: '',        // the edition key this page asked to sample, until it plays or fails
     sampleFailed: false,
     addressFixed: false,
-    embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
+    embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed',
+    asking: {}              // 'ebook' | 'audio': { st, sub }, an in-place request made on this visit
   };
 
   // The skeleton as the server sent it, to put back for Try again.
@@ -738,61 +739,77 @@ export async function mount(ctx) {
     available: { label: 'Already in the library', sub: 'It may be listed on its own in Books', icon: 'check_circle' }
   };
 
+  function requestWords(kind) {
+    const word = kind === 'ebook' ? 'ebook' : 'audiobook';
+    return { word: word, label: 'Request the ' + word, sub: 'No ' + word + ' in the library yet', icon: kind === 'ebook' ? 'menu_book' : 'headphones' };
+  }
+
   /** The format's request, made here (POST /api/books/<id>/request): idle,
       Requesting… while it is out, then Requested (disabled) or, refused, the
       idle words again with the reason under them, ready to try again. A book
-      Chaptarr can't pin down becomes the Requests link. */
-  function requestButton(kind, href, asked) {
-    const word = kind === 'ebook' ? 'ebook' : 'audiobook';
-    const idle = { label: 'Request the ' + word, sub: 'No ' + word + ' in the library yet', icon: kind === 'ebook' ? 'menu_book' : 'headphones' };
+      Chaptarr can't pin down becomes the Requests link. Where it stands is
+      the visit's (state.asking), not the button's: the book can be drawn
+      again while a request is out (the live answer over a kept copy), and
+      the new button carries on where the old one was. */
+  function requestButton(kind, asked) {
+    const idle = requestWords(kind);
     const b = control('button', '', QUIET, idle.icon, idle.label, idle.sub);
     b.type = 'button';
     b.setAttribute('data-request', kind);
     b.setAttribute('data-state', 'idle');
-    let busy = false;
-    function paint(st, sub) {
-      const w = ASKED[st] || idle;
-      b.setAttribute('data-state', st);
-      b.querySelector('[data-icon]').textContent = w.icon;
-      b.querySelector('[data-label]').textContent = w.label;
-      b.querySelector('[data-sub]').textContent = sub || w.sub || idle.sub;
-      const done = st === 'requested' || st === 'available';
-      b.className = BTN + (done ? OFF : QUIET);
-      // Disabled for a pointer, but it keeps the focus it was pressed with, so
-      // a screen reader hears the new words.
-      if (done) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
-      if (st === 'requesting') b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
-    }
-    function failedText(err) {
-      const status = statusOf(err);
-      if (status === 429) return 'Daily request limit reached. Try tomorrow';
-      return 'Couldn’t request it. Try again';
-    }
-    b.addEventListener('click', function () {
-      if (busy || b.getAttribute('aria-disabled') === 'true') return;
-      busy = true;
-      paint('requesting', 'No ' + word + ' in the library yet');
-      sendBooks('POST', bookUrl('request'), { format: word }).then(function (data) {
-        busy = false;
-        if (signal.aborted) return;
-        forgetKept();
-        paint(data && data.state === 'available' ? 'available' : 'requested');
-        say(ASKED[b.getAttribute('data-state')].label);
-      }, function (err) {
-        busy = false;
-        if (signal.aborted) return;
-        if (statusOf(err) === 404 && href) {
-          const link = requestLink(kind, href);
-          link.querySelector('[data-sub]').textContent = 'Find it on the Requests page';
-          b.replaceWith(link);
-          link.focus();
-          return;
-        }
-        paint('idle', failedText(err));
-      });
-    }, { signal: signal });
-    if (asked) paint('requested');
+    b.addEventListener('click', function () { sendRequest(kind); }, { signal: signal });
+    const held = state.asking[kind];
+    if (held) paintRequest(b, kind, held.st, held.sub);
+    else if (asked) paintRequest(b, kind, 'requested');
     return b;
+  }
+
+  function paintRequest(b, kind, st, sub) {
+    const idle = requestWords(kind);
+    const w = ASKED[st] || idle;
+    b.setAttribute('data-state', st);
+    b.querySelector('[data-icon]').textContent = w.icon;
+    b.querySelector('[data-label]').textContent = w.label;
+    b.querySelector('[data-sub]').textContent = sub || w.sub || idle.sub;
+    const done = st === 'requested' || st === 'available';
+    b.className = BTN + (done ? OFF : QUIET);
+    // Disabled for a pointer, but it keeps the focus it was pressed with, so
+    // a screen reader hears the new words.
+    if (done) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+    if (st === 'requesting') b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
+  }
+
+  /** Where this format's request stands now, drawn on whichever button is on screen. */
+  function setAsking(kind, st, sub) {
+    state.asking[kind] = { st: st, sub: sub || '' };
+    const b = root.querySelector('button[data-request="' + kind + '"]');
+    if (b) paintRequest(b, kind, st, sub);
+  }
+
+  function sendRequest(kind) {
+    const held = state.asking[kind];
+    const b = root.querySelector('button[data-request="' + kind + '"]');
+    if ((held && held.st !== 'idle') || !b || b.getAttribute('aria-disabled') === 'true') return;
+    const words = requestWords(kind);
+    setAsking(kind, 'requesting', words.sub);
+    sendBooks('POST', bookUrl('request'), { format: words.word }).then(function (data) {
+      if (signal.aborted) return;
+      forgetKept();
+      setAsking(kind, data && data.state === 'available' ? 'available' : 'requested');
+      say(ASKED[state.asking[kind].st].label);
+    }, function (err) {
+      if (signal.aborted) return;
+      const href = requestHref(state.data && state.data.request_links[kind]);
+      if (statusOf(err) === 404 && href) {
+        state.asking[kind] = { st: 'link', sub: '' };
+        const now = root.querySelector('button[data-request="' + kind + '"]');
+        const link = requestLink(kind, href);
+        link.querySelector('[data-sub]').textContent = 'Find it on the Requests page';
+        if (now) { now.replaceWith(link); link.focus(); }
+        return;
+      }
+      setAsking(kind, 'idle', statusOf(err) === 429 ? 'Daily request limit reached. Try tomorrow' : 'Couldn’t request it. Try again');
+    });
   }
 
   /** A format the library lacks ('ebook' or 'audio'): asked for here when the
@@ -800,8 +817,15 @@ export async function mount(ctx) {
   function requestControl(data, kind) {
     const href = requestHref(data.request_links[kind]);
     const action = data.request_actions[kind];
+    const held = state.asking[kind];
     if (state.embed) return null;
-    if (action === 'ready' || action === 'requested') return slot(kind, requestButton(kind, href, action === 'requested'));
+    if (held && held.st === 'link') {
+      if (!href) return null;
+      const link = requestLink(kind, href);
+      link.querySelector('[data-sub]').textContent = 'Find it on the Requests page';
+      return slot(kind, link);
+    }
+    if (action === 'ready' || action === 'requested' || held) return slot(kind, requestButton(kind, action === 'requested'));
     return href ? slot(kind, requestLink(kind, href)) : null;
   }
 
