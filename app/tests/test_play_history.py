@@ -40,6 +40,17 @@ def log(db, identity, book, at, ms, event="checkin", device="Chrome on Android",
                         chapter_label=label, source="web"))
 
 
+def app_client(test, Session, user):
+    """helpers.api_client, with the setup check answered: the app's setup
+    middleware would otherwise open the real database (a fresh CI process
+    has no settings table)."""
+    p = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+    p.start()
+    test.addCleanup(p.stop)
+    test.addCleanup(helpers.reset_overrides)
+    return helpers.api_client(Session, user=user)
+
+
 def sitting(db, identity, book, end, minutes, start_ms=0, step_s=10, **kw):
     """Check-ins every step_s seconds for `minutes`, ending at `end`."""
     count = int(minutes * 60 / step_s)
@@ -314,8 +325,7 @@ class Endpoint(unittest.TestCase):
                   mock.patch.object(route.kavita, "chapter_number_at", fake_number)):
             p.start()
             self.addCleanup(p.stop)
-        self.client = helpers.api_client(self.Session, user=self.A)
-        self.addCleanup(helpers.reset_overrides)
+        self.client = app_client(self, self.Session, self.A)
 
     def test_own_listening_only(self):
         r = self.client.get("/api/me/history?kind=audio")
@@ -482,8 +492,7 @@ class HiddenReadingNeverSkipped(unittest.TestCase):
                   mock.patch.object(route.kavita, "chapter_number_at", fake_number)):
             p.start()
             self.addCleanup(p.stop)
-        self.client = helpers.api_client(self.Session, user=self.A)
-        self.addCleanup(helpers.reset_overrides)
+        self.client = app_client(self, self.Session, self.A)
 
     def every_page(self, kind):
         seen, before = [], None
@@ -526,8 +535,7 @@ class FarCursor(unittest.TestCase):
 
     def test_the_route_answers_422(self):
         Session = helpers.make_sessionmaker()
-        client = helpers.api_client(Session, user=Endpoint.A)
-        self.addCleanup(helpers.reset_overrides)
+        client = app_client(self, Session, Endpoint.A)
 
         async def fake_scope(user, session_id):
             return Scope(identity="plex:1001", series=set(), kavita=None, audio=True)
