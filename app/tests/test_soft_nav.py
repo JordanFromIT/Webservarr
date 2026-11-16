@@ -858,7 +858,7 @@ class BookPages(unittest.TestCase):
         # Read a sample (books 3b) is the checked reader address in sample mode, nothing else.
         self.assertIn("const SAMPLE_PARAM = '&sample=1';", book)
         self.assertIn("a.href = href + SAMPLE_PARAM;", book)
-        self.assertIn("cell.appendChild(readSampleLink(href));", book)
+        self.assertIn("split(a, readSampleLink(href, main), main)", book)
         # Its banner holds its room from the first paint of a full load.
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         self.assertIn("if (m && m[1] === '1') document.documentElement.setAttribute('data-reader-sample', '');", loader)

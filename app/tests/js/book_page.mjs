@@ -1311,47 +1311,82 @@ await run('3b: the stars: one press rates, Clear clears, the pointer previews', 
   check('with a toast', u.toasts.length === 1 && u.toasts[0][0] === 'Couldn’t save your rating. Try again.');
 });
 
+// The samples are each the right-hand segment of their own card (a split card):
+// named in full for a screen reader, a short word under the icon on screen.
+function seg(t, action) { return t.q('[data-action="' + action + '"]'); }
+function segName(t) { return seg(t, 'sample').getAttribute('aria-label'); }
+function segShown(t) { return rr(t.text('[data-action="sample"] [data-label]')); }
+
 await run('3b: Read a sample opens the reader\'s sample mode; only for a format the person can open', async (make) => {
   const t = await open(make, detail());
   const a = t.q('[data-action="read-sample"]');
-  check('a link under Read, in the ebook slot', !!a && a.tagName === 'A' && a.closest('[data-slot]').getAttribute('data-slot') === 'ebook');
+  check('a link in the ebook slot', !!a && a.tagName === 'A' && a.closest('[data-slot]').getAttribute('data-slot') === 'ebook');
+  check('the Sample segment of Read\'s own card, after Read', a.closest('[data-split]') && a.previousElementSibling === t.q('[data-action="read"]'));
   check('to the book\'s own chapter, in sample mode', a.getAttribute('href') === '/reader?seriesId=5&chapterId=77&sample=1', a.getAttribute('href'));
-  check('it says so', rr(a.textContent).indexOf('Read a sample') !== -1);
+  check('named Read a sample; shows Sample under the open-book icon', a.getAttribute('aria-label') === 'Read a sample' && rr(a.querySelector('[data-label]').textContent) === 'Sample' && a.querySelector('[data-icon]').textContent === 'auto_stories');
+  check('a 56px tall, 88px wide target', /min-h-14/.test(a.className) && /grid-cols-\[minmax\(0,1fr\)_5\.5rem\]/.test(a.parentNode.className));
+  check('it takes its card\'s colour: Read is quiet here, so is its segment', !/bg-primary/.test(a.className) && /bg-frosted-blue\/\[0\.07\]/.test(a.className));
+  check('the thin divider is decoration only', a.querySelector('span[aria-hidden="true"].w-px') !== null);
+  check('the progress bar stays in Read\'s own half', !a.querySelector('[data-bar]') && !!t.q('[data-action="read"] [data-bar]'));
+  check('the pair lifts as one card: the halves do not lift on their own', /ws-lift/.test(a.parentNode.className) && !/ws-lift/.test(t.q('[data-action="read"]').className) && !/ws-lift/.test(a.className));
+  check('Read\'s words truncate in the narrower half', /truncate/.test(t.q('[data-action="read"] [data-label]').className) && /truncate/.test(t.q('[data-action="read"] [data-sub]').className));
   const u = await open(make, detail({ formats: { ebook: null, audio: { available: true, editions: EDITIONS, preferred: '100:2' } }, request_links: { ebook: '/requests?q=x', audio: null } }));
-  check('no ebook: no Read a sample', !u.q('[data-action="read-sample"]'));
+  check('no ebook: no Read a sample, and Request the ebook runs full width with no segment', !u.q('[data-action="read-sample"]') && !u.q('[data-request="ebook"]').closest('[data-split]') && /ws-lift/.test(u.q('[data-request="ebook"]').className));
   const v = await open(make, detail({ formats: { ebook: null, audio: { available: true, editions: EDITIONS, preferred: '100:2' } },
     notes: [{ source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }] }));
-  check('Kavita down: the disabled Read says why, and no sample is offered', !v.q('[data-action="read-sample"]') && v.q('[data-action="read"]').disabled);
+  check('Kavita down: the disabled Read says why, and no sample is offered', !v.q('[data-action="read-sample"]') && v.q('[data-action="read"]').disabled && !v.q('[data-action="read"]').closest('[data-split]'));
   const x = await open(make, detail({ formats: { ebook: Object.assign({}, EBOOK, { read_url: 'https://elsewhere.example/' }), audio: null } }));
-  check('a read address that is not the reader\'s: no sample link either', !x.q('[data-action="read-sample"]'));
+  check('a read address that is not the reader\'s: no sample segment either', !x.q('[data-action="read-sample"]') && !x.q('[data-split]'));
+});
+
+await run('3b: on the leading card, the segment is the card\'s blue too', async (make) => {
+  const t = await open(make, detail());
+  const s = seg(t, 'sample');
+  check('Listen leads here (its place is newer), and its segment is blue with a light divider', /bg-primary/.test(t.q('[data-action="listen"]').className) && /bg-primary/.test(s.className) && /text-bright/.test(s.className) && !!s.querySelector('.bg-bright\\/25'));
+  check('Read\'s segment is quiet, with a quiet divider', !/bg-primary/.test(seg(t, 'read-sample').className) && !!seg(t, 'read-sample').querySelector('.bg-frosted-blue\\/\\[0\\.15\\]'));
+  check('both halves are their own controls, each with a visible focus ring drawn inside it', ['listen', 'sample'].every((k) => /focus-visible:outline-2/.test(seg(t, k).className) && /focus-visible:\[outline-offset:-4px\]/.test(seg(t, k).className)));
+  check('the split card\'s outer corners stay round, the inner ones square', /rounded-e-none/.test(t.q('[data-action="listen"]').className) && /rounded-s-none/.test(s.className));
 });
 
 await run('3b: Try a sample plays the picked narrator\'s first minutes; Stop sample with the time left while it plays', async (make) => {
   const t = await open(make, detail());
   const b = t.q('[data-action="sample"]');
-  check('a button under Listen, in the audio slot (after the narrator picker)', !!b && b.tagName === 'BUTTON' && b.closest('[data-slot]').getAttribute('data-slot') === 'audio' && b.previousElementSibling.querySelector('#narratorSelect'));
-  check('Try a sample', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample' && t.q('[data-action="sample"] [data-left]').classList.contains('hidden'));
+  check('a button in the audio slot, the segment of Listen\'s card; the narrator picker under the card', !!b && b.tagName === 'BUTTON' && b.closest('[data-slot]').getAttribute('data-slot') === 'audio' && b.previousElementSibling === t.q('[data-action="listen"]') && b.parentNode.nextElementSibling.querySelector('#narratorSelect'));
+  check('named Try a sample; shows Sample under the play icon', segName(t) === 'Try a sample' && segShown(t) === 'Sample' && t.text('[data-action="sample"] [data-icon]') === 'play_circle' && b.getAttribute('data-on') === 'false');
   t.click('[data-action="sample"]');
   await flush();
   check('the preferred narrator\'s edition, preselected', JSON.stringify(t.player.sampled) === '["100:2"]', t.player.sampled);
   check('the main player was not opened', t.player.opened.length === 0);
-  check('while it starts: Stop sample, Starting…', rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample' && t.text('[data-action="sample"] [data-left]') === 'Starting…');
+  check('while it starts: named Stop sample, Starting…; shows Starting…', rr(segName(t)) === 'Stop sample, Starting…' && segShown(t) === 'Starting…', segName(t));
   t.player.sampleChange('time', { book: '100:2', title: 'X', playing: true, loading: false, bookMs: 28000, leftMs: 272000 });
-  check('playing: Stop sample and 4:32 left', rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample' && t.text('[data-action="sample"] [data-left]') === '4:32 left' && !t.q('[data-action="sample"] [data-left]').classList.contains('hidden'));
-  check('the time is in tabular figures (it ticks)', /tabular-nums/.test(t.q('[data-action="sample"] [data-left]').className));
-  check('the icon says stop', t.text('[data-action="sample"] [data-icon]') === 'stop_circle');
+  check('playing: named Stop sample, 4:32 left; shows 4:32 left', segName(t) === 'Stop sample, 4:32 left' && segShown(t) === '4:32 left' && b.title === 'Stop sample, 4:32 left');
+  check('the time is in tabular figures (it ticks)', /tabular-nums/.test(t.q('[data-action="sample"] [data-label]').className));
+  check('the icon says stop, and the segment is marked on', t.text('[data-action="sample"] [data-icon]') === 'stop_circle' && b.getAttribute('data-on') === 'true');
   t.click('[data-action="sample"]');
   check('pressed again: stopSample', t.player.stops === 1);
-  check('and it is Try a sample again', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample' && t.text('[data-action="sample"] [data-left]') === '');
+  check('and it is Try a sample again', segName(t) === 'Try a sample' && segShown(t) === 'Sample' && !/tabular-nums/.test(t.q('[data-action="sample"] [data-label]').className) && b.getAttribute('data-on') === 'false');
   t.change('#narratorSelect', '100:1');
   t.click('[data-action="sample"]');
   await flush();
   check('another narrator picked: that one is sampled', t.player.sampled[1] === '100:1', t.player.sampled);
   t.player.sampleChange('start', { book: '999:1', title: 'Other', playing: true, loading: false, bookMs: 1000, leftMs: 299000 });
-  check('a sample of another book (started elsewhere) is not this page\'s: Try a sample', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample');
+  check('a sample of another book (started elsewhere) is not this page\'s: Try a sample', segName(t) === 'Try a sample');
   t.ctl.abort();
   t.player.sampleChange('stop', null);
   check('a page that was left stops listening', t.player.sampleListeners.length === 0 && t.player.listeners.length === 0);
+});
+
+await run('3b: a sample asked for but not yet started says Starting the sample…', async (make) => {
+  const t = await open(make, detail());
+  const later = deferred();
+  t.player.sample = function (key) { this.sampled.push(key); return later.promise; };
+  t.click('[data-action="sample"]');
+  check('named Starting the sample…, shows Starting… under the play icon', rr(segName(t)) === 'Starting the sample…' && segShown(t) === 'Starting…' && t.text('[data-action="sample"] [data-icon]') === 'play_circle', segName(t));
+  t.click('[data-action="sample"]');
+  check('a second press while it starts asks for nothing more', t.player.sampled.length === 1);
+  later.resolve(false);
+  await flush();
+  check('it never started: unavailable', segName(t) === 'Sample unavailable right now');
 });
 
 await run('3b: a sample that cannot play says it is unavailable right now, and can be tried again', async (make) => {
@@ -1364,17 +1399,17 @@ await run('3b: a sample that cannot play says it is unavailable right now, and c
   };
   t.click('[data-action="sample"]');
   await flush();
-  check('Sample unavailable right now', rr(t.text('[data-action="sample"] [data-label]')) === 'Sample unavailable right now', rr(t.text('[data-action="sample"] [data-label]')));
+  check('named Sample unavailable right now (also its tooltip); shows Unavailable', segName(t) === 'Sample unavailable right now' && seg(t, 'sample').title === 'Sample unavailable right now' && segShown(t) === 'Unavailable' && t.text('[data-action="sample"] [data-icon]') === 'error', segName(t));
   check('the button still works', !t.q('[data-action="sample"]').disabled);
   t.player.sample = function (key) { this.sampled.push(key); this.sampleChange('start', { book: key, title: '', playing: true, loading: false, bookMs: 500, leftMs: 299500 }); return Promise.resolve(true); };
   t.click('[data-action="sample"]');
   await flush();
-  check('tried again, it plays', t.player.sampled.length === 2 && rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample');
+  check('tried again, it plays', t.player.sampled.length === 2 && /^Stop sample, /.test(segName(t)));
   const u = await open(make, detail(), { player: false });
   u.click('[data-action="sample"]');
   check('no player yet: a quiet toast, nothing breaks', u.toasts.length === 1 && /player/.test(u.toasts[0][0]));
   const v = await open(make, detail({ formats: { ebook: EBOOK, audio: null }, request_links: { ebook: null, audio: '/requests?q=x' } }));
-  check('no audiobook: no Try a sample', !v.q('[data-action="sample"]'));
+  check('no audiobook: no Try a sample; Request the audiobook runs full width', !v.q('[data-action="sample"]') && !v.q('[data-request="audio"]').closest('[data-split]'));
 });
 
 await run('3b: CLS: the skeleton has the shape of the new rows; nothing on screen moves when the answer lands', async (make) => {
@@ -1382,7 +1417,7 @@ await run('3b: CLS: the skeleton has the shape of the new rows; nothing on scree
   const t = make('book', { routes: (net) => net.on('/api/books/', () => slow.promise.then(() => ({ body: mine() }))) });
   const m = t.mount();
   await flush();
-  check('the skeleton holds a sample row under each format button', t.qa('#bookRest .skel.h-14').length === 2 && t.qa('#bookRest .skel.h-14 + .mt-2.h-10').length === 2);
+  check('the skeleton holds one card row per format (the samples sit inside the cards)', t.qa('#bookRest .skel.h-14').length === 2 && t.qa('#bookRest .skel.h-14 + .mt-2.h-10').length === 0);
   check('My list and Up next, in the two columns', t.qa('#bookRest .grid.\\@\\[30rem\\]\\:grid-cols-2 .skel.h-11').length === 2);
   check('and the stars\' row', t.qa('#bookRest .skel.h-10').length === 1);
   const title = t.q('#bookTitle');
@@ -1393,7 +1428,7 @@ await run('3b: CLS: the skeleton has the shape of the new rows; nothing on scree
   check('the heading stays the same element (nothing above the new part is touched)', t.q('#bookTitle') === title);
   check('the new part replaced the skeleton in one write', !!t.q('[data-mine-block]') && !t.q('#bookRest .skel'));
   check('the cover was replaced once, in the same commit', t.q('#bookCover') !== cover);
-  check('no overflow at 320: labels truncate and the columns may shrink', t.qa('[data-mine] [data-label]').every((s) => /truncate/.test(s.className)) && /min-w-0/.test(t.q('[data-mine="queue"]').parentNode.className) && /max-w-full/.test(t.q('[data-action="sample"]').className));
+  check('no overflow at 320: labels truncate and the columns may shrink', t.qa('[data-mine] [data-label]').every((s) => /truncate/.test(s.className)) && /min-w-0/.test(t.q('[data-mine="queue"]').parentNode.className) && /min-w-0/.test(t.q('[data-action="sample"]').className) && /truncate/.test(t.q('[data-action="sample"] [data-label]').className));
 });
 
 // ---------------------------------------------------------------------------

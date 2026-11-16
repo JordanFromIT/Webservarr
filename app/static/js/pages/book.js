@@ -68,8 +68,16 @@ const MAIN = ' bg-primary text-bright';
 const QUIET = ' bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10';
 const OFF = ' cursor-not-allowed bg-frosted-blue/[0.04] text-frosted-blue/70';
 const PERSON = 'font-semibold text-frosted-blue underline-offset-4 hover:underline ' + LINK_FOCUS + ' rounded-sm';
-// A quiet text button under a format's button (a sample), and the person's own buttons.
-const TEXT_BTN = 'mt-2 -ml-2 inline-flex h-10 max-w-full items-center gap-2 rounded-[10px] px-2 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue ' + LINK_FOCUS;
+// A card with a sample: the card is split, the format's button on the left and
+// a Sample segment on the right behind a thin divider. The pair lifts as one
+// card; each half is its own control, with its own hover and a focus ring
+// drawn inside it (outside, the two halves' rings would meet at the divider).
+const SPLIT = 'ws-lift grid grid-cols-[minmax(0,1fr)_5.5rem] rounded-[10px]';
+const SPLIT_PART = ' rounded-e-none focus-visible:[outline-offset:-4px]';
+const SPLIT_MAIN_HOVER = ' hover:bg-[color-mix(in_srgb,rgb(var(--color-primary))_92%,rgb(var(--color-text-secondary)))]';
+const SEG = 'relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-[10px] rounded-s-none px-1 text-[13px] font-semibold leading-tight ' + LINK_FOCUS + ' focus-visible:[outline-offset:-4px]';
+const SEG_MAIN = ' bg-primary text-bright' + SPLIT_MAIN_HOVER + ' data-[on=true]:shadow-[inset_0_0_0_10rem_rgb(var(--color-background)/0.18)]';
+const SEG_QUIET = ' bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue data-[on=true]:bg-frosted-blue/[0.14] data-[on=true]:text-frosted-blue';
 const MINE_BTN = 'ws-lift flex h-11 min-w-0 flex-1 items-center gap-2 rounded-[10px] px-4 text-left text-[15px] font-semibold text-frosted-blue ' + LINK_FOCUS;
 const MINE_OFF = ' bg-frosted-blue/[0.07] hover:bg-frosted-blue/10';
 const MINE_ON = ' bg-frosted-blue/[0.15] hover:bg-frosted-blue/20';
@@ -355,20 +363,26 @@ export async function mount(ctx) {
     return s && isMine(s.book) ? s : null;
   }
 
-  /** "Try a sample": Stop sample with the time left while one of this book's
-      plays; "Sample unavailable right now" after one failed (press to try again). */
+  /** Listen's Sample segment. Its name says it all ("Try a sample", "Stop
+      sample, 4:32 left", "Starting the sample…", "Sample unavailable right
+      now", press to try again); what it shows is the short form under the
+      icon: Sample, the time left, Starting…, or Unavailable. */
   function syncSample() {
     if (signal.aborted) return;
     const btn = root.querySelector('[data-action="sample"]');
     if (!btn) return;
     const s = mySample();
     const starting = !s && !!state.sampleAsked;
-    const label = s ? 'Stop sample' : starting ? 'Starting the sample…' : state.sampleFailed ? 'Sample unavailable right now' : 'Try a sample';
-    btn.querySelector('[data-icon]').textContent = s ? 'stop_circle' : 'play_circle';
-    btn.querySelector('[data-label]').textContent = label;
-    const left = btn.querySelector('[data-left]');
-    left.textContent = !s ? '' : s.loading && !(s.bookMs > 0) ? 'Starting…' : leftText(s.leftMs);
-    left.classList.toggle('hidden', !left.textContent);
+    const failed = !s && !starting && !!state.sampleFailed;
+    const left = !s ? '' : s.loading && !(s.bookMs > 0) ? 'Starting…' : leftText(s.leftMs);
+    const name = s ? 'Stop sample, ' + left : starting ? 'Starting the sample…' : failed ? 'Sample unavailable right now' : 'Try a sample';
+    btn.setAttribute('aria-label', name);
+    btn.title = name;
+    btn.setAttribute('data-on', s ? 'true' : 'false');
+    btn.querySelector('[data-icon]').textContent = s ? 'stop_circle' : failed ? 'error' : 'play_circle';
+    const shown = btn.querySelector('[data-label]');
+    shown.textContent = s ? left : starting ? 'Starting…' : failed ? 'Unavailable' : 'Sample';
+    shown.classList.toggle('tabular-nums', !!s);
   }
 
   function onSample(d) {
@@ -413,29 +427,54 @@ export async function mount(ctx) {
     stepAside();
   }
 
-  /** The quiet button under Listen: the first 5 minutes of the picked narrator, nothing saved. */
-  function sampleButton() {
-    const b = el('button', TEXT_BTN);
+  /** A Sample segment: the right end of its card, in the card's own colour,
+      behind a thin divider; an icon over a one-word label, named in full for
+      a screen reader. */
+  function segment(tag, main, name, iconName) {
+    const node = el(tag, SEG + (main ? SEG_MAIN : SEG_QUIET));
+    node.setAttribute('aria-label', name);
+    node.title = name;
+    const rule = el('span', 'absolute inset-y-3 start-0 w-px ' + (main ? 'bg-bright/25' : 'bg-frosted-blue/[0.15]'));
+    rule.setAttribute('aria-hidden', 'true');
+    node.appendChild(rule);
+    node.appendChild(icon(iconName, 'text-[22px] shrink-0'));
+    node.lastChild.setAttribute('data-icon', '');
+    node.appendChild(el('span', 'block max-w-full truncate', 'Sample'));
+    node.lastChild.setAttribute('data-label', '');
+    return node;
+  }
+
+  /** Listen's segment: the first 5 minutes of the picked narrator, nothing saved. */
+  function sampleButton(main) {
+    const b = segment('button', main, 'Try a sample', 'play_circle');
     b.type = 'button';
     b.setAttribute('data-action', 'sample');
-    b.appendChild(icon('play_circle', 'text-[22px] shrink-0'));
-    b.lastChild.setAttribute('data-icon', '');
-    b.appendChild(el('span', 'truncate', 'Try a sample'));
-    b.lastChild.setAttribute('data-label', '');
-    b.appendChild(el('span', 'hidden shrink-0 font-medium tabular-nums', ''));
-    b.lastChild.setAttribute('data-left', '');
+    b.setAttribute('data-on', 'false');
     b.addEventListener('click', trySample, { signal: signal });
     return b;
   }
 
-  /** The quiet link under Read: the reader's sample mode, at the book's first chapter. */
-  function readSampleLink(href) {
-    const a = el('a', TEXT_BTN);
+  /** Read's segment: the reader's sample mode, at the book's first chapter. */
+  function readSampleLink(href, main) {
+    const a = segment('a', main, 'Read a sample', 'auto_stories');
     a.setAttribute('data-action', 'read-sample');
     a.href = href + SAMPLE_PARAM;
-    a.appendChild(icon('auto_stories', 'text-[22px] shrink-0'));
-    a.appendChild(el('span', 'truncate', 'Read a sample'));
     return a;
+  }
+
+  /** A format's card with its Sample segment: the card's button loses its own
+      lift (the pair lifts as one) and its right-hand corners. */
+  function split(card, seg, main) {
+    card.classList.remove('ws-lift');
+    SPLIT_PART.trim().split(' ').forEach(function (c) { card.classList.add(c); });
+    if (main) SPLIT_MAIN_HOVER.trim().split(' ').forEach(function (c) { card.classList.add(c); });
+    // The words truncate rather than wrap: the card is narrower by the segment.
+    card.querySelectorAll('[data-label], [data-sub]').forEach(function (n) { n.classList.add('truncate'); });
+    const box = el('div', SPLIT);
+    box.setAttribute('data-split', '');
+    box.appendChild(card);
+    box.appendChild(seg);
+    return box;
   }
 
   // ---- My list, Up next, rating ----
@@ -720,9 +759,7 @@ export async function mount(ctx) {
       const a = control('a', 'read', main ? MAIN : QUIET, 'menu_book', 'Read', sub);
       a.href = href;
       bar(a, f.progress, main);
-      const cell = slot('ebook', a);
-      cell.appendChild(readSampleLink(href));
-      return cell;
+      return slot('ebook', split(a, readSampleLink(href, main), main));
     }
     if (data.request_links.ebook) {
       const href = requestHref(data.request_links.ebook);
@@ -753,9 +790,8 @@ export async function mount(ctx) {
       const edition = editionOf(state.edition);
       b.querySelector('[data-sub]').textContent = edition && edition.progress ? edition.progress.label : 'Not started';
       bar(b, edition && edition.progress, main);
-      const cell = slot('audio', b);
+      const cell = slot('audio', split(b, sampleButton(main), main));
       if (f.editions.length > 1) cell.appendChild(narratorPicker(f.editions));
-      cell.appendChild(sampleButton());
       return cell;
     }
     if (data.request_links.audio) {
