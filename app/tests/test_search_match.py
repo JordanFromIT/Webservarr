@@ -42,6 +42,8 @@ class Matcher(unittest.TestCase):
         self.assertEqual(tier("ruin inevitable", "This Inevitable Ruin"), search_match.TIER_WORDS)
         self.assertEqual(tier("ruin inev", "This Inevitable Ruin"), search_match.TIER_PREFIX)
         self.assertEqual(tier("inevitible ruin", "This Inevitable Ruin"), search_match.TIER_TYPO)
+        self.assertEqual(tier("ruin inevt", "This Inevitable Ruin"), search_match.TIER_TYPO)
+        self.assertEqual(tier("leguin", "Le Guin"), search_match.TIER_WORDS)
 
     def test_words_match_across_fields_and_report_the_best_field(self):
         found = search_match.Query("dinniman ruin").match([(0, "This Inevitable Ruin"), (2, "Matt Dinniman")])
@@ -214,6 +216,7 @@ CORPUS = [
     ("inevitable ruins", [677]),
     ("ruin inevitable", [677]),
     ("inev", [677]),
+    ("inevt", [677]),                                # a slip in the half-typed last word
     ("dinniman ruin", [677]),
     ("inevitable ruin dinniman", [677]),
     ("ruin", ("first", 677)),
@@ -226,6 +229,7 @@ CORPUS = [
     ("tolkein", [315, 326, 321, 310]),
     ("pratchett guards", [379]),
     ("huxley brave", [257]),
+    ("leguin", [117, 111, 100, 91, 99, 104]),       # "Le Guin" typed without the space
     # Series and numbers.
     ("dungeon crawler carl 7", [677]),
     ("dungeon crawler carl book 7", [677]),
@@ -255,6 +259,7 @@ CORPUS = [
     ("doomsday carl", [14]),
     ("hitchhikers guide", [53, 64]),
     ("slaughterhouse five", [601]),
+    ("slaughterhousefive", [601]),
     ("les miserables", [581, 589]),
     ("fahrenheit 451", [567, 185]),
     ("dune messiah", [385]),
@@ -263,6 +268,7 @@ CORPUS = [
     ("dune 7", []),
     ("harry potter 9", []),
     ("zzzz", []),
+    ("inex", []),                                    # under 5 letters a half word must be exact
 ]
 
 

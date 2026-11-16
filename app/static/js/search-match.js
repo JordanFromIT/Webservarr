@@ -7,7 +7,9 @@
  * matches(query, text): the whole query, folded (no case, no accents), inside
  * the text; or every significant word of the query a word of the text, in any
  * order, the last word perhaps only begun, a word of 4 to 7 letters with one
- * slip (a letter added, dropped, changed or two swapped), 8 or more with two.
+ * slip (a letter added, dropped, changed or two swapped), 8 or more with two;
+ * a half-typed last word of 5 letters or more may slip against as much of a
+ * word as was typed. Two neighbouring words also count run together ("leguin").
  * Filler words ("the", "of", ...) are left out of a query that has others.
  * An empty query matches everything.
  *
@@ -39,21 +41,26 @@
   function len(word) { return Array.from(word).length; }
 
   /* The text's words plus the joined forms a reader may type: "Half-Blood"
-     also as "halfblood", "J. R. R." also as "jrr". */
+     also as "halfblood", "J. R. R." also as "jrr", and two neighbouring words
+     run together, "Le Guin" also as "leguin" (not with a filler word). */
   function itemWords(folded) {
     var out = [];
+    var joined = [];
     plain(folded).split(/\s+/).forEach(function (chunk) {
       var parts = split(chunk);
       out.push.apply(out, parts);
-      if (parts.length > 1) out.push(parts.join(''));
+      if (parts.length > 1) joined.push(parts.join(''));
     });
     var letters = [];
     out.concat(['']).forEach(function (w) {
       if (len(w) === 1 && /^\p{L}$/u.test(w)) { letters.push(w); return; }
-      if (letters.length > 1) out.push(letters.join(''));
+      if (letters.length > 1) joined.push(letters.join(''));
       letters = [];
     });
-    return out;
+    for (var i = 0; i + 1 < out.length; i++) {
+      if (FILLER.indexOf(out[i]) === -1 && FILLER.indexOf(out[i + 1]) === -1) joined.push(out[i] + out[i + 1]);
+    }
+    return out.concat(joined);
   }
 
   function slipsAllowed(word) {
@@ -103,10 +110,17 @@
     return terms.every(function (term, i) {
       var limit = slipsAllowed(term);
       var half = prefixLast && i === terms.length - 1;
+      var typed = len(term);
       return item.some(function (w) {
         if (w === term) return true;
         if (half && w.indexOf(term) === 0) return true;
-        return limit > 0 && editDistance(term, w, limit) <= limit;
+        if (limit > 0 && editDistance(term, w, limit) <= limit) return true;
+        // A half-typed word of 5 letters or more may slip too, against as
+        // much of the item word as was typed: "inevt" is "inevi".
+        if (half && typed >= 5 && len(w) > typed) {
+          return editDistance(term, Array.from(w).slice(0, typed).join(''), limit) <= limit;
+        }
+        return false;
       });
     });
   }

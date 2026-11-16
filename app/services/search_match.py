@@ -12,7 +12,9 @@ A query matches an item in one of four ways, best first (Match.tier):
   1. every significant word of the query is a word of the item, in any order
      and across fields ("dinniman ruin" is an author word and a title word);
   2. as 1, the last word only the start of one (search as you type);
-  3. as 1 or 2, with a spelling slip or two in a word.
+  3. as 1 or 2, with a spelling slip or two in a word (in a half-typed last
+     word of 5 letters or more, against as much of the item word as was
+     typed).
 
 Words are the folded text split at anything that is not a letter or a digit,
 apostrophes dropped first ("Carl's" is "carls") and "&" read as "and". Filler
@@ -20,6 +22,7 @@ words ("the", "of", ...) are left out of a query that has other words, so
 "the inevitable ruin" finds "This Inevitable Ruin". A slip is one edit
 (a letter added, dropped, changed, or two swapped) in a word of 4 to 7
 letters, two in a word of 8 or more; shorter words and numbers must be exact.
+Two neighbouring words of an item also count run together ("leguin").
 """
 import re
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
@@ -67,22 +70,26 @@ def words(text) -> List[str]:
 
 def _item_words(folded: str) -> List[str]:
     """The words of an item's folded field, plus the joined forms a reader may
-    type: "Half-Blood" also as "halfblood", "J. R. R." also as "jrr"."""
+    type: "Half-Blood" also as "halfblood", "J. R. R." also as "jrr", and two
+    neighbouring words run together, "Le Guin" also as "leguin" (not with a
+    filler word: "ofthe" would only be noise)."""
     out: List[str] = []
+    joined: List[str] = []
     for chunk in _plain(folded).split():
         parts = _split(chunk)
         out.extend(parts)
         if len(parts) > 1:
-            out.append("".join(parts))
+            joined.append("".join(parts))
     letters: List[str] = []
     for w in out + [""]:
         if len(w) == 1 and w.isalpha():
             letters.append(w)
             continue
         if len(letters) > 1:
-            out.append("".join(letters))
+            joined.append("".join(letters))
         letters = []
-    return out
+    joined += [a + b for a, b in zip(out, out[1:]) if a not in FILLER and b not in FILLER]
+    return out + joined
 
 
 def initials(text) -> List[str]:
@@ -185,19 +192,31 @@ class Query:
             found = (_EXACT, 0)
         elif self._prefix_last and i == len(self.terms) - 1 and word.startswith(term):
             found = (_PREFIX, 0)
-        elif self._slips[i] == 1:
-            if _one_edit(term, word):
-                found = (_TYPO, 1)
-        elif self._slips[i]:
-            limit = self._slips[i]
-            # Each edit brings in or takes out at most two different letters:
-            # a cheap way to pass over most words before the table.
-            if len(self._letters[i].symmetric_difference(word)) <= 2 * limit:
-                edits = edit_distance(term, word, limit)
-                if edits <= limit:
-                    found = (_TYPO, edits)
+        else:
+            edits = self._slips_between(i, word)
+            # A half-typed last word of 5 letters or more may slip too, measured
+            # against as much of the item word as was typed: "inevt" is "inevi".
+            if edits is None and self._prefix_last and i == len(self.terms) - 1 \
+                    and len(term) >= 5 and len(word) > len(term):
+                edits = self._slips_between(i, word[:len(term)])
+            if edits is not None:
+                found = (_TYPO, edits)
         memo[word] = found
         return found
+
+    def _slips_between(self, i: int, word: str) -> Optional[int]:
+        """The edits from query term `i` (not equal to it) to `word`, or None
+        when that is more than the term's length allows."""
+        limit = self._slips[i]
+        if limit == 1:
+            return 1 if _one_edit(self.terms[i], word) else None
+        # Each edit brings in or takes out at most two different letters:
+        # a cheap way to pass over most words before the table.
+        if limit and len(self._letters[i].symmetric_difference(word)) <= 2 * limit:
+            edits = edit_distance(self.terms[i], word, limit)
+            if edits <= limit:
+                return edits
+        return None
 
     def match(self, fields: Sequence[Tuple[int, str]],
               extra_words: Sequence[Tuple[int, str]] = ()) -> Optional[Match]:
