@@ -25,7 +25,25 @@
  * the other connection at the same offset; then a fresh token
  * (GET /api/player/book/<key>?refresh=1) once; then "Can't reach the media
  * server" with a retry. A stream that stops without an error (8 s waiting
- * with nothing arriving) counts as a failure. Only a part that will not load
+ * with nothing arriving) counts as a failure. Except away from the page: when
+ * that ladder ends while the page is hidden (a locked phone, at a part's end
+ * most of all, where a fresh connection has to be made) or the browser says
+ * it is offline, playback is not stopped. state().reconnecting is set, the
+ * player shows it loading, and the place is tried again on the connection
+ * that last worked (the whole ladder, but the token is asked for again only
+ * while no fresh one came back since anything last played) after 1, 2, 4,
+ * 8, 15 and then every 30 s, for RECONNECT_MS (2 minutes, by the wall
+ * clock, from the first failure) at most; at once when the browser comes
+ * back online or the page is shown again. Something playing ends it (the
+ * 'play' change, as after any failure). A failure with the page shown and the
+ * browser online ends it in the error state as before, and so does the
+ * first failure after RECONNECT_MS, and a Pause while it waits between
+ * tries. Meanwhile it is still a Play: the lock screen shows it playing, a
+ * seek or skip moves the place and is the next try, and saves go on as
+ * during any failure (the place does not move). Each failure's ladder is
+ * reported to env.diag (boot: queued, and sent to POST /api/player/diag
+ * while the page is shown), with no URL and no token in it.
+ * Only a part that will not load
  * or decode (never a dropped connection) can be skipped, with a notice, and
  * only when it fails that way twice, the second time on a connection just
  * shown to work (another part, or the same one, loads its metadata there).
@@ -55,6 +73,7 @@
  *   mimeFor(container, codec, profile) -> the MIME type for canPlayType, '' if unknown
  *   createEngine(env)              the engine, given its surroundings (tests)
  *   createSampler(env)             "Try a sample" beside an engine (tests; see below)
+ *   createDiagQueue(env)           the failure records on their way to the server (tests)
  *   boot(win, overrides)           mounts the engine in #wsPlayer as WS.player
  *   UnknownTrack                   open()'s rejection for a place not in the book
  *
@@ -315,6 +334,8 @@
  *       lastSavedAt: ms (this device's clock) of the last save the server
  *       took, or null; saveError: the "not saved" warning is showing.
  *       checking: a late Play is reading the saved places first (see play()).
+ *       reconnecting: a failure away from the page is being tried again
+ *       (see Connection above); loading and playing are true meanwhile.
  *       resumedFrom: which copy open() resumed from ('web', 'plex', 'local');
  *       age_ms: how old that place was when it was read, in the server's
  *       clock (its `now` on GET /position less the copy's updated_at, which
@@ -331,7 +352,8 @@
  *                'save' (state().saveError changed), 'prefs' (the skip length or
  *                the listener's settings changed), 'checking' (a late Play's read
  *                of the saved places started or ended), 'preview' (previewAt
- *                moved to its spot). confirmPlace's moves are 'seek's with
+ *                moved to its spot), 'reconnecting' (a failure away from the
+ *                page waits to be tried again). confirmPlace's moves are 'seek's with
  *                place: true (the held playhead to the spot, then the one
  *                that lands).
  *     'ended'    { state } at the end of the last part
@@ -358,6 +380,24 @@
  * Saving (saves.js) is injected as env.saver: the engine hands it every
  * change and opens and stops it with each book. Without one (the engine's
  * own tests) nothing is saved and open() does not look for a place.
+ *
+ * The page is injected as env.page: { hidden(), offline(), onWake(fn) } (boot:
+ * document.visibilityState, navigator.onLine, and fn on 'online' and on the
+ * page being shown). Without one the page is always shown and online, so
+ * every failure ends as it did before. env.diag(record), when given, gets one
+ * record per failure and one per recovery, plain numbers, booleans and short
+ * words only:
+ *   { event: 'fail', book (its key), via: 'error'|'stall', kind: 'network'|
+ *     'media', code (the MediaError code, 0 for a stall), side, part (its
+ *     index), parts, hidden, online, network_state, ready_state,
+ *     since_ended_ms (since the part
+ *     before ended, null when this load did not follow one), attempt (0: the
+ *     first ladder, n: the nth try again), steps: ['check:ok'|'check:fail',
+ *     'other', 'refresh:ok'|'refresh:fail'|'refresh:none', 'part:ok'|
+ *     'part:fail'], outcome: 'retry-part'|'skip'|'other'|'refreshed'|'wait'|
+ *     'unreachable'|'superseded', took_ms }
+ *   { event: 'recovered', book, side, part, tries, after_ms (since the first
+ *     failure), hidden, online }
  *
  * Try a sample (books spec 3b section 7), on WS.player too (boot):
  *   sample(key) -> Promise<bool>  plays the first SAMPLE_MS (5 min) of that
@@ -395,6 +435,8 @@ export const PLAYER_BROKEN = "The player couldn't start. Please update your brow
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
 export const PREVIEW_CEILING_MS = 60000; // ... and never longer than this by the wall clock, stalls and all
 export const ORPHANS_WAIT_MS = 5000;   // a new book waits this long at most for the safety net's lookup
+export const RECONNECT_MS = 120000;    // a failure away from the page is tried again for this long
+export const RECONNECT_WAITS_MS = [1000, 2000, 4000, 8000, 15000, 30000];  // ... after these waits (the last repeats)
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
 export const PLACE_END_MS = 30000;     // a confirmed place is never nearer the book's end than this
@@ -640,6 +682,8 @@ export function createEngine(env) {
   // spent asleep counts (a monotonic clock stands still then).
   const wallNow = typeof env.now === 'function' ? env.now : Date.now;
   let skipS = roundSkip(env.skipSeconds) || SKIP_S;
+  const page = env.page || null;
+  const diag = typeof env.diag === 'function' ? env.diag : null;
 
   const audio = env.createAudio();
   audio.preload = 'auto';
@@ -745,6 +789,11 @@ export function createEngine(env) {
   const proven = new Map();   // side -> index of a part that loaded there
   const tried = new Set();
   let refreshed = false;
+  let refreshGot = false;     // a refresh brought a fresh token since anything last played
+  // A failure away from the page being tried again: { since (wall ms of the
+  // first failure), tries, timer (the wait before the next try, or null) }.
+  let reconnect = null;
+  let endedAt = null;         // wall ms when the part before the one loading ended
 
   let watchdog = null;
   const probes = new Map();   // live probe element -> its finish(ok)
@@ -853,6 +902,7 @@ export function createEngine(env) {
       connection: book && cur ? cur.side : null,
       error: error ? { code: error.code, message: error.message } : null,
       checking: !!checking || !!(files && files.reading),
+      reconnecting: !!(book && reconnect),
       lastSavedAt: saver ? saver.lastSavedAt : null,
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom,
@@ -995,6 +1045,11 @@ export function createEngine(env) {
     seekApplied = false;
     metaLoaded = false;
     disarm();
+    // Any load is the next try: a wait for one is over.
+    if (reconnect && reconnect.timer !== null) {
+      clearT(reconnect.timer);
+      reconnect.timer = null;
+    }
     cur = { index: index, side: side };
     target = { index: index, offset: offset };
     playhead = { index: index, offset: offset };
@@ -1034,7 +1089,7 @@ export function createEngine(env) {
     const g = gen;
     watchdog = setT(function () {
       watchdog = null;
-      if (g === gen && book && wantPlay) fail('network');
+      if (g === gen && book && wantPlay) fail('network', 'stall');
     }, STALL_MS);
   }
 
@@ -1088,6 +1143,14 @@ export function createEngine(env) {
     chosen = cur.side;
     tried.clear();
     refreshed = false;
+    refreshGot = false;
+    endedAt = null;
+    if (reconnect) {
+      const r = reconnect;
+      reconnect = null;
+      report({ event: 'recovered', book: book.key, side: cur.side, part: cur.index, tries: r.tries,
+        after_ms: Math.max(0, wallNow() - r.since), hidden: hidden(), online: !offline() });
+    }
     if (loading) {
       setLoading(false);
       changed('play');
@@ -1182,6 +1245,7 @@ export function createEngine(env) {
         formatStop({ index: i, offset: durationOf(book.tracks[i]) });
         return;
       }
+      endedAt = wallNow();
       load(i + 1, 0, cur.side);
       changed('part');
       return;
@@ -1199,7 +1263,7 @@ export function createEngine(env) {
   audio.addEventListener('error', function () {
     const err = audio.error;
     if (!book || !cur || !err || err.code === MEDIA_ERR_ABORTED) return;
-    fail(err.code === MEDIA_ERR_NETWORK ? 'network' : 'media');
+    fail(err.code === MEDIA_ERR_NETWORK ? 'network' : 'media', 'error');
   });
 
   // ---- Failures ----
@@ -1212,11 +1276,20 @@ export function createEngine(env) {
      when it fails that way twice: once, then again when loaded afresh on a
      connection just shown to work (another part, or this one, loads its
      metadata there). Anything else goes up the connection ladder and, at its
-     top, to the error state, where the place is held for Retry. */
-  async function fail(kind) {
+     top, to the error state, where the place is held for Retry; away from
+     the page it is tried again first (awayRetry). via: 'error' (the
+     element's) or 'stall' (the watchdog), for the diagnostics only. */
+  async function fail(kind, via) {
     if (failedGen === gen || !book || !cur) return;
     failedGen = gen;
     const g = gen;
+    const rec = failRecord(kind, via);
+    const t0 = wallNow();
+    const out = function (outcome) {
+      rec.outcome = outcome;
+      rec.took_ms = Math.max(0, wallNow() - t0);
+      report(rec);
+    };
     pending = true;
     seekApplied = false;
     metaLoaded = false;
@@ -1229,13 +1302,16 @@ export function createEngine(env) {
 
     if (kind === 'media') {
       if (suspect && suspect.index === at.index && suspect.side === side) {
+        out('skip');
         skipPart(at, side);
         return;
       }
       if (proven.has(side)) {
         const ok = await probe(side, verifyIndex(side, at.index));
-        if (g !== gen) return;
+        rec.steps.push(ok ? 'check:ok' : 'check:fail');
+        if (g !== gen) return out('superseded');
         if (ok) {
+          out('retry-part');
           retryPart(at, side);
           return;
         }
@@ -1246,6 +1322,8 @@ export function createEngine(env) {
     tried.add(side);
     const other = otherSide(side);
     if (usable(other) && !tried.has(other)) {
+      rec.steps.push('other');
+      out('other');
       load(at.index, at.offset, other);
       changed('connection');
       return;
@@ -1260,17 +1338,21 @@ export function createEngine(env) {
       } catch (e) {
         data = null;
       }
-      if (g !== gen || !book) return;
+      rec.steps.push(data ? 'refresh:ok' : 'refresh:fail');
+      if (g !== gen || !book) return out('superseded');
       if (data) {
         stream = { token: String(data.stream.token || ''), uris: data.stream.uris || {} };
+        refreshGot = true;
         proven.clear();
         tried.clear();
         const next = preferredSide();
         if (next) {
+          out('refreshed');
           load(at.index, at.offset, next);
           changed('connection');
           return;
         }
+        rec.steps[rec.steps.length - 1] = 'refresh:none';
       }
     }
 
@@ -1280,14 +1362,126 @@ export function createEngine(env) {
     if (kind === 'media') {
       const s = preferredSide();
       const ok = !!s && await probe(s, verifyIndex(s, at.index));
-      if (g !== gen) return;
+      rec.steps.push(ok ? 'part:ok' : 'part:fail');
+      if (g !== gen) return out('superseded');
       if (ok) {
+        out('retry-part');
         retryPart(at, s);
         return;
       }
     }
 
+    if (awayRetry()) {
+      out('wait');
+      return;
+    }
+    out('unreachable');
     stopWith('unreachable', UNREACHABLE, retry);
+  }
+
+  // ---- Away from the page: trying again ----
+
+  function hidden() {
+    return !!(page && page.hidden());
+  }
+
+  function offline() {
+    return !!(page && page.offline());
+  }
+
+  // A failure's record for env.diag (see the header): numbers, booleans and
+  // short words, never a URL or the token.
+  function failRecord(kind, via) {
+    const err = audio.error;
+    return {
+      event: 'fail',
+      book: book.key,
+      via: via === 'stall' ? 'stall' : 'error',
+      kind: kind,
+      code: via === 'stall' || !err ? 0 : Number(err.code) || 0,
+      side: cur.side,
+      part: cur.index,
+      parts: book.tracks.length,
+      hidden: hidden(),
+      online: !offline(),
+      network_state: Number(audio.networkState) || 0,
+      ready_state: Number(audio.readyState) || 0,
+      since_ended_ms: endedAt === null ? null : Math.max(0, wallNow() - endedAt),
+      attempt: reconnect ? reconnect.tries : 0,
+      steps: [],
+      outcome: '',
+      took_ms: 0
+    };
+  }
+
+  function report(rec) {
+    if (!diag) return;
+    try {
+      diag(rec);
+    } catch (e) {
+      console.error('[player] the diagnostics failed', e);
+    }
+  }
+
+  /* The ladder ended with nothing working. Away from the page (hidden, or
+     the browser offline) and within RECONNECT_MS of the first such failure,
+     playback is not stopped: the element is emptied, the place held, and the
+     next try waits its turn (RECONNECT_WAITS_MS). true: it waits. */
+  function awayRetry() {
+    if (!wantPlay || !book || !cur) return false;
+    const now = wallNow();
+    if (!reconnect) {
+      if (!hidden() && !offline()) return false;
+      reconnect = { since: now, tries: 0, timer: null };
+    } else if ((!hidden() && !offline()) || now - reconnect.since >= RECONNECT_MS) {
+      reconnect = null;
+      return false;
+    }
+    const step = RECONNECT_WAITS_MS[Math.min(reconnect.tries, RECONNECT_WAITS_MS.length - 1)];
+    const left = RECONNECT_MS - (now - reconnect.since);
+    reconnect.tries += 1;
+    target = { index: playhead.index, offset: playhead.offset };
+    try {
+      audio.pause();
+    } catch (e) { /* already */ }
+    release();
+    setLoading(true);
+    const g = gen;
+    reconnect.timer = setT(function () {
+      if (!reconnect) return;
+      reconnect.timer = null;
+      if (g === gen) reconnectNow();
+    }, Math.max(0, Math.min(step, left)));
+    changed('reconnecting');
+    return true;
+  }
+
+  // The next try: the whole ladder again from the connection that last
+  // worked, the token asked for again only if no fresh one came back.
+  function reconnectNow() {
+    if (!reconnect || !book || !cur || !wantPlay || error) return;
+    if (reconnect.timer !== null) {
+      clearT(reconnect.timer);
+      reconnect.timer = null;
+    }
+    tried.clear();
+    refreshed = refreshGot;
+    failedGen = -1;
+    partSuspect = null;
+    const side = preferredSide();
+    if (!side) {
+      stopWith('unreachable', UNREACHABLE, retry);
+      return;
+    }
+    load(playhead.index, playhead.offset, side);
+    changed('connection');
+  }
+
+  // Back online, or the page shown again: the next try is now.
+  if (page && typeof page.onWake === 'function') {
+    page.onWake(function () {
+      if (reconnect) reconnectNow();
+    });
   }
 
   function retryPart(at, side) {
@@ -1328,7 +1522,14 @@ export function createEngine(env) {
     stopWith('part', "The rest of this book couldn't be played.", retry);
   }
 
+  function endReconnect() {
+    if (!reconnect) return;
+    if (reconnect.timer !== null) clearT(reconnect.timer);
+    reconnect = null;
+  }
+
   function stopWith(code, message, retryFn) {
+    endReconnect();
     wantPlay = false;
     pending = true;
     seekApplied = false;
@@ -1522,6 +1723,9 @@ export function createEngine(env) {
     proven.clear();
     tried.clear();
     refreshed = false;
+    refreshGot = false;
+    endReconnect();
+    endedAt = null;
     // Nothing plays: the lock screen shows nothing (a failed open included).
     if (session) {
       try {
@@ -1920,6 +2124,16 @@ export function createEngine(env) {
       // stops it.
       stopElement();
       return;
+    }
+    if (reconnect) {
+      // Waiting to try again away from the page, nothing is loaded to pause
+      // on: the error state, as the ladder's end would have been, with its
+      // Retry. A try under way goes on, paused, and ends as any failure.
+      if (reconnect.timer !== null) {
+        stopWith('unreachable', UNREACHABLE, retry);
+        return;
+      }
+      reconnect = null;
     }
     wantPlay = false;
     disarm();
@@ -3101,6 +3315,85 @@ export function createSampler(env) {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+export const DIAG_URL = '/api/player/diag';
+export const DIAG_KEEP = 20;           // the most records kept waiting (the oldest go first)
+const DIAG_DELAY_MS = 2000;            // records arriving together go in one request
+
+/* The failure records (env.diag) on their way to the server. env: { fetch,
+   sendBeacon (or null), Blob, visible() -> bool, now, setTimeout }.
+     add(record)  kept with when it happened (sent as age_ms), DIAG_KEEP at
+                  most; sent while the page is shown, DIAG_DELAY_MS after the
+                  first one waiting, all at once (fetch, keepalive). A send
+                  the network refused keeps them for the next chance; one the
+                  server answered, whatever it said, is done with them.
+     wake()       shown again, or back online: send what waits.
+     leave()      the page is going (pagehide): a beacon, shown or not.
+     size()       how many wait.
+   A failure while the page is hidden waits for it to be shown: a locked
+   phone's network is the thing that just failed. */
+export function createDiagQueue(env) {
+  const queue = [];
+  let timer = null;
+
+  function trim() {
+    if (queue.length > DIAG_KEEP) queue.splice(0, queue.length - DIAG_KEEP);
+  }
+
+  function body(batch) {
+    const now = env.now();
+    return JSON.stringify({ events: batch.map(function (w) {
+      return Object.assign({}, w.rec, { age_ms: Math.max(0, Math.round(now - w.at)) });
+    }) });
+  }
+
+  function schedule() {
+    if (timer !== null || !queue.length || !env.visible()) return;
+    timer = env.setTimeout(send, DIAG_DELAY_MS);
+  }
+
+  function send() {
+    timer = null;
+    if (!queue.length || !env.visible()) return;
+    const batch = queue.splice(0, queue.length);
+    let sent;
+    try {
+      sent = Promise.resolve(env.fetch(DIAG_URL, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true,
+        headers: { 'Content-Type': 'application/json' }, body: body(batch)
+      }));
+    } catch (e) {
+      sent = Promise.reject(e);
+    }
+    sent.catch(function () {
+      // Not sent: kept, older first, for the next chance.
+      queue.unshift.apply(queue, batch);
+      trim();
+    });
+  }
+
+  function leave() {
+    if (!queue.length || typeof env.sendBeacon !== 'function' || !env.Blob) return;
+    try {
+      if (env.sendBeacon(DIAG_URL, new env.Blob([body(queue)], { type: 'application/json' }))) queue.length = 0;
+    } catch (e) { /* kept: the page may yet stay */ }
+  }
+
+  return {
+    add: function (rec) {
+      queue.push({ rec: rec, at: env.now() });
+      trim();
+      schedule();
+    },
+    wake: schedule,
+    leave: leave,
+    size: function () { return queue.length; }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Browser
 // ---------------------------------------------------------------------------
 
@@ -3131,6 +3424,25 @@ export function boot(win, overrides) {
       saver = null;
     }
   }
+  const shown = function () { return doc.visibilityState !== 'hidden'; };
+  const page = {
+    hidden: function () { return !shown(); },
+    offline: function () { return nav.onLine === false; },
+    onWake: function (fn) {
+      win.addEventListener('online', fn);
+      doc.addEventListener('visibilitychange', function () { if (shown()) fn(); });
+    }
+  };
+  const diagQueue = createDiagQueue({
+    fetch: win.fetch.bind(win),
+    sendBeacon: typeof nav.sendBeacon === 'function' ? nav.sendBeacon.bind(nav) : null,
+    Blob: win.Blob || null,
+    visible: shown,
+    now: Date.now,
+    setTimeout: win.setTimeout.bind(win)
+  });
+  page.onWake(diagQueue.wake);
+  win.addEventListener('pagehide', diagQueue.leave);
   const surroundings = {
     host: host,
     createAudio: function () { return doc.createElement('audio'); },
@@ -3140,15 +3452,17 @@ export function boot(win, overrides) {
     mediaSession: nav.mediaSession || null,
     permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
-    baseUrl: win.location.href
+    baseUrl: win.location.href,
+    page: page
   };
-  const engine = createEngine(Object.assign({}, surroundings, { saver: saver, noSaver: !given && !saver }, overrides || {}));
-  // Samples: an engine of their own with no saver (whatever the page's is)
-  // and no lock screen, which stays the main book's.
+  const engine = createEngine(Object.assign({}, surroundings, { saver: saver, noSaver: !given && !saver, diag: diagQueue.add },
+    overrides || {}));
+  // Samples: an engine of their own with no saver (whatever the page's is),
+  // no lock screen, which stays the main book's, and no diagnostics.
   const sampler = createSampler({
     main: engine,
     make: function () {
-      return createEngine(Object.assign({}, surroundings, overrides || {}, { saver: null, noSaver: false, mediaSession: null }));
+      return createEngine(Object.assign({}, surroundings, overrides || {}, { saver: null, noSaver: false, mediaSession: null, diag: null }));
     }
   });
   engine.sample = sampler.sample;

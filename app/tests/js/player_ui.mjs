@@ -313,6 +313,18 @@ await run('a failed open hides the bar and keeps the error on screen', () => {
   check('it goes with the error', t.qa('.wsp-notice').length === 0 && t.host.hidden === true);
 });
 
+await run('a failure away from the page being tried again says Reconnecting', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.engine.set({ loading: true, reconnecting: true }, 'reconnecting');
+  check('the bar says it', t.q('.wsp-bar-meta').textContent === 'Reconnecting…', t.q('.wsp-bar-meta').textContent);
+  check('the play button is busy', t.q('.wsp-bar .wsp-play').getAttribute('aria-label') === 'Loading');
+  check('no error notice', t.qa('.wsp-notice').length === 0);
+  t.engine.set({ loading: false, reconnecting: false }, 'play');
+  check('playing again: the chapter and time left', t.q('.wsp-bar-meta').textContent === 'Part 2 of 3 · 2 h 49 min left',
+    t.q('.wsp-bar-meta').textContent);
+});
+
 await run('the book finished', () => {
   const t = setup();
   t.engine.set(Object.assign({}, BOOK, { bookMs: 3 * H, chapterIndex: 2, playing: false }), 'ended');

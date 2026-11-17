@@ -402,6 +402,7 @@ function makeFetch(net, clock) {
     }
     const m = /^\/api\/player\/book\/([^?]+)(\?refresh=1)?$/.exec(url);
     if (!m) return response(404, { detail: 'Not Found' });
+    if (net.fetchDown) throw new TypeError('Failed to fetch');   // the phone's own network is gone
     const wait = net.fetchDelay[decodeURIComponent(m[1])];
     if (wait && clock) await new Promise((r) => clock.setTimeout(r, wait));
     const own = net.statusFor[decodeURIComponent(m[1])];
@@ -447,7 +448,9 @@ function setup(o = {}) {
     permissions: o.permissions,
     baseUrl: 'https://ws.test/news',
     saver: o.saver,
-    now: o.wall ? () => clock.now : undefined
+    now: o.wall ? () => clock.now : undefined,
+    page: o.page,
+    diag: o.diag
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
   // Every place a change reported, with what the element was doing then:
@@ -1483,6 +1486,259 @@ current = 'a one-off glitch 60 s after a good retry does not skip the part';
   check('no skip for the one-off glitch', t.log.warning.length === 0, t.log.warning);
   check('part 2 plays on past it', partOf(t.main) === P2 && !t.main.paused && t.main.currentTime > now + 60, t.main.currentTime);
   t.engine.close();
+}
+
+// ---- 16b. Away from the page: a failure is tried again before it is an error ----
+
+// A page the test hides, takes offline and wakes ('online', shown again).
+function fakePage(o = {}) {
+  return {
+    isHidden: o.hidden !== false,
+    isOffline: !!o.offline,
+    wakes: [],
+    hidden() { return this.isHidden; },
+    offline() { return this.isOffline; },
+    onWake(fn) { this.wakes.push(fn); },
+    wake() { this.wakes.forEach((fn) => fn()); }
+  };
+}
+const allDiags = [];
+// A book playing near the end of part 1, remote only (away from home); the
+// phone's network goes as part 1 ends: Plex and WebServarr both unreachable.
+async function awayOutage(o = {}) {
+  const page = o.page || fakePage();
+  const diags = [];
+  const t = setup({ net: Object.assign({ noLocal: true }, o.net || {}), page, wall: true,
+    diag: (r) => { diags.push(r); allDiags.push(JSON.parse(JSON.stringify(r))); } });
+  await openPlaying(t, MULTI.key, { at: at('501', 598000) });
+  t.main.addEventListener('pause', () => {
+    if (!t.main.ended || t.outageAt !== undefined) return;
+    t.outageAt = t.clock.now;
+    t.net.down.add('remote');
+    t.net.fetchDown = true;
+  });
+  return Object.assign(t, { page, diags });
+}
+const tries = (t) => t.net.loads.filter((l) => !l.probe && l.part === MULTI.tracks[1].part_path).length;
+const backOn = (t) => { t.net.down.clear(); t.net.fetchDown = false; };
+
+current = 'hidden: an outage at a part\'s end keeps trying, then plays on when the connection is back';
+{
+  const t = await awayOutage();
+  await t.clock.advance(30000);
+  const s = t.engine.state();
+  check('the part ended into the outage', t.outageAt !== undefined);
+  check('no error while it tries again', t.log.error.length === 0 && s.error === null, t.log.error);
+  check('reconnecting, loading, still a Play', s.reconnecting === true && s.loading === true && s.playing === true, s);
+  check('the lock screen still shows it playing', t.ms.playbackState === 'playing');
+  check('the place is the start of part 2', s.position.track === '502' && s.position.offset_ms === 0, s.position);
+  check('part 2 was tried several times', tries(t) >= 4, tries(t));
+  check('a reconnecting change was reported', reasons(t).includes('reconnecting'));
+  check('nothing skipped', t.log.warning.length === 0, t.log.warning);
+  backOn(t);
+  await t.clock.advance(31000);
+  const r = t.engine.state();
+  check('playing part 2 again', r.playing && !t.main.paused && partOf(t.main) === MULTI.tracks[1].part_path && r.error === null);
+  check('no longer reconnecting, not loading', r.reconnecting === false && r.loading === false, r);
+  check('still no error', t.log.error.length === 0);
+  check('it plays from the start of part 2', r.position.track === '502' && r.position.offset_ms < 30000, r.position);
+  check('never a place in part 3', t.seen.every((x) => !x.pos || x.pos.track !== '503'));
+  const fails = t.diags.filter((d) => d.event === 'fail');
+  const rec = t.diags.find((d) => d.event === 'recovered');
+  check('each failure was recorded', fails.length >= 4, fails.length);
+  check('the first: a media error at the part\'s end, hidden, online, then the wait', fails[0].via === 'error' &&
+    fails[0].kind === 'media' && fails[0].code === 4 && fails[0].hidden === true && fails[0].online === true &&
+    fails[0].side === 'remote' && fails[0].part === 1 && fails[0].parts === 3 && fails[0].attempt === 0 &&
+    typeof fails[0].since_ended_ms === 'number' && fails[0].since_ended_ms < 1000 && fails[0].outcome === 'wait' &&
+    fails[0].steps.join() === 'check:fail,refresh:fail,part:fail', fails[0]);
+  check('later ones count their try', fails[1].attempt === 1 && fails[2].attempt === 2, fails.map((f) => f.attempt));
+  check('the recovery was recorded', rec && rec.tries >= 4 && rec.after_ms >= 30000 && rec.after_ms <= 61000 && rec.side === 'remote', rec);
+  t.engine.close();
+}
+
+current = 'hidden: still unreachable after RECONNECT_MS, it stops as before: the error, its Retry, the place kept';
+{
+  const t = await awayOutage();
+  let errorAt = null;
+  t.engine.on('error', () => { if (errorAt === null) errorAt = t.clock.now; });
+  await t.clock.advance(E.RECONNECT_MS - 5000);
+  check('still trying before the window ends', t.log.error.length === 0 && t.engine.state().reconnecting);
+  await t.clock.advance(40000);
+  const s = t.engine.state();
+  check('one error, unreachable, with a retry', t.log.error.length === 1 && t.log.error[0].code === 'unreachable' &&
+    t.log.error[0].message === E.UNREACHABLE && t.log.error[0].retry === '[fn]', t.log.error);
+  check('after the window, not long after', errorAt - t.outageAt >= E.RECONNECT_MS && errorAt - t.outageAt <= E.RECONNECT_MS + 20000,
+    errorAt - t.outageAt);
+  check('not playing, not reconnecting', !s.playing && !s.reconnecting && !s.loading && t.main.paused, s);
+  check('the place is kept', s.position.track === '502' && s.position.offset_ms === 0, s.position);
+  const n = t.net.loads.length;
+  await t.clock.advance(120000);
+  check('nothing is tried after it', t.net.loads.length === n);
+  const last = t.diags.filter((d) => d.event === 'fail').pop();
+  check('the last record is the give-up', last.outcome === 'unreachable' && last.attempt >= 5, last);
+  backOn(t);
+  t.engine.retry();
+  await t.clock.advance(1500);
+  check('Retry plays part 2', !t.main.paused && t.engine.state().playing && partOf(t.main) === MULTI.tracks[1].part_path);
+  t.engine.close();
+}
+
+current = 'away: back online or shown again, the next try is at once';
+{
+  // Back online while still hidden.
+  const t = await awayOutage();
+  await t.clock.advance(20000);          // in the 15 s wait
+  check('waiting to try again', t.engine.state().reconnecting && t.log.error.length === 0);
+  backOn(t);
+  const n = tries(t);
+  t.page.wake();
+  await t.clock.advance(800);
+  check('online: tried at once and playing', tries(t) === n + 1 && !t.main.paused && t.engine.state().playing &&
+    !t.engine.state().reconnecting, [tries(t), n]);
+  t.engine.close();
+  // Shown again: as the listener unlocks the phone.
+  const u = await awayOutage();
+  await u.clock.advance(20000);
+  backOn(u);
+  u.page.isHidden = false;
+  u.page.wake();
+  await u.clock.advance(800);
+  check('shown: playing within a second', !u.main.paused && u.engine.state().playing && u.log.error.length === 0);
+  u.engine.close();
+  // Shown again with Plex still unreachable: that failure is a foreground one.
+  const v = await awayOutage();
+  await v.clock.advance(20000);
+  v.page.isHidden = false;
+  v.page.wake();
+  await v.clock.advance(5000);
+  check('shown, still down: the error at once, with its Retry', v.log.error.length === 1 &&
+    v.log.error[0].code === 'unreachable' && v.log.error[0].retry === '[fn]' && !v.engine.state().reconnecting);
+  v.engine.close();
+  // A wake with nothing being tried again does nothing.
+  const w = await awayOutage();
+  const n2 = w.net.loads.length;
+  w.page.wake();
+  await w.clock.advance(500);
+  check('a wake while playing loads nothing', w.net.loads.length === n2 && w.engine.state().playing && !w.engine.state().reconnecting);
+  w.engine.close();
+}
+
+current = 'offline, page shown: tried again too';
+{
+  const t = await awayOutage({ page: fakePage({ hidden: false }) });
+  t.main.addEventListener('pause', () => { if (t.main.ended) t.page.isOffline = true; });
+  await t.clock.advance(20000);
+  check('reconnecting, no error', t.engine.state().reconnecting && t.log.error.length === 0);
+  check('recorded as offline and shown', t.diags[0].online === false && t.diags[0].hidden === false, t.diags[0]);
+  backOn(t);
+  t.page.isOffline = false;
+  t.page.wake();
+  await t.clock.advance(800);
+  check('back online: playing', t.engine.state().playing && !t.main.paused && t.log.error.length === 0);
+  t.engine.close();
+}
+
+current = 'page shown and online: a failure ends as before, at once';
+{
+  const t = await awayOutage({ page: fakePage({ hidden: false }) });
+  await t.clock.advance(20000);
+  check('one error, unreachable, with a retry', t.log.error.length === 1 && t.log.error[0].code === 'unreachable' &&
+    t.log.error[0].retry === '[fn]');
+  check('never reconnecting', !reasons(t).includes('reconnecting') && !t.engine.state().reconnecting);
+  check('one refresh, as before', t.net.fetches.filter((u) => u.endsWith('?refresh=1')).length === 1);
+  check('its record says so', t.diags.length === 1 && t.diags[0].outcome === 'unreachable' && t.diags[0].hidden === false, t.diags);
+  t.engine.close();
+}
+
+current = 'reconnecting: Pause while it waits is the error state; a seek is the next try';
+{
+  const t = await awayOutage();
+  await t.clock.advance(20000);
+  t.engine.pause();
+  const s = t.engine.state();
+  check('Pause: the error with its Retry, place kept', t.log.error.length === 1 && t.log.error[0].retry === '[fn]' &&
+    !s.playing && !s.reconnecting && s.position.track === '502' && s.position.offset_ms === 0, [t.log.error, s]);
+  const n = t.net.loads.length;
+  await t.clock.advance(60000);
+  check('nothing tried after the Pause', t.net.loads.length === n);
+  t.engine.close();
+  const u = await awayOutage();
+  await u.clock.advance(20000);
+  backOn(u);
+  u.engine.seek(700000);                  // part 2 at 100 s
+  await u.clock.advance(800);
+  const r = u.engine.state();
+  check('the seek loads and plays there', !u.main.paused && r.playing && !r.reconnecting &&
+    r.position.track === '502' && r.position.offset_ms >= 100000 && r.position.offset_ms < 102000, r.position);
+  u.engine.close();
+}
+
+current = 'hidden: a refresh that brought a fresh token is not asked for again on every try';
+{
+  // WebServarr answers, Plex does not: one refresh comes back, the tries
+  // that follow do not ask plex.tv again.
+  const t = await awayOutage();
+  t.main.addEventListener('pause', () => { if (t.main.ended) t.net.fetchDown = false; });
+  await t.clock.advance(60000);
+  check('still trying', t.engine.state().reconnecting && t.log.error.length === 0);
+  check('one refresh in all those tries', t.net.fetches.filter((u) => u.endsWith('?refresh=1')).length === 1 && tries(t) >= 5,
+    [t.net.fetches.filter((u) => u.endsWith('?refresh=1')).length, tries(t)]);
+  t.engine.close();
+}
+
+current = 'the failure records never carry the token or a URL';
+{
+  const all = JSON.stringify(allDiags);
+  check('records were made', allDiags.length >= 10, allDiags.length);
+  check('no token', all.indexOf(TOKEN) === -1);
+  check('no URL, host or part path', !/https?:|plex\.direct|\/library\//.test(all));
+  const keys = new Set(['event', 'book', 'via', 'kind', 'code', 'side', 'part', 'parts', 'hidden', 'online', 'network_state',
+    'ready_state', 'since_ended_ms', 'attempt', 'steps', 'outcome', 'took_ms', 'tries', 'after_ms']);
+  check('only the documented fields', allDiags.every((r) => Object.keys(r).every((k) => keys.has(k))),
+    allDiags.flatMap((r) => Object.keys(r)).filter((k) => !keys.has(k)));
+}
+
+current = 'createDiagQueue: kept while hidden, sent once shown, kept when the send fails, capped';
+{
+  const clock = fakeClock();
+  let visible = false;
+  const sent = [];
+  let netUp = false;
+  const beacons = [];
+  const q = E.createDiagQueue({
+    fetch: async (url, init) => {
+      if (!netUp) throw new TypeError('Failed to fetch');
+      sent.push({ url, init });
+      return { ok: true, status: 204 };
+    },
+    sendBeacon: (url, blob) => { beacons.push({ url, blob }); return true; },
+    Blob: class { constructor(parts, o) { this.text = parts.join(''); this.type = o.type; } },
+    visible: () => visible,
+    now: () => clock.now,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms)
+  });
+  q.add({ event: 'fail', outcome: 'wait' });
+  await clock.advance(10000);
+  check('hidden: nothing sent', sent.length === 0 && q.size() === 1);
+  visible = true;
+  q.wake();
+  await clock.advance(5000);
+  check('the network refused it: kept', sent.length === 0 && q.size() === 1);
+  netUp = true;
+  q.wake();
+  await clock.advance(5000);
+  check('shown and online: sent in one POST', sent.length === 1 && sent[0].url === E.DIAG_URL && sent[0].init.method === 'POST' &&
+    sent[0].init.keepalive === true && q.size() === 0);
+  const body = JSON.parse(sent[0].init.body);
+  check('with how long ago it happened', body.events.length === 1 && body.events[0].event === 'fail' &&
+    body.events[0].age_ms === 17000, body);              // added at 0, sent at 15 s + the 2 s batching delay
+  visible = false;
+  for (let i = 0; i < 30; i++) q.add({ event: 'fail', n: i });
+  check('at most DIAG_KEEP wait, the newest', q.size() === E.DIAG_KEEP);
+  q.leave();
+  const beaconed = beacons.length === 1 ? JSON.parse(beacons[0].blob.text) : null;
+  check('leaving: one beacon with them, then none wait', beaconed && beaconed.events.length === E.DIAG_KEEP &&
+    beaconed.events[0].n === 10 && beacons[0].blob.type === 'application/json' && q.size() === 0, beaconed);
 }
 
 // ---- 17. Formats the browser cannot decode (spec 11a): direct play only ----

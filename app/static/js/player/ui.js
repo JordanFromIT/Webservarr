@@ -1106,7 +1106,9 @@ export function createUI(env) {
     const span = chapterSpan(s);
     const left = timeLeft(s);
     const leftText = !s.book || !dur ? '' : left <= 0 ? 'Finished' : formatLeft(left);
-    setText(barMeta, [span && span.label, leftText].filter(Boolean).join(' · '));
+    // A failure away from the page is being tried again (the engine's
+    // reconnecting): said where the chapter and time left go.
+    setText(barMeta, s.reconnecting ? 'Reconnecting…' : [span && span.label, leftText].filter(Boolean).join(' · '));
     setText(chapLabel, span ? span.label : '');
     setHidden(chapLabel, !(span && span.label));
     if (span && !scrubbing) drawScrub(span, num(s.bookMs) - span.start);
