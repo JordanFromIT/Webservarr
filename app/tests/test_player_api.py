@@ -3091,6 +3091,20 @@ class DiagReports(PlayerApiBase):
         self.assertIn("Player stream recovered for listener1001: ", lines[1])
         self.assertIn('"tries":4', lines[1])
 
+    def test_the_name_in_the_log_line_is_printable_only(self):
+        self.as_user(plex_user("1003", username="eve\nINFO - Player stream recovered for admin\x1b[2J\r"))
+        with self.assertLogs("app.routers.player", level="INFO") as logs:
+            self.assertEqual(self.post({"events": [DIAG_BACK]}).status_code, 204)
+        lines = [r.getMessage() for r in logs.records if "Player stream" in r.getMessage()]
+        self.assertEqual(lines, [lines[0]])
+        self.assertTrue(lines[0].startswith("Player stream recovered for eveINFO - Player stream recovered for admin[2J: "),
+                        lines[0])
+        self.assertTrue(all(c.isprintable() for c in lines[0]), lines[0])
+        self.as_user(plex_user("1004", username="", display_name="\n\t"))
+        with self.assertLogs("app.routers.player", level="INFO") as logs:
+            self.post({"events": [DIAG_BACK]})
+        self.assertIn("Player stream recovered for ?: ", logs.records[-1].getMessage())
+
     def test_a_session_is_needed(self):
         app.dependency_overrides.pop(get_current_user)
         self.client.cookies.clear()

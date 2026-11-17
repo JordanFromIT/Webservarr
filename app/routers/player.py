@@ -971,6 +971,7 @@ DIAG_MAX_BYTES = 16 * 1024
 DIAG_MAX_EVENTS = 20            # engine.js DIAG_KEEP
 DIAG_MAX_PARTS = 10_000
 DIAG_MAX_TRIES = 1_000
+DIAG_MAX_NAME = 64              # of the listener's name in the log line
 
 DiagMs = Annotated[int, Field(strict=True, ge=0, le=MAX_MS)]
 DiagCount = Annotated[int, Field(strict=True, ge=0, le=DIAG_MAX_TRIES)]
@@ -1026,7 +1027,10 @@ async def diag(request: Request, who: Listener = Depends(listener)):
     except ValidationError:
         # Pydantic's own message would echo the input into the response.
         raise HTTPException(status_code=422, detail="Not a player diagnostics report") from None
-    name = who.user.get("username") or who.user.get("display_name") or "?"
+    # The name is the listener's own text: printable characters only, so a
+    # newline or terminal escape in it cannot forge or garble a log line.
+    name = "".join(c for c in str(who.user.get("username") or who.user.get("display_name") or "?")
+                   if c.isprintable())[:DIAG_MAX_NAME] or "?"
     for event in report.events:
         logger.info("Player stream %s for %s: %s", event.event, name,
                     json.dumps(event.model_dump(exclude_defaults=True), separators=(",", ":"), sort_keys=True))
