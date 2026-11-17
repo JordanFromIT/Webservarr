@@ -889,13 +889,20 @@ def _row_has_file(row: Dict[str, Any]) -> bool:
     return bool(row.get("hasFiles")) or bool((row.get("statistics") or {}).get("bookFileCount"))
 
 
+def requested_rows(items: List[Dict[str, Any]], title: str, author: str) -> List[Dict[str, Any]]:
+    """The request snapshot's rows (book_requests: monitored, no file yet)
+    that are this book: the same title, by the same author when the row
+    names one."""
+    key = _title_key(title)
+    return [row for row in items
+            if key and _title_key(row.get("title") or "") == key
+            and (not row.get("author") or _author_likeness(author, row.get("author")))]
+
+
 def requested_formats(items: List[Dict[str, Any]], title: str, author: str) -> set:
     """The formats ("ebook", "audiobook") of this book that stand asked for in
-    the request snapshot's rows (book_requests: monitored, no file yet)."""
-    key = _title_key(title)
-    return {row.get("media_type") for row in items
-            if key and _title_key(row.get("title") or "") == key
-            and (not row.get("author") or _author_likeness(author, row.get("author")))}
+    the request snapshot's rows."""
+    return {row.get("media_type") for row in requested_rows(items, title, author)}
 
 
 def request_formats() -> set:

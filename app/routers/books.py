@@ -1118,6 +1118,50 @@ async def _request_actions(book, editions) -> dict:
     return actions
 
 
+def _request_stand(row) -> Optional[dict]:
+    """A request snapshot row as the book page shows it: where it stands (the
+    Requests page's reason code), when it was asked for, and how far along a
+    download is. Nothing else in the row leaves the server."""
+    if not row:
+        return None
+    percent = row.get("percent")
+    return {"state": row.get("reason_code") or "UNKNOWN", "requested_at": row.get("requested_at"),
+            "percent": percent if isinstance(percent, (int, float)) else None}
+
+
+@router.get("/{book_id}/request-status")
+@_limit(LIST_LIMIT, "request-status")
+@_db_503
+async def request_status(request: Request, book_id: BookId, who: Scope = Depends(caller),
+                         db: Session = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Where the request for each format this book lacks stands, for the
+    book page's Requested button: {"ebook", "audio"}, each {"state",
+    "requested_at", "percent"} or null (not lacking, not asked for, or the
+    request tracker has no row for it yet). Read from the Requests page's
+    cached book snapshot (app/services/book_requests.py) and never waits on
+    Chaptarr: a cold cache is all nulls. Same audience as the detail: 404
+    for a book the caller cannot see; all nulls while the Requests page is
+    switched off for them."""
+    book, _survivor = book_catalog.resolve_book(db, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="No such book")
+    editions = book_catalog.editions_of(db, book)
+    if not (_is_visible_ebook(book, who) or (who.audio and bool(editions))):
+        raise HTTPException(status_code=404, detail="No such book")
+    answer: dict = {"ebook": None, "audio": None}
+    if integrations.requests_switched_off(db, user):
+        return answer
+    lacking = {"ebook": book.kavita_chapter_id is None, "audio": not editions}
+    if not any(lacking.values()):
+        return answer
+    snapshot = await book_requests.get_cached_snapshot()
+    rows = await book_requests.rows_for_book(book.id, book.title, book.author, (snapshot or {}).get("items"))
+    for key, fmt in (("ebook", "ebook"), ("audio", "audiobook")):
+        if lacking[key]:
+            answer[key] = _request_stand(rows.get(fmt))
+    return answer
+
+
 class FormatRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     format: Literal["ebook", "audiobook"]

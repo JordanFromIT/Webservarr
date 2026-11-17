@@ -502,5 +502,39 @@ class AskedFromTheBookPage(unittest.TestCase):
             self.assertEqual(asyncio.run(book_requests.asked_formats(763, [])), set())
 
 
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class RowsForTheBookPage(unittest.TestCase):
+    """rows_for_book: the snapshot row behind each format of a catalog book,
+    for its Requested button's status line. Redis is faked."""
+
+    ITEMS = [
+        {"request_id": "book-1", "media_type": "ebook", "title": "Emma", "author": "Jane Austen", "reason_code": "A"},
+        {"request_id": "book-2", "media_type": "ebook", "title": "Emma", "author": "Jane Austen", "reason_code": "B"},
+        {"request_id": "book-3", "media_type": "audiobook", "title": "Emma", "author": "Ann Other", "reason_code": "C"},
+        {"request_id": "book-8882", "media_type": "audiobook", "title": "Emma: A Novel", "author": "Jane Austen",
+         "reason_code": "D"},
+    ]
+
+    def rows(self, fake, items=None):
+        with mock.patch.object(book_requests, "_get_redis", return_value=fake):
+            return asyncio.run(book_requests.rows_for_book(763, "Emma", "Jane Austen",
+                                                           self.ITEMS if items is None else items))
+
+    def test_by_title_and_author_the_first_row_per_format(self):
+        found = self.rows(_FakeRedis())
+        self.assertEqual({fmt: row["request_id"] for fmt, row in found.items()}, {"ebook": "book-1"})
+
+    def test_a_marked_row_stands_in_where_the_title_differs(self):
+        fake = _FakeRedis()
+        with mock.patch.object(book_requests, "_get_redis", return_value=fake):
+            asyncio.run(book_requests.mark_asked(763, "audiobook", [8882]))
+        self.assertEqual(self.rows(fake)["audiobook"]["request_id"], "book-8882")
+        self.assertEqual(self.rows(fake, items=[]), {})                    # marked, but no row any more
+
+    def test_redis_down_still_matches_by_title(self):
+        found = self.rows(_FakeRedis(down=True))
+        self.assertEqual(set(found), {"ebook"})
+
+
 if __name__ == "__main__":
     unittest.main()

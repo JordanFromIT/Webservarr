@@ -457,7 +457,7 @@ await run('in place: Request the audiobook is a button, not a link, and full wid
   check('nothing was asked for yet', POSTS(t).length === 0);
 });
 
-await run('in place: Requesting… while it is out, then Requested, disabled', async (make) => {
+await run('in place: Requesting… while it is out, then Requested, which asks nothing more', async (make) => {
   const answer = deferred();
   const withMine = detail(Object.assign({ my_list: false, queue_position: null, my_rating: null }, ASK_AUDIO));
   const t = await open(make, withMine, { routes: (net) => {
@@ -478,7 +478,7 @@ await run('in place: Requesting… while it is out, then Requested, disabled', a
   await flush();
   const ask = t.q('[data-request="audio"]');
   check('Requested, with what happens next', reqLabel(t, 'audio') === 'Requested' && reqSub(t, 'audio') === 'We’ll add it when it’s found', [reqLabel(t, 'audio'), reqSub(t, 'audio')]);
-  check('disabled (and no longer busy)', ask.getAttribute('aria-disabled') === 'true' && ask.getAttribute('aria-busy') === null && /cursor-not-allowed/.test(ask.className));
+  check('dimmed and operable: an expander, not disabled (and no longer busy)', ask.getAttribute('aria-disabled') === null && ask.getAttribute('aria-expanded') === 'false' && ask.getAttribute('aria-controls') === 'bookStand-audio' && ask.getAttribute('aria-busy') === null && /text-frosted-blue\/70/.test(ask.className) && !/cursor-not-allowed/.test(ask.className));
   check('a screen reader is told', t.text('#bookSaid') === 'Requested', t.text('#bookSaid'));
   check('the kept copy of the book is dropped', !t.WS.cache.has('book:2'));
   t.click('[data-request="audio"]');
@@ -513,16 +513,118 @@ await run('in place: the live answer drawn over a kept copy while a request is o
   check('a press on the new button sends nothing more', POSTS(t).length === 1, POSTS(t).length);
   answer.resolve({ body: { ok: true, state: 'requested' } });
   await flush();
-  check('the answer lands on the button on screen', reqLabel(t, 'audio') === 'Requested' && t.q('[data-request="audio"]').getAttribute('aria-disabled') === 'true');
+  check('the answer lands on the button on screen', reqLabel(t, 'audio') === 'Requested' && t.q('[data-request="audio"]').getAttribute('aria-expanded') === 'false');
 });
 
 await run('in place: already asked for shows Requested from the start', async (make) => {
   const t = await open(make, detail(Object.assign({}, ASK_AUDIO, { request_actions: { ebook: null, audio: 'requested' } })));
   const ask = t.q('[data-request="audio"]');
-  check('Requested, disabled', reqLabel(t, 'audio') === 'Requested' && ask.getAttribute('aria-disabled') === 'true', reqLabel(t, 'audio'));
+  check('Requested, an expander', reqLabel(t, 'audio') === 'Requested' && ask.getAttribute('aria-expanded') === 'false' && ask.getAttribute('aria-disabled') === null, reqLabel(t, 'audio'));
   t.click('[data-request="audio"]');
   await flush();
   check('a press sends nothing', POSTS(t).length === 0);
+});
+
+// ---- Where a request stands (Requested, opened) ----
+
+const ASKED_AUDIO = detail(Object.assign({}, ASK_AUDIO, { request_actions: { ebook: null, audio: 'requested' } }));
+const STANDS = (t) => t.net.calls.filter((c) => c.url === '/api/books/2/request-status');
+const standLine = (t, kind) => rr(t.text(`#bookStand-${kind} [data-stand-line]`));
+
+await run('stand: a press opens where the request stands, a second closes it, nothing is asked', async (make) => {
+  const answer = deferred();
+  const t = await open(make, ASKED_AUDIO, { routes: (net) => {
+    bookRoutes(ASKED_AUDIO)(net);
+    net.on('/api/books/2/request-status', () => answer.promise);
+  } });
+  const ask = t.q('[data-request="audio"]');
+  const panel = t.q('#bookStand-audio');
+  check('closed at first, and nothing read', panel && panel.hidden === true && STANDS(t).length === 0);
+  t.click('[data-request="audio"]');
+  await flush();
+  check('open: aria-expanded, the panel shown', ask.getAttribute('aria-expanded') === 'true' && panel.hidden === false);
+  check('a quiet skeleton while it is read', !!t.q('#bookStand-audio [data-stand-line] .skel') && t.q('#bookStand-audio [data-stand-line]').getAttribute('aria-busy') === 'true');
+  check('read once, only now', STANDS(t).length === 1);
+  answer.resolve({ body: { ebook: null, audio: { state: 'NO_RELEASE_FOUND', requested_at: new Date(new Date().getFullYear(), 10, 16, 12).toISOString(), percent: null } } });
+  await flush();
+  check('where it stands, in the Requests page\'s word', standLine(t, 'audio') === 'Requested Nov 16 · Searching', standLine(t, 'audio'));
+  const all = t.q('#bookStand-audio [data-stand-link]');
+  check('and the way to every request', !!all && all.getAttribute('href') === '/requests#rsSection' && /See all requests/.test(all.textContent));
+  t.click('[data-request="audio"]');
+  await flush();
+  check('a second press closes it', ask.getAttribute('aria-expanded') === 'false' && panel.hidden === true);
+  t.click('[data-request="audio"]');
+  await flush();
+  check('reopened straight away: the same words, not read again', panel.hidden === false && standLine(t, 'audio') === 'Requested Nov 16 · Searching' && STANDS(t).length === 1);
+  check('never a request', POSTS(t).length === 0);
+});
+
+await run('stand: downloading, queued, retrying, stuck and not out yet', async (make) => {
+  const cases = [
+    [{ state: 'DOWNLOADING', percent: 40.4 }, 'Downloading 40%'],
+    [{ state: 'DOWNLOADING', percent: 0 }, 'Queued'],
+    [{ state: 'DOWNLOAD_STALLED' }, 'Retrying'],
+    [{ state: 'IMPORT_BLOCKED' }, 'Stuck'],
+    [{ state: 'NOT_RELEASED_YET' }, 'Not out yet'],
+    [{ state: 'SOMETHING_NEW' }, 'Checking']
+  ];
+  for (const [row, word] of cases) {
+    const t = await open(make, ASKED_AUDIO, { routes: (net) => {
+      bookRoutes(ASKED_AUDIO)(net);
+      net.on('/api/books/2/request-status', () => ({ body: { ebook: null, audio: row } }));
+    } });
+    t.click('[data-request="audio"]');
+    await flush();
+    check(row.state + ': ' + word, standLine(t, 'audio') === 'Requested · ' + word, standLine(t, 'audio'));
+  }
+});
+
+await run('stand: nothing in the tracker, or a failed read, is the quiet fallback with the link', async (make) => {
+  for (const reply of [{ body: { ebook: null, audio: null } }, { status: 503, body: {} }, { body: 'oops' }]) {
+    const t = await open(make, ASKED_AUDIO, { routes: (net) => {
+      bookRoutes(ASKED_AUDIO)(net);
+      net.on('/api/books/2/request-status', () => reply);
+    } });
+    t.click('[data-request="audio"]');
+    await flush();
+    check('fallback (' + (reply.status || 200) + ')', standLine(t, 'audio') === 'Requested · waiting to be found' && !!t.q('#bookStand-audio [data-stand-link]'), standLine(t, 'audio'));
+    check('no error wall', !/couldn|error|fail/i.test(t.q('#bookStand-audio').textContent));
+  }
+});
+
+await run('stand: the ebook side the same way; a fresh request opens to it too', async (make) => {
+  const both = { formats: { ebook: null, audio: { available: true, editions: [EDITIONS[0]], preferred: '100:1' } }, request_links: { ebook: '/requests?q=x', audio: null }, request_actions: { ebook: 'ready', audio: null } };
+  const t = await open(make, detail(both), { routes: (net) => {
+    bookRoutes(detail(both))(net);
+    net.on('/api/books/2/request', () => ({ body: { ok: true, state: 'requested' } }));
+    net.on('/api/books/2/request-status', () => ({ body: { ebook: { state: 'DOWNLOADING', percent: 12 }, audio: null } }));
+  } });
+  t.click('[data-request="ebook"]');
+  await flush();
+  check('requested', reqLabel(t, 'ebook') === 'Requested' && POSTS(t).length === 1);
+  t.click('[data-request="ebook"]');
+  await flush();
+  check('the next press opens where it stands', t.q('[data-request="ebook"]').getAttribute('aria-expanded') === 'true' && standLine(t, 'ebook') === 'Requested · Downloading 12%', standLine(t, 'ebook'));
+  check('and asked nothing more', POSTS(t).length === 1);
+});
+
+await run('stand: drawn again (the live answer) it stays open with its words', async (make) => {
+  const live = deferred();
+  const fresh = detail(Object.assign({}, ASK_AUDIO, { request_actions: { ebook: null, audio: 'requested' }, book: { description: 'A newer summary.' } }));
+  const t = make('book', { routes: (net) => {
+    net.on('/api/books/', () => live.promise.then(() => ({ body: fresh })));
+    net.on('/api/books/2/request-status', () => ({ body: { ebook: null, audio: { state: 'NOT_RELEASED_YET' } } }));
+  } });
+  t.WS.cache.set('book:2', ASKED_AUDIO);
+  const mounted = t.mount();
+  await t.clock.advance(1600);
+  t.click('[data-request="audio"]');
+  await flush();
+  live.resolve();
+  await t.clock.advance(100);
+  await mounted;
+  check('redrawn', /newer summary/.test(t.q('#bookRest').textContent));
+  check('still open, same words', t.q('[data-request="audio"]').getAttribute('aria-expanded') === 'true' && t.q('#bookStand-audio').hidden === false && standLine(t, 'audio') === 'Requested · Not out yet', standLine(t, 'audio'));
 });
 
 await run('in place: a refusal says so briefly and can be tried again', async (make) => {

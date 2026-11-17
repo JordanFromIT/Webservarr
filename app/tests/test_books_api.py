@@ -824,6 +824,81 @@ class FormatRequest(BooksBase):
         self.asked.assert_not_awaited()
 
 
+class FormatRequestStatus(BooksBase):
+    """GET /api/books/<id>/request-status: where the request for each format
+    the book lacks stands, for the book page's Requested button. Read from
+    the cached book snapshot only (faked here); the page's request marks are
+    faked at book_requests.asked_rows."""
+
+    ROW = {"request_id": "book-8882", "media_type": "audiobook", "title": "Emma", "author": "Jane Austen",
+           "requested_at": "2026-11-16T09:30:00Z", "reason_code": "NO_RELEASE_FOUND",
+           "state_code": "SEARCHING", "group": "on_the_way"}
+
+    def setUp(self):
+        super().setUp()
+        self.rows = {}
+        p = mock.patch.object(book_requests, "asked_rows",
+                              mock.AsyncMock(side_effect=lambda book_id: self.rows.get(book_id, {})))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_searching_request_says_so_and_when(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW)]}
+        body = self.ok("/api/books/4/request-status")
+        self.assertEqual(body, {"ebook": None, "audio": {"state": "NO_RELEASE_FOUND",
+                                                         "requested_at": "2026-11-16T09:30:00Z", "percent": None}})
+
+    def test_a_download_carries_its_percent_and_nothing_else_of_the_row(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW, reason_code="DOWNLOADING", percent=40.5,
+                                                     group="on_the_way", extra="secret")]}
+        audio = self.ok("/api/books/4/request-status")["audio"]
+        self.assertEqual(audio, {"state": "DOWNLOADING", "requested_at": "2026-11-16T09:30:00Z", "percent": 40.5})
+
+    def test_the_ebook_side_of_an_audio_only_book(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW, request_id="book-9", media_type="ebook",
+                                                     title="The Hobbit", author="J. R. R. Tolkien",
+                                                     reason_code="NOT_RELEASED_YET")]}
+        body = self.ok("/api/books/7/request-status")
+        self.assertEqual((body["ebook"]["state"], body["audio"]), ("NOT_RELEASED_YET", None))
+
+    def test_nothing_in_the_tracker_is_null(self):
+        self.assertEqual(self.ok("/api/books/4/request-status"), {"ebook": None, "audio": None})   # cold cache
+        self.snapshot.return_value = {"items": [dict(self.ROW, author="Someone Else")]}           # another Emma
+        self.assertEqual(self.ok("/api/books/4/request-status")["audio"], None)
+
+    def test_a_row_the_page_asked_for_under_another_title_is_found_by_its_mark(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW, title="Emma: A Novel", reason_code="DOWNLOAD_STALLED")]}
+        self.assertEqual(self.ok("/api/books/4/request-status")["audio"], None)
+        self.rows[4] = {"audiobook": [8882]}
+        self.assertEqual(self.ok("/api/books/4/request-status")["audio"]["state"], "DOWNLOAD_STALLED")
+
+    def test_a_book_with_both_formats_asks_nothing_of_the_tracker(self):
+        self.assertEqual(self.ok("/api/books/1/request-status"), {"ebook": None, "audio": None})
+        self.snapshot.assert_not_awaited()
+
+    def test_requests_switched_off_say_nothing(self):
+        from app.models import Setting
+        db = self.Session()
+        try:
+            db.add(Setting(key="sidebar.enabled_requests", value="false"))
+            db.commit()
+        finally:
+            db.close()
+        self.snapshot.return_value = {"items": [dict(self.ROW)]}
+        self.assertEqual(self.ok("/api/books/4/request-status"), {"ebook": None, "audio": None})
+
+    def test_a_book_the_caller_cannot_see_is_404(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW, title="Secret Book", author="Hidden Author")]}
+        self.assertEqual(self.get("/api/books/5/request-status").status_code, 404)
+        self.assertEqual(self.get("/api/books/9999/request-status").status_code, 404)
+        self.assertEqual(self.get("/api/books/0/request-status").status_code, 422)
+
+    def test_401_without_a_session(self):
+        app.dependency_overrides.pop(get_current_user)
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get("/api/books/4/request-status").status_code, 401)
+
+
 class Search(BooksBase):
     def found(self, q):
         body = self.ok("/api/books/search", q=q)

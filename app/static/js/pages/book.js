@@ -11,7 +11,10 @@
  * person was last in preselected; their places stay per narrator. A format the
  * library lacks is asked for right here (POST /api/books/<id>/request), or,
  * where the server can't, is a link to Requests; one whose source is down is
- * a disabled button that says so.
+ * a disabled button that says so. A format already asked for is a dimmed
+ * Requested button that opens where the request stands (GET
+ * /api/books/<id>/request-status, read on the first open) and a link to every
+ * request; it never asks again.
  *
  * Everything comes from GET /api/books/<id> (the server reads the progress
  * live and decides what this person may see). Everything is drawn in one write
@@ -61,6 +64,7 @@ const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) b
 const STEP_ASIDE_MS = 1000;         // the pop-up's step back to the page, at most, before the full player opens anyway
 const FOLD_AT = 400;                // a description longer than this folds behind "Show more"
 const MAX_ID = 2147483647;          // a database id; anything larger cannot be one
+const STAND_KEEP_MS = 60 * 1000;    // where a request stands, read again on an open after this
 
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
 // Class strings are written out whole: Tailwind only builds what it can read.
@@ -68,6 +72,8 @@ const BTN = 'ws-lift relative flex w-full items-center gap-3 min-h-14 overflow-h
 const MAIN = ' bg-primary text-bright';
 const QUIET = ' bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10';
 const OFF = ' cursor-not-allowed bg-frosted-blue/[0.04] text-frosted-blue/70';
+// Requested: OFF's dimmed "done" look, but it opens where the request stands.
+const DONE = ' bg-frosted-blue/[0.04] text-frosted-blue/70 hover:bg-frosted-blue/[0.07]';
 const PERSON = 'font-semibold text-frosted-blue underline-offset-4 hover:underline ' + LINK_FOCUS + ' rounded-sm';
 // A card with a sample: the card is split, the format's button on the left and
 // a Sample segment on the right behind a thin divider. The pair lifts as one
@@ -184,7 +190,11 @@ export async function mount(ctx) {
     sampleFailed: false,
     addressFixed: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed',
-    asking: {}              // 'ebook' | 'audio': { st, sub }, an in-place request made on this visit
+    asking: {},             // 'ebook' | 'audio': { st, sub }, an in-place request made on this visit
+    standOpen: {},          // 'ebook' | 'audio': true while its Requested button shows where it stands
+    stand: null,            // GET /<id>/request-status, tidied: { ebook, audio }, each a row or null
+    standAt: 0,             // when `stand` was read (0: read it again on the next open)
+    standBusy: false
   };
 
   // The skeleton as the server sent it, to put back for Try again.
@@ -745,7 +755,7 @@ export async function mount(ctx) {
   }
 
   /** The format's request, made here (POST /api/books/<id>/request): idle,
-      Requesting… while it is out, then Requested (disabled) or, refused, the
+      Requesting… while it is out, then Requested (opens where it stands) or, refused, the
       idle words again with the reason under them, ready to try again. A book
       Chaptarr can't pin down becomes the Requests link. Where it stands is
       the visit's (state.asking), not the button's: the book can be drawn
@@ -757,7 +767,9 @@ export async function mount(ctx) {
     b.type = 'button';
     b.setAttribute('data-request', kind);
     b.setAttribute('data-state', 'idle');
-    b.addEventListener('click', function () { sendRequest(kind); }, { signal: signal });
+    b.addEventListener('click', function () {
+      if (b.getAttribute('data-state') === 'requested') toggleStand(kind); else sendRequest(kind);
+    }, { signal: signal });
     const held = state.asking[kind];
     if (held) paintRequest(b, kind, held.st, held.sub);
     else if (asked) paintRequest(b, kind, 'requested');
@@ -771,11 +783,20 @@ export async function mount(ctx) {
     b.querySelector('[data-icon]').textContent = w.icon;
     b.querySelector('[data-label]').textContent = w.label;
     b.querySelector('[data-sub]').textContent = sub || w.sub || idle.sub;
-    const done = st === 'requested' || st === 'available';
-    b.className = BTN + (done ? OFF : QUIET);
-    // Disabled for a pointer, but it keeps the focus it was pressed with, so
-    // a screen reader hears the new words.
-    if (done) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+    const asked = st === 'requested';
+    const here = st === 'available';
+    b.className = BTN + (asked ? DONE : here ? OFF : QUIET);
+    // Already here: disabled for a pointer, but it keeps the focus it was
+    // pressed with, so a screen reader hears the new words. Requested is a
+    // live button that opens where the request stands (and asks nothing more).
+    if (here) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+    if (asked) {
+      b.setAttribute('aria-expanded', state.standOpen[kind] ? 'true' : 'false');
+      b.setAttribute('aria-controls', standId(kind));
+    } else {
+      b.removeAttribute('aria-expanded');
+      b.removeAttribute('aria-controls');
+    }
     if (st === 'requesting') b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
   }
 
@@ -789,7 +810,9 @@ export async function mount(ctx) {
   function sendRequest(kind) {
     const held = state.asking[kind];
     const b = root.querySelector('button[data-request="' + kind + '"]');
-    if ((held && held.st !== 'idle') || !b || b.getAttribute('aria-disabled') === 'true') return;
+    // Only an idle button asks: Requested (from this visit or the answer) never asks again.
+    if ((held && held.st !== 'idle') || !b || b.getAttribute('aria-disabled') === 'true' ||
+        b.getAttribute('data-state') !== 'idle') return;
     const words = requestWords(kind);
     setAsking(kind, 'requesting', words.sub);
     sendBooks('POST', bookUrl('request'), { format: words.word }).then(function (data) {
@@ -812,6 +835,116 @@ export async function mount(ctx) {
     });
   }
 
+  // ---- Where a request stands (the Requested button, opened) ----
+
+  function standId(kind) { return 'bookStand-' + kind; }
+
+  // The Requests page's words for where a book request stands (requests.js
+  // RS_STATUS), by the tracker's reason code.
+  const STAND_WORDS = {
+    NO_RELEASE_FOUND: 'Searching',
+    DOWNLOAD_STALLED: 'Retrying',
+    NOT_RELEASED_YET: 'Not out yet',
+    IMPORT_BLOCKED: 'Stuck'
+  };
+
+  /** "Nov 16" (with the year when it is not this one), or '' for no date. */
+  function dayText(iso) {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    const opts = { month: 'short', day: 'numeric' };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(undefined, opts);
+  }
+
+  /** "Requested Nov 16 · Searching", or, with nothing in the tracker, the quiet fallback. */
+  function standText(row) {
+    if (!row || typeof row !== 'object' || typeof row.state !== 'string') return 'Requested · waiting to be found';
+    let word = STAND_WORDS[row.state] || 'Checking';
+    if (row.state === 'DOWNLOADING') {
+      const pct = typeof row.percent === 'number' && isFinite(row.percent) ? Math.round(row.percent) : 0;
+      word = pct > 0 ? 'Downloading ' + Math.min(100, pct) + '%' : 'Queued';
+    }
+    const day = dayText(row.requested_at);
+    return 'Requested' + (day ? ' ' + day : '') + ' · ' + word;
+  }
+
+  /** The line under a Requested button: where it stands, and the way to every request. */
+  function standPanel(kind) {
+    // A short fade as it opens (it replays each time [hidden] comes off); none with reduced motion.
+    const panel = el('div', 'ps-14 pt-2 motion-safe:animate-[ws-vt-in_160ms_ease-out_both]');
+    panel.id = standId(kind);
+    panel.setAttribute('data-stand', kind);
+    panel.hidden = !state.standOpen[kind];
+    const line = el('p', 'min-h-6 text-[15px] leading-6 text-frosted-blue');
+    line.setAttribute('data-stand-line', '');
+    line.setAttribute('aria-live', 'polite');
+    panel.appendChild(line);
+    const all = el('a', 'inline-flex min-h-8 items-center gap-0.5 rounded-sm text-[15px] font-semibold text-frosted-blue/70 hover:text-frosted-blue ' + LINK_FOCUS, 'See all requests');
+    all.href = '/requests#rsSection';
+    all.setAttribute('data-stand-link', '');
+    all.appendChild(icon('chevron_right', 'text-[20px]'));
+    panel.appendChild(all);
+    fillStand(panel, kind);
+    return panel;
+  }
+
+  /** The line's words, or, until the first answer, a quiet skeleton of its size. */
+  function fillStand(panel, kind) {
+    const line = panel && panel.querySelector('[data-stand-line]');
+    if (!line) return;
+    if (!state.stand) {
+      line.textContent = '';
+      const bone = el('span', 'skel skel-line inline-block w-52 max-w-full align-middle');
+      bone.setAttribute('aria-hidden', 'true');
+      line.appendChild(bone);
+      line.appendChild(el('span', 'sr-only', 'Checking where it stands'));
+      line.setAttribute('aria-busy', 'true');
+      return;
+    }
+    line.removeAttribute('aria-busy');
+    line.textContent = standText(state.stand[kind]);
+  }
+
+  function fillStands() {
+    ['ebook', 'audio'].forEach(function (kind) { fillStand(root.querySelector('#' + standId(kind)), kind); });
+  }
+
+  /** Read where this book's requests stand (both formats, one call), unless
+      read in the last minute. Never an error: a failed read is the fallback
+      line, and the next open reads again. */
+  function readStand() {
+    if (state.standBusy || (state.stand && Date.now() - state.standAt < STAND_KEEP_MS)) return;
+    state.standBusy = true;
+    WS.getJSON(bookUrl('request-status'), { signal: signal }).then(function (data) {
+      const d = data && typeof data === 'object' ? data : {};
+      state.stand = { ebook: d.ebook || null, audio: d.audio || null };
+      state.standAt = Date.now();
+    }, function (err) {
+      if (quiet(err)) return;
+      if (!state.stand) state.stand = { ebook: null, audio: null };
+      state.standAt = 0;
+    }).then(function () {
+      state.standBusy = false;
+      if (!signal.aborted) fillStands();
+    });
+  }
+
+  /** A press on Requested: open or close where it stands. Nothing is ever asked for. */
+  function toggleStand(kind) {
+    const b = root.querySelector('button[data-request="' + kind + '"]');
+    const panel = root.querySelector('#' + standId(kind));
+    if (!b || !panel) return;
+    const open = !state.standOpen[kind];
+    state.standOpen[kind] = open;
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+    if (open) {
+      fillStand(panel, kind);
+      readStand();
+    }
+  }
+
   /** A format the library lacks ('ebook' or 'audio'): asked for here when the
       server can, else a link to Requests. Neither when requests go to the Seerr embed. */
   function requestControl(data, kind) {
@@ -825,7 +958,11 @@ export async function mount(ctx) {
       link.querySelector('[data-sub]').textContent = 'Find it on the Requests page';
       return slot(kind, link);
     }
-    if (action === 'ready' || action === 'requested' || held) return slot(kind, requestButton(kind, action === 'requested'));
+    if (action === 'ready' || action === 'requested' || held) {
+      const cell = slot(kind, requestButton(kind, action === 'requested'));
+      cell.appendChild(standPanel(kind));
+      return cell;
+    }
     return href ? slot(kind, requestLink(kind, href)) : null;
   }
 

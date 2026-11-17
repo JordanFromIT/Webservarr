@@ -267,6 +267,45 @@ async def mark_asked(book_id: int, fmt: str, row_ids) -> None:
         logger.warning("Could not mark a book request: %s", exc)
 
 
+async def asked_rows(book_id: int) -> dict:
+    """{format: [Chaptarr book row ids]} for the formats of this catalog book
+    asked for from its page (the marks above). {} when Redis cannot say."""
+    found = {}
+    try:
+        for fmt in FORMATS:
+            raw = await _get_redis().get(ASKED_KEY.format(book_id=book_id, fmt=fmt))
+            if raw:
+                found[fmt] = [i for i in json.loads(raw).get("rows") or [] if isinstance(i, int)]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read book request marks: %s", exc)
+        return {}
+    return found
+
+
+async def rows_for_book(book_id: int, title: str, author: str, items) -> dict:
+    """{format: snapshot row} for each format of this catalog book that the
+    request snapshot's `items` hold as a request: a row with its title by its
+    author (chaptarr.requested_rows), else a row its page's request named
+    (the book may have been found under a subtitle). Where one format has
+    several rows, the first (the oldest request) stands for it."""
+    from app.integrations import chaptarr
+
+    items = items or []
+    found = {}
+    for row in chaptarr.requested_rows(items, title, author):
+        if row.get("media_type") in FORMATS:
+            found.setdefault(row["media_type"], row)
+    missing = [fmt for fmt in FORMATS if fmt not in found]
+    if missing:
+        by_id = {row.get("request_id"): row for row in items}
+        marks = await asked_rows(book_id)
+        for fmt in missing:
+            row = next((by_id[f"book-{i}"] for i in marks.get(fmt, []) if f"book-{i}" in by_id), None)
+            if row is not None:
+                found[fmt] = row
+    return found
+
+
 async def asked_formats(book_id: int, items) -> set:
     """The formats ("ebook", "audiobook") of this catalog book asked for from
     its page that stand asked for: marked within ASKED_FRESH, or with a row
