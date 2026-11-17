@@ -206,6 +206,9 @@ export async function mount(ctx) {
 
   function quiet(err) { return signal.aborted || isAbort(err); }
 
+  /** Every read this page makes, on the visit's signal: a soft navigation away cancels it. */
+  function readJSON(url) { return WS.getJSON(url, { signal: signal }); }
+
   // ---- The Kavita hand-off ----
 
   /** Not connected to Kavita yet, for a book that has an ebook: Read is the way in. */
@@ -921,7 +924,7 @@ export async function mount(ctx) {
   function readStand() {
     if (state.standBusy || (state.stand && Date.now() - state.standAt < STAND_KEEP_MS)) return;
     state.standBusy = true;
-    WS.getJSON(bookUrl('request-status'), { signal: signal }).then(function (data) {
+    readJSON(bookUrl('request-status')).then(function (data) {
       const d = data && typeof data === 'object' ? data : {};
       state.stand = { ebook: d.ebook || null, audio: d.audio || null };
       state.standAt = Date.now();
@@ -1327,7 +1330,7 @@ export async function mount(ctx) {
   /** The book, from the server. Its notes decide the hand-off, so they are
       looked at on the live answer only, never on a kept copy. */
   function readLive() {
-    return WS.getJSON('/api/books/' + encodeURIComponent(String(state.id)), { signal: signal }).then(function (data) {
+    return readJSON('/api/books/' + encodeURIComponent(String(state.id))).then(function (data) {
       if (!valid(data)) throw new Error('Unexpected response');
       const tidied = tidy(data);
       if (needsConnect(tidied)) startConnect();
