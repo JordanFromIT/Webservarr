@@ -563,6 +563,8 @@ await run('stand: downloading, queued, retrying, stuck and not out yet', async (
   const cases = [
     [{ state: 'DOWNLOADING', percent: 40.4 }, 'Downloading 40%'],
     [{ state: 'DOWNLOADING', percent: 0 }, 'Queued'],
+    [{ state: 'DOWNLOADING', percent: 0.4 }, 'Downloading 1%'],
+    [{ state: 'DOWNLOADING', percent: 99.8 }, 'Downloading 100%'],
     [{ state: 'DOWNLOAD_STALLED' }, 'Retrying'],
     [{ state: 'IMPORT_BLOCKED' }, 'Stuck'],
     [{ state: 'NOT_RELEASED_YET' }, 'Not out yet'],
@@ -606,6 +608,27 @@ await run('stand: the ebook side the same way; a fresh request opens to it too',
   await flush();
   check('the next press opens where it stands', t.q('[data-request="ebook"]').getAttribute('aria-expanded') === 'true' && standLine(t, 'ebook') === 'Requested · Downloading 12%', standLine(t, 'ebook'));
   check('and asked nothing more', POSTS(t).length === 1);
+});
+
+await run('stand: open on a kept Requested, then the live answer says ready: an idle button, the panel closed', async (make) => {
+  const live = deferred();
+  const fresh = detail(Object.assign({}, ASK_AUDIO, { book: { description: 'A newer summary.' } }));   // audio: 'ready'
+  const t = make('book', { routes: (net) => {
+    net.on('/api/books/', () => live.promise.then(() => ({ body: fresh })));
+    net.on('/api/books/2/request-status', () => ({ body: { ebook: null, audio: { state: 'NO_RELEASE_FOUND' } } }));
+  } });
+  t.WS.cache.set('book:2', ASKED_AUDIO);
+  const mounted = t.mount();
+  await t.clock.advance(1600);
+  t.click('[data-request="audio"]');
+  await flush();
+  check('opened on the kept copy', t.q('#bookStand-audio').hidden === false);
+  live.resolve();
+  await t.clock.advance(100);
+  await mounted;
+  const ask = t.q('[data-request="audio"]');
+  check('redrawn as idle Request the audiobook', /newer summary/.test(t.q('#bookRest').textContent) && reqLabel(t, 'audio') === 'Request the audiobook' && ask.getAttribute('aria-expanded') === null && ask.getAttribute('aria-controls') === null);
+  check('and the panel is hidden', !t.q('#bookStand-audio') || t.q('#bookStand-audio').hidden === true);
 });
 
 await run('stand: drawn again (the live answer) it stays open with its words', async (make) => {

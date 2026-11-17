@@ -796,6 +796,10 @@ export async function mount(ctx) {
     } else {
       b.removeAttribute('aria-expanded');
       b.removeAttribute('aria-controls');
+      // Only Requested opens where it stands: anything else closes it.
+      state.standOpen[kind] = false;
+      const panel = b.parentNode && b.parentNode.querySelector('[data-stand]');
+      if (panel) panel.hidden = true;
     }
     if (st === 'requesting') b.setAttribute('aria-busy', 'true'); else b.removeAttribute('aria-busy');
   }
@@ -862,8 +866,9 @@ export async function mount(ctx) {
     if (!row || typeof row !== 'object' || typeof row.state !== 'string') return 'Requested · waiting to be found';
     let word = STAND_WORDS[row.state] || 'Checking';
     if (row.state === 'DOWNLOADING') {
-      const pct = typeof row.percent === 'number' && isFinite(row.percent) ? Math.round(row.percent) : 0;
-      word = pct > 0 ? 'Downloading ' + Math.min(100, pct) + '%' : 'Queued';
+      // Queued only with nothing downloaded (as requests.js); a sliver reads 1%, never 0%.
+      const pct = typeof row.percent === 'number' && isFinite(row.percent) ? row.percent : 0;
+      word = pct > 0 ? 'Downloading ' + Math.min(100, Math.max(1, Math.round(pct))) + '%' : 'Queued';
     }
     const day = dayText(row.requested_at);
     return 'Requested' + (day ? ' ' + day : '') + ' · ' + word;
@@ -959,7 +964,11 @@ export async function mount(ctx) {
       return slot(kind, link);
     }
     if (action === 'ready' || action === 'requested' || held) {
-      const cell = slot(kind, requestButton(kind, action === 'requested'));
+      const b = requestButton(kind, action === 'requested');
+      // A redraw where the request no longer stands (the live answer says
+      // "ready") closes the panel rather than showing it under an idle button.
+      if (b.getAttribute('data-state') !== 'requested') state.standOpen[kind] = false;
+      const cell = slot(kind, b);
       cell.appendChild(standPanel(kind));
       return cell;
     }

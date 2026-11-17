@@ -285,7 +285,7 @@ async def asked_rows(book_id: int) -> dict:
 async def rows_for_book(book_id: int, title: str, author: str, items) -> dict:
     """{format: snapshot row} for each format of this catalog book that the
     request snapshot's `items` hold as a request: a row with its title by its
-    author (chaptarr.requested_rows), else a row its page's request named
+    author, both named (chaptarr.requested_rows), else a row its page's request named
     (the book may have been found under a subtitle). Where one format has
     several rows, the first (the oldest request) stands for it."""
     from app.integrations import chaptarr
@@ -293,7 +293,10 @@ async def rows_for_book(book_id: int, title: str, author: str, items) -> dict:
     items = items or []
     found = {}
     for row in chaptarr.requested_rows(items, title, author):
-        if row.get("media_type") in FORMATS:
+        # Both sides must name an author here: an author-less row (Chaptarr's
+        # author list failed) would otherwise stand for every book of that
+        # title. Such a row can still be found by the page's own mark below.
+        if row.get("media_type") in FORMATS and row.get("author") and (author or "").strip():
             found.setdefault(row["media_type"], row)
     missing = [fmt for fmt in FORMATS if fmt not in found]
     if missing:

@@ -531,6 +531,14 @@ class RowsForTheBookPage(unittest.TestCase):
         self.assertEqual(self.rows(fake)["audiobook"]["request_id"], "book-8882")
         self.assertEqual(self.rows(fake, items=[]), {})                    # marked, but no row any more
 
+    def test_an_author_less_row_never_matches_by_title_only_by_its_mark(self):
+        items = [{"request_id": "book-77", "media_type": "audiobook", "title": "Emma", "author": "", "reason_code": "X"}]
+        self.assertEqual(self.rows(_FakeRedis(), items=items), {})
+        fake = _FakeRedis()
+        with mock.patch.object(book_requests, "_get_redis", return_value=fake):
+            asyncio.run(book_requests.mark_asked(763, "audiobook", [77]))
+        self.assertEqual(self.rows(fake, items=items)["audiobook"]["request_id"], "book-77")
+
     def test_redis_down_still_matches_by_title(self):
         found = self.rows(_FakeRedis(down=True))
         self.assertEqual(set(found), {"ebook"})

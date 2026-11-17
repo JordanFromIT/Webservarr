@@ -872,6 +872,14 @@ class FormatRequestStatus(BooksBase):
         self.rows[4] = {"audiobook": [8882]}
         self.assertEqual(self.ok("/api/books/4/request-status")["audio"]["state"], "DOWNLOAD_STALLED")
 
+    def test_an_author_less_row_is_null_by_title_and_found_by_its_mark(self):
+        self.snapshot.return_value = {"items": [dict(self.ROW, author="")]}
+        self.takes.return_value = {"ebook", "audiobook"}
+        self.assertEqual(self.ok("/api/books/4/request-status")["audio"], None)
+        self.assertEqual(self.ok("/api/books/4")["request_actions"]["audio"], "requested")   # the button is unchanged
+        self.rows[4] = {"audiobook": [8882]}
+        self.assertEqual(self.ok("/api/books/4/request-status")["audio"]["state"], "NO_RELEASE_FOUND")
+
     def test_a_book_with_both_formats_asks_nothing_of_the_tracker(self):
         self.assertEqual(self.ok("/api/books/1/request-status"), {"ebook": None, "audio": None})
         self.snapshot.assert_not_awaited()
