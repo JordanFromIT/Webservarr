@@ -23,9 +23,10 @@
  * Access prompt, local is tried only if that permission is already granted:
  * the engine never makes the browser ask. When the stream fails, in order:
  * the other connection at the same offset; then a fresh token
- * (GET /api/player/book/<key>?refresh=1) once; then "Can't reach the media
- * server" with a retry. A stream that stops without an error (8 s waiting
- * with nothing arriving) counts as a failure. Except away from the page: when
+ * (GET /api/player/book/<key>?refresh=1, REFRESH_WAIT_MS at most) once;
+ * then "Can't reach the media server" with a retry. A stream that stops
+ * without an error (8 s waiting with nothing arriving) counts as a
+ * failure. Except away from the page: when
  * that ladder ends while the page is hidden (a locked phone, at a part's end
  * most of all, where a fresh connection has to be made) or the browser says
  * it is offline, playback is not stopped. state().reconnecting is set, the
@@ -38,8 +39,10 @@
  * 'play' change, as after any failure). A failure with the page shown and the
  * browser online ends it in the error state as before, and so does the
  * first failure after RECONNECT_MS, and a Pause while it waits between
- * tries. Meanwhile it is still a Play: the lock screen shows it playing, a
- * seek or skip moves the place and is the next try, and saves go on as
+ * tries; a Play the browser refuses on a try is a pause, as ever, and ends
+ * it too. Meanwhile it is still a Play: the lock screen shows it playing, a
+ * seek or skip moves the place and is the next try (on the connection that
+ * last worked, the ladder afresh), and saves go on as
  * during any failure (the place does not move). Each failure's ladder is
  * reported to env.diag (boot: queued, and sent to POST /api/player/diag
  * while the page is shown), with no URL and no token in it.
@@ -435,6 +438,7 @@ export const PLAYER_BROKEN = "The player couldn't start. Please update your brow
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
 export const PREVIEW_CEILING_MS = 60000; // ... and never longer than this by the wall clock, stalls and all
 export const ORPHANS_WAIT_MS = 5000;   // a new book waits this long at most for the safety net's lookup
+export const REFRESH_WAIT_MS = 10000;  // the ladder's token refresh waits this long at most
 export const RECONNECT_MS = 120000;    // a failure away from the page is tried again for this long
 export const RECONNECT_WAITS_MS = [1000, 2000, 4000, 8000, 15000, 30000];  // ... after these waits (the last repeats)
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
@@ -1073,6 +1077,8 @@ export function createEngine(env) {
         // A newer load interrupted it (AbortError), or the element failed
         // (its error event handles that). Only a refusal is the listener's.
         if (g !== gen || !wantPlay || !e || e.name !== 'NotAllowedError') return;
+        // Refused: paused, so nothing is being tried again either.
+        endReconnect();
         wantPlay = false;
         disarm();
         if (metaLoaded) setLoading(false);
@@ -1332,12 +1338,7 @@ export function createEngine(env) {
     // 2. A fresh token and connections, once.
     if (!refreshed) {
       refreshed = true;
-      let data = null;
-      try {
-        data = await fetchBook(book.key, true);
-      } catch (e) {
-        data = null;
-      }
+      const data = await refreshBook(book.key);
       rec.steps.push(data ? 'refresh:ok' : 'refresh:fail');
       if (g !== gen || !book) return out('superseded');
       if (data) {
@@ -1588,6 +1589,23 @@ export function createEngine(env) {
       throw { status: 0, detail: '' };
     }
     return data;
+  }
+
+  /* The ladder's token refresh: the book's data, or null when it failed or
+     took REFRESH_WAIT_MS (a late answer is dropped), so a request that
+     hangs can't hold the ladder (or a try away from the page) for ever. */
+  async function refreshBook(key) {
+    let timer = null;
+    const timeout = new Promise(function (resolve) {
+      timer = setT(function () {
+        timer = null;
+        resolve(null);
+      }, REFRESH_WAIT_MS);
+    });
+    const asked = fetchBook(key, true).catch(function () { return null; });
+    const got = await Promise.race([asked, timeout]);
+    if (timer !== null) clearT(timer);
+    return got;
   }
 
   /* This listener's saved copies of the place: { web, plex }, either null.
@@ -2211,6 +2229,12 @@ export function createEngine(env) {
       // play or retry loads it.
       playhead = next;
       target = { index: next.index, offset: next.offset };
+    } else if (reconnect && wantPlay) {
+      // Being tried again away from the page: the move is the next try,
+      // from the connection that last worked, the ladder afresh.
+      playhead = next;
+      target = { index: next.index, offset: next.offset };
+      reconnectNow();
     } else if (to.index === cur.index && metaLoaded) {
       playhead = next;
       target = { index: next.index, offset: next.offset };

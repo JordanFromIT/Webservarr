@@ -1686,6 +1686,92 @@ current = 'hidden: a refresh that brought a fresh token is not asked for again o
   t.engine.close();
 }
 
+current = 'BH1: a lock-screen skip while it waits is a try on the connection that last worked, the ladder afresh';
+{
+  // Local is usable (no permission gate) but hangs: off the home network.
+  const page = fakePage();
+  const t = setup({ net: { hang: new Set(['local']) }, page, wall: true });
+  Object.assign(t, { page });
+  const opened = t.engine.open(MULTI.key, { at: at('501', 590000) });
+  await t.clock.advance(2500);                // the local probe times out, then remote
+  await opened;
+  check('playing on remote', t.engine.state().connection === 'remote' && t.engine.state().playing);
+  t.main.addEventListener('pause', () => {
+    if (!t.main.ended || t.outageAt !== undefined) return;
+    t.outageAt = t.clock.now;
+    t.net.down.add('remote');
+    t.net.fetchDown = true;
+  });
+  let waiting = false;
+  for (let i = 0; i < 400 && !waiting; i++) {
+    await t.clock.advance(500);
+    waiting = t.outageAt !== undefined && t.clock.now - t.outageAt >= 100000 && t.engine.state().reconnecting && t.main.src === '';
+  }
+  check('waiting late in the window', waiting, t.outageAt !== undefined && t.clock.now - t.outageAt);
+  backOn(t);
+  const from = t.net.loads.length;
+  t.ms.handlers.get('seekbackward')({});
+  await t.clock.advance(12000);
+  const s = t.engine.state();
+  check('the skip plays, on remote', s.playing && !t.main.paused && s.connection === 'remote' && t.log.error.length === 0,
+    [s.connection, t.log.error]);
+  check('its load was on remote, not the side last tried', t.net.loads.slice(from).filter((l) => !l.probe)[0].side === 'remote',
+    t.net.loads.slice(from));
+  check('it loaded part 1, 10 s back, and played on into part 2',
+    t.net.loads.slice(from).filter((l) => !l.probe)[0].part === MULTI.tracks[0].part_path &&
+    s.position.track === '502' && s.position.offset_ms < 3000, s.position);
+  t.engine.close();
+}
+
+current = 'BH2: a refresh that hangs is a failed refresh after REFRESH_WAIT_MS; the tries go on and play';
+{
+  const t = await awayOutage();
+  await t.clock.advance(20000);
+  t.net.fetchDown = false;
+  t.net.fetchDelay[MULTI.key] = 15 * 60 * 1000;
+  await t.clock.advance(16000);
+  t.net.down.clear();
+  await t.clock.advance(E.RECONNECT_MS);
+  const s = t.engine.state();
+  check('playing again', s.playing && !s.reconnecting && !s.loading && !t.main.paused && t.log.error.length === 0, s);
+  check('the hung refresh counted as failed', t.diags.some((d) => d.event === 'fail' && d.steps.includes('refresh:fail') &&
+    d.took_ms >= E.REFRESH_WAIT_MS), t.diags.map((d) => [d.steps, d.took_ms]));
+  const conns = reasons(t).filter((r) => r === 'connection').length;
+  await t.clock.advance(15 * 60 * 1000);
+  check('the late answer changes nothing', t.log.error.length === 0 && reasons(t).filter((r) => r === 'connection').length === conns);
+  t.engine.close();
+  // In the foreground, too: the ladder ends instead of hanging.
+  const u = setup({ net: { noLocal: true }, page: fakePage({ hidden: false }), wall: true });
+  await openPlaying(u, MULTI.key, { at: at('501', 60000) });
+  u.net.down.add('remote');
+  u.net.fetchDelay[MULTI.key] = 15 * 60 * 1000;
+  await u.clock.advance(E.REFRESH_WAIT_MS + 5000);
+  check('foreground: the error with its Retry', u.log.error.length === 1 && u.log.error[0].code === 'unreachable' &&
+    u.log.error[0].retry === '[fn]');
+  u.engine.close();
+}
+
+current = 'BH3: a Play refused while it tries again is a pause: not reconnecting, and a later Play plays';
+{
+  const t = await awayOutage();
+  await t.clock.advance(20000);
+  backOn(t);
+  t.net.blockAutoplay = true;
+  await t.clock.advance(40000);
+  const s = t.engine.state();
+  check('paused, not reconnecting, not loading, no error', !s.playing && !s.reconnecting && !s.loading && s.error === null, s);
+  check('the lock screen says paused', t.ms.playbackState === 'paused');
+  const n = t.net.loads.length;
+  t.page.wake();
+  await t.clock.advance(60000);
+  check('a wake tries nothing', t.net.loads.length === n);
+  t.net.blockAutoplay = false;
+  await t.engine.play();
+  await t.clock.advance(1000);
+  check('then Play plays part 2', t.engine.state().playing && !t.main.paused && partOf(t.main) === MULTI.tracks[1].part_path);
+  t.engine.close();
+}
+
 current = 'the failure records never carry the token or a URL';
 {
   const all = JSON.stringify(allDiags);
