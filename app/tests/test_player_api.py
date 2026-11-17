@@ -2986,7 +2986,8 @@ class RateLimits(unittest.TestCase):
                     "get_prefs": ("60 per 1 minute", "prefs-get"), "put_prefs": ("60 per 1 minute", "prefs-put"),
                     "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover"),
                     "next_book": ("60 per 1 minute", "next"), "orphans": ("60 per 1 minute", "orphans"),
-                    "dismiss_orphans": ("60 per 1 minute", "orphans-dismiss")}
+                    "dismiss_orphans": ("60 per 1 minute", "orphans-dismiss"),
+                    "diag": ("10 per 1 minute", "diag")}
         for name, (limit, scope) in expected.items():
             with self.subTest(route=name):
                 self.assertEqual(self.limits(getattr(player, name)),
@@ -3049,6 +3050,101 @@ class LimitsAcrossKeys(PlayerApiBase):
             book, track = (("100:1", "101"), ("200:1", "202"))[i % 2]
             self.assertEqual(self.checkin(book=book, track=track, seq=i + 1).status_code, 200)
         self.assertEqual(self.checkin(book="100:1", track="101", seq=100).status_code, 429)
+
+    def test_diag_budget_is_10_a_minute(self):
+        for _ in range(10):
+            self.assertEqual(self.client.post("/api/player/diag", json=DIAG_REPORT,
+                                              headers={"Origin": ORIGIN}).status_code, 204)
+        self.assertEqual(self.client.post("/api/player/diag", json=DIAG_REPORT,
+                                          headers={"Origin": ORIGIN}).status_code, 429)
+
+
+# What engine.js sends: a hidden part change that failed and waits to try
+# again, then the recovery.
+DIAG_FAIL = {"event": "fail", "book": "200:1", "via": "error", "kind": "media", "code": 4, "side": "remote",
+             "part": 1, "parts": 3, "hidden": True, "online": True, "network_state": 3, "ready_state": 0,
+             "since_ended_ms": 40, "attempt": 0, "steps": ["check:fail", "refresh:fail", "part:fail"],
+             "outcome": "wait", "took_ms": 3100, "age_ms": 95000}
+DIAG_BACK = {"event": "recovered", "book": "200:1", "side": "remote", "part": 1, "tries": 4,
+             "after_ms": 31000, "hidden": False, "online": True, "age_ms": 2000}
+DIAG_REPORT = {"events": [DIAG_FAIL, DIAG_BACK]}
+
+
+class DiagReports(PlayerApiBase):
+    """POST /api/player/diag: the player's stream failures, logged one line each."""
+
+    def post(self, body, headers=None, raw=None):
+        h = {"Origin": ORIGIN, "Content-Type": "application/json"}
+        h.update(headers or {})
+        return self.client.post("/api/player/diag", content=raw if raw is not None else json.dumps(body), headers=h)
+
+    def test_a_report_is_logged_one_line_per_event(self):
+        with self.assertLogs("app.routers.player", level="INFO") as logs:
+            r = self.post(DIAG_REPORT)
+        self.assertEqual(r.status_code, 204, r.text)
+        lines = [m for m in logs.output if "Player stream" in m]
+        self.assertEqual(len(lines), 2, logs.output)
+        self.assertIn("Player stream fail for listener1001: ", lines[0])
+        self.assertIn('"outcome":"wait"', lines[0])
+        self.assertIn('"since_ended_ms":40', lines[0])
+        self.assertIn('"steps":["check:fail","refresh:fail","part:fail"]', lines[0])
+        self.assertIn("Player stream recovered for listener1001: ", lines[1])
+        self.assertIn('"tries":4', lines[1])
+
+    def test_a_session_is_needed(self):
+        app.dependency_overrides.pop(get_current_user)
+        self.client.cookies.clear()
+        self.assertEqual(self.post(DIAG_REPORT).status_code, 401)
+
+    def test_a_plex_listener_is_needed(self):
+        for user in (LOCAL, OIDC_ONLY):
+            self.as_user(user)
+            with self.subTest(user=user["username"]):
+                self.assertEqual(self.post(DIAG_REPORT).status_code, 403)
+
+    def test_404_while_the_player_is_off(self):
+        self.on.return_value = False
+        self.assertEqual(self.post(DIAG_REPORT).status_code, 404)
+
+    def test_same_origin_only(self):
+        self.assertEqual(self.post(DIAG_REPORT, headers={"Origin": "https://evil.example"}).status_code, 403)
+
+    def test_a_report_over_the_byte_cap_is_413(self):
+        raw = json.dumps(DIAG_REPORT) + " " * player.DIAG_MAX_BYTES
+        with self.assertNoLogs("app.routers.player", level="INFO"):
+            self.assertEqual(self.post(None, raw=raw).status_code, 413)
+
+    def test_at_most_20_events(self):
+        self.assertEqual(self.post({"events": [DIAG_FAIL] * player.DIAG_MAX_EVENTS}).status_code, 204)
+        with self.assertNoLogs("app.routers.player", level="INFO"):
+            self.assertEqual(self.post({"events": [DIAG_FAIL] * (player.DIAG_MAX_EVENTS + 1)}).status_code, 422)
+            self.assertEqual(self.post({"events": []}).status_code, 422)
+
+    def test_anything_but_the_known_fields_and_words_is_422_and_nothing_logged(self):
+        bad = [
+            {**DIAG_FAIL, "url": "https://b.hash.plex.direct:32400/library/parts/1?X-Plex-Token=abc"},
+            {**DIAG_FAIL, "side": "https://b.hash.plex.direct:32400"},
+            {**DIAG_FAIL, "outcome": "anything at all"},
+            {**DIAG_FAIL, "steps": ["check:ok", "X-Plex-Token=abc"]},
+            {**DIAG_FAIL, "steps": ["other"] * 9},
+            {**DIAG_FAIL, "book": "not a key"},
+            {**DIAG_FAIL, "code": 9},
+            {**DIAG_FAIL, "code": "4"},
+            {**DIAG_FAIL, "hidden": "yes"},
+            {**DIAG_FAIL, "took_ms": -1},
+            {**DIAG_FAIL, "took_ms": 1.5},
+            {**DIAG_FAIL, "event": "play"},
+        ]
+        with self.assertNoLogs("app.routers.player", level="INFO"):
+            for event in bad:
+                with self.subTest(event=event):
+                    r = self.post({"events": [DIAG_BACK, event]})
+                    self.assertEqual(r.status_code, 422)
+                    self.assertNotIn("abc", r.text)
+                    self.assertNotIn("plex.direct", r.text)
+            for raw in ("not json", "[]", '{"events": "x"}', '{"events": [1]}', ""):
+                with self.subTest(raw=raw):
+                    self.assertEqual(self.post(None, raw=raw).status_code, 422)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

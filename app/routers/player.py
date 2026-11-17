@@ -24,6 +24,7 @@ the same site.
 
 import asyncio
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,7 +32,8 @@ from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Cookie, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
+from pydantic import (AfterValidator, BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError,
+                      model_validator)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -953,3 +955,79 @@ async def put_prefs(request: Request, payload: dict = Body(...), who: Listener =
         return listening.put_prefs(db, who.identity, **payload)
     except (ValueError, OverflowError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+# --- Stream diagnostics -------------------------------------------------------------
+#
+# The stream goes from the browser to Plex directly, so neither WebServarr nor
+# Plex sees a part that would not load. The player records each failure of
+# its stream (and each recovery after trying again) and sends them here once
+# the page is shown again, so the next "Can't reach the media server" can be
+# read back from the log. Every field is a number, a boolean or one of a few
+# words: the report carries no URL, no token and no free text.
+
+DIAG_LIMIT = "10/minute"
+DIAG_MAX_BYTES = 16 * 1024
+DIAG_MAX_EVENTS = 20            # engine.js DIAG_KEEP
+DIAG_MAX_PARTS = 10_000
+DIAG_MAX_TRIES = 1_000
+
+DiagMs = Annotated[int, Field(strict=True, ge=0, le=MAX_MS)]
+DiagCount = Annotated[int, Field(strict=True, ge=0, le=DIAG_MAX_TRIES)]
+DiagPart = Annotated[int, Field(strict=True, ge=0, le=DIAG_MAX_PARTS)]
+DiagStep = Literal["check:ok", "check:fail", "other", "refresh:ok", "refresh:fail", "refresh:none",
+                   "part:ok", "part:fail"]
+
+
+class DiagEvent(BaseModel):
+    """One record of engine.js's env.diag (its header lists the fields)."""
+    model_config = ConfigDict(extra="forbid")
+
+    event: Literal["fail", "recovered"]
+    book: Optional[str] = Field(default=None, pattern=r"^[0-9]{1,20}:[0-9]{1,6}$")
+    via: Optional[Literal["error", "stall"]] = None
+    kind: Optional[Literal["network", "media"]] = None
+    code: Optional[StrictInt] = Field(default=None, ge=0, le=4)
+    side: Optional[Literal["local", "remote"]] = None
+    part: Optional[DiagPart] = None
+    parts: Optional[DiagPart] = None
+    hidden: Optional[StrictBool] = None
+    online: Optional[StrictBool] = None
+    network_state: Optional[StrictInt] = Field(default=None, ge=0, le=3)
+    ready_state: Optional[StrictInt] = Field(default=None, ge=0, le=4)
+    since_ended_ms: Optional[DiagMs] = None
+    attempt: Optional[DiagCount] = None
+    tries: Optional[DiagCount] = None
+    steps: list[DiagStep] = Field(default_factory=list, max_length=8)
+    outcome: Optional[Literal["retry-part", "skip", "other", "refreshed", "wait", "unreachable",
+                              "superseded"]] = None
+    took_ms: Optional[DiagMs] = None
+    after_ms: Optional[DiagMs] = None
+    age_ms: Optional[DiagMs] = None
+
+
+class DiagReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[DiagEvent] = Field(min_length=1, max_length=DIAG_MAX_EVENTS)
+
+
+@router.post("/diag", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_same_origin)])
+@_limit(DIAG_LIMIT, "diag")
+async def diag(request: Request, who: Listener = Depends(listener)):
+    """Log the player's stream failures, one line each. 413 over
+    DIAG_MAX_BYTES, 422 for anything that is not such a report (the whole
+    report is refused: nothing in it is logged)."""
+    raw = await request.body()
+    if len(raw) > DIAG_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Report too large")
+    try:
+        report = DiagReport.model_validate_json(raw)
+    except ValidationError:
+        # Pydantic's own message would echo the input into the response.
+        raise HTTPException(status_code=422, detail="Not a player diagnostics report") from None
+    name = who.user.get("username") or who.user.get("display_name") or "?"
+    for event in report.events:
+        logger.info("Player stream %s for %s: %s", event.event, name,
+                    json.dumps(event.model_dump(exclude_defaults=True), separators=(",", ":"), sort_keys=True))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
