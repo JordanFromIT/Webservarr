@@ -2092,6 +2092,51 @@ current = 'keepalive BH-K2: a move into another part while playing (the lock scr
   u.engine.close();
 }
 
+current = 'keepalive gate: boot gives none on an iPhone or iPad (iPadOS as a Mac with touch), and one elsewhere';
+{
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+  const CRIOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1';
+  const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1';
+  const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15';
+  const ANDROID = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+  const FIREFOX = 'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0';
+  // Boots in happy-dom with the given navigator, plays across part 1's end
+  // and says whether a keepalive element was made.
+  async function keepaliveOn(ua, touch) {
+    const win = new Window({ url: 'https://ws.test/news', settings: { navigator: { userAgent: ua } } });
+    Object.defineProperty(win.navigator, 'maxTouchPoints', { value: touch, configurable: true });
+    win.document.write('<!DOCTYPE html><html><body><div id="wsPlayer" hidden></div></body></html>');
+    win.WS = {};
+    let made = 0;
+    win.URL.createObjectURL = () => { made += 1; return SILENCE; };
+    const clock = fakeClock();
+    const net = Object.assign(makeNet(), { noLocal: true });
+    const env = { clock, net, audios: [] };
+    const engine = E.boot(win, { fetch: makeFetch(net, clock), setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      mediaSession: null, MediaMetadata: null, saver: null, createAudio: () => new FakeAudio(env),
+      host: { appendChild(el) { return el; } } });
+    const p = engine.open(MULTI.key, { at: at('501', 597000) });
+    await clock.advance(400);
+    await p;
+    await clock.advance(5000);
+    const crossed = engine.state().position && engine.state().position.track === '502';
+    const on = env.audios.some((a) => a.src.startsWith('blob:'));
+    engine.close();
+    await win.happyDOM.close();
+    return { crossed, on, made };
+  }
+  check('happy-dom takes the user agent', new Window({ settings: { navigator: { userAgent: IPHONE } } }).navigator.userAgent === IPHONE);
+  for (const [what, ua, touch, want] of [
+    ['iPhone Safari', IPHONE, 5, false], ['iPhone Chrome (WebKit)', CRIOS, 5, false], ['iPad', IPAD, 5, false],
+    ['iPadOS as a Mac with touch', MAC, 5, false], ['a Mac', MAC, 0, true], ['Android Chrome', ANDROID, 5, true],
+    ['desktop Firefox', FIREFOX, 0, true]
+  ]) {
+    const r = await keepaliveOn(ua, touch);
+    check(what + ': crossed into part 2', r.crossed, r);
+    check(what + (want ? ': a keepalive' : ': no keepalive, its silence never made'), r.on === want && (r.made > 0) === want, r);
+  }
+}
+
 current = 'the failure records never carry the token or a URL';
 {
   const all = JSON.stringify(allDiags);

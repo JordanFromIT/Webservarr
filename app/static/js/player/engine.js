@@ -47,7 +47,8 @@
  * reported to env.diag (boot: queued, and sent to POST /api/player/diag
  * while the page is shown), with no URL and no token in it.
  * The keepalive (env.keepaliveSrc; boot gives the main engine one, never a
- * sample's): Android cuts a browser's network the moment it stops being a
+ * sample's, and none on an iPhone or iPad, where WebKit may pause the book
+ * for it): Android cuts a browser's network the moment it stops being a
  * playing media player, which a part's end is (the element ends and its src
  * changes), so a locked phone's next part, and every request after it,
  * failed until the page was shown. So a second element plays looped
@@ -3614,6 +3615,13 @@ export function createDiagQueue(env) {
 // Browser
 // ---------------------------------------------------------------------------
 
+/* An iPhone or iPad, where every browser is WebKit. iPadOS asks for desktop
+   pages by default and then names itself a Mac: one with a touch screen. */
+function iosWebKit(nav) {
+  const ua = String((nav && nav.userAgent) || '');
+  return /\b(iPhone|iPad|iPod)\b/.test(ua) || (/\bMacintosh\b/.test(ua) && Number(nav.maxTouchPoints) > 1);
+}
+
 /* Mounts the engine in #wsPlayer as WS.player, once per document. Its fetch
    and timers are the window's own, taken now. Returns the engine, or null on
    a page without the shell. */
@@ -3673,8 +3681,10 @@ export function boot(win, overrides) {
     page: page
   };
   // The keepalive's silence (see createEngine), as a blob: URL (media-src
-  // allows blob:, app/main.py), made once, at its first use.
-  const keepaliveSrc = function () {
+  // allows blob:, app/main.py), made once, at its first use. None on an
+  // iPhone or iPad: WebKit there may pause the book when another element
+  // starts, and give Now Playing to the silence.
+  const keepaliveSrc = iosWebKit(nav) ? null : function () {
     if (!win.URL || typeof win.URL.createObjectURL !== 'function' || !win.Blob) return '';
     return win.URL.createObjectURL(new win.Blob([silentWav(KEEPALIVE_WAV_MS)], { type: 'audio/wav' }));
   };
