@@ -53,14 +53,17 @@
  * failed until the page was shown. So a second element plays looped
  * silence (silentWav, a blob: URL, nothing fetched) from KEEPALIVE_LEAD_MS
  * before a part with a playable part after it ends (in any case from its
- * 'ended', before the src changes) until the main element plays again;
+ * 'ended', before the src changes), and from a move into another part
+ * while playing (the lock screen's too), until the main element plays again;
  * also while a try away from the page waits, and from the start of a
  * failure while the page is hidden. It stops whenever nothing is wanted
  * playing (a pause, the error state, the book's end, a refused Play), on a
  * move that takes playback away from a part's end, on close() and on open()
- * of a book. It is never in the page, never touches the place, the saves or
- * state(), and the Media Session (metadata, playback and position state,
- * the actions) stays the book's, from the main element only.
+ * of a book, even after the system paused and played it again (played
+ * again when it is not wanted, it is stopped at once). It is never in the
+ * page, never touches the place, the saves or state(), and the Media
+ * Session (metadata, playback and position state, the actions) stays the
+ * book's, from the main element only.
  * Only a part that will not load
  * or decode (never a dropped connection) can be skipped, with a notice, and
  * only when it fails that way twice, the second time on a connection just
@@ -1196,7 +1199,26 @@ export function createEngine(env) {
     keepEl.addEventListener('pause', function () {
       if (keepEl.paused) keepSince = null;
     });
+    // Played again by the system (audio focus back after a call): it is ours
+    // again while it is wanted, else stopped at once, so it never loops on
+    // unseen after a Pause, a close or the next part playing.
+    keepEl.addEventListener('play', function () {
+      if (keepSince !== null) return;
+      if (keepWanted()) {
+        keepSince = wallNow();
+        return;
+      }
+      try {
+        keepEl.pause();
+      } catch (e) { /* already */ }
+    });
     return keepEl;
+  }
+
+  // Something is wanted playing and the main element is between parts,
+  // being tried again, or near a part's end: the keepalive's moments.
+  function keepWanted() {
+    return !!(book && wantPlay && !error && (reconnect || pending || audio.paused || nearPartEnd()));
   }
 
   function refusalWord(e) {
@@ -1230,10 +1252,11 @@ export function createEngine(env) {
     }
   }
 
+  // Stops it whatever keepSince says: the system may have played it again.
   function keepStop() {
-    if (keepSince === null) return;
     keepSince = null;
     keepGen += 1;
+    if (!keepEl || keepEl.paused) return;
     try {
       keepEl.pause();
     } catch (e) { /* already */ }
@@ -2415,6 +2438,9 @@ export function createEngine(env) {
       playhead = next;
       target = { index: next.index, offset: next.offset };
     } else {
+      // Into another part while playing (the lock screen's seeks included):
+      // a src change like a part's end, so the keepalive covers it too.
+      if (wantPlay && next.index !== cur.index) keepStart();
       load(next.index, next.offset, cur.side);
     }
     // Held for the book's changed files, the listener's move is the helper's

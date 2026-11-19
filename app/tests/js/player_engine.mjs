@@ -1993,6 +1993,105 @@ current = 'silentWav: a PCM WAV of silence';
   check('longer than 5 s', E.KEEPALIVE_WAV_MS > 5000);
 }
 
+current = 'keepalive BH-K1: paused and played again by the system, it still stops (Pause, close, the next part)';
+{
+  // During a wait away from the page: audio focus lost and back.
+  const t = await awayOutage({ keepalive: true });
+  await t.clock.advance(5000);
+  check('(on while it waits)', keepOn(t) && t.engine.state().reconnecting);
+  keepOf(t).pause();
+  keepOf(t).play();
+  check('played again while wanted: it plays', keepOn(t));
+  backOn(t);
+  await t.clock.advance(31000);
+  check('the next part playing stops it', t.engine.state().playing && !t.main.paused && !keepOn(t));
+  t.engine.close();
+  const u = await awayOutage({ keepalive: true });
+  await u.clock.advance(5000);
+  keepOf(u).pause();
+  keepOf(u).play();
+  u.engine.pause();
+  check('Pause stops it after the system played it again', !keepOn(u));
+  u.engine.close();
+  const v = await awayOutage({ keepalive: true });
+  await v.clock.advance(5000);
+  keepOf(v).pause();
+  keepOf(v).play();
+  v.engine.close();
+  check('close() stops it after the system played it again', !keepOn(v));
+  // No outage: the system pauses and plays both elements at the part change.
+  const w = setup({ net: { noLocal: true, latency: 300 }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(w, MULTI.key, { at: at('501', 598000) });
+  let bounced = false;
+  w.engine.on('change', (d) => {
+    if (d.reason !== 'part' || bounced || !keepOf(w)) return;
+    bounced = true;
+    w.main.pause(); w.main.play();
+    keepOf(w).pause(); keepOf(w).play();
+  });
+  await until(w, () => bounced);
+  check('(bounced at the part change)', bounced);
+  await until(w, () => !w.main.paused && partOf(w.main) === MULTI.tracks[1].part_path && !w.engine.state().loading);
+  check('the next part playing stops it', !keepOn(w));
+  w.engine.pause();
+  check('and Pause leaves it off', !keepOn(w));
+  w.engine.close();
+  // Played again by the system when nothing is wanted: stopped at once.
+  const x = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(x, MULTI.key, { at: at('501', 597000) });
+  await until(x, () => keepOn(x), 100, 40);
+  x.engine.pause();
+  keepOf(x).play();
+  check('played again after a Pause: stopped at once', !keepOn(x));
+  await x.clock.advance(5000);
+  check('and it stays off', !keepOn(x));
+  x.engine.close();
+  keepOf(x).play();
+  check('played again after close(): stopped at once', !keepOn(x));
+  // Played again mid-part, playing far from a part's end: not wanted.
+  const y = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(y, MULTI.key, { at: at('501', 597000) });
+  await until(y, () => keepOn(y), 100, 40);
+  await until(y, () => partOf(y.main) === MULTI.tracks[1].part_path && !y.main.paused && !keepOn(y));
+  keepOf(y).play();
+  check('played again with the book playing mid-part: stopped at once', !keepOn(y) && !y.main.paused);
+  y.engine.close();
+}
+
+current = 'keepalive BH-K2: a move into another part while playing (the lock screen\'s too) covers the src change';
+{
+  const cases = [
+    ['seekbackward from part 2 into part 1', at('502', 3000), (t) => t.ms.handlers.get('seekbackward')({}), '501'],
+    ['seekforward from part 1 into part 2', at('501', 595000), (t) => t.ms.handlers.get('seekforward')({}), '502'],
+    ['seekto from part 1 into part 3', at('501', 100000), (t) => t.ms.handlers.get('seekto')({ seekTime: 1600 }), '503'],
+    ['a chapter jump', at('501', 100000), (t) => t.engine.jumpToChapter(1), '502']
+  ];
+  for (const [what, from, move, lands] of cases) {
+    const t = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+    await openPlaying(t, MULTI.key, { at: from });
+    await t.clock.advance(1000);
+    let onAtSrcChange = null;
+    t.main.addEventListener('emptied', () => { if (onAtSrcChange === null) onAtSrcChange = keepOn(t); });
+    move(t);
+    check(what + ': on as the src changes', onAtSrcChange === true, onAtSrcChange);
+    await t.clock.advance(1500);
+    check(what + ': off once the new part plays, there', !keepOn(t) && !t.main.paused &&
+      t.engine.state().position.track === lands, t.engine.state().position);
+    t.engine.close();
+  }
+  // Within the part, or while paused: nothing.
+  const u = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(u, MULTI.key, { at: at('501', 100000) });
+  u.ms.handlers.get('seekforward')({});
+  await u.clock.advance(500);
+  check('a seek within the part: no keepalive', keepOf(u) === null);
+  u.engine.pause();
+  u.engine.seek(700000);
+  await u.clock.advance(1000);
+  check('a move into another part while paused: no keepalive', keepOf(u) === null);
+  u.engine.close();
+}
+
 current = 'the failure records never carry the token or a URL';
 {
   const all = JSON.stringify(allDiags);
