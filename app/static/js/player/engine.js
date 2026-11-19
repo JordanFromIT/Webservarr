@@ -46,6 +46,21 @@
  * during any failure (the place does not move). Each failure's ladder is
  * reported to env.diag (boot: queued, and sent to POST /api/player/diag
  * while the page is shown), with no URL and no token in it.
+ * The keepalive (env.keepaliveSrc; boot gives the main engine one, never a
+ * sample's): Android cuts a browser's network the moment it stops being a
+ * playing media player, which a part's end is (the element ends and its src
+ * changes), so a locked phone's next part, and every request after it,
+ * failed until the page was shown. So a second element plays looped
+ * silence (silentWav, a blob: URL, nothing fetched) from KEEPALIVE_LEAD_MS
+ * before a part with a playable part after it ends (in any case from its
+ * 'ended', before the src changes) until the main element plays again;
+ * also while a try away from the page waits, and from the start of a
+ * failure while the page is hidden. It stops whenever nothing is wanted
+ * playing (a pause, the error state, the book's end, a refused Play), on a
+ * move that takes playback away from a part's end, on close() and on open()
+ * of a book. It is never in the page, never touches the place, the saves or
+ * state(), and the Media Session (metadata, playback and position state,
+ * the actions) stays the book's, from the main element only.
  * Only a part that will not load
  * or decode (never a dropped connection) can be skipped, with a notice, and
  * only when it fails that way twice, the second time on a connection just
@@ -74,6 +89,7 @@
  *   toBookMs(tracks, trackKey, offsetMs) -> number | null
  *   chapterAt(chapters, bookMs)    -> the chapter's position in the list, -1 if none
  *   mimeFor(container, codec, profile) -> the MIME type for canPlayType, '' if unknown
+ *   silentWav(ms)                  -> Uint8Array: a WAV of ms of silence (the keepalive's)
  *   createEngine(env)              the engine, given its surroundings (tests)
  *   createSampler(env)             "Try a sample" beside an engine (tests; see below)
  *   createDiagQueue(env)           the failure records on their way to the server (tests)
@@ -395,7 +411,10 @@
  *     index), parts, hidden, online, network_state, ready_state,
  *     since_ended_ms (since the part
  *     before ended, null when this load did not follow one), attempt (0: the
- *     first ladder, n: the nth try again), steps: ['check:ok'|'check:fail',
+ *     first ladder, n: the nth try again), keepalive (it was playing at the
+ *     failure), keepalive_ms (since it started, null when not playing),
+ *     keepalive_refused (its last start's play() was refused: 'not-allowed'|
+ *     'aborted'|'unsupported'|'other', else null), steps: ['check:ok'|'check:fail',
  *     'other', 'refresh:ok'|'refresh:fail'|'refresh:none', 'part:ok'|
  *     'part:fail'], outcome: 'retry-part'|'skip'|'other'|'refreshed'|'wait'|
  *     'unreachable'|'superseded', took_ms }
@@ -441,6 +460,8 @@ export const ORPHANS_WAIT_MS = 5000;   // a new book waits this long at most for
 export const REFRESH_WAIT_MS = 10000;  // the ladder's token refresh waits this long at most
 export const RECONNECT_MS = 120000;    // a failure away from the page is tried again for this long
 export const RECONNECT_WAITS_MS = [1000, 2000, 4000, 8000, 15000, 30000];  // ... after these waits (the last repeats)
+export const KEEPALIVE_LEAD_MS = 3000; // the keepalive starts this long (real time) before a part ends
+export const KEEPALIVE_WAV_MS = 10000; // its silence, looped: over 5 s, so Chromium counts it as content, not a blip
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
 export const PLACE_END_MS = 30000;     // a confirmed place is never nearer the book's end than this
@@ -651,6 +672,33 @@ export function mimeFor(container, codec, profile) {
   }
 }
 
+/* A WAV file of ms milliseconds of silence (16-bit mono PCM at 8 kHz, every
+   sample 0), built in memory for the keepalive: nothing to fetch. */
+export function silentWav(ms) {
+  const rate = 8000;
+  const n = Math.max(1, Math.round(rate * (Number(ms) > 0 ? Number(ms) : 1000) / 1000));
+  const size = n * 2;
+  const bytes = new Uint8Array(44 + size);   // zero-filled: the samples are silence
+  const v = new DataView(bytes.buffer);
+  function ascii(at, s) {
+    for (let i = 0; i < s.length; i++) bytes[at + i] = s.charCodeAt(i);
+  }
+  ascii(0, 'RIFF');
+  v.setUint32(4, 36 + size, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  v.setUint32(16, 16, true);        // the fmt chunk's size
+  v.setUint16(20, 1, true);         // PCM
+  v.setUint16(22, 1, true);         // mono
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);  // bytes per second
+  v.setUint16(32, 2, true);         // bytes per sample
+  v.setUint16(34, 16, true);        // bits per sample
+  ascii(36, 'data');
+  v.setUint32(40, size, true);
+  return bytes;
+}
+
 // Only a finite number is a skip length; anything else (null, '', false, a
 // string) changes nothing.
 function roundSkip(x) {
@@ -671,7 +719,8 @@ function roundSpeed(x) {
 
 /* env: { host (where the element goes), createAudio(), fetch, setTimeout,
    clearTimeout, mediaSession, MediaMetadata, permissions, baseUrl,
-   skipSeconds, saver (saves.js createSaver) }. */
+   skipSeconds, saver (saves.js createSaver), page, diag, keepaliveSrc() (the
+   keepalive's silence as a URL; without it, no keepalive) }. */
 export function createEngine(env) {
   const setT = env.setTimeout;
   const clearT = env.clearTimeout;
@@ -845,6 +894,9 @@ export function createEngine(env) {
       armCeiling(preview);
     }
     wasPlaying = on;
+    // Not playing (a pause, the error state, the book's end, a refused
+    // Play): no keepalive either.
+    if (!on) keepStop();
     if (saver) {
       // First, so this change already carries what saving it changed. The
       // place's own book time too: it differs from the playhead's while a
@@ -1106,6 +1158,99 @@ export function createEngine(env) {
     }
   }
 
+  // ---- The keepalive ----
+  //
+  // A second element playing silence (env.keepaliveSrc(): a URL of
+  // silentWav, looped; not muted, since a muted player may not count as
+  // active media), so the page stays a playing media player while the main
+  // element changes parts or waits to try again. Without it, Android takes
+  // the browser for a background app the moment a part ends, and every
+  // request it makes fails until the page is shown. Made at its first use,
+  // kept for the document, never in the page, never in state() or the saves,
+  // and never what the Media Session describes (that is the book's, set
+  // from the main element only).
+  const keepSrc = typeof env.keepaliveSrc === 'function' ? env.keepaliveSrc : null;
+  let keepEl = null;
+  let keepMade = false;
+  let keepSince = null;       // wall ms it was started, null while stopped
+  let keepGen = 0;
+  let keepRefused = null;     // why its last start's play() was refused, a short word, or null
+
+  function keepElement() {
+    if (keepMade) return keepEl;
+    keepMade = true;
+    let url = '';
+    try {
+      url = String(keepSrc() || '');
+    } catch (e) {
+      console.error('[player] the keepalive could not be made', e);
+    }
+    if (!url) return null;
+    keepEl = env.createAudio();
+    keepEl.preload = 'auto';
+    keepEl.loop = true;
+    keepEl.src = url;
+    // Stopped by the system (another app's audio): it is stopped. Our own
+    // pause() has cleared keepSince already, and a pause event queued by a
+    // stop just before a restart finds it playing again.
+    keepEl.addEventListener('pause', function () {
+      if (keepEl.paused) keepSince = null;
+    });
+    return keepEl;
+  }
+
+  function refusalWord(e) {
+    const name = e && e.name;
+    return name === 'NotAllowedError' ? 'not-allowed' : name === 'AbortError' ? 'aborted' :
+      name === 'NotSupportedError' ? 'unsupported' : 'other';
+  }
+
+  function keepStart() {
+    if (!keepSrc || keepSince !== null) return;
+    const el = keepElement();
+    if (!el) return;
+    keepSince = wallNow();
+    keepRefused = null;
+    const g = ++keepGen;
+    let p = null;
+    try {
+      p = el.play();
+    } catch (e) {
+      keepRefused = refusalWord(e);
+      keepSince = null;
+      return;
+    }
+    if (p && typeof p.catch === 'function') {
+      p.catch(function (e) {
+        // A stop (pause) before it began is no refusal.
+        if (g !== keepGen) return;
+        keepRefused = refusalWord(e);
+        keepSince = null;
+      });
+    }
+  }
+
+  function keepStop() {
+    if (keepSince === null) return;
+    keepSince = null;
+    keepGen += 1;
+    try {
+      keepEl.pause();
+    } catch (e) { /* already */ }
+  }
+
+  function keepPlaying() {
+    return keepSince !== null && !!keepEl && !keepEl.paused;
+  }
+
+  // The playing part ends within KEEPALIVE_LEAD_MS (at this speed), and a
+  // part this browser can play comes after it.
+  function nearPartEnd() {
+    if (!book || !cur || pending || !(cur.index + 1 < book.tracks.length) || blocked(cur.index + 1)) return false;
+    const off = Number(audio.currentTime) * 1000;
+    return isFinite(off) && (durationOf(book.tracks[cur.index]) - off) / (speed || 1) <= KEEPALIVE_LEAD_MS;
+  }
+
   // ---- The element ----
 
   audio.addEventListener('loadedmetadata', function () {
@@ -1142,6 +1287,8 @@ export function createEngine(env) {
 
   audio.addEventListener('playing', function () {
     if (!book || !cur) return;
+    // The next part plays (or this one again): the keepalive is done.
+    if (!nearPartEnd()) keepStop();
     previewCeiling();
     disarm();
     if (pending && seekApplied) pending = false;
@@ -1181,6 +1328,12 @@ export function createEngine(env) {
     // A part loaded again after failing plays on (not just starts): it is fine.
     if (partSuspect && !audio.paused && off >= target.offset + PLAYED_MS) partSuspect = null;
     if (moved && wantPlay && !audio.paused) disarm();
+    // The keepalive starts as the part nears its end, and stops when a move
+    // takes playback away from it (never while a try waits).
+    if (wantPlay && !audio.paused) {
+      if (nearPartEnd()) keepStart();
+      else if (!reconnect) keepStop();
+    }
     changed('time');
     // A preview (the book's files changed) stops after its 15 s.
     // ... and after as long by the wall clock, so a seek from outside the
@@ -1252,6 +1405,9 @@ export function createEngine(env) {
         return;
       }
       endedAt = wallNow();
+      // At the latest now, before the src changes: the page never stops
+      // being a playing media player across the change.
+      keepStart();
       load(i + 1, 0, cur.side);
       changed('part');
       return;
@@ -1290,6 +1446,9 @@ export function createEngine(env) {
     failedGen = gen;
     const g = gen;
     const rec = failRecord(kind, via);
+    // Away from the page: the media player the page was may be gone already
+    // (the part ended); playing again is what lets the next request through.
+    if (hidden() && wantPlay) keepStart();
     const t0 = wallNow();
     const out = function (outcome) {
       rec.outcome = outcome;
@@ -1409,6 +1568,9 @@ export function createEngine(env) {
       ready_state: Number(audio.readyState) || 0,
       since_ended_ms: endedAt === null ? null : Math.max(0, wallNow() - endedAt),
       attempt: reconnect ? reconnect.tries : 0,
+      keepalive: keepPlaying(),
+      keepalive_ms: keepPlaying() ? Math.max(0, wallNow() - keepSince) : null,
+      keepalive_refused: keepRefused,
       steps: [],
       outcome: '',
       took_ms: 0
@@ -1446,6 +1608,9 @@ export function createEngine(env) {
       audio.pause();
     } catch (e) { /* already */ }
     release();
+    // Nothing plays while it waits: the keepalive does, so the try is made
+    // from a playing page.
+    keepStart();
     setLoading(true);
     const g = gen;
     reconnect.timer = setT(function () {
@@ -1744,6 +1909,8 @@ export function createEngine(env) {
     refreshGot = false;
     endReconnect();
     endedAt = null;
+    keepStop();
+    keepRefused = null;
     // Nothing plays: the lock screen shows nothing (a failed open included).
     if (session) {
       try {
@@ -3479,14 +3646,22 @@ export function boot(win, overrides) {
     baseUrl: win.location.href,
     page: page
   };
-  const engine = createEngine(Object.assign({}, surroundings, { saver: saver, noSaver: !given && !saver, diag: diagQueue.add },
-    overrides || {}));
+  // The keepalive's silence (see createEngine), as a blob: URL (media-src
+  // allows blob:, app/main.py), made once, at its first use.
+  const keepaliveSrc = function () {
+    if (!win.URL || typeof win.URL.createObjectURL !== 'function' || !win.Blob) return '';
+    return win.URL.createObjectURL(new win.Blob([silentWav(KEEPALIVE_WAV_MS)], { type: 'audio/wav' }));
+  };
+  const engine = createEngine(Object.assign({}, surroundings,
+    { saver: saver, noSaver: !given && !saver, diag: diagQueue.add, keepaliveSrc: keepaliveSrc }, overrides || {}));
   // Samples: an engine of their own with no saver (whatever the page's is),
-  // no lock screen, which stays the main book's, and no diagnostics.
+  // no lock screen, which stays the main book's, no diagnostics, and no
+  // keepalive (a sample is a few minutes in the page, not a locked phone's).
   const sampler = createSampler({
     main: engine,
     make: function () {
-      return createEngine(Object.assign({}, surroundings, overrides || {}, { saver: null, noSaver: false, mediaSession: null, diag: null }));
+      return createEngine(Object.assign({}, surroundings, overrides || {},
+        { saver: null, noSaver: false, mediaSession: null, diag: null, keepaliveSrc: null }));
     }
   });
   engine.sample = sampler.sample;

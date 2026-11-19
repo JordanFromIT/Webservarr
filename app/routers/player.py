@@ -998,6 +998,9 @@ class DiagEvent(BaseModel):
     ready_state: Optional[StrictInt] = Field(default=None, ge=0, le=4)
     since_ended_ms: Optional[DiagMs] = None
     attempt: Optional[DiagCount] = None
+    keepalive: Optional[StrictBool] = None
+    keepalive_ms: Optional[DiagMs] = None
+    keepalive_refused: Optional[Literal["not-allowed", "aborted", "unsupported", "other"]] = None
     tries: Optional[DiagCount] = None
     steps: list[DiagStep] = Field(default_factory=list, max_length=8)
     outcome: Optional[Literal["retry-part", "skip", "other", "refreshed", "wait", "unreachable",

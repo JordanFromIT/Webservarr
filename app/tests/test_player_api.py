@@ -3063,7 +3063,8 @@ class LimitsAcrossKeys(PlayerApiBase):
 # again, then the recovery.
 DIAG_FAIL = {"event": "fail", "book": "200:1", "via": "error", "kind": "media", "code": 4, "side": "remote",
              "part": 1, "parts": 3, "hidden": True, "online": True, "network_state": 3, "ready_state": 0,
-             "since_ended_ms": 40, "attempt": 0, "steps": ["check:fail", "refresh:fail", "part:fail"],
+             "since_ended_ms": 40, "attempt": 0, "keepalive": True, "keepalive_ms": 2900,
+             "keepalive_refused": None, "steps": ["check:fail", "refresh:fail", "part:fail"],
              "outcome": "wait", "took_ms": 3100, "age_ms": 95000}
 DIAG_BACK = {"event": "recovered", "book": "200:1", "side": "remote", "part": 1, "tries": 4,
              "after_ms": 31000, "hidden": False, "online": True, "age_ms": 2000}
@@ -3090,6 +3091,21 @@ class DiagReports(PlayerApiBase):
         self.assertIn('"steps":["check:fail","refresh:fail","part:fail"]', lines[0])
         self.assertIn("Player stream recovered for listener1001: ", lines[1])
         self.assertIn('"tries":4', lines[1])
+
+    def test_the_keepalive_fields_are_logged(self):
+        refused = {**DIAG_FAIL, "attempt": 1, "keepalive": False, "keepalive_ms": None, "keepalive_refused": "not-allowed"}
+        with self.assertLogs("app.routers.player", level="INFO") as logs:
+            self.assertEqual(self.post({"events": [DIAG_FAIL, refused]}).status_code, 204)
+        lines = [r.getMessage() for r in logs.records if "Player stream" in r.getMessage()]
+        self.assertIn('"keepalive":true', lines[0])
+        self.assertIn('"keepalive_ms":2900', lines[0])
+        self.assertNotIn("keepalive_refused", lines[0])     # null: left out, as every default
+        self.assertIn('"keepalive":false', lines[1])
+        self.assertNotIn("keepalive_ms", lines[1])
+        self.assertIn('"keepalive_refused":"not-allowed"', lines[1])
+        for word in ("aborted", "unsupported", "other"):
+            with self.subTest(word=word):
+                self.assertEqual(self.post({"events": [{**DIAG_FAIL, "keepalive_refused": word}]}).status_code, 204)
 
     def test_the_name_in_the_log_line_is_printable_only(self):
         self.as_user(plex_user("1003", username="eve\nINFO - Player stream recovered for admin\x1b[2J\r"))
@@ -3148,6 +3164,12 @@ class DiagReports(PlayerApiBase):
             {**DIAG_FAIL, "took_ms": -1},
             {**DIAG_FAIL, "took_ms": 1.5},
             {**DIAG_FAIL, "event": "play"},
+            {**DIAG_FAIL, "keepalive": "yes"},
+            {**DIAG_FAIL, "keepalive": 1},
+            {**DIAG_FAIL, "keepalive_ms": -1},
+            {**DIAG_FAIL, "keepalive_ms": "2900"},
+            {**DIAG_FAIL, "keepalive_refused": "NotAllowedError: play() can only be initiated by abc"},
+            {**DIAG_FAIL, "keepalive_refused": True},
         ]
         with self.assertNoLogs("app.routers.player", level="INFO"):
             for event in bad:

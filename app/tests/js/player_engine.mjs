@@ -195,7 +195,10 @@ function makeNet() {
 }
 const sideOf = (url) => url.startsWith(LOCAL + '/') ? 'local' : url.startsWith(REMOTE + '/') ? 'remote' : '?';
 
+const SILENCE = 'blob:https://ws.test/silence-1';
 function answer(net, url) {
+  // The keepalive's silence: in memory, no network, whatever the network does.
+  if (url.startsWith('blob:')) return { kind: 'ok', side: 'blob', part: 'silence', durationMs: E.KEEPALIVE_WAV_MS };
   const u = new URL(url);
   const side = sideOf(url);
   const part = u.pathname;
@@ -236,6 +239,8 @@ class FakeAudio {
     this.seeking = false;
     this.preload = 'auto';
     this.muted = false;
+    this.volume = 1;
+    this.loop = false;
     this.gen = 0;
     this.loads = 0;
     this.side = null;
@@ -317,6 +322,11 @@ class FakeAudio {
     }, this.env.net.latency);
   }
   play() {
+    if (this.env.net.keepRefused && this._src.startsWith('blob:')) {
+      const e = new Error('play() refused');
+      e.name = this.env.net.keepRefused;
+      return Promise.reject(e);
+    }
     if (this.env.net.blockAutoplay) {
       const e = new Error('play() needs a user gesture');
       e.name = 'NotAllowedError';
@@ -359,6 +369,11 @@ class FakeAudio {
       if (this.seeking) { this.tick(g); return; }
       this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
       this.fire('timeupdate');
+      if (this._t >= this.duration && this.loop) {
+        this._t = 0;
+        this.tick(g);
+        return;
+      }
       if (this._t >= this.duration) {
         this.ticking = false;
         this.paused = true;
@@ -450,7 +465,8 @@ function setup(o = {}) {
     saver: o.saver,
     now: o.wall ? () => clock.now : undefined,
     page: o.page,
-    diag: o.diag
+    diag: o.diag,
+    keepaliveSrc: o.keepalive ? () => SILENCE : undefined
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
   // Every place a change reported, with what the element was doing then:
@@ -1508,7 +1524,7 @@ const allDiags = [];
 async function awayOutage(o = {}) {
   const page = o.page || fakePage();
   const diags = [];
-  const t = setup({ net: Object.assign({ noLocal: true }, o.net || {}), page, wall: true,
+  const t = setup({ net: Object.assign({ noLocal: true }, o.net || {}), page, wall: true, keepalive: o.keepalive,
     diag: (r) => { diags.push(r); allDiags.push(JSON.parse(JSON.stringify(r))); } });
   await openPlaying(t, MULTI.key, { at: at('501', 598000) });
   t.main.addEventListener('pause', () => {
@@ -1772,6 +1788,211 @@ current = 'BH3: a Play refused while it tries again is a pause: not reconnecting
   t.engine.close();
 }
 
+// ---- 16c. The keepalive: the page stays a playing media player across a part's end ----
+
+const keepOf = (t) => t.env.audios.find((a) => a.src.startsWith('blob:')) || null;
+const keepOn = (t) => { const k = keepOf(t); return !!k && !k.paused; };
+// Advances in small steps until fn() holds (or the steps run out).
+async function until(t, fn, stepMs = 250, steps = 400) {
+  for (let i = 0; i < steps && !fn(); i++) await t.clock.advance(stepMs);
+  return fn();
+}
+
+current = 'keepalive: starts just before a part ends, holds across the change, stops when the next part plays';
+{
+  const t = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(t, MULTI.key, { at: at('501', 590000) });
+  check('nothing made while the part has long to go', keepOf(t) === null);
+  let onAtPart = null;
+  let onAtSrcChange = null;
+  t.engine.on('change', (d) => { if (d.reason === 'part' && onAtPart === null) onAtPart = keepOn(t); });
+  t.main.addEventListener('emptied', () => { if (onAtSrcChange === null && t.main.ended === false && keepOf(t)) onAtSrcChange = keepOn(t); });
+  check('it starts', await until(t, () => keepOn(t)));
+  const s = t.engine.state();
+  const left = MULTI.tracks[0].duration_ms - s.position.offset_ms;
+  check('within KEEPALIVE_LEAD_MS of the end, still in part 1', s.position.track === '501' && left <= E.KEEPALIVE_LEAD_MS && left > 0,
+    [s.position, left]);
+  const k = keepOf(t);
+  check('silence, looped, not muted, not volume 0, never in the page', k.loop === true && k.muted === false && k.volume > 0 &&
+    t.host.children.length === 1 && t.host.children[0] === t.main);
+  check('the main element still plays part 1', !t.main.paused && partOf(t.main) === MULTI.tracks[0].part_path);
+  check('it is playing as the src changes and at the part change', await until(t, () => onAtPart !== null) &&
+    onAtPart === true && onAtSrcChange === true, [onAtPart, onAtSrcChange]);
+  check('stopped once part 2 plays', await until(t, () => !t.main.paused && partOf(t.main) === MULTI.tracks[1].part_path &&
+    t.engine.state().loading === false) && !keepOn(t));
+  check('the place is part 2\'s, never the silence\'s', t.engine.state().position.track === '502' &&
+    t.seen.every((x) => !x.pos || x.pos.track !== '501' || x.pos.offset_ms >= 589000));
+  // The Media Session is the book's throughout.
+  check('the lock screen: the book, playing', t.ms.metadata && t.ms.metadata.title === MULTI.title && t.ms.playbackState === 'playing');
+  check('every position state is the book\'s', t.ms.positions.length > 0 && t.ms.positions.every((p) =>
+    p.duration === MULTI.duration_ms / 1000 && p.position >= 589 && p.playbackRate === 1), t.ms.positions.slice(-3));
+  check('the actions are the engine\'s (the silence adds none)', ['play', 'pause', 'seekbackward', 'seekforward', 'seekto']
+    .every((a) => typeof t.ms.handlers.get(a) === 'function'));
+  // The next part's end: started again on the same element, made once.
+  await t.engine.seek(600000 + MULTI.tracks[1].duration_ms - 6000);
+  check('again before part 2 ends', await until(t, () => keepOn(t)) && t.engine.state().position.track === '502');
+  check('one element for the document, its silence loaded once', t.env.audios.filter((a) => a.src.startsWith('blob:')).length === 1 &&
+    t.net.loads.filter((l) => l.side === 'blob').length === 1);
+  check('a move away from the end stops it', (t.engine.seek(700000), await until(t, () => !keepOn(t), 250, 20)) &&
+    t.engine.state().playing);
+  t.engine.close();
+  check('a closed engine holds no timers', t.live.size === 0, t.live.size);
+}
+
+current = 'keepalive: \'ended\' starts it before the src changes, even when nothing started it before';
+{
+  const t = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(t, MULTI.key, { at: at('501', 594000) });
+  await until(t, () => keepOn(t));
+  // The system stops the silence just as the part ends (after its last
+  // timeupdate, before 'ended').
+  t.main.addEventListener('pause', () => { if (t.main.ended && keepOf(t)) keepOf(t).pause(); });
+  let onAtSrcChange = null;
+  t.main.addEventListener('emptied', () => { if (onAtSrcChange === null && keepOf(t)) onAtSrcChange = keepOn(t); });
+  await until(t, () => onAtSrcChange !== null);
+  check('playing again when the src changes', onAtSrcChange === true);
+  t.engine.close();
+}
+
+current = 'keepalive: stopped by Pause, close(), open() of another book, the error state and the book\'s end';
+{
+  const near = async (o = {}) => {
+    const t = setup(Object.assign({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true }, o));
+    await openPlaying(t, MULTI.key, { at: at('501', 596000) });
+    await until(t, () => keepOn(t), 100, 40);
+    return t;
+  };
+  let t = await near();
+  check('(on before each)', keepOn(t));
+  t.engine.pause();
+  check('Pause stops it', !keepOn(t) && t.main.paused);
+  await t.clock.advance(5000);
+  check('and it stays stopped', !keepOn(t));
+  t.engine.close();
+  t = await near();
+  t.ms.handlers.get('pause')();
+  check('the lock screen\'s Pause stops it', !keepOn(t));
+  t.engine.close();
+  t = await near();
+  t.engine.close();
+  check('close() stops it', !keepOn(t));
+  t = await near();
+  const p = t.engine.open(OTHER.key, { at: at('701', 60000) });
+  check('open() of another book stops it at once', !keepOn(t));
+  await t.clock.advance(1000);
+  await p;
+  check('and the new book plays without it', !keepOn(t) && !t.main.paused && t.engine.state().book === OTHER.key);
+  t.engine.close();
+  // The error state: an outage at the part's end with the page shown.
+  const u = await awayOutage({ page: fakePage({ hidden: false }), keepalive: true });
+  await u.clock.advance(20000);
+  check('the error state stops it', u.log.error.length === 1 && !keepOn(u) && keepOf(u) !== null);
+  u.engine.close();
+  // The book's end: the last part has no part after it, so it never starts.
+  const v = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(v, MULTI.key, { at: at('503', 296000) });
+  await v.clock.advance(8000);
+  check('the last part ends with no keepalive', v.log.ended.length === 1 && !keepOn(v), [v.log.ended.length, keepOn(v)]);
+  v.engine.close();
+  // Before a part this browser can't decode, playback stops: none either.
+  const w = setup({ net: { noLocal: true }, page: fakePage(), wall: true, keepalive: true });
+  await openPlaying(w, MIXED.key, { at: at('901', 596000) });
+  await w.clock.advance(8000);
+  check('a stop before an undecodable part leaves it off', w.engine.state().error && w.engine.state().error.code === 'format' &&
+    !keepOn(w));
+  w.engine.close();
+}
+
+current = 'keepalive: a hidden failure starts it, the next try is made with it playing, and it stops once playing';
+{
+  const page = fakePage();
+  const diags = [];
+  const t = setup({ net: { noLocal: true }, page, wall: true, keepalive: true, diag: (r) => diags.push(r) });
+  await openPlaying(t, MULTI.key, { at: at('501', 60000) });
+  check('(off mid-part)', !keepOn(t));
+  t.net.down.add('remote');
+  // Read as the ladder's token refresh is asked for, before any wait.
+  let down = true;
+  let onAtRefresh = null;
+  Object.defineProperty(t.net, 'fetchDown', {
+    get() { if (onAtRefresh === null) onAtRefresh = keepOn(t); return down; },
+    set(v) { down = v; }
+  });
+  await t.clock.advance(1500);
+  check('on from the failure\'s start, before the ladder\'s refresh', onAtRefresh === true);
+  check('on while it waits', keepOn(t) && t.engine.state().reconnecting);
+  let onAtTry = null;
+  t.main.addEventListener('emptied', () => { if (t.main.src && onAtTry === null) onAtTry = keepOn(t); });
+  await t.clock.advance(5000);
+  check('the next try loads with it playing', onAtTry === true);
+  const fails = diags.filter((d) => d.event === 'fail');
+  check('the first record: not playing at the failure (it started after)', fails[0].keepalive === false &&
+    fails[0].keepalive_ms === null && fails[0].keepalive_refused === null, fails[0]);
+  check('the next: playing, since the first failure', fails[1].keepalive === true && fails[1].keepalive_ms >= 900 &&
+    fails[1].attempt === 1, fails[1]);
+  backOn(t);
+  await t.clock.advance(31000);
+  check('playing again, the keepalive stopped', t.engine.state().playing && !t.main.paused && !keepOn(t) &&
+    !t.engine.state().reconnecting);
+  t.engine.close();
+}
+
+current = 'keepalive: a refused start is recorded, and playback behaves as it did without it';
+{
+  const t = await awayOutage({ keepalive: true, net: { keepRefused: 'NotAllowedError' } });
+  await t.clock.advance(20000);
+  const fails = t.diags.filter((d) => d.event === 'fail');
+  check('never playing, each record says why', fails.length >= 3 && fails.every((f) => f.keepalive === false) &&
+    fails.slice(0).every((f) => f.keepalive_refused === 'not-allowed'), fails.map((f) => [f.keepalive, f.keepalive_refused]));
+  check('still reconnecting, no error', t.engine.state().reconnecting && t.log.error.length === 0);
+  backOn(t);
+  await t.clock.advance(31000);
+  check('then plays part 2', t.engine.state().playing && !t.main.paused && partOf(t.main) === MULTI.tracks[1].part_path);
+  t.engine.close();
+  // Started before the part's end, the same outage's records show it playing.
+  const u = await awayOutage({ keepalive: true });
+  await u.clock.advance(20000);
+  const f0 = u.diags.find((d) => d.event === 'fail');
+  check('the part\'s end failure: playing since before the end', f0.keepalive === true && f0.keepalive_ms >= 1500 &&
+    f0.keepalive_ms <= E.KEEPALIVE_LEAD_MS + 2000 && f0.keepalive_refused === null, f0);
+  check('the lock screen: still the book, playing, at the place', u.ms.playbackState === 'playing' &&
+    u.ms.metadata.title === MULTI.title && u.ms.positions[u.ms.positions.length - 1].position === 600, u.ms.positions.slice(-1));
+  u.engine.pause();
+  check('Pause while it waits: the error, the keepalive off', u.log.error.length === 1 && !keepOn(u));
+  u.engine.close();
+}
+
+current = 'keepalive: with the page shown, a failure does not start it; without a source, nothing is made';
+{
+  const t = setup({ net: { noLocal: true }, page: fakePage({ hidden: false }), wall: true, keepalive: true });
+  await openPlaying(t, MULTI.key, { at: at('501', 60000) });
+  t.net.down.add('remote');
+  t.net.fetchDown = true;
+  await t.clock.advance(15000);
+  check('the error, as before, and no keepalive', t.log.error.length === 1 && keepOf(t) === null);
+  t.engine.close();
+  const u = setup({ net: { noLocal: true }, page: fakePage(), wall: true });
+  await openPlaying(u, MULTI.key, { at: at('501', 596000) });
+  await u.clock.advance(8000);
+  check('no source: one element only, the part changes as before', u.env.audios.every((a) => !a.src.startsWith('blob:')) &&
+    partOf(u.main) === MULTI.tracks[1].part_path && !u.main.paused);
+  u.engine.close();
+}
+
+current = 'silentWav: a PCM WAV of silence';
+{
+  const w = E.silentWav(E.KEEPALIVE_WAV_MS);
+  const v = new DataView(w.buffer);
+  const tag = (o) => String.fromCharCode(w[o], w[o + 1], w[o + 2], w[o + 3]);
+  check('RIFF/WAVE, fmt, data', tag(0) === 'RIFF' && tag(8) === 'WAVE' && tag(12) === 'fmt ' && tag(36) === 'data');
+  check('PCM 16-bit mono 8 kHz', v.getUint16(20, true) === 1 && v.getUint16(22, true) === 1 && v.getUint32(24, true) === 8000 &&
+    v.getUint16(34, true) === 16);
+  check('its length is the duration', v.getUint32(40, true) === 8000 * 2 * E.KEEPALIVE_WAV_MS / 1000 &&
+    w.length === 44 + v.getUint32(40, true) && v.getUint32(4, true) === w.length - 8);
+  check('every sample is 0', w.subarray(44).every((b) => b === 0));
+  check('longer than 5 s', E.KEEPALIVE_WAV_MS > 5000);
+}
+
 current = 'the failure records never carry the token or a URL';
 {
   const all = JSON.stringify(allDiags);
@@ -1779,7 +2000,8 @@ current = 'the failure records never carry the token or a URL';
   check('no token', all.indexOf(TOKEN) === -1);
   check('no URL, host or part path', !/https?:|plex\.direct|\/library\//.test(all));
   const keys = new Set(['event', 'book', 'via', 'kind', 'code', 'side', 'part', 'parts', 'hidden', 'online', 'network_state',
-    'ready_state', 'since_ended_ms', 'attempt', 'steps', 'outcome', 'took_ms', 'tries', 'after_ms']);
+    'ready_state', 'since_ended_ms', 'attempt', 'steps', 'outcome', 'took_ms', 'tries', 'after_ms',
+    'keepalive', 'keepalive_ms', 'keepalive_refused']);
   check('only the documented fields', allDiags.every((r) => Object.keys(r).every((k) => keys.has(k))),
     allDiags.flatMap((r) => Object.keys(r)).filter((k) => !keys.has(k)));
 }

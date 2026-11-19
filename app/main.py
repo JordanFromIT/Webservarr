@@ -346,7 +346,10 @@ async def add_security_headers(request: Request, call_next):
         # The audiobook player streams straight from the listener's Plex
         # server over its plex.direct https addresses, on any port: a
         # server's remote port is whatever its operator mapped (spec 5.4).
-        "media-src 'self' https://*.plex.direct:*",
+        # blob: is the player's keepalive, silence it builds in memory
+        # (engine.js silentWav), so a locked phone keeps its network across
+        # a part's end. Only media-src gets it.
+        "media-src 'self' blob: https://*.plex.direct:*",
         # Standards-compliant clickjacking defense (supersedes X-Frame-Options).
         "frame-ancestors 'self'",
         "base-uri 'self'",

@@ -52,12 +52,14 @@ class StaticHeaders(unittest.TestCase):
         script = [d for d in directives if d.split(" ", 1)[0] == "script-src"]
         self.assertEqual(script, ["script-src 'self'"])
 
-    def test_csp_media_src_is_self_and_plex_direct_only(self):
+    def test_csp_media_src_is_self_blob_and_plex_direct_only(self):
         # The audiobook player streams from the listener's Plex server over
         # its plex.direct https addresses, on any port (a server's remote
-        # port is whatever its operator mapped). That is the only thing the
+        # port is whatever its operator mapped), and plays its keepalive's
+        # silence from a blob: URL it builds in memory. That is all the
         # player adds: covers are served same-origin, so img-src is
-        # unchanged, and no other directive names plex.direct.
+        # unchanged, no other directive names plex.direct or blob:, and
+        # data: is not a media source.
         from app.config import settings
         r = self.client.get("/static/css/theme.css?v=1")
         directives = {}
@@ -65,7 +67,11 @@ class StaticHeaders(unittest.TestCase):
             name, _, value = d.strip().partition(" ")
             self.assertNotIn(name, directives, f"{name} appears twice")
             directives[name] = value
-        self.assertEqual(directives["media-src"], "'self' https://*.plex.direct:*")
+        self.assertEqual(directives["media-src"], "'self' blob: https://*.plex.direct:*")
+        self.assertNotIn("data:", directives["media-src"])
+        for name, value in directives.items():
+            if name != "media-src":
+                self.assertNotIn("blob:", value, name)
         expected = {
             "default-src": "'self'",
             "script-src": "'self'",
@@ -73,7 +79,7 @@ class StaticHeaders(unittest.TestCase):
             "font-src": "'self' https://fonts.gstatic.com",
             "img-src": "'self' data: https:",
             "worker-src": "'self'",
-            "media-src": "'self' https://*.plex.direct:*",
+            "media-src": "'self' blob: https://*.plex.direct:*",
             "frame-ancestors": "'self'",
             "base-uri": "'self'",
             "object-src": "'none'",

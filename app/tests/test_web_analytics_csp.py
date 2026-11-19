@@ -65,7 +65,7 @@ def strict_csp() -> str:
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",
         "worker-src 'self'",
-        "media-src 'self' https://*.plex.direct:*",
+        "media-src 'self' blob: https://*.plex.direct:*",
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",
