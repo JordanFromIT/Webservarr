@@ -29,16 +29,16 @@ starlette>=1.3.1
 python-multipart==0.0.32  # <0.0.30 carries a chain of parser advisories
 
 # OIDC Authentication
-authlib==1.9.5  # 1.9.x clears a critical and two highs against 1.8.0
+authlib==1.9.10  # 1.9.x clears a critical and two highs against 1.8.0; 1.9.10 the Nov 2026 advisories
 # authlib's OIDC client (AsyncOAuth2Client) runs on httpx2; without it authlib
 # falls back to plain httpx and warns that the backend is deprecated. Plain
 # httpx stays for the rest of the app.
-httpx2==2.16.0
+httpx2==2.16.2
 httpx==0.26.0
 itsdangerous==2.2.0
 
 # Database
-sqlalchemy==2.0.57
+sqlalchemy==2.0.58
 aiosqlite==0.19.0
 
 # Redis

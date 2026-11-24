@@ -31,14 +31,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def warnings_on_import(module: str) -> list:
-    """(category name, message) of every warning importing ``module`` raises
-    in a fresh interpreter."""
+    """(category name, message, filename) of every warning importing
+    ``module`` raises in a fresh interpreter."""
     code = (
         "import json, warnings\n"
         "with warnings.catch_warnings(record=True) as caught:\n"
         "    warnings.simplefilter('always')\n"
         f"    import {module}\n"
-        "print(json.dumps([[w.category.__name__, str(w.message)] for w in caught]))\n"
+        "print(json.dumps([[w.category.__name__, str(w.message), w.filename] for w in caught]))\n"
     )
     done = subprocess.run(
         [sys.executable, "-c", code], cwd=ROOT, env=os.environ.copy(),
@@ -54,6 +54,31 @@ class DeclarativeBaseFromOrm(unittest.TestCase):
     def test_importing_database_raises_no_moved_in_20_warning(self):
         caught = warnings_on_import("app.database")
         self.assertEqual([w for w in caught if w[0] == "MovedIn20Warning"], [])
+
+
+@unittest.skipUnless(HAVE_APP, "app dependencies not installed")
+class NewsSchemaOnConfigDict(unittest.TestCase):
+    def test_importing_news_raises_no_pydantic_v2_deprecation(self):
+        caught = warnings_on_import("app.routers.news")
+        self.assertEqual(
+            [w for w in caught if w[0] == "PydanticDeprecatedSince20" and w[2].endswith("news.py")], [])
+
+    def test_the_response_still_reads_attributes(self):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+
+        from app.routers.news import NewsPostResponse
+
+        when = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        row = SimpleNamespace(
+            id=7, title="Hello", content="<p>raw</p>", content_html="<p>safe</p>",
+            author_name="admin", created_at=when, updated_at=None, published=True,
+            published_at=when, pinned=False,
+        )
+        post = NewsPostResponse.model_validate(row)
+        self.assertEqual((post.id, post.title, post.content_html), (7, "Hello", "<p>safe</p>"))
+        self.assertEqual(post.published_at, when)
+        self.assertIsNone(post.updated_at)
 
 
 @unittest.skipUnless(HAVE_APP, "app dependencies not installed")
