@@ -4,7 +4,7 @@ News API routes - CRUD operations for news posts
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, ConfigDict, field_serializer
 from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import or_
@@ -54,8 +54,7 @@ class NewsPostResponse(BaseModel):
     published_at: Optional[datetime]
     pinned: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @field_serializer("created_at", "updated_at", "published_at")
     def _utc(self, value: Optional[datetime]) -> Optional[str]:
