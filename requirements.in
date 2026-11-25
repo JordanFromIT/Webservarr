@@ -38,7 +38,7 @@ httpx==0.26.0
 itsdangerous==2.2.0
 
 # Database
-sqlalchemy==2.0.58
+sqlalchemy==2.1.9
 aiosqlite==0.19.0
 
 # Redis
